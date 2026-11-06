@@ -18,8 +18,3 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run package:mac
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: Central-Knot-0.1.0-mac-arm64
-          path: release/Central-Knot-0.1.0-mac-arm64.zip
-          if-no-files-found: error
