@@ -1,0 +1,364 @@
+# Central Knot: capability data
+
+Research catalogue behind [SPEC.md](SPEC.md), seeding the bundled capability data (DET-03). Nothing here is confirmed intent or a pass. Requirements in the spec win on behaviour; [validated findings](research/validated-findings.md) wins on evidence, for the OS and version it covers. "Target" in a table means a destination in the spec's sense.
+
+## 1. Evidence labels, versions and report limits
+
+**Reports.** Detail in `research/validation/`: **[VCM]** `claude-macos.md`, **[VCL]** `claude-linux.md`, **[VCW]** `claude-windows.md`, **[VX]** `codex.md`, **[VPM]** `copilot-macos.md`, **[VPL]** `copilot-linux.md`, **[VPW]** `copilot-windows.md`, **[VO]** `opencode.md`, **[VP]** `pi.md`. **[VF]** [validated findings](research/validated-findings.md). Documented paths and formats, including read-only locations and project paths: [accuracy audit](research/accuracy-audit.md) **[AU]**, [Claude and Copilot](research/claude-copilot.md) **[CC]**, [Codex](research/codex.md) **[CX]**, [Pi and OpenCode](research/pi-opencode.md) **[PO]**.
+
+**Evidence classes.** The spec's four words (its section 3), with these report labels. **Exercised** covers **Real:** the real app or CLI with a real signed-in model; **Stub:** the real CLI signed out with a local fake model, which shows what is loaded and sent, not how a model behaves; **Stand-in:** the app's own Claude Code binary run outside the app, not a result for the app; and **Listing:** shown in a listing or UI, not used in a session. **Unproven** covers untested and **Blocked:** needed a human sign-in or click; not tested.
+
+Results apply only to the OS, version and fixture tested, and no one re-ran them independently. **The test fixture was a private GitHub repository, so no validation exercised GitLab.** Access was mainly by deploy keys, often through `ssh.github.com:443`, because port 22 failed or hung on all three machines at some point. Pi testing also met a live GitHub incident [VP].
+
+Tested versions: Claude.app 4.16336.0 (Code tab binary 2.1.317), Claude Code 2.1.318, Copilot CLI 1.0.105, Copilot app 1.1.34 (own runtime 1.0.102-unstable), VS Code 1.144.x, `gh` 2.103.3, GitHub Desktop 3.6.10, Pi 1.5.0, pi-gui 1.0.1 (static only), Codex 0.166.0, ChatGPT desktop 26.1013 on the Mac, OpenCode 1.19.5 and 2.2.5. Machines: Mac arm64, Windows 11 x64, CachyOS x64.
+
+| Report | Sign-in and model | Main limits |
+| --- | --- | --- |
+| VCM | App signed in, Real in Code tab sessions; CLI Stub | Every GUI success used a fixture deploy key set through settings `env.GIT_SSH_COMMAND`, existing Claude state and a test driver with folder trust preset. Ordinary key or agent, HTTPS success, typed commands and app UI not shown |
+| VCL, VCW | Signed out; Stand-in only | **Code tab never run.** Linux Desktop `.deb` unpacked on CachyOS (unsupported) stopped at Sign In. Windows fresh-install data folder and HTTPS success unknown |
+| VX | Signed out, except five Real prompts on macOS | Windows app not launched; no app UI seen; HTTPS and live reload not tested |
+| VPM, VPL, VPW | macOS CLI Real, VS Code signed out; Linux signed out, mock model; Windows signed out, no CLI session | App and VS Code chat turns and UI installs Blocked; Windows CLI components at Listing level only |
+| VO | Signed out; Stub on Linux only | Desktop server-side only; Linux Desktop never run; valid private plugin not tested |
+| VP | No real model; Stub; TUI and `/reload` on Mac only | Deploy key via `GIT_SSH_COMMAND`; pi-gui not launched; `pi update` and `AGENTS.override.md` not run |
+
+**Still unverified [VF §5]:** the real Code tab on Windows and Linux (the most important gap); typed `/plugin` commands and any add-marketplace UI in it; private HTTPS through a real credential helper; Copilot app and VS Code chat turns; Chat and Cowork by interaction; Windows Copilot sign-in, Codex desktop and passphrase keys; fresh machines with no prior state, Node or Git; Iru.
+
+## 2. Surfaces
+
+Priority tiers are confirmed (I-18); the order within a tier is proposed. Upstream OS availability is not a tested-device claim.
+
+| Priority | Surface | Upstream OS | Facts |
+| --- | --- | --- | --- |
+| 1 | **GitHub Copilot app** | arm64 and x64 on all | The actual desktop target: GitHub's [product page](https://github.com/features/copilot) names it separately from Copilot CLI and Copilot in VS Code. See facts below. V-05 |
+| 1 | **Copilot CLI** | All; PowerShell 6+ documented, 5.1 untested | Full target. Plugins marketplace-first |
+| 1 | **Claude app, Cowork** | All; Linux needs KVM and QEMU | **Required marketplace destination.** Account state; routes in section 7. `~/.claude/skills` is not read. Loads `~/.claude/CLAUDE.md`, restricted on imports and symlinks |
+| 1 | **Claude app, Code tab** | All; Linux beta (apt on Ubuntu 22.04+, Debian 12+; no official Arch route) | Reads the same files as the CLI. Binary is embedded, not on `PATH`, and its version differs. Windows is an MSIX with no Git or SSH inside. Plugins: V-01. Actual reading of shared MCP and agents per OS: V-06 |
+| 1 | **Claude Code CLI** | macOS 13+, Windows 10 1809+, Linux | Full target for skills, MCP (V-09), agents, instructions, plugins |
+| 2 | **Pi CLI** | All; Windows normally needs Git Bash | Skills, MCP, instructions; no native agents; Pi packages only for plugins |
+| 2 | **Codex CLI** | All; WSL is separate | Full target. Claude plugins with named failures (Appendix D) |
+| 2 | **OpenCode CLI, 1.x and 2.x** | All | Two lines, two adapters (section 8). Claude plugins refused |
+| 2 | **ChatGPT desktop (Codex local)** | All; Linux preview | Shares `~/.codex` on macOS (Exercised: real app, signed out, disposable home; the CLI-installed plugin's MCP process started, no model turn). Runtime otherwise V-05. Its host-bound config entries are never shared |
+| 2 | **OpenCode desktop, beta** | All; Linux never run | Bundles its own CLI and uses the shared 2.x background service, which outlives the app. V-05 |
+| 2 | **VS Code with built-in Copilot** (placement proposed) | Detect at runtime | Never a substitute for the Copilot app. See facts below. V-05 |
+| 2 | **pi-gui 1.0.1** | All per release assets; only macOS inspected | **Third-party** (Matthew Lam), not official, and no official Pi desktop is established. Label it. Shares `~/.pi/agent` by source and README; GUI not run. Bundles SDK 0.87.1 with **no MCP**, so MCP is shown CLI-only for that build [VP] |
+| Not in the order | Claude Chat | All | Same account state as Cowork, not separately required |
+| Not a harness | **GitHub Desktop** 3.6.10 | macOS, Windows | A Git client, not the Copilot app. No customization target (static check). It embeds a Copilot SDK runtime, so "no Copilot" would be wrong |
+| Not a harness | **`gh`** | All | Helper. `gh skill` rewrites frontmatter; not a write route |
+
+**Copilot app and VS Code [VF §3].** A chat turn is Blocked on both.
+
+| | Copilot app 1.1.34 | VS Code 1.144.x with built-in Copilot |
+| --- | --- | --- |
+| Config | Shares `~/.copilot`; own older runtime | Reads `~/.copilot/*` and `~/.claude/*`; own plugin store `~/.vscode/agent-plugins/` |
+| Reader evidence | Exercised on macOS after restart [VPM]: MCP servers from `installed-plugins` and `mcp-config.json` started, the global agent count followed `~/.copilot/agents` and plugins (count only, names not visible), and a CLI disable took effect. **Not proved:** skill use in the app, and any skill, MCP or agent use in a chat turn (Blocked) | Listing only, signed out; use in chat not proved (Blocked) |
+| Picks up changes | After restart, or possibly a new session; not live | Live in listings, about 15 s |
+| Instructions | Reading `~/.copilot/copilot-instructions.md` is unknown; UI-set text is probably in `data.db`, which CK never writes | Files, Listing; differs from the CLI |
+| Plugins | A CLI install reached it after restart (macOS). MCP runs at next launch with no prompt seen. UI install Blocked | A CLI install shows in its listing. Do not install into both stores, or it appears twice |
+
+T3 Code: no T3 API or setting was investigated (D-24, V-14).
+
+## 3. Detection, probes and native-command hazards
+
+- **Identifiers.** `github` on `PATH` identifies nothing. `ChatGPT.app` has bundle ID `com.openai.codex`; on winget `OpenAI.Codex` is the **CLI** and `OpenAI.ChatGPT` the app. A Pi config folder does not imply a CLI: also check `~/.pi/agent/bin/pi` and `managed-install.json`. An app's bundled CLI never counts as a CLI install.
+- **Claude modes (DET-01).** This research records no safe read-only signal of which modes an account can use, and none is inferred from account folders or internal app data. V-01 and V-15 test restricted accounts. **I don't have this mode** (DET-01, D-28d) is the user's statement, not a signal.
+- **Probes.** Use `--version`, targeted `--help` and OS app records, from a neutral working directory. OpenCode's line comes from `--version` output (`1.19.5` against `opencode v2.2.5`). Check Pi's version before any `pi mcp` call, because an old Pi treats `pi mcp …` as a prompt to a model [VP].
+- **Root overrides.** `CLAUDE_CONFIG_DIR` (also moves `.claude.json`), `CODEX_HOME` and `HOME` (which control different roots), `COPILOT_HOME`, `PI_CODING_AGENT_DIR`, `XDG_CONFIG_HOME`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, plus one manual home override per family. On Windows, report when Pi's shell resolves to WSL's `bash.exe`, since a missing Git Bash falls there silently (simulated) [VP].
+- **Known floors.** Claude `/plugin` 2.1.275, `--marketplace` 2.1.292, account sync 2.1.273, `AGENTS.md` 2.1.277.
+- **Read-only items (DIS-03).** Also: Pi `SYSTEM.md`, `APPEND_SYSTEM.md`, OpenCode inline agents, and host-bound desktop entries (`notify`, `[desktop]`, `[mcp_servers.node_repl]`, `marketplaces.openai-bundled`).
+- **Precedence.** Claude user skills and project agents win, and in the Code tab `claude_desktop_config.json` beats `~/.claude.json`; Copilot project skills and MCP and user agents win [VF §3, VP].
+- **Registries never edited (OWN-02).** `known_marketplaces.json`, `installed_plugins.json`, Copilot `config.json`, Codex `plugins/cache`, Pi `git/`, `npm/`, Pi `trust.json`, `data.db`.
+- **Trust state never written (ACT-03).** Codex `[hooks.state]`, Claude `hasTrustDialogAccepted`, Copilot trusted folders, Pi `trust.json`.
+- **Write-path hazards (FIL-02).** `codex mcp add` deletes comments and unknown keys, and OpenCode's commands reformat neighbouring values. Copilot's `enable` and `disable` exit 0 on an unknown name [VPL]. Stalls hang with no timeout on Codex, OpenCode and Pi. A 211-character Windows profile failed a clone [VCW].
+- **Import exclusions (STO-03).** Codex `.system`; `~/.claude/skills/synced/`, which Claude reserves; `@` imports are listed, not followed; app instructions held in `data.db` or an account.
+
+**Commands never run for discovery (DIS-05).** [E, VF §1, VP]
+
+| Command | Reported behaviour |
+| --- | --- |
+| OpenCode 1.x `debug config`, `debug skill`, `agent list`, `mcp list`, `plugin` | Inserts `$schema` into each loaded config, even on a failed run |
+| OpenCode 2.x `debug config`, `debug agents`, `mcp list`, `plugin list` | Starts a background service that stays running; `mcp list` starts servers; on a fresh data directory this breaks 1.x. |
+| `claude plugin list` | Can populate the cache; can list a plugin with no files |
+| `claude mcp list`, `pi mcp list` | Launch configured stdio servers |
+| `pi --mode rpc` `get_commands`, `pi list` | No model needed, and useful on request. `get_commands` omits load failures, and `--approve` loads project extensions, which execute code. Never pass it |
+| Codex `app-server` RPCs | Experimental; status calls start servers. `codex mcp list` says `enabled` for a server that cannot start |
+| Copilot `… list --json` | No config write reported, but depends on working directory, hides untrusted and malformed entries, and sign-in needs the GUI session on macOS |
+
+## 4. Skills: readers and metadata
+
+**Duplicates (OWN-04).** Codex lists all same-name copies, Copilot lists one silently, OpenCode 1.x warns and keeps one, and Pi's own root wins silently. In a non-Git folder under home, Pi treats `~/.agents/skills` as project scope, which then needs trust: disclose this [VP].
+
+**Metadata tolerance (SKL-02).**
+
+| Target (tested) | Will not load | Tolerated, with this effect |
+| --- | --- | --- |
+| Codex 0.166.0 | No frontmatter. Missing `name` or `description` documented as required | Frontmatter name beats folder |
+| Copilot CLI 1.0.105 | No or malformed frontmatter; invalid name characters | Missing `name` uses the folder; missing `description` uses the first body line |
+| Pi 1.5.0, three OSes [VP] | No `description`, no frontmatter, invalid YAML: all silently absent | Missing `name` uses the folder; frontmatter name beats folder; invalid names warn in the TUI and still load |
+| OpenCode 1.19.5 | Missing `name` or no frontmatter: **silently absent** | Name mismatch and uppercase accepted. Missing `description`: listed, not advertised |
+| OpenCode 2.2.5 | Broken YAML | Missing `name` or frontmatter accepted. Missing `description`: listed, not advertised |
+
+**Keys with a known effect (SKL-03).**
+
+| Key | Reader | Reported effect |
+| --- | --- | --- |
+| `paths` | Copilot CLI 1.0.105 | Ignored (macOS); wider access |
+| `user-invocable: false` | Copilot CLI 1.0.105 | Ignored (macOS, Linux); still offered to the model |
+| `disable-model-invocation: true` | Copilot CLI 1.0.105 | Hidden from the model though listed enabled; `/name` in `-p` also failed (macOS) |
+| same | OpenCode | 1.19.5 advertises it anyway (wider access); 2.2.5 lists but does not advertise it, user invocation untested |
+| Any | Any other reader or version | Item detail evidence note, "effect not tested": untested is not itself a loss, label or row status, and claims no equivalent behaviour (SKL-03) |
+
+## 5. MCP and agent formats
+
+**Conversion classes (TRN-01).**
+
+| Class | Examples | Result |
+| --- | --- | --- |
+| **Representable** | MCP command, ordered args, env, headers, URL; stdio or Streamable HTTP where both sides document it; absolute `cwd` where the target documents it; agent name, description, body; a skill key with no documented or recorded loss, as its bytes arrive exact | **Automatic** |
+| **Source-only metadata** | Comments, display text, fields with no behaviour effect | Kept in the store; **Automatic** |
+| **Best-effort, with a loss** | Timeouts; `required`; exposure settings; MCP tool allow and deny lists; agent `tools`, `model`, `permissionMode`, `memory`, `hooks`, `isolation` where this catalogue records no equivalent at the destination; an SKL-03 key with a documented or recorded loss at that reader; an MCP or agent field not yet classified for this destination. Also an agent becoming a skill, only through explicit Convert to skill (AGT-02) | **With limits** (TRN-01) |
+| **Unsupported** | SSE to Pi (Unsupported) or to Codex or OpenCode 2.x (none documented); `${CLAUDE_PLUGIN_ROOT}`, `${user_config.*}`, sibling-file or `bin/` dependencies; relative `cwd` with a different base, or a target with no `cwd`; unconvertible environment references; a command the target's environment cannot run; executable hook components, extensions, rules and replacement prompts | **Not available here** (TRN-01) |
+
+"A command the target cannot run" means an actual incompatibility, such as a Windows path for a target in WSL or a `.ps1` the target cannot resolve. An ordinary absolute path on the same computer is representable. This is never a content scan (I-11).
+
+**Class is not evidence (spec section 4).** A classified field keeps its class while untested, with an Item detail evidence note, never a fifth label or an assumed loss. Only an unclassified MCP or agent field counts as Best-effort, as this catalogue records no form for it there; for a skill key, missing execution proof is the note alone (SKL-03).
+
+- **MCP shapes.** `mcpServers` JSON (Claude, Copilot with `type: local` and default `tools: ["*"]`, Pi), Codex TOML `[mcp_servers.x]`, OpenCode 1.x `mcp.x` with command array and `environment`, 2.x `mcp.servers.x`.
+- **Reverse edits and initial identity (MCP-01, SYN-06).** The adapter reads back only the fields that destination can hold into the neutral record, at first comparison and on every later edit.
+- **`~/.claude.json` (MCP-02).** Holds account data. CK detects and closes nothing.
+- **`claude_desktop_config.json` (D-11).** Needs a full restart, overrides the Code tab on same name, and Desktop dropped an unknown top-level key (one observation).
+- **Agent shapes.** Claude Markdown; Codex TOML (`name`, `description`, `developer_instructions`; other file types silently ignored); Copilot `.agent.md` (`description` required, or silently not offered); OpenCode Markdown with explicit `mode`, because the default differs by line. Pi 1.5.0 has no documented native agent directory; `~/.pi/agent/agents/` had no effect on Windows and Linux, while the macOS output was incomplete [VP].
+
+**Agent invocation modes (AGT-01).** `AGENTS.md` and `CLAUDE.md` context files are persistent instructions, not selectable agent profiles. Named profiles and delegated subagents are another capability, and selecting a primary agent is not the same as spawning a subagent. Sources: [CX §3.4](research/codex.md), [PO capability table](research/pi-opencode.md), [CC agent conversion](research/claude-copilot.md).
+
+| Family | Named agent support in research and documentation | Do not infer |
+| --- | --- | --- |
+| Copilot | Custom profiles, including user-wide `~/.copilot/agents/`; CLI `/agent` and `--agent` selection | CLI discovery is not proof of every desktop picker |
+| Claude Code | User/project custom agents, usable as subagents; current docs also describe `--agent`/`agent` for the main session | Main-session custom prompt semantics are not merely an appended skill; current docs say a nonempty custom prompt replaces the default system prompt |
+| Codex | Native custom TOML agents under `$CODEX_HOME/agents/` and `.codex/agents/`, with `developer_instructions`; research covers delegated roles | This does not establish a Copilot-style main-session picker, nor that installing a Claude plugin registers its agents |
+| OpenCode | Native primary and subagent profiles, with explicit mode; primary profiles can be selected | Do not flatten primary and delegated modes or ignore 1.x/2.x format differences |
+| Pi 1.5.0 | Instruction files and skills; no built-in named agent directory or subagent capability established; extensions may supply other behaviour | `AGENTS.md` is not a named profile, and an extension example is not native support |
+
+Primary documentation spot-checked November 4, 2026, with no runtime checks: [Copilot invocation](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/invoke-custom-agents), [Claude agents](https://code.claude.com/docs/en/sub-agents), [Codex agents](https://developers.openai.com/codex/subagents), [OpenCode agents](https://opencode.ai/docs/agents). Pi evidence remains the pinned research and [VP](research/validation/pi.md), not a new current-version assertion.
+
+**Direction (TRN-02, D-26, proposed),** per the table below. Documented example of a lossy pair: Claude to Copilot, where "All unrecognized tool names are ignored" and `hooks`, `permissionMode`, `memory` and `isolation` have no verified equivalent [CC]. No agent round trip has been run (V-07).
+
+| Agent at a destination, with V-07 open | Class | Route label | Direction | Evidence note |
+| --- | --- | --- | --- | --- |
+| Every field Representable or Source-only, and translate-back reproduces the revision | Representable | **Automatic** | Both ways (proposed) | Runtime equivalence not run: V-07 |
+| A Best-effort field, or translate-back does not reproduce the revision | Best-effort | **With limits**, naming the loss | One way: edits and deletions there stay local (proposed) | Runtime equivalence not run: V-07 |
+| No compatible native agent support, such as researched Pi 1.5.0 | Unsupported | **Not available here**, with Convert to skill on offer | None | None |
+| Route awaits a required proof, or DET-03 does not permit it on the detected build | As classified | **Not known yet**, naming the applicable proof or missing format evidence | None until known | Names the proof or missing format evidence |
+
+A skill can carry reusable prose but does not preserve agent identity, prompt priority, model or tool restrictions, delegation, memory or hooks. Those are the true losses Convert to skill must name.
+
+## 6. Instructions: readers and instruction files
+
+**Personal paths only.** Main-session instructions need not be workspace files: Codex reads `$CODEX_HOME/AGENTS.md` (with its override precedence), Claude reads `~/.claude/CLAUDE.md`, and researched Pi reads `~/.pi/agent/AGENTS.md`. These are ordinary personal instructions, not selected agent profiles. Pi also documents user-level `SYSTEM.md` replacement and `APPEND_SYSTEM.md` addition, which must not be conflated with additive instruction sync. References: [Codex personal instructions](https://developers.openai.com/codex/guides/agents-md), [Claude memory](https://code.claude.com/docs/en/memory), [Pi pinned configuration](https://raw.githubusercontent.com/earendil-works/pi/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/coding-agent/docs/configuration.md).
+
+Claude skips `AGENTS.md` if a project, parent, `.claude/` or `CLAUDE.local.md` file applies, while `~/.claude/CLAUDE.md` does not block it. Copilot CLI does not load `.claude/CLAUDE.md`. Pi uses `AGENTS.md` over `CLAUDE.md` in one folder, does not read `~/.claude/CLAUDE.md`, and sends context files above the Git root with no trust needed [VP]. Replacement prompts (Pi `SYSTEM.md`, Codex `model_instructions_file`) are labelled "replaces built-in instructions" and never shared; path-scoped rules are never flattened.
+
+Bind the file a reader actually uses, and never create a higher-precedence file without saying what it will shadow. A selected file is one instruction destination whichever surfaces read it (INS-03): Claude's serves the CLI, the Code tab and, with restrictions, Cowork.
+
+| Family | Member file | Check first |
+| --- | --- | --- |
+| Claude | `~/.claude/CLAUDE.md` | Also read by Cowork, with restrictions: disclose. Flag `@` imports |
+| Codex | `$CODEX_HOME/AGENTS.md` | A non-empty `AGENTS.override.md` wins: bind that or refuse |
+| Copilot | `~/.copilot/copilot-instructions.md` | Same text in `~/.copilot/instructions/` reads twice: warn. Whether the Copilot app reads this file is unknown (V-05) |
+| Pi | `~/.pi/agent/AGENTS.md` | A new `AGENTS.md` beside `CLAUDE.md` shadows it (tested): warn. `AGENTS.override.md` is documented, untested: bind it if present |
+| OpenCode | `~/.config/opencode/AGENTS.md` | Needed for 2.x. On 1.x it replaces the `~/.claude/CLAUDE.md` fallback (Linux stub) |
+
+## 7. Marketplaces and plugins
+
+**Private GitLab route per surface.** No row has been tested against real GitLab [VF §4a].
+
+| Surface | Route | Status for the work marketplace |
+| --- | --- | --- |
+| Claude Code | Native Git marketplace. Any Git host is documented, using credentials already on the machine; it never prompts | Local credential-helper and SSH tests apply by mechanism only. V-16 |
+| Copilot CLI | Marketplace add, then install | The token retry is GitHub-specific. A generic host worked over SSH and a helper on Linux, tested only with a local repository. V-16 |
+| Copilot app | None of its own established. The working non-UI route was a CLI install into `~/.copilot` (macOS) [VPM]; app UI install Blocked | Needs the CLI, so no route for an app-only user. V-05 |
+| Codex, Pi, OpenCode | Native Git transport | Generic Git per documentation. Untested on GitLab. V-16 |
+| Cowork, Chat: self-added marketplace | Documented hosts are GitHub, GitHub Enterprise and **public** GitLab and Bitbucket | **A self-added private GitLab marketplace is not a documented route.** Not offered unless V-15 validates it |
+| Cowork, Chat: organization sync | See the Cowork candidates below | Candidate. V-15 |
+
+### Cowork candidates (COW-01, V-15)
+
+Cowork supports plugin installation: [Cowork installation](https://claude.com/docs/cowork/guide/plugins) documents marketplace install, file upload and marketplace updates (official documentation rechecked November 4, 2026, not runtime-tested). The open question is CK's automatic route. None of these is chosen, and no live test was run for this catalogue.
+
+| Candidate | Evidence | Established | Not established |
+| --- | --- | --- | --- |
+| **Locally hosted Git source** | **User-reported,** November 4, 2026, in the Cowork local-source discussion | The user reports having just used one | Exact URL or protocol, app build or mode, steps, an installed-plugin session result, update result. Not independently reproduced; no gate closed. Standard Cowork documentation lists supported hosts rather than arbitrary local Git URLs. Next: CK's own automatic registration, install and update, plus restart and CK-unavailable behaviour, without recipients repeating the user's manual setup |
+| **Local marketplace bridge** | Unproven; user-proposed | CK could serve its bundled or downloaded marketplace on a loopback endpoint, as a Git-compatible source or a manifest plus plugin archives. The documented third-party-provider route fetches on the host and accepts HTTPS Git URLs or HTTPS manifests with same-origin archives, which suggests it is worth testing | Loopback acceptance, TLS behaviour, fetch origin (host, VM or cloud), applicability to ordinary account-backed Desktop, automatic registration, per-plugin install. Prefer a manifest and archive interface over implementing Git hosting if the applicable native route supports it. A bridge distributes already-local content; it does not solve how CK receives new private releases |
+| **Third-party-provider host provisioning** | Documented, for third-party-provider deployments: [extensions](https://claude.com/docs/third-party/claude-desktop/extensions) | Host-side marketplace provisioning through `allowedPluginMarketplaces`, HTTPS manifests and plugin archives, and system-wide `org-plugins` directories on macOS and Windows. The directory route supports installation preferences and version-triggered updates for Cowork and Chat, not full Code plugin loading | Applicability to an ordinary Enterprise account: the label does not prove that deployment mode. Administrator needs, and whether a user-wide CK adapter can write those locations; system-wide administrator provisioning is not assumed to satisfy user-wide scope, and organization policy is not changed. Directory withdrawal can unregister installations, which a CK adapter must not allow (PLG-08). It is nevertheless evidence against treating all local Cowork automation as impossible |
+| **Claude organization sync from GitLab** | Documented, public beta: [org sync](https://claude.com/docs/plugins/org-sync) | An Owner on a Team or Enterprise plan uses **Sync from GitLab**, for gitlab.com or self-managed, with a token held in organization settings. Members need no repository access or Git credentials. A plugin can be installed by default or required, and automatic sync can follow default-branch pushes. Documented to reach chat, Cowork and Claude Code sessions that sync from the account (v2.1.273+). On the macOS Code tab, account plugins were seen loading; org-synced ones were never tested (V-04) | claude.ai reads from Anthropic's side, so a VPN-only GitLab may be **unreachable** to it. The user's screenshot shows an Enterprise label; permissions and enabled features are unknown. Private plugins must live in the marketplace repository or on the same GitLab host. A top-level `bin/` is rejected. The plugin choice would sit in Claude rather than CK, so it does not by itself meet REC-01, and it does not replace bundled distribution |
+| **Sharing and organization publishing** | Documented: [sharing](https://claude.com/docs/plugins/share) | Share a created or uploaded plugin with named organization members, or publish it to the organization's library, subject to policy. Direct-share recipients receive later edits; later edits to an organization-published version need publishing again | Any CK automation API; whether upload-only installs track CK's feed |
+| **UI automation** | Unproven | A separate candidate, not an established supported API | Everything |
+| **Manual Add > Upload plugin** | Documented, never run | Takes a `.zip` or `.plugin`, one plugin at a time; does not track updates. No documented file or command writes this account state | **Not a CK route** (COW-02). Evidence of a user path only |
+
+### Native registration, install and updates
+
+- **Default marketplaces observed.** Claude adds `claude-plugins-official` in a fresh home after a session [VCW]; the Codex app writes `marketplaces.openai-bundled`, a bundled, host-owned catalog [VX]. Copilot's `github/awesome-copilot` default is not part of this selection [VPL]. **Applicability (MKT-03):** Claude's was seen from a Claude Code session and sits in `~/.claude` files the Code tab also reads; Codex's was written by the app into the `config.toml` that ChatGPT desktop and Codex CLI share. Neither is evidence for Cowork, Chat, Copilot, Pi or OpenCode, or for another version (V-18).
+- **Bundled install candidates (ORG-03, ORG-04).** Claude Code local directory source (file shape only: 2.1.318, Linux, signed out); Codex local marketplace root (documented, tested); Copilot non-bare local path (Windows), a live link with nothing copied [VPW], while `file://` and bare-repository paths failed [VPL, VPW]. **System Git is untested for all of these.** Git-based routes fail without it (Claude Code with Git off `PATH` [VCW]; Copilot CLI with no `git` on `PATH` [VPW]), but whether a local-source route needs it on a recipient's machine is V-17, and machines with no Git at all were not tried [VF §5]. This is no evidence for or against bundling Git.
+- **Shared plugin stores (spec section 4, OWN-04, PLG-02, PLG-07).** The Code tab reads the same `~/.claude` files as the CLI, including `installed_plugins.json`, which the app watches (log on macOS [VCM], static reading on Windows [VCW]). Copilot app and CLI share `~/.copilot`: a CLI install and a CLI disable both reached the app after restart (macOS) [VPM]. So a write, Disable or uninstall through one can act on one install unit for both, and no per-reader filter is recorded for either pair (V-06). **Account plugins overlap too.** They loaded in a macOS Code tab session [VCM] (elsewhere V-04), and org sync is documented to reach Cowork, Chat and Code sessions syncing from the account. So a Cowork route held in account state may also reach Code sessions, and OWN-04 then applies (V-06). Whether a plugin held both as an account plugin and as a local Code registration duplicates content is a separate unproven question: a local Code tab install never appeared under `cowork_plugins` [VCM]. V-17's combined fixture records both, and no deduplication is assumed.
+- **Copilot declaration in settings.** Hand-written `extraKnownMarketplaces` and `enabledPlugins` in user `settings.json` listed the marketplace with no clone, and installed nothing until `plugin install` (Windows CLI) [VPW]. A self-added marketplace can opt into `autoUpdate: true` on that entry (Documented) [CC].
+- **Access-check wording.** With bad credentials, Claude sessions run normally and nothing is reported. A port 22 timeout reported as an SSH authentication failure, and `Permission denied` during a provider incident is not proof of bad credentials.
+- **Independent authorization (MKT-05).** Copilot CLI retries HTTPS with its signed-in **GitHub** token (macOS), which does not help GitLab. GUI-launched harnesses may differ from CK's process, and the Linux test desktop had no ssh-agent. Reports set `GIT_SSH_COMMAND` as a test condition only.
+- **Validation before add (MKT-06).** One `npm`, `pip`, `archive` or SCP-style `source.url` entry makes Copilot reject the whole marketplace (Linux). A top-level `bin/` refuses the plugin on account routes, with limits of 5,000 files and 200 MB per plugin.
+- **Credentials.** An unknown SSH host today needs `ssh -T git@host` and a fingerprint comparison. The Claude app contains no Git on Windows.
+- **Reuse (MKT-07).** Same repository means known URL forms of one host and path, same ref. Native errors are shown verbatim.
+- **Runtime disclosure (PLG-02).** An install succeeds while its hooks and MCP fail without `node`. A plugin with MCP runs code when the Copilot app next launches, with no prompt seen.
+- **Verification (PLG-03).** `plugin list` or `installed_plugins.json` alone can list a plugin with no files. Cache paths differ per OS and do not match the docs.
+- **Iru (end state, not v1; documentation only).** Coverage: Mac and Windows 11 24H2+; no documented Linux. Likely shape: Custom App plus a Custom Script for the console user; Mac scripts run as root. Claude Code managed settings (`managed-settings.json` or MDM) can carry `extraKnownMarketplaces` and install plugins on machines. This is **enforced policy**, so an explicit administrator choice. Developers still need Git access to the source, per a vendor page not read in full [VF §4a]. Iru supplies no Git credentials and cannot reach account-backed Chat or Cowork.
+
+**Code tab with no `claude` command (PLG-04).**
+
+| Route | Evidence | Status |
+| --- | --- | --- |
+| **Settings route:** `extraKnownMarketplaces` and `enabledPlugins` in `~/.claude/settings.json` | **macOS 4.16336.0, Real:** every component worked, over three sessions (clone, install, loaded), with a fixture deploy key via settings `env`. **Windows, Linux:** Stand-ins cloned but did not download without `/reload-plugins`; real Code tab Blocked. `CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1` through settings `env` is untested and worth trying first | Not known yet on every OS until V-01 |
+| **Claude Code's own plugin commands** from a private copy | Complete install on Windows (Stub). Code tab loading untested, though it reads the same files. Not a documented app API | Not offered until V-01; conditions in PLG-04 |
+| **In-app steps:** `+ > Add plugins`, typed `/plugin marketplace add`, any add-marketplace UI | `/plugin` is refused in the embedded binary's streaming mode; typed in the real Code tab is Blocked | Unknown; information only, not a recipient route |
+
+## 8. OpenCode's two lines
+
+Desktop ignores a 1.x CLI on `PATH`, and a 2.x Desktop counts as a 2.x reader. Windows config is under `%USERPROFILE%\.config`, not AppData, and `HOME` is ignored there [VO]. Write 1.x singular forms in shared files; they work on both. `permissions` is a hard error on every 1.x command, and `plugins` is silently ignored on 1.x. `mcp add` defaults are opposite, so CK uses targeted edits [VF §3].
+
+| Readers | MCP entry and Disable | Other |
+| --- | --- | --- |
+| Pure 1.x | `mcp.x`, `enabled: false` | `agent` |
+| Pure 2.x | `mcp.servers.x`, `disabled: true`; an existing 1.x entry stays in its form | `agents` |
+| Mixed, or version unknown | 1.x forms only. A remote server's files are never written | No 2.x write command against the shared file. **Never `permissions`.** A 2.x-only setting is skipped (V-08) |
+
+- `agent` with a `system` key is silently misrouted on both lines.
+- **Plugins.** A Claude-format repository fails with `missing package.json`, and a failed 1.x run still writes `$schema`. A valid plugin over private SSH was not tested. For native modules: pure 1.x `opencode plugin -g <spec>`; pure 2.x `opencode plugin add <spec>`, with removal by `plugin remove <spec>`. 1.x has no recorded update or removal command, so removal there is Not known yet. A mixed machine blocks 2.x modules (V-08).
+- **Database hazard.** A first 2.x or Desktop run on a fresh data directory makes every config-loading 1.x command exit 1, on all three OSes. The other order migrates and keeps working. Copy no OpenCode database, and show the native error unrepaired.
+
+## 9. Proofs: method and evidence so far
+
+Interims and unmet outcomes are in spec section 8. "So far" is evidence, never a pass.
+
+| Proof | Must be established | So far |
+| --- | --- | --- |
+| **V-15 (first)** | On a normal CK install with no recipient step, no Claude Code and no CLI: which section 7 candidate registers the marketplace, installs a selected plugin, updates it and loads it in a Cowork session? Does it uninstall, or can CK at least observe an uninstall made in the app so automation honours it, and does a plugin disabled there stay disabled through an update (V-04 on account routes)? Which readers does the route reach, including Code sessions (OWN-04)? For each: applicability to ordinary account-backed Desktop, administrator needs, user-wide scope, fetch origin, endpoint and TLS acceptance, restart and CK-unavailable behaviour, and what catalog removal does (I-27). Prove direct GitLab and organization bundle separately, the bundle with a recipient who has no repository access. On accounts restricted from Cowork or from Code: what the app and each route do, and whether any safe read-only signal shows mode access. Record what is observed, assuming no vendor permission model. For org sync: can **Sync from GitLab** reach the organization's GitLab on the company network or VPN, can the organization allow that, and how does a member get a selected plugin? | Documented routes; local Git User-reported; nothing exercised; no restricted account tested. Org sync is a public beta |
+| V-17 | Per OS and destination, from a normally installed bundled build with no Iru, with each surface isolated (Cowork; Code tab, no CLI; Copilot app, no CLI; each CLI), each isolated fixture having no system Git, and then combined: native registration appears in the native browser, including for a surface installed after CK; a selected plugin installs and loads, in the CLI and the app, from a location surviving an app update; a content release updates the installed copy and keeps a disabled state; uninstall and exclusion hold through the next release; catalog removal leaves it working with its content retained (I-27); an existing registration under the same name with a different source; native removal of CK's own registration (D-16); registration, plugin automation and updates while another build owns sync; behaviour when CK is quit or removed. Any recipient dependency, such as system Git on the recipient's machine, is recorded and leaves "installing CK is enough" unproved on that route, without implying CK must bundle it. Combined: which readers an account plugin reaches and whether it and a local Code registration duplicate content, per surface; no deduplication is assumed. A direct-GitLab result never counts here, nor the reverse | Claude local directory source: file shape only. Codex local marketplace root: documented, tested. Copilot non-bare local path: tested on Windows. None on a machine with no Git [VF §5] |
+| V-01 | Per OS, signed in, clean machine, no `claude`, private repository: does each PLG-04 candidate install and load, in how many sessions? With the user's **ordinary key or agent** and no credential environment changed; HTTPS; trust dialog; automatic update, a disabled state surviving it, uninstall and catalog removal (I-27). On accounts restricted from Cowork or from Code: what each candidate does, whether any safe read-only signal shows mode access, and whether the private copy is acceptable while Code access is unknown, assuming no vendor permission model. **Separately, with `claude` present,** per OS: does a plugin installed by the CLI route load in a native Code tab session, and does its lifecycle hold there (AT-56)? No sibling CLI result closes this, and it never closes the no-CLI journey | Section 7. Silent failure when the Mac's own key was denied [VCM]. **Most important gap: real Code tab on Windows and Linux** |
+| V-05 | A real chat turn in the Copilot app first, including with no Copilot CLI present, using shared skills, MCP entries and agents, and whether it reads `~/.copilot/copilot-instructions.md`; an install route needing no Copilot CLI; plugin update, a disabled state surviving it, uninstall and catalog removal (I-27) there. Then ChatGPT desktop, OpenCode desktop, pi-gui, VS Code; desktop Disable effects | Section 2, Appendix D. CLI install reached the app after restart (macOS). The turn that would test instruction reading was Blocked [VPM]. Sign-in Blocked |
+| V-16 | Real private GitLab behind the company network or VPN, HTTPS and SSH, launched from GUI and terminal, per OS: Claude Code first, then Copilot CLI, Codex, Pi, OpenCode. Whichever method the organization uses, and whether it works with no terminal | None on GitLab. GitHub deploy-key SSH: Claude CLI, Codex, Copilot CLI, Pi on three OSes; OpenCode clones up to its `package.json` check |
+| V-09 | Per OS, with a session or the app running: does a targeted `~/.claude.json` edit, or `claude mcp add`, keep every unrelated byte, and does the entry survive? The same for a return into `claude_desktop_config.json`, which D-11 leaves unwritten and which overrides the Code tab on same name | Hand edit connected (CLI); the app wrote the file during a run |
+| V-20 | Per kind, surface and supported build: is each Appendix B route effective in a session, user-wide, persistent through restart and update, and free of unrelated rewrites? Which plugin-child overrides leave plugin contents unmodified? | Appendix B. Plugin toggles and Codex skill-by-path Exercised; most standalone routes Documented only |
+| V-12 | Per OS, for GitLab: a no-terminal way for a novice to install Git and obtain usable credentials, and to confirm an unknown SSH host | Not tested |
+| V-18 | Per version: how to read Codex's and Claude Code's default marketplaces without a mutating command or session, including catalogs that are not Git repositories, on a computer where the harness has not yet run | One observation each [VCW, VX] |
+| V-06 | Skills in each root load on each reader, each OS, including Codex `~/.agents/skills` on Windows. In the Code tab with no CLI, per OS and in a new session: actual reading of shared skills, `~/.claude.json` MCP entries and `~/.claude/agents/` agents, with no result carried over from macOS. Identical duplicates; native per-reader filters, including for plugins in a shared store and account plugins reaching Code sessions | Appendix A. Pi: both roots listed on three OSes [VP]. Code tab: a `~/.claude.json` server connected in a real macOS session [VCM]; agents inferred; nothing on Windows or Linux |
+| V-04 | Whether org-synced plugins load in local Code sessions; account plugins beyond the macOS log and transcript; update, a disabled state surviving it, and uninstall; which readers an account install, update or uninstall reaches | macOS: account plugins load in a Code tab session (log and transcript). Org-synced plugins not tested |
+| V-02 | Private update, a disabled state surviving it, uninstall and catalog removal (I-27) on each Appendix C route; whether Codex `marketplace upgrade` moves an installed plugin; Copilot's update argument; `pi update --extensions` scope | Uninstall: Claude, Codex, Copilot, Pi. Update: partial |
+| V-07 | Per pair, at runtime: does a translated agent behave the same; whether Representable agent fields round-trip per family (TRN-02); converted skills usable; agent field enforcement; hooks beyond `SessionStart`. The local translate-back check sets direction meanwhile and proves none of this | Appendix D |
+| V-08 | Mixed OpenCode: valid plugins per line, removal on a shared file, 2.x writes with no data side effects | Section 8 forms |
+| V-10 | Per OS: paths, identifiers, locks, including D-31's shared-file coordination across builds, carried state and permanent-loss test, atomic rename, case-folding, line endings, file-event delivery and order, whether any adapter signal establishes action order for a pair of locations (CON-04), tray, background operation and sign-in start, tray indicator, package formats, signing, automatic organization app update with no recipient action by a route that keeps the build's identity | Windows on one machine; event order not tested |
+| V-14 | For each harness run through T3, from a T3-launched session on each OS used: actual executable, version, home and scope; whether a disposable skill, MCP entry, instruction and, where the harness has them, native agent are seen in the session (AT-32) | Not tested |
+| V-19 | Per target and OS: can the file a reader actually uses hold the common base plus additions safely, given size limits, imports, precedence and shadowing, and the harness or app rewriting that file? | Not tested. Reader and shadowing facts: section 6 |
+
+## 10. Per-harness acceptance tests
+
+Same rules as spec section 9: specified, not executed.
+
+- **AT-01 Detection.** Every Appendix A location, relocated roots, Claude app only (Cowork and Code each Access unknown without a validated signal), config with no app, mixed OpenCode, GitHub Desktop, `gh`, `github` on `PATH`, pi-gui, a hung probe; an empty list, a failed command, a policy restriction, a malformed file and a missing binary. Side-effect fixtures: OpenCode 1.x config without `$schema`, 2.x with a fresh data directory, a Claude plugin declared and unfetched, a stdio MCP that records launches. **Pass:** correct separate rows; those five are different results (DIS-04); `gh` not a harness; pi-gui third-party, MCP CLI-only on 1.0.1; hashes unchanged; no `$schema`, database or cache populated; no session, service or server started; versions follow DET-03.
+- **AT-05 Claude-format plugin across families.** A plugin with skills, command, agent, hook and root-variable MCP, on Codex and Copilot CLI, then Pi and OpenCode: install, Disable, Enable, update, uninstall; a second plugin from one marketplace; a differing source under one name. **Pass:** native commands run; the report shows Appendix D outcomes, including Codex MCP "won't start" and agents "not surfaced"; no "compatible" label; refused entry warned before add; reuse runs no add; differing source stops; Update claims only what a re-read shows; never `--force`. Pi and OpenCode: Not available here with the reason, no native install, no exit-0 success claim.
+- **AT-09 Native Disable.** Disable, then Enable: an MCP server on Codex, Pi, OpenCode and Copilot CLI; a skill on Codex, Claude Code, Copilot CLI, Pi and OpenCode; an MCP server on Claude Code; a Not shared Codex MCP entry in a commented `config.toml`. **Pass:** each step is confirmed by re-reading native state, not an exit code, because Copilot's commands exit 0 on an unknown name; `enabled = false` on Codex; `enabled: false` on Pi; section 8 forms on OpenCode; the Codex skill by `[[skills.config]] path=`, leaving same-name skills alone; the Claude Code skill by `skillOverrides`, the Pi skill by its `settings.json` `skills` resource filter and Copilot CLI's routes by Appendix B's controls, with no session flag; other bytes identical; content updates arrive with the switch kept. The OpenCode skill and Claude Code MCP show Disable unavailable with bytes unchanged, and no `hidden`, `disable-model-invocation`, per-project `disabledMcpServers`, removal or relocation is used. The Not shared entry gains no sharing, and the reverse click restores it. A route with no V-20 record of its own, including the Pi skill's, shows Disable unavailable, "not verified on this build", with no support fabricated. **Desktops.** Repeat per kind on the Code tab and the Copilot app, each alone with no CLI. **Pass:** each needs that surface's own V-20 record, under the same native-switch limits; with none, Disable unavailable, with no CLI result borrowed. **Build change.** Move a fixture to a build outside V-20's record, with one item Disabled, one enabled and one Disabled and then deleted; Restore the deleted one, and in a repeat with its recorded form changed. **Pass:** ENB-01's build-change rule: the Disabled item stays Disabled, with nothing deleted, rerun or re-enabled; the enabled item reads Disable unavailable, its sharing route label unchanged; Enable behaves as ENB-01 states, or is unavailable with the reason if the recorded form changed; Restore follows DEL-03: the recorded switch with the unverified-effect note and no new Disable or, with the form changed, unrestored with the reason and never enabled; nothing says supported.
+- **AT-13 MCP conversion classes and reverse edits.** **Pass throughout:** no prompt apart from each collision choice below; a second pass makes zero writes.
+  - **Classes (TRN-01).** Representable; tool allow list on a target without one; relative `cwd` with a differing base; SSE to Pi, Codex, OpenCode 2.x. **Pass:** Representable: Automatic. Allow list: With limits, "wider access" shown. Relative `cwd` and SSE: Not available here, nothing written.
+  - **Reverse edits.** At the target without an allow list: edit the URL; separately, delete the entry and Restore it; separately, edit the URL there while the allow list is edited at a capable destination. **Pass:** the reverse edit updates only the URL in the neutral record: capable destinations get the new URL with the allow list intact, and the target is not read as having removed it. The deletion propagates (DEL-02), and Restore returns the allow list. The competing edits follow CON-01 as whole revisions, with the loser in history and no field merged.
+  - **Initial identity.** That target's same-name copy matches a capable copy in every field both can hold, met at first setup, at a later harness selection and across a handoff (AT-62), and separately with the limited copy selected first; then with a differing URL, choosing the limited copy. **Pass:** one item, no Needs a decision and the allow list intact at the capable destination and in the neutral record; the differing URL shows Needs a decision with a diff, and choosing the limited copy replaces only the fields it can hold.
+  - **Three copies, at first setup.** Two capable copies hold different allow lists and a limited copy matches each on every field it can hold; choose the limited copy, and in a repeat a capable one; then edit the URL at the limited copy. **Pass:** no one item is inferred from the limited copy; Needs a decision shows with a diff, and choosing the limited copy has the user select, in that choice, which capable copy supplies the allow list. The neutral record and capable destinations end with that one list, the other list's bytes stay in history, no union appears and the limited copy stays without one. Choosing a capable copy needs no further selection. The later URL edit keeps the list with no prompt.
+- **AT-14 Native agents, no automatic conversion.** Claude agents with (a) name, description, body and (b) `tools`, `model`, `permissionMode`, with Codex, Copilot, OpenCode and Pi managed, through first setup and later discovery, with V-07 open.
+  - **Labels and modes.** **Pass:** compatible native outputs proceed with no approval, and no pass creates a skill. By class, (a) is Automatic and (b) With limits with lost fields named; each has an Item detail evidence note naming V-07, "not tested" never appears as a route label or row status, and no classified field becomes a loss for being untested. Runtime equivalence stays **Unmet: V-07** whatever the check shows. Each destination shows its real invocation modes, keeping primary agents, subagents and instruction files distinct. Pi gets nothing written, with an explanation and a Convert to skill action.
+  - **Direction.** Edit (a) at a destination where the translate-back check reproduces it and, in a separate run, delete it there; edit and, separately, delete (b) at a destination that loses a field; repeat (a) with a pair whose translate-back does not reproduce it. **Pass:** (a)'s edit spreads to the origin and other destinations with no field changed, concurrent edits follow CON-01 and its deletion follows DEL-02. (b)'s edit or deletion stays local: CK stops writing there and says why, the origin and other destinations stay byte-identical, and no later pass recreates or overwrites that destination. A pair that fails the check behaves as (b).
+  - **Build eligibility.** Repeat with a documented native-agent route outside its tested range. **Pass:** DET-03 permits it with its structural class and direction unchanged, an unverified-build note and the V-07 runtime-equivalence note. An undocumented or unestablished route stays unwritten.
+  - **Convert eligibility.** Repeat for explicit Convert to skill. **Pass:** known source format and documented skill route follow DET-03; an unestablished format or route gets no guessed conversion, and no case converts without the user choosing the action.
+- **AT-54 Convert to skill and explicit return.** Explicitly convert a Claude Code agent; run default-all sharing, later harness selection and discovery; edit the skill; then request it on Claude Code with each choice; after Skill only, Restore the original from History, once with other destinations unchanged and once with one differing; repeat with a plugin-owned original and with a same-name skill present. **Pass:** the skill has recorded provenance and names true losses, never "agent installed". It never reaches Claude Code automatically, including through a shared root. Its edits spread among skill destinations and write to no agent. Keep agent and skill leaves both. Skill only replaces that agent, keeps the original in history, survives reconciliation with no agent recreated, and deletes nothing at other native-agent destinations. Restore returns the native original byte-identical at Claude Code alone and leaves the skill there, as under Keep agent and skill; nothing changes at other destinations, a differing agent elsewhere follows CON-03, and later passes make zero writes, neither recreating nor re-removing either item. The plugin-owned original makes Skill only unavailable; the same-name skill follows CON-03.
+- **AT-21 OpenCode lines.** Pure 1.x, pure 2.x, mixed, unknown version: add MCP, Disable, a valid module, a 2.x-only option; a fresh data directory. **Pass:** forms per section 8; comments kept; plugin Written with disclosure and diff; mixed: 2.x module and option skipped with reason, no 2.x process run; no database created; written files re-parsed.
+- **AT-27 Skill metadata.** Skills missing `description`, missing `name`, with no frontmatter; each SKL-03 key; a shared root. **Pass:** source bytes exact on every target; non-loading targets skipped, naming the field, others continue; each documented or recorded key loss named as With limits; a key untested at a reader keeps its route label with the "effect not tested" note and no equivalence claim; no prompt.
+- **AT-32 T3 Code.** V-14's method for each harness used through T3, including a native agent where the harness has one. **Pass:** the Compatibility page reports match or mismatch from observed session values, apart from what local disk holds; what a session does not show is a reported limit, never a match; no T3 file or configuration changed.
+- **AT-34 Import.** One selected source harness and no other destination, holding one of each kind, including an MCP entry from `~/.claude.json`, a plugin, a hook; an unselected harness also holds items. Separately, a skill reached through a user's symlink, then shared to a second selected harness and edited there. **Pass:** store matches STO-03; plugin record has no cache or code; hook read-only; nothing is imported or adopted from the unselected harness; no harness byte changes. The symlink stays a symlink after import and that write, and CK creates none (OWN-02, D-13).
+- **AT-38 Pi packages.** A Pi-format package from a private URL, including bare `git@host:path`; update; remove; a Claude-format repository. **Pass:** source normalized to `git:` or `ssh://`; `pi mcp list` never run; never shown Loaded; update preview says it may not be limited to this package; remove clears the entry. Claude-format not offered, because install exits 0 and loads nothing.
+
+## Appendix A. User-scope write targets and their readers
+
+**T** tested, on the OSes reports cover; **D** documented; **L** Listing only, in a signed-out editor; **I** inferred; **?** unknown. `~` is the actual home; DET-02 overrides apply. A macOS result for the Code tab is never inferred to another OS (V-06). Windows OpenCode uses `%USERPROFILE%\.config`.
+
+| Kind | Location | Read by |
+| --- | --- | --- |
+| Skill | `~/.claude/skills/` | Claude CLI, Code tab (T); OpenCode (T); VS Code (L). **Not** Copilot CLI, Pi (T), Cowork (D) |
+| Skill | `~/.agents/skills/` | Codex macOS, Linux (T); on Windows unvalidated, Not known yet until V-06; Copilot CLI, OpenCode, Pi (T); VS Code (L); Copilot app, ChatGPT desktop (D). Not Claude (D) |
+| Skill | `$CODEX_HOME/skills` (D-05) | Codex (T). Not foregrounded by Codex's current authoring guide |
+| Skill | `~/.copilot/skills/` | Copilot CLI (T), VS Code (L), Copilot app (D) |
+| Skill | `~/.pi/agent/skills/`; `~/.config/opencode/skills/` | Pi (T), pi-gui's SDK (T); OpenCode (T) |
+| MCP | `~/.claude.json` `mcpServers` (MCP-02) | Claude CLI (T), Code tab (T macOS). Not VS Code or Copilot (T) |
+| MCP | `claude_desktop_config.json`, off as a target (D-11). Windows: probe `%LOCALAPPDATA%\Claude-Data`, the package's `LocalCache\Roaming\Claude`, `%APPDATA%\Claude` | Chat; Code tab (T macOS: wins on same name); Cowork ?. Not the CLI (T) |
+| MCP | `$CODEX_HOME/config.toml` | Codex CLI (T); ChatGPT desktop (T macOS) |
+| MCP | `~/.copilot/mcp-config.json` | Copilot CLI (T), VS Code (L); Copilot app (T macOS) |
+| MCP | `~/.pi/agent/mcp.json` | Pi 1.5.0 (T, three OSes; called in a Stub session on Mac, Windows). Not pi-gui 1.0.1 (T) |
+| MCP | `~/.config/opencode/opencode.json(c)` | OpenCode 1.x, 2.x (T) |
+| Agent | `~/.claude/agents/*.md` | Claude CLI (T), Code tab (I); VS Code (L). **Not** Copilot CLI or OpenCode (T) |
+| Agent | `$CODEX_HOME/agents/*.toml`; `~/.config/opencode/agents/*.md` | Codex (T); OpenCode (T) |
+| Agent | `~/.copilot/agents/` | Copilot CLI (T macOS, Linux), VS Code (L); app count (T macOS) |
+| Instructions | Section 6 of this file | INS-02 |
+| Plugin | Native command (Appendix C), Appendix B plugin switches, D-23 settings route. Never a hand-edited cache or registry | Per target |
+
+## Appendix B. Native Disable routes
+
+ENB-01 governs. A cell names a route only where a native switch is known. **Unavailable** means CK shows Disable unavailable and leaves the destination unchanged. Every route needs V-20 on the supported build before CK offers it. Keep full disable distinct from `disable-model-invocation`, which only restricts automatic invocation. Never modify plugin package or cache contents to simulate per-child disabling. Instructions have no Disable in any family (INS-02).
+
+| Kind | Claude Code | Codex | Copilot CLI | Pi | OpenCode |
+| --- | --- | --- | --- | --- | --- |
+| Standalone skill | `skillOverrides` `off`, documented as blocking invocation (Documented) | `[[skills.config]] path=… enabled=false`, by path, since `name=` disables every same-name skill; restart (Exercised, macOS, Linux) | `copilot skill disable <name>` (Documented) | `settings.json` `skills` resource filters, not a per-skill boolean (Documented) | Unavailable: no full per-skill disable established by the reviewed docs. 1.x `permission.skill` deny only hides; 2.x `disable-model-invocation` only stops advertising |
+| MCP | Unavailable at user-wide scope. `/mcp` disable retains config, including plugin servers, but is stored per project as `disabledMcpServers` in `~/.claude.json`; that is not a user-wide switch merely because it is in the home directory, and it inherits V-09 | `mcp_servers.<id>.enabled=false` (Documented) | Enable and disable controls (Documented); persistence and scope unverified, and session flags do not count | `enabled:false`; `/mcp` enable and disable (Documented) | Use section 8's reader-dependent form: preserve an existing 1.x `enabled` entry even on pure 2.x; new pure-2.x entries use `disabled:true` (Documented); mixed or unknown readers retain the 1.x form |
+| Agent | Unavailable: none established | Unavailable: none established | Unavailable: none established | n/a | Unavailable; `hidden` is not disabling |
+| Whole plugin | `enabledPlugins` false (Exercised: next session) | `[plugins."p@m"] enabled=false` (Exercised) | `copilot plugin disable` (Exercised; re-read, since it exits 0 on an unknown name) | Package filter; a filter reaching a Claude-format subfolder loaded nothing (Exercised) [VP] | 1.x none: Unavailable. 2.x minus entry |
+| Plugin-owned skill, individually (ENB-06) | Unavailable: `skillOverrides` explicitly does not affect plugin skills | Not established | `copilot skill disable` is a candidate: docs say plugin and builtin skills cannot be removed through skill remove and should be disabled (Documented, untested) | Package-component selection is a candidate (Documented) | Not established |
+
+**Desktop surfaces, not inferred from the above.** Claude Code tab: same files as the CLI, so a change affects both. Chat and Cowork: account UI only, so Disable unavailable in CK. Copilot app and VS Code: their plugin toggles, and a CLI disable reached them (macOS); no other per-item switch is known (V-05). ChatGPT desktop: shared `config.toml` or Settings (V-05). OpenCode desktop: its GUI switch disables only the plugin's GUI part.
+
+Sources, checked November 4, 2026, not runtime-validated unless marked: [Claude skills](https://code.claude.com/docs/en/skills), [Claude MCP](https://code.claude.com/docs/en/mcp), [Codex configuration](https://developers.openai.com/codex/config-reference), [Copilot CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference), [Pi settings at researched commit](https://raw.githubusercontent.com/earendil-works/pi/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/coding-agent/docs/settings.md), [Pi MCP at researched commit](https://raw.githubusercontent.com/earendil-works/pi/f9a26365568127461c47a07a37dcb42c140a3ac5/packages/coding-agent/docs/mcp.md), [OpenCode 2.2.5 skills](https://raw.githubusercontent.com/anomalyco/opencode/v2.2.5/services/www/src/docs/content/skills.mdx), [OpenCode 2.2.5 MCP](https://raw.githubusercontent.com/anomalyco/opencode/v2.2.5/services/www/src/docs/content/mcp-servers.mdx). These do not establish Cowork or every desktop surface's behaviour.
+
+## Appendix C. Native plugin routes
+
+In this native-command table only, Automatic means the command runs without CK approval, not lossless compatibility; component outcomes and losses remain those in Appendix D. "Route today" assumes the access check passed. **No route means the named label and its open proof, never a guessed command or an assumed manual route.** Whether a disabled state survives an update, and an installed copy survives catalog removal, is open on every route (V-01, V-02, V-04, V-05, V-15, V-17). Where surfaces share a store, Update and Uninstall act for all its readers (section 7). All Git routes: real GitLab untested (V-16).
+
+| Target | Native route | Route today | Update | Uninstall |
+| --- | --- | --- | --- | --- |
+| Claude Code, CLI present | `claude plugin marketplace add <url>`, `claude plugin install P@M --scope user`. Project scope does not download | Automatic (SSH Stub on three OSes) | Not known yet (V-02) | `claude plugin uninstall`, three OSes. The marketplace declaration stays and may be reused (MKT-07) |
+| Claude Code tab, no CLI | PLG-04 | Not known yet (V-01); macOS settings route Exercised with conditions | Not known yet (V-01) | Not known yet (V-01). Settings undo is not uninstall and leaves fetched files |
+| Cowork, Chat | COW-01; candidates in section 7 | Not known yet (V-15) | Not known yet (V-04, V-15); uploads do not track | Not known yet (V-15); account UI exists |
+| Copilot CLI | `copilot plugin marketplace add`, `plugin install P@M`; never direct (deprecated). `#ref` breaks on SCP URLs (Windows) | Automatic (Real on macOS, Stub on Linux, install only on Windows) | `copilot plugin update`, argument per build (V-02) | `copilot plugin uninstall NAME`. Never `marketplace remove --force` |
+| Copilot app; VS Code | The apps have Marketplace and Customize steps (VS Code editor is Preview; Blocked), which are not a CK route. With a CLI present, the CLI route reached the app after restart (macOS) and VS Code's listing. Do not write both stores | Not known yet (V-05); no route for an app-only user | Not known yet (V-05) | Not known yet (V-05) |
+| Codex CLI | `codex plugin marketplace add <ssh-url>`, `plugin add P@M --json`. `owner/repo` is always HTTPS; a short-SHA ref breaks upgrade; do not force System32 `ssh.exe` | Automatic (SSH on three OSes) | `marketplace upgrade M` refreshes the marketplace; effect on an installed plugin unproven (V-02) | `codex plugin remove P@M --json` |
+| ChatGPT desktop only | Plugins directory steps exist in the app, with hook review inside Codex; not a CK route | Not known yet (V-05) | Not known yet | Not known yet |
+| Pi | `pi install git:…` or `ssh://…`; a bare `git@host:path` fails as a missing local path, so normalize. **Pi packages only: a Claude marketplace repository exits 0 and loads nothing,** so compare resources after install rather than trusting the exit code | Automatic for Pi packages (deploy key, three OSes). Claude format: Not available here | `pi update --extensions`, not exercised; may not be limited to one package | `pi remove <source>`, three OSes |
+| OpenCode | Section 8 | Automatic for native modules (local `git+file` only; valid plugin over private SSH not tested). Claude format: Not available here | Section 8 | Section 8 |
+
+## Appendix D. Claude-format plugin outcome per target
+
+Fixture: one private marketplace, one stdio server using `${CLAUDE_PLUGIN_ROOT}`, tested versions. Cowork cells were never exercised. **OpenCode:** install fails on both lines, `missing package.json`; skills are read separately from `~/.claude/skills`. **Pi:** a marketplace repository install exits 0 and loads nothing; the cells below are for the plugin folder installed directly [VP].
+
+| Component | Claude Code | Cowork (Documented) | Codex 0.166.0 | Copilot CLI 1.0.105 | VS Code; Copilot app | Pi 1.5.0 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Skills | Works: Real macOS Code tab; Stub elsewhere | Loads | Works, as `plugin:skill` (Real macOS) | Works: Real macOS, Stub Linux, Listing Windows | Listing; app untested | Loads (Stub) |
+| Commands | Works | Loads | Converted to a skill at install | Works, as a skill; `/name` in `-p` stayed literal on Linux | Listing as prompt; app untested | Ignored |
+| Agents | Works: Real macOS Code tab | Loads | **Ignored:** copied to cache, not surfaced | Works, as `plugin:agent`; Windows untested | Listing; app count only | Ignored |
+| Hooks | `SessionStart` works, three OSes; a failure is not an install error | Loads | `SessionStart` after trust review, on first turn; others untested | `SessionStart`: macOS, Linux; Windows untested | Listing, `chat.useClaudeHooks` defaults false; app untested | Not established |
+| Stdio MCP with root variable | Works: Real macOS Code tab | Loads on a local session | **Fails on three OSes: not expanded,** yet `mcp list` says enabled. Works only if the plugin ships `cwd: "."` with relative paths | Works: Real macOS, mock Linux | VS Code started, not called (Windows); app started at launch (macOS) | Ignored; add to `mcp.json` separately |
+| Remote MCP, `${user_config.*}`, `.lsp.json`, styles, themes, settings | Documented | Remote: connect it. Others ignored | None or untested | None or untested | None or untested | None |
+| Top-level `bin/` | Documented | **Refuses the plugin** | Untested | None | None | None |
+
+## Appendix E. Next step after a write
+
+**(R)** reported test, usually no real model; otherwise documented. Default and **Unknown**: "start a new session".
+
+| Surface | Skills | MCP | Agents | Instructions | Plugins |
+| --- | --- | --- | --- | --- | --- |
+| Claude CLI, Code tab | Existing dir: next turn (R). New dir: `/reload-skills` (R Linux) | New session for `.mcp.json` (R); `~/.claude.json` Unknown | Existing dir: next turn (R). New dir: new session (R Linux) | New session (R) | `/reload-plugins`, typed by the user; app reloads live sessions on registry change (R macOS log only); hooks need a new session |
+| Cowork, Chat | Account | Chat: full restart. Cowork: account | Account | New session, unverified | Account |
+| Codex, ChatGPT desktop | Detected; `skills.config`: restart | Desktop: restart | New session | New session | New chat; local marketplace: restart desktop |
+| Copilot CLI | `/skills reload`; each new `-p` sees edits (R) | `/mcp reload` | Restart | New session | Future sessions |
+| Copilot app | Unknown | Restart (R macOS) | Restart (R macOS) | Unknown | Restart (R macOS) |
+| VS Code | Listing live, about 15 s (R macOS, signed out); use in chat Unknown | Same | Same | Same | Same |
+| Pi | `/reload` (R macOS) | `/reload`, MCP pickup untested | n/a | `/reload` | `/reload`, package pickup untested |
+| OpenCode | 1.x: restart owning server (R Linux). 2.x: `opencode reload`; watched dirs about 2 s (R Linux). Desktop: Unknown | Same | Same | Same | Same; 2.x `opencode service restart` for dependencies |

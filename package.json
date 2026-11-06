@@ -1,0 +1,24 @@
+{
+  "name": "central-knot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only first look at user-wide Claude Code skills",
+  "type": "module",
+  "main": "dist/main.cjs",
+  "engines": { "node": ">=24.9.0" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "test": "tsc --noEmit && node --test tests/*.test.ts",
+    "package:mac": "npm run build && node scripts/package-mac.mjs",
+    "smoke:mac": "npm run build && electron . --smoke-test"
+  },
+  "dependencies": { "yaml": "2.9.1" },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "@types/node": "26.6.6",
+    "electron": "45.2.3",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

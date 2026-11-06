@@ -1,0 +1,25 @@
+name: First-look Mac package
+on:
+  push:
+    branches: [next]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mac:
+    runs-on: [self-hosted, macOS, ARM64, ck-mac]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:mac
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: Central-Knot-0.1.0-mac-arm64
+          path: release/Central-Knot-0.1.0-mac-arm64.zip
+          if-no-files-found: error

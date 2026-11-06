@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
+  <title>Central Knot · First look</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header><div class="brand">◈ <strong>Central Knot</strong><span class="phase">FIRST LOOK</span></div><span class="readonly">Read only · nothing changes</span></header>
+  <main>
+    <section class="intro"><p class="eyebrow">YOUR CONFIGURATION, IN VIEW</p><h1>See what’s already there.</h1><p>This first package reads standalone Claude Code CLI skills. It does not share, install, initialize, or edit configuration.</p></section>
+    <section class="source" aria-label="Development home selector"><div><span class="eyebrow">READ FROM</span><strong id="home-label">Bundled fixture</strong></div><div class="buttons"><button data-home="fixture">Bundled fixture</button><button data-home="custom">Another folder…</button><button data-home="actual">This Mac’s home</button></div></section>
+    <p class="scope">A selected folder is a simulated home: only its user-wide <code>.claude/skills</code> is read. Project folders are not managed. System version probes run only after you choose “This Mac’s home”.</p>
+    <section class="harness"><div><h2>Claude Code <span class="muted">CLI</span></h2><p><span id="detection">Reading…</span><span class="separator">·</span><span id="version"></span></p></div><button id="refresh">Read again</button></section>
+    <div class="workspace"><section class="list-panel"><div class="panel-heading"><h3>Standalone skills</h3><span id="count"></span></div><div id="skills" aria-label="Discovered skills"></div></section><section class="detail" aria-label="Item detail"><p class="eyebrow">ITEM DETAIL</p><h2 id="detail-name">Choose a skill</h2><p id="detail-status" class="badge"></p><p id="detail-notes" class="notes"></p><details><summary>File location</summary><p id="detail-path" class="path"></p></details><pre id="detail-content" tabindex="0" aria-label="Original skill contents"></pre></section></div>
+    <p id="issues" class="issues" role="status"></p><p id="announcement" class="announcement" aria-live="polite"></p>
+    <footer>On disk is not proof of loading. Other harnesses, plugins, sharing, and history are not built in 1a.</footer>
+  </main>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>
