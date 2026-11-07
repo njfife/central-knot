@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { chmod, constants, copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import type { ActionResult, DestinationResult, Disclosure, HarnessId, HomeMode, PlanCopy, PlanItem, PlanTarget, Preview, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
+const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 
 /** A build's identity, and where this build remembers which record it owns. */
 export interface ShareContext {
@@ -39,6 +41,12 @@ const errorCode = (error: unknown) => (typeof error === 'object' && error !== nu
 
 export interface Tree { hash: string; files: Map<string, { sha256: string; mode: number }>; directories: string[]; held?: string }
 
+async function hashFile(path: string): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
 /** Whole-directory identity. Only the executable bit counts, so umask differences are no collision. */
 export async function readTree(directory: string, options: { includeGit?: boolean } = {}): Promise<Tree> {
   const files: Tree['files'] = new Map();
@@ -51,7 +59,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
       const relativePath = relative(directory, path).split(sep).join('/');
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
       else if (entry.isDirectory()) { directories.push(relativePath); await visit(path); }
-      else if (entry.isFile()) files.set(relativePath, { sha256: createHash('sha256').update(await readFile(path)).digest('hex'), mode: (await stat(path)).mode & 0o777 });
+      else if (entry.isFile()) files.set(relativePath, { sha256: await hashFile(path), mode: (await stat(path)).mode & 0o777 });
       else { held ??= `It contains a special file (${relativePath}).`; files.set(relativePath, { sha256: 'special', mode: 0 }); }
     }
   }
@@ -67,8 +75,7 @@ async function copyTree(source: string, target: string, tree: Tree) {
   await mkdir(target);
   for (const name of [...tree.directories].sort()) await mkdir(join(target, name));
   for (const [name, file] of tree.files) {
-    const bytes = await readFile(join(source, name));
-    await writeFile(join(target, name), bytes, { mode: file.mode });
+    await copyFile(join(source, name), join(target, name), constants.COPYFILE_EXCL);
     await chmod(join(target, name), file.mode);
   }
   for (const name of [...tree.directories].sort().reverse()) await chmod(join(target, name), (await stat(join(source, name))).mode & 0o777);
@@ -103,6 +110,8 @@ async function describeDifference(first: PlanCopy, second: PlanCopy): Promise<st
     if (!a) sections.push(`\n${name}: only in ${harnesses[second.harness].name}`);
     else if (!b) sections.push(`\n${name}: only in ${harnesses[first.harness].name}`);
     else if (a.sha256 !== b.sha256) {
+      const [sizeA, sizeB] = await Promise.all([stat(join(first.directory, name)), stat(join(second.directory, name))]).then(sizes => sizes.map(info => info.size));
+      if (Math.max(sizeA, sizeB) > MAX_DIFF_BYTES) { sections.push(`\n${name}:\n  (too large to compare line by line)`); continue; }
       const [bytesA, bytesB] = await Promise.all([readFile(join(first.directory, name)), readFile(join(second.directory, name))]);
       sections.push(`\n${name}:\n${isText(bytesA) && isText(bytesB) ? lineDiff(bytesA.toString('utf8'), bytesB.toString('utf8')) : '  (binary files differ)'}`);
     } else if ((a.mode & 0o111) !== (b.mode & 0o111)) sections.push(`\n${name}: executable permission differs`);
@@ -230,13 +239,18 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
   const name = group[0].skill.folder;
   const copies: PlanCopy[] = [];
   const trees: Tree[] = [];
-  for (const { harness, skill } of group) {
-    const tree = await readTree(skill.directory);
-    trees.push(tree);
-    copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: tree.hash });
-  }
   const shared = recorded?.state === 'shared';
   const base = { key, name, copies, targets: [] as PlanTarget[], locked: false, undoable: shared };
+  for (const { harness, skill } of group) {
+    try {
+      const tree = await readTree(skill.directory);
+      trees.push(tree);
+      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: tree.hash });
+    } catch (error) {
+      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: '' });
+      return { ...base, state: 'held', status: 'Not known yet', reason: `${harnesses[harness].name}'s copy could not be read completely${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing is copied.` };
+    }
+  }
   if (recorded?.state === 'dont-share') return { ...base, locked: true, undoable: false, state: 'dont-share', status: 'Don’t share', reason: 'Stays as it is and is not copied again. Sharing it again arrives in a later version.' };
   if (excluded) return { ...base, state: 'dont-share', status: 'Don’t share', reason: 'Excluded. Every copy stays as it is.' };
   const held = trees.find(tree => tree.held)?.held;

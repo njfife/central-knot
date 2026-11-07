@@ -578,6 +578,36 @@ test('Undo never parks a copy inside a folder a tool loads', async () => {
   } finally { await box.cleanup(); }
 });
 
+test('A skill with an unreadable file is held, and the others still copy', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'good');
+    const locked = await skill(box.home, CLAUDE, 'locked');
+    await writeFile(join(locked, 'ref.md'), 'private');
+    await chmod(join(locked, 'ref.md'), 0o000);
+    const result = await start(ctx(box), both, []);
+    await chmod(join(locked, 'ref.md'), 0o644);
+    assert.equal(result.harnessWrites, 1);
+    assert.equal(state(result.preview, 'locked'), 'held');
+    assert.match(result.preview.items.find(item => item.key === 'locked')!.reason, /could not be read/);
+    assert.equal(await exists(join(box.home, COPILOT, 'good/SKILL.md')), true);
+    assert.equal(await exists(join(box.home, COPILOT, 'locked')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A very large differing file does not stop the plan', async () => {
+  const box = await sandbox();
+  try {
+    const first = await skill(box.home, CLAUDE, 'large');
+    const second = await skill(box.home, COPILOT, 'large');
+    await writeFile(join(first, 'data.txt'), 'a'.repeat(3 * 1024 * 1024));
+    await writeFile(join(second, 'data.txt'), 'b'.repeat(3 * 1024 * 1024));
+    const preview = await buildPreview(ctx(box), both, []);
+    assert.equal(state(preview, 'large'), 'collision');
+    assert.match(preview.items[0].diff!, /too large to compare/);
+  } finally { await box.cleanup(); }
+});
+
 test('Practice fixture: the bundled home produces every kind of plan row', async () => {
   const fixture = join(import.meta.dirname, '../fixtures/home');
   const context: ShareContext = { home: fixture, mode: 'fixture', read: reader(fixture, 'fixture'), build: 'test-build', settingsPath: join(tmpdir(), 'ck-unused-settings.json'), realHome: join(tmpdir(), 'ck-unused-home') };

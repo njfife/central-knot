@@ -15,7 +15,7 @@ const crashRounds = Number(option('--crash-rounds', 6));
 const canWriteRealHome = process.platform === 'darwin';
 const root = resolve(import.meta.dirname, '..');
 const packaged = join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
-const command = flag('--electron') ? join(root, 'node_modules/.bin/electron') : packaged;
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : packaged;
 
 // ---------- Checks ----------
 const failures = [];
