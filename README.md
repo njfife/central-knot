@@ -17,6 +17,8 @@ Mac packaging runs on the selected Apple Silicon Mac and produces `release/Centr
 
 `npm run smoke:mac` opens a hidden, fixture-only window with disposable app data and checks the rendered rows and sharing plan. It never selects an actual home.
 
+`npm run e2e` drives the packaged app end to end in a throwaway HOME, including force-kills during copies. Run it after `npm run package:mac`.
+
 ## Homes
 
 - **Practice copy** (opens first): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Start and Undo really write here.
