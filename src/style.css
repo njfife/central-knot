@@ -124,7 +124,6 @@ ul { list-style: none; }
 .homes-title { padding: 0 8px 6px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 .home-row { height: 28px; font-weight: 500; }
 .home-row:disabled { opacity: 0.5; }
-.read-again { margin-top: 6px; }
 
 .rail #sidebar { width: 56px; }
 .rail .brand { padding: 0; justify-content: center; }

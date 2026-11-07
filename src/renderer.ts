@@ -58,7 +58,6 @@ function renderSidebar() {
     homeRow('fixture', 'Practice copy', 'flask-conical'),
     homeRow('custom', 'Another folder…', 'folder-open'),
     homeRow('actual', 'This Mac’s home', 'laptop'),
-    h('button.home-row.read-again', { type: 'button', id: 'refresh', 'aria-label': 'Read again', title: 'Read again', disabled: !!state.busy || !state.home, onclick: () => void readAgain() }, icon('refresh-cw', 14), h('span.nav-label', {}, 'Read again')),
   );
 }
 
