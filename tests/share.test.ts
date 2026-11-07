@@ -350,7 +350,8 @@ test('Undo: removes only unchanged copies it created; everything else stays, and
     assert.equal(await exists(join(box.home, COPILOT, 'edited-later/SKILL.md')), true, 'a changed copy stays');
     assert.ok(undone.results.some(result => result.item === 'edited-later' && result.outcome === 'stayed' && /Changed/.test(result.message)));
     assert.equal(await exists(join(twin, 'SKILL.md')), true, 'a taken-over copy stays');
-    assert.deepEqual(undone.results.filter(result => result.item === 'twin').map(result => result.outcome), ['stayed']);
+    assert.deepEqual(undone.results.filter(result => result.item === 'twin'), [], 'a whole-Start Undo leaves a skill it did not copy alone');
+    assert.equal(undone.preview.items.find(item => item.key === 'twin')!.status, 'Written');
     assert.equal(await exists(join(storeDirectory(box.home), 'items/copied')), true, 'imported bytes stay');
     const preview = undone.preview;
     assert.equal(state(preview, 'copied'), 'dont-share');
@@ -376,6 +377,39 @@ test('Undo: a copy someone added .git or a link to stays', { skip: noPosix }, as
     assert.equal(undone.harnessWrites, 0);
     assert.equal(await readFile(join(box.home, COPILOT, 'adopted/.git/HEAD'), 'utf8'), 'mine');
     assert.equal(await exists(join(box.home, COPILOT, 'linked-up/alias')), true);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo per item on a skill it did not copy keeps every copy and says so', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'twin');
+    const twin = await skill(box.home, COPILOT, 'twin');
+    await start(ctx(box), both, []);
+    const undone = await undo(ctx(box), both, 'twin');
+    assert.equal(undone.harnessWrites, 0);
+    assert.equal(await exists(join(twin, 'SKILL.md')), true);
+    assert.deepEqual(undone.results.map(result => result.outcome), ['stayed']);
+  } finally { await box.cleanup(); }
+});
+
+test('A Start interrupted by a crash and retried is one Start for Undo', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'first');
+    await skill(box.home, CLAUDE, 'second');
+    let crashes = 0;
+    const fault = (step: string) => { if (step === 'after-rename' && crashes++ === 0) throw new Error('fault: crash after rename'); };
+    await assert.rejects(start(ctx(box, { fault }), both, []), /fault:/);
+    const retry = await start(ctx(box), both, []);
+    assert.equal(retry.harnessWrites, 1);
+    assert.equal(retry.preview.canUndo, true);
+    const undone = await undo(ctx(box), both);
+    assert.equal(undone.harnessWrites, 2, 'both copies go, though two runs made them');
+    const repeat = await start(ctx(box), both, []);
+    assert.equal(repeat.harnessWrites, 0);
+    const record = JSON.parse(await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8'));
+    assert.equal(record.activeStartId, undefined, 'finished Starts leave no marker');
   } finally { await box.cleanup(); }
 });
 

@@ -193,6 +193,7 @@ async function practiceFlow() {
   same('Undo removes only its copies', [existsSync(join(practice, '.copilot/skills/release-notes')), existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.copilot/skills/standup'))], [false, false, true, true]);
   await a.expand();
   same('undone skills stay Don’t share', (await a.plan()).standup, 'dont-share');
+  same('a skill Undo did not copy stays shared', (await a.plan()).notes, 'identical');
   await a.click('#start');
   same('Start after Undo does not recopy', existsSync(join(practice, '.copilot/skills/release-notes')), false);
   same('no page errors, practice', a.pageErrors, []);

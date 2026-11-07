@@ -26,7 +26,7 @@ export interface ShareContext {
 
 interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; status: 'pending' | 'written' }
 interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[] }
-interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; items: Record<string, RecordItem> }
+interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
@@ -129,6 +129,8 @@ function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTa
 
 // ---------- State ----------
 
+const startCopied = (item: RecordItem, startId?: string) => item.startId === startId && item.state === 'shared' && item.copies.some(copy => copy.created);
+
 async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
@@ -220,7 +222,7 @@ export async function buildPreview(context: ShareContext, selected: HarnessId[],
     items.push(await planItem(context, key, group, selected, excluded.has(key), record?.items[key], snapshots));
   }
   const disclosures: Disclosure[] = selected.map(id => ({ harness: id, name: harnesses[id].name, writesTo: writeRoot(harnesses[id], context.home, context.overrides?.[id]), alsoReadBy: harnesses[id].otherReaders }));
-  const canUndo = !!record?.lastStartId && Object.values(record.items).some(item => item.startId === record.lastStartId && item.state === 'shared');
+  const canUndo = !!record?.lastStartId && Object.values(record.items).some(item => startCopied(item, record.lastStartId));
   return { selected, items, disclosures, access: await writeAccess(context), gate: await syncGate(context), canUndo };
 }
 
@@ -344,7 +346,7 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
   if (gate.state !== 'ready') await remember(context, record.generation);
   await clearStaleStages(preview.disclosures.map(disclosure => disclosure.writesTo));
 
-  const startId = randomUUID();
+  const startId = record.activeStartId ?? randomUUID();
   let changed = false, writes = 0;
   for (const item of preview.items) {
     const existing = record.items[item.key];
@@ -360,7 +362,7 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
       const tree = await readTree(sourceCopy.directory);
       await importRevision(context, item.key, sourceCopy.directory, tree);
       const entry: RecordItem = existing ?? { name: item.name, hash: tree.hash, state: 'shared', startId, observedAt: new Date().toISOString(), copies: [] };
-      if (!existing) { changed = true; record.lastStartId = startId; }
+      if (!existing) changed = true;
       for (const copy of item.copies) {
         if (!entry.copies.some(known => known.directory === copy.directory)) {
           entry.copies.push({ harness: copy.harness, directory: copy.directory, hash: copy.hash, created: false, status: 'written' });
@@ -375,6 +377,7 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
         entry.copies = [...entry.copies.filter(known => known.directory !== target.directory), intent];
         entry.startId = startId;
         record.lastStartId = startId;
+        record.activeStartId = startId;
         await saveRecord(context.home, record);
         await placeCopy(context, sourceCopy.directory, target, tree);
         writes++;
@@ -393,13 +396,14 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
       results.push({ item: item.name, outcome: 'failed', message: error instanceof Error ? error.message : 'The copy failed; the last good state stays.' });
     }
   }
+  if (record.activeStartId) { delete record.activeStartId; changed = true; }
   if (changed) await saveRecord(context.home, record);
   return action(context, selected, dontShare, results, writes);
 }
 
 // ---------- Undo ----------
 
-/** Removes only copies a Start created that still match their recorded hash. The item becomes Don't share. */
+/** Removes only copies a Start created that still match their recorded hash. Those items become Don't share; a whole-Start Undo leaves skills it did not copy alone. */
 export async function undo(context: ShareContext, selected: HarnessId[], only?: string): Promise<ActionResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return action(context, selected, [], [], 0, access.reason);
@@ -408,7 +412,7 @@ export async function undo(context: ShareContext, selected: HarnessId[], only?: 
   const record = (await readRecord(context.home)).record!;
   const results: DestinationResult[] = [];
   let removed = 0;
-  const keys = only ? [itemKey(only)] : Object.keys(record.items).filter(key => record.items[key].startId === record.lastStartId && record.items[key].state === 'shared');
+  const keys = only ? [itemKey(only)] : Object.keys(record.items).filter(key => startCopied(record.items[key], record.lastStartId));
   for (const key of keys) {
     const item = record.items[key];
     if (!item) continue;
