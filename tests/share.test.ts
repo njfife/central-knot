@@ -462,7 +462,7 @@ test('Write guard: the real home stays read-only however it is reached', { skip:
       const before = await tree(box.realHome);
       const context: ShareContext = { home, mode, read: reader(home, mode), build: 'test-build', settingsPath: box.settingsPath, realHome: box.realHome };
       const result = await start(context, both, []);
-      assert.match(result.stopped ?? '', /never copies/);
+      assert.match(result.stopped ?? '', /Preview only/);
       assert.equal(result.preview.access.allowed, false);
       assert.deepEqual(await tree(box.realHome), before);
     };
@@ -476,6 +476,41 @@ test('Write guard: the real home stays read-only however it is reached', { skip:
     await mkdir(join(box.realHome, '.copilot/skills'), { recursive: true });
     await symlink(join(box.realHome, '.copilot/skills'), join(roots, '.copilot/skills'));
     await direct(roots, 'custom');
+  } finally { await box.cleanup(); }
+});
+
+test('Real home: written only when chosen and allowed; a relative override and an absent tool get nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.realHome, CLAUDE, 'real-skill');
+    const context: ShareContext = { home: box.realHome, mode: 'actual', read: reader(box.realHome, 'actual'), build: 'test-build', settingsPath: box.settingsPath, realHome: box.realHome, allowActualWrites: true };
+    const before = await tree(box.realHome);
+    const relative = await start({ ...context, overrides: { 'copilot-cli': 'relative-root' } }, both, []);
+    assert.match(relative.stopped ?? '', /COPILOT_HOME is not an absolute path/);
+    assert.deepEqual(await tree(box.realHome), before);
+    const absent = await start(context, both, []);
+    assert.equal(absent.harnessWrites, 0, 'Copilot is not detected in this home');
+    assert.match(absent.results[0].message + absent.preview.items[0].reason, /not found on this machine/);
+    assert.equal(await exists(join(box.realHome, COPILOT)), false);
+    await mkdir(join(box.realHome, '.copilot'));
+    const written = await start(context, both, []);
+    assert.equal(written.harnessWrites, 1);
+    assert.equal(await exists(join(box.realHome, COPILOT, 'real-skill/SKILL.md')), true);
+    assert.equal((await undo(context, both)).harnessWrites, 1);
+    assert.equal(await exists(join(box.realHome, COPILOT, 'real-skill')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('First writes: an unreadable destination root gets nothing', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await mkdir(join(box.home, COPILOT), { recursive: true });
+    await chmod(join(box.home, COPILOT), 0o000);
+    const result = await start(ctx(box), both, []);
+    await chmod(join(box.home, COPILOT), 0o755);
+    assert.equal(result.harnessWrites, 0);
+    assert.match(result.preview.items[0].reason, /could not be read/);
   } finally { await box.cleanup(); }
 });
 

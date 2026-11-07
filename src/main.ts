@@ -48,6 +48,7 @@ function context(): ShareContext {
   return {
     home: current!.home, mode: current!.mode, read, build: BUILD,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
+    allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
   };
 }

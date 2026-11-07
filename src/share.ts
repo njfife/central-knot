@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import type { ActionResult, DestinationResult, Disclosure, HarnessId, HomeMode, PlanCopy, PlanItem, PlanTarget, Preview, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
@@ -15,8 +15,10 @@ export interface ShareContext {
   read: () => Promise<Snapshot[]>;
   build: string;
   settingsPath: string;
-  /** The person's real home, which this package never writes. */
+  /** The person's real home, written only when reached by explicitly choosing it. */
   realHome: string;
+  /** Real-home writes are on only where Nathan accepted them: macOS, and never in a smoke test. */
+  allowActualWrites?: boolean;
   overrides?: Partial<Record<HarnessId, string>>;
   /** Test seam: throws at a named step, standing in for a crash. */
   fault?: (step: 'before-rename' | 'after-rename') => void;
@@ -172,10 +174,17 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   return { state: 'ready' };
 }
 
-/** This package only writes disposable homes; the real home stays read-only whichever way it is reached. */
+/** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
-  const refused = { allowed: false, reason: 'Preview only: this package never copies into your real configuration folders.' };
-  if (context.mode === 'actual') return refused;
+  if (context.mode === 'actual') {
+    if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: copying into real folders is on only on macOS in this version.' };
+    for (const id of Object.keys(harnesses) as HarnessId[]) {
+      const override = context.overrides?.[id];
+      if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };
+    }
+    return { allowed: true, reason: 'Your real folders: Start and Undo write here.' };
+  }
+  const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
   const realHome = (await real(context.realHome)) ?? context.realHome;
   const protectedRoots = (await Promise.all(['.claude', '.copilot', '.agents'].map(name => real(join(realHome, name))))).filter((path): path is string => !!path);
@@ -196,7 +205,8 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
 export async function buildPreview(context: ShareContext, selected: HarnessId[], dontShare: string[]): Promise<Preview> {
   const { record } = await readRecord(context.home);
   const groups = new Map<string, { harness: HarnessId; skill: Skill }[]>();
-  for (const snapshot of await context.read()) {
+  const snapshots = await context.read();
+  for (const snapshot of snapshots) {
     if (!selected.includes(snapshot.harness)) continue;
     for (const skill of snapshot.skills) {
       const key = itemKey(skill.folder);
@@ -206,14 +216,14 @@ export async function buildPreview(context: ShareContext, selected: HarnessId[],
   const excluded = new Set(dontShare.map(itemKey));
   const items: PlanItem[] = [];
   for (const [key, group] of [...groups].sort(([first], [second]) => first.localeCompare(second))) {
-    items.push(await planItem(context, key, group, selected, excluded.has(key), record?.items[key]));
+    items.push(await planItem(context, key, group, selected, excluded.has(key), record?.items[key], snapshots));
   }
   const disclosures: Disclosure[] = selected.map(id => ({ harness: id, name: harnesses[id].name, writesTo: writeRoot(harnesses[id], context.home, context.overrides?.[id]), alsoReadBy: harnesses[id].otherReaders }));
   const canUndo = !!record?.lastStartId && Object.values(record.items).some(item => item.startId === record.lastStartId && item.state === 'shared');
   return { selected, items, disclosures, access: await writeAccess(context), gate: await syncGate(context), canUndo };
 }
 
-async function planItem(context: ShareContext, key: string, group: { harness: HarnessId; skill: Skill }[], selected: HarnessId[], excluded: boolean, recorded: RecordItem | undefined): Promise<PlanItem> {
+async function planItem(context: ShareContext, key: string, group: { harness: HarnessId; skill: Skill }[], selected: HarnessId[], excluded: boolean, recorded: RecordItem | undefined, snapshots: Snapshot[]): Promise<PlanItem> {
   const name = group[0].skill.folder;
   const copies: PlanCopy[] = [];
   const trees: Tree[] = [];
@@ -256,6 +266,9 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
   for (const harness of missing) {
     const definition = harnesses[harness];
     const directory = join(writeRoot(definition, context.home, context.overrides?.[harness]), source.folder);
+    const snapshot = snapshots.find(entry => entry.harness === harness);
+    if (snapshot?.discovery === 'restricted' || snapshot?.discovery === 'failed') { problems.push(`${definition.name}'s folder could not be read, so nothing is copied into it.`); continue; }
+    if (context.mode === 'actual' && snapshot?.detection === 'Not found') { targets.push({ harness, directory, limits: [], skipped: `${definition.name} was not found on this machine.` }); continue; }
     if (definition.reservedSkills.includes(source.folder)) { targets.push({ harness, directory, limits: [], skipped: `${definition.name} reserves the name “${source.folder}”.` }); continue; }
     try {
       await lstat(directory);
