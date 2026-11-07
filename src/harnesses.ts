@@ -12,6 +12,8 @@ export interface HarnessDefinition {
   defaultConfig: string;
   /** Claude Code keeps this skills folder for itself. */
   reservedSkills: string[];
+  /** Observed: Claude Code 2.1.309 lists dot-folders as skills; Copilot CLI 1.0.107 skips them. */
+  loadsDotFolders: boolean;
   /** Other products that read the folder this harness is written through (CD Appendix A). */
   otherReaders: string[];
   nextStep: string;
@@ -22,14 +24,14 @@ export interface HarnessDefinition {
 export const harnesses: Record<HarnessId, HarnessDefinition> = {
   'claude-cli': {
     id: 'claude-cli', name: 'Claude Code', surface: 'CLI', binary: 'claude',
-    configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: '.claude', reservedSkills: ['synced'],
+    configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: '.claude', reservedSkills: ['synced'], loadsDotFolders: true,
     otherReaders: ['Claude desktop Code tab', 'OpenCode', 'VS Code'],
     nextStep: 'Written. In Claude Code, run /reload-skills or start a new session to use it.',
     skillRoots: config => [{ path: join(config, 'skills'), label: 'Claude Code skills' }],
   },
   'copilot-cli': {
     id: 'copilot-cli', name: 'GitHub Copilot', surface: 'CLI', binary: 'copilot',
-    configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [],
+    configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [], loadsDotFolders: false,
     otherReaders: ['GitHub Copilot app (documented, not yet proved)', 'VS Code'],
     nextStep: 'Written. In Copilot CLI, run /skills reload or start a new session to use it.',
     skillRoots: (config, home) => [

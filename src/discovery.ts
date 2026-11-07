@@ -117,7 +117,7 @@ export async function discover(options: {
     }
     rootResults.push('empty');
     for (const entry of entries.sort((first, second) => first.name.localeCompare(second.name))) {
-      if (entry.name.startsWith('.') || definition.reservedSkills.includes(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+      if ((entry.name.startsWith('.') && !definition.loadsDotFolders) || definition.reservedSkills.includes(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
       const directory = join(skillRoot.path, entry.name);
       const skillPath = join(directory, 'SKILL.md');
       try {

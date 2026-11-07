@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readdirSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -270,15 +271,18 @@ test('First writes: an interrupted write leaves no partial skill, and a retry co
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'solo');
-    const fault = (step: string) => { if (step === 'before-rename') throw new Error('fault: crash before rename'); };
+    let insideDuringWrite: string[] = ['not checked'];
+    const check = () => readdirSync(join(box.home, COPILOT));
+    const fault = (step: string) => { if (step === 'before-rename') { insideDuringWrite = check(); throw new Error('fault: crash before rename'); } };
     await assert.rejects(start(ctx(box, { fault }), both, []), /fault:/);
+    assert.deepEqual(insideDuringWrite, [], 'a tool loading this folder never sees a half-written copy');
     assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
-    const leftovers = await readdir(join(box.home, COPILOT));
-    assert.deepEqual(leftovers, [], 'no stage left behind');
-    await mkdir(join(box.home, COPILOT, '.ck-stage-from-a-real-crash'), { recursive: true });
+    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'no stage left behind');
+    await mkdir(join(box.home, '.copilot', '.ck-stage-from-a-real-crash', 'half'), { recursive: true });
     const retry = await start(ctx(box), both, []);
     assert.equal(retry.harnessWrites, 1);
-    assert.deepEqual(await readdir(join(box.home, COPILOT)), ['solo'], 'a stale stage is cleared');
+    assert.deepEqual(await readdir(join(box.home, COPILOT)), ['solo']);
+    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'a stale stage is cleared');
   } finally { await box.cleanup(); }
 });
 
@@ -511,6 +515,32 @@ test('First writes: an unreadable destination root gets nothing', { skip: noPosi
     await chmod(join(box.home, COPILOT), 0o755);
     assert.equal(result.harnessWrites, 0);
     assert.match(result.preview.items[0].reason, /could not be read/);
+  } finally { await box.cleanup(); }
+});
+
+test('Dot-folders: Claude Code loads them and Copilot CLI does not, so that copy is skipped by name', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, '.hidden-skill');
+    await skill(box.home, COPILOT, '.ignored-by-copilot');
+    const [claude, copilot] = await reader(box.home, 'custom')();
+    assert.deepEqual(claude.skills.map(item => item.folder), ['.hidden-skill']);
+    assert.deepEqual(copilot.skills.map(item => item.folder), []);
+    const result = await start(ctx(box), both, []);
+    assert.equal(result.harnessWrites, 0);
+    assert.match(result.preview.items[0].reason, /folder starting with a dot/);
+    assert.equal(await exists(join(box.home, COPILOT, '.hidden-skill')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo never parks a copy inside a folder a tool loads', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await start(ctx(box), both, []);
+    await undo(ctx(box), both);
+    assert.deepEqual(await readdir(join(box.home, COPILOT)), []);
+    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills']);
   } finally { await box.cleanup(); }
 });
 

@@ -120,6 +120,7 @@ const copilotLosses: Record<string, string> = {
 
 function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
   if (harness === 'copilot-cli') {
+    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
     if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
     return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
   }
@@ -296,19 +297,23 @@ async function importRevision(context: ShareContext, key: string, source: string
   await rename(staging, target);
 }
 
+/** Beside the skills folder, on the same volume. A folder inside it would load as a skill: Claude Code lists dot-folders too. */
+async function stagingFolder(root: string): Promise<string> {
+  await mkdir(root, { recursive: true });
+  return dirname(await realpath(root));
+}
+
 async function clearStaleStages(roots: string[]) {
   for (const root of new Set(roots)) {
-    let entries: string[];
-    try { entries = await readdir(root); } catch { continue; }
-    await Promise.all(entries.filter(name => name.startsWith(STAGE_PREFIX)).map(name => rm(join(root, name), { recursive: true, force: true })));
+    let folder: string, entries: string[];
+    try { folder = dirname(await realpath(root)); entries = await readdir(folder); } catch { continue; }
+    await Promise.all(entries.filter(name => name.startsWith(STAGE_PREFIX)).map(name => rm(join(folder, name), { recursive: true, force: true })));
   }
 }
 
-/** Stage beside the target, verify, then rename into place (FIL-01). */
+/** Stage beside the target's folder, verify, then rename into place (FIL-01). */
 async function placeCopy(context: ShareContext, source: string, target: PlanTarget, tree: Tree) {
-  const root = dirname(target.directory);
-  await mkdir(root, { recursive: true });
-  const stage = join(root, `${STAGE_PREFIX}${randomUUID()}`);
+  const stage = join(await stagingFolder(dirname(target.directory)), `${STAGE_PREFIX}${randomUUID()}`);
   try {
     await copyTree(source, stage, tree);
     if ((await readTree(stage)).hash !== tree.hash) throw new Error('The staged copy did not match its source.');
@@ -418,7 +423,7 @@ export async function undo(context: ShareContext, selected: HarnessId[], only?: 
       }
       const current = info.isDirectory() ? await readTree(copy.directory, { includeGit: true }) : undefined;
       if (current?.hash !== copy.hash) { results.push({ item: item.name, harness: copy.harness, outcome: 'stayed', message: 'Changed since the copy, so it stays.' }); continue; }
-      const parked = join(dirname(copy.directory), `${STAGE_PREFIX}${randomUUID()}`);
+      const parked = join(await stagingFolder(dirname(copy.directory)), `${STAGE_PREFIX}${randomUUID()}`);
       await rename(copy.directory, parked);
       await rm(parked, { recursive: true, force: true });
       removed++;
