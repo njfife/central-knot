@@ -28,7 +28,7 @@ export function buildRows(home: HomeView, preview: Preview): Row[] {
     let row = rows.get(key);
     if (!row) {
       const plan = preview.items.find(item => item.key === key);
-      row = { key, name: skill.name, description: skill.description, copies: [], plan, status: statusFor(plan) };
+      row = { key, name: skill.folder, description: skill.description, copies: [], plan, status: statusFor(plan) };
       rows.set(key, row);
     }
     row.description ||= skill.description;
@@ -37,12 +37,15 @@ export function buildRows(home: HomeView, preview: Preview): Row[] {
   return [...rows.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
+/** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */
+export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder)).size;
+
 export const copiesIn = (row: Row, tool: HarnessId) => row.copies.filter(copy => copy.tool === tool);
 
 export function matches(row: Row, find: string): boolean {
   const needle = find.trim().toLowerCase();
   if (!needle) return true;
-  return [row.name, row.key, row.description].some(text => text.toLowerCase().includes(needle));
+  return [row.name, row.key, row.description, ...row.copies.map(copy => copy.skill.name)].some(text => text.toLowerCase().includes(needle));
 }
 
 const looks: Record<string, { glyph: IconName; tone: string }> = {

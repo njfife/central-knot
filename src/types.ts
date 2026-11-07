@@ -21,6 +21,8 @@ export interface Skill {
   rootLabel: string;
   hasFrontmatter: boolean;
   metadataKeys: string[];
+  /** Why Copilot CLI refuses this skill, measured against 1.0.107. */
+  copilotProblem?: string;
   content: string;
   notes: string[];
   status: string;
@@ -42,7 +44,7 @@ export interface Snapshot {
 
 export type PlanState = 'already-shared' | 'identical' | 'copy' | 'collision' | 'held' | 'dont-share';
 
-export interface PlanCopy { harness: HarnessId; directory: string; realDirectory: string; hash: string }
+export interface PlanCopy { harness: HarnessId; directory: string; realDirectory: string; hash: string; rootLabel: string }
 export interface PlanTarget { harness: HarnessId; directory: string; limits: string[]; note?: string; skipped?: string }
 
 export interface PlanItem {
@@ -92,6 +94,6 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   preview(selected: HarnessId[], dontShare: string[]): Promise<Preview>;
-  start(selected: HarnessId[], dontShare: string[], resume: boolean): Promise<ActionResult>;
-  undo(selected: HarnessId[], only?: string): Promise<ActionResult>;
+  start(selected: HarnessId[], dontShare: string[], resume: boolean, home: string): Promise<ActionResult>;
+  undo(selected: HarnessId[], only: string | undefined, home: string): Promise<ActionResult>;
 }

@@ -8,6 +8,8 @@ import type { ActionResult, DestinationResult, Disclosure, HarnessId, HomeMode, 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+/** Finder drops these into any folder it opens; they are no change to a skill. */
+const NOISE = new Set(['.DS_Store']);
 
 /** A build's identity, and where this build remembers which record it owns. */
 export interface ShareContext {
@@ -37,6 +39,17 @@ export function itemKey(folder: string): string { return folder.normalize('NFC')
 
 const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 
+function plainError(error: unknown): string {
+  const code = errorCode(error);
+  if (code === 'EACCES' || code === 'EPERM') return 'Permission was denied.';
+  if (code === 'ENOSPC') return 'The disk is full.';
+  if (code === 'EROFS') return 'That folder is read-only.';
+  if (code === 'ENAMETOOLONG') return 'A file name is too long for this disk.';
+  if (code === 'EXDEV') return 'That folder is on a different disk from its parent.';
+  if (code === 'CK_EXISTS') return 'Something appeared at the destination, so it was left alone.';
+  return 'It could not finish.';
+}
+
 // ---------- Trees ----------
 
 export interface Tree { hash: string; files: Map<string, { sha256: string; mode: number }>; directories: string[]; held?: string }
@@ -54,7 +67,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
   let held: string | undefined;
   async function visit(current: string) {
     for (const entry of await readdir(current, { withFileTypes: true })) {
-      if (entry.name === '.git' && !options.includeGit) continue;
+      if ((entry.name === '.git' && !options.includeGit) || NOISE.has(entry.name)) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
@@ -70,7 +83,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
   return { hash: hash.digest('hex'), files, directories, held };
 }
 
-/** Byte-exact copy with modes, without nested .git (SKL-01). Refuses anything but plain files and folders. */
+/** Byte-exact copy with modes, without nested .git (SKL-01). The top folder keeps its write bit: a read-only folder cannot be moved into place. */
 async function copyTree(source: string, target: string, tree: Tree) {
   await mkdir(target);
   for (const name of [...tree.directories].sort()) await mkdir(join(target, name));
@@ -79,7 +92,18 @@ async function copyTree(source: string, target: string, tree: Tree) {
     await chmod(join(target, name), file.mode);
   }
   for (const name of [...tree.directories].sort().reverse()) await chmod(join(target, name), (await stat(join(source, name))).mode & 0o777);
-  await chmod(target, (await stat(source)).mode & 0o777);
+}
+
+const finishCopy = async (source: string, target: string) => chmod(target, (await stat(source)).mode & 0o777);
+
+/** Removes a folder CK owns, even one with read-only folders inside. */
+async function removeTree(path: string) {
+  const openUp = async (directory: string) => {
+    await chmod(directory, ((await lstat(directory)).mode & 0o777) | 0o700);
+    for (const entry of await readdir(directory, { withFileTypes: true })) if (entry.isDirectory()) await openUp(join(directory, entry.name));
+  };
+  await openUp(path);
+  await rm(path, { recursive: true, force: true });
 }
 
 // ---------- Differences ----------
@@ -104,7 +128,12 @@ const isText = (bytes: Buffer) => !bytes.subarray(0, 8000).includes(0);
 async function describeDifference(first: PlanCopy, second: PlanCopy): Promise<string> {
   const [treeA, treeB] = await Promise.all([readTree(first.directory), readTree(second.directory)]);
   const names = [...new Set([...treeA.files.keys(), ...treeB.files.keys()])].sort();
-  const sections = [`- ${harnesses[first.harness].name}`, `+ ${harnesses[second.harness].name}`];
+  const label = (copy: PlanCopy) => `${harnesses[copy.harness].name}${first.harness === second.harness ? `, ${copy.rootLabel}` : ''}`;
+  const sections = [`- ${label(first)}`, `+ ${label(second)}`];
+  for (const name of [...new Set([...treeA.directories, ...treeB.directories])].sort()) {
+    if (!treeA.directories.includes(name)) sections.push(`\n${name}/: folder only in ${label(second)}`);
+    else if (!treeB.directories.includes(name)) sections.push(`\n${name}/: folder only in ${label(first)}`);
+  }
   for (const name of names) {
     const a = treeA.files.get(name), b = treeB.files.get(name);
     if (!a) sections.push(`\n${name}: only in ${harnesses[second.harness].name}`);
@@ -131,6 +160,7 @@ function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTa
   if (harness === 'copilot-cli') {
     if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
     if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
+    if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
     return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
   }
   return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
@@ -140,6 +170,13 @@ function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTa
 
 const startCopied = (item: RecordItem, startId?: string) => item.startId === startId && item.state === 'shared' && item.copies.some(copy => copy.created);
 
+function validItems(items: unknown): boolean {
+  if (typeof items !== 'object' || items === null || Array.isArray(items)) return false;
+  return Object.values(items).every(item => typeof item === 'object' && item !== null
+    && typeof item.name === 'string' && typeof item.hash === 'string' && (item.state === 'shared' || item.state === 'dont-share')
+    && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy?.directory === 'string' && typeof copy.hash === 'string'));
+}
+
 async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
@@ -148,7 +185,9 @@ async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?
     const record = JSON.parse(text) as SyncRecord;
     if (typeof record?.formatVersion !== 'number') return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
-    if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || typeof record.items !== 'object' || record.items === null) return { problem: 'The sync record is damaged.' };
+    if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || !validItems(record.items)) return { problem: 'The sync record is damaged.' };
+    // No prototype: a skill may be called constructor or __proto__.
+    record.items = Object.assign(Object.create(null), record.items);
     return { record };
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
@@ -240,14 +279,16 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
   const copies: PlanCopy[] = [];
   const trees: Tree[] = [];
   const shared = recorded?.state === 'shared';
-  const base = { key, name, copies, targets: [] as PlanTarget[], locked: false, undoable: shared };
+  // Written means it reached a second tool. An import from one selected tool shared nothing.
+  const spansTools = new Set(recorded?.copies.map(copy => copy.harness)).size > 1;
+  const base = { key, name, copies, targets: [] as PlanTarget[], locked: false, undoable: shared && spansTools };
   for (const { harness, skill } of group) {
     try {
       const tree = await readTree(skill.directory);
       trees.push(tree);
-      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: tree.hash });
+      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: tree.hash, rootLabel: skill.rootLabel });
     } catch (error) {
-      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: '' });
+      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: '', rootLabel: skill.rootLabel });
       return { ...base, state: 'held', status: 'Not known yet', reason: `${harnesses[harness].name}'s copy could not be read completely${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing is copied.` };
     }
   }
@@ -260,15 +301,18 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
     // Two-way changes arrive with 8b. Until then a change or loss after sharing is held, never guessed at.
     const lost = recorded.copies.filter(copy => copy.status === 'written' && selected.includes(copy.harness) && !copies.some(found => found.directory === copy.directory));
     if (lost.length) return { ...base, state: 'held', status: 'Not known yet', reason: `A shared copy in ${harnesses[lost[0].harness].name} is gone. Nothing is recreated or deleted.` };
-    if (hashes.length > 1 || hashes[0] !== recorded.hash) return { ...base, state: 'held', status: 'Not known yet', reason: 'Changed since it was shared. Nothing is overwritten; carrying edits across arrives in a later version.' };
+    // A copy never recorded, such as one in a newly selected tool, is an unrelated skill, not an edit.
+    const known = copies.filter(copy => recorded.copies.some(entry => entry.directory === copy.directory));
+    if (known.some(copy => copy.hash !== recorded.hash)) return { ...base, state: 'held', status: 'Not known yet', reason: 'Changed since it was shared. Nothing is overwritten; carrying edits across arrives in a later version.' };
   }
   if (hashes.length > 1) {
     const other = copies.find(copy => copy.hash !== copies[0].hash)!;
-    return { ...base, state: 'collision', status: 'Needs a decision', reason: 'Different skills share this name. Each copy stays separate and unchanged, and neither spreads. Choosing one arrives in a later version.', diff: await describeDifference(copies[0], other) };
+    return { ...base, undoable: false, state: 'collision', status: 'Needs a decision', reason: 'Different skills share this name. Each copy stays separate and unchanged, and neither spreads. Choosing one arrives in a later version.', diff: await describeDifference(copies[0], other) };
   }
   const missing = selected.filter(id => !copies.some(copy => copy.harness === id));
   if (!missing.length) {
     const sameFolder = new Set(copies.map(copy => copy.realDirectory)).size === 1;
+    if (shared && !spansTools) return { ...base, state: 'already-shared', status: 'Not shared', reason: 'Imported from the selected tool. Tick another tool to share it.' };
     if (shared) {
       const losses = copies.some(copy => copy.harness === 'copilot-cli') ? group[0].skill.metadataKeys.map(key => copilotLosses[key]) : [];
       return { ...base, state: sameFolder ? 'already-shared' : 'identical', status: losses.length ? 'With limits' : 'Written', reason: ['Shared. Every copy matches what was recorded.', ...losses].join(' ') };
@@ -303,14 +347,22 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
 
 // ---------- Start ----------
 
+/** Readable when the name allows it; a name too long or too odd for every disk gets a short safe form. */
+function storeFolder(key: string): string {
+  if (/^[a-z0-9._-]{1,100}$/.test(key) && !/^\.+$/.test(key)) return key;
+  const readable = key.replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+/, '').slice(0, 40);
+  return `${readable || 'skill'}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
+}
+
 async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
-  const target = join(storeDirectory(context.home), 'items', encodeURIComponent(key), tree.hash);
-  try { if ((await readTree(target)).hash === tree.hash) return; await rm(target, { recursive: true }); }
+  const target = join(storeDirectory(context.home), 'items', storeFolder(key), tree.hash);
+  try { if ((await readTree(target)).hash === tree.hash) return; await removeTree(target); }
   catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
   await mkdir(dirname(target), { recursive: true });
   const staging = `${target}.${randomUUID()}.tmp`;
   await copyTree(source, staging, tree);
   await rename(staging, target);
+  await finishCopy(source, target);
 }
 
 /** Beside the skills folder, on the same volume. A folder inside it would load as a skill: Claude Code lists dot-folders too. */
@@ -319,11 +371,15 @@ async function stagingFolder(root: string): Promise<string> {
   return dirname(await realpath(root));
 }
 
+/** Best effort: a leftover that cannot be cleared holds up nothing. */
 async function clearStaleStages(roots: string[]) {
   for (const root of new Set(roots)) {
     let folder: string, entries: string[];
-    try { folder = dirname(await realpath(root)); entries = await readdir(folder); } catch { continue; }
-    await Promise.all(entries.filter(name => name.startsWith(STAGE_PREFIX)).map(name => rm(join(folder, name), { recursive: true, force: true })));
+    try {
+      folder = await realpath(root).then(dirname, () => realpath(dirname(root)));
+      entries = await readdir(folder);
+    } catch { continue; }
+    await Promise.all(entries.filter(name => name.startsWith(STAGE_PREFIX)).map(name => removeTree(join(folder, name)).catch(() => undefined)));
   }
 }
 
@@ -337,7 +393,8 @@ async function placeCopy(context: ShareContext, source: string, target: PlanTarg
     try { await lstat(target.directory); throw Object.assign(new Error('Something appeared at the destination.'), { code: 'CK_EXISTS' }); }
     catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
     await rename(stage, target.directory);
-  } catch (error) { await rm(stage, { recursive: true, force: true }); throw error; }
+    await finishCopy(source, target.directory);
+  } catch (error) { await removeTree(stage).catch(() => undefined); throw error; }
 }
 
 async function action(context: ShareContext, selected: HarnessId[], dontShare: string[], results: DestinationResult[], harnessWrites: number, stopped?: string): Promise<ActionResult> {
@@ -346,6 +403,14 @@ async function action(context: ShareContext, selected: HarnessId[], dontShare: s
 
 /** First copy: imports selected skills and copies non-colliding ones. Replans from disk; never trusts an earlier preview. */
 export async function start(context: ShareContext, selected: HarnessId[], dontShare: string[], resume = false): Promise<ActionResult> {
+  try { return await runStart(context, selected, dontShare, resume); }
+  catch (error) {
+    if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+    return action(context, selected, dontShare, [], 0, `Start could not finish. ${plainError(error)} Read again to see where things stand.`);
+  }
+}
+
+async function runStart(context: ShareContext, selected: HarnessId[], dontShare: string[], resume: boolean): Promise<ActionResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return action(context, selected, dontShare, [], 0, access.reason);
   const gate = await syncGate(context);
@@ -353,10 +418,11 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
   if (gate.state === 'needs-resume' && !resume) return action(context, selected, dontShare, [], 0, gate.reason);
 
   const preview = await buildPreview(context, selected, dontShare);
+  if (!preview.items.length) return action(context, selected, dontShare, [], 0);
   const results: DestinationResult[] = [];
   let record = (await readRecord(context.home)).record;
   // Order matters: a crash between these leaves an intact record that this build can resume.
-  if (!record) { record = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: {} }; await saveRecord(context.home, record); }
+  if (!record) { record = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, record); }
   if (gate.state !== 'ready') await remember(context, record.generation);
   await clearStaleStages(preview.disclosures.map(disclosure => disclosure.writesTo));
 
@@ -393,7 +459,13 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
         record.lastStartId = startId;
         record.activeStartId = startId;
         await saveRecord(context.home, record);
-        await placeCopy(context, sourceCopy.directory, target, tree);
+        try { await placeCopy(context, sourceCopy.directory, target, tree); }
+        catch (error) {
+          // It was never ours, so Undo must not treat whatever is there as a copy this Start made.
+          entry.copies = entry.copies.filter(known => known !== intent);
+          changed = true;
+          throw error;
+        }
         writes++;
         context.fault?.('after-rename');
         intent.status = 'written';
@@ -407,7 +479,7 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-      results.push({ item: item.name, outcome: 'failed', message: error instanceof Error ? error.message : 'The copy failed; the last good state stays.' });
+      results.push({ item: item.name, outcome: 'failed', message: plainError(error) });
     }
   }
   if (record.activeStartId) { delete record.activeStartId; changed = true; }
@@ -419,6 +491,33 @@ export async function start(context: ShareContext, selected: HarnessId[], dontSh
 
 /** Removes only copies a Start created that still match their recorded hash. Those items become Don't share; a whole-Start Undo leaves skills it did not copy alone. */
 export async function undo(context: ShareContext, selected: HarnessId[], only?: string): Promise<ActionResult> {
+  try { return await runUndo(context, selected, only); }
+  catch (error) { return action(context, selected, [], [], 0, `Undo could not finish. ${plainError(error)} Read again to see where things stand.`); }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try { await lstat(path); return true; } catch { return false; }
+}
+
+async function undoCopy(item: RecordItem, copy: RecordCopy): Promise<DestinationResult> {
+  const result = (outcome: DestinationResult['outcome'], message: string): DestinationResult => ({ item: item.name, harness: copy.harness, outcome, message });
+  let info;
+  try { info = await lstat(copy.directory); }
+  catch (error) { return errorCode(error) === 'ENOENT' ? result('stayed', 'Already gone.') : result('failed', 'Could not be checked, so it stays.'); }
+  const current = info.isDirectory() ? await readTree(copy.directory, { includeGit: true }) : undefined;
+  if (current?.hash !== copy.hash) return result('stayed', 'Changed since the copy, so it stays.');
+  const sources = item.copies.filter(other => !other.created);
+  let sourceRemains = false;
+  for (const source of sources) sourceRemains ||= await exists(source.directory);
+  if (!sourceRemains) return result('stayed', 'Its source is gone, so this copy stays.');
+  await chmod(copy.directory, (info.mode & 0o777) | 0o700);
+  const parked = join(await stagingFolder(dirname(copy.directory)), `${STAGE_PREFIX}${randomUUID()}`);
+  await rename(copy.directory, parked);
+  await removeTree(parked);
+  return result('removed', 'Removed. Its source and the imported bytes stay.');
+}
+
+async function runUndo(context: ShareContext, selected: HarnessId[], only?: string): Promise<ActionResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return action(context, selected, [], [], 0, access.reason);
   const gate = await syncGate(context);
@@ -430,25 +529,25 @@ export async function undo(context: ShareContext, selected: HarnessId[], only?: 
   for (const key of keys) {
     const item = record.items[key];
     if (!item) continue;
-    if (!item.copies.some(copy => copy.created)) results.push({ item: item.name, outcome: 'stayed', message: 'Every copy was here before Start, so they stay.' });
-    for (const copy of item.copies) {
-      if (!copy.created) continue;
-      let info;
-      try { info = await lstat(copy.directory); }
-      catch (error) {
-        if (errorCode(error) === 'ENOENT') { results.push({ item: item.name, harness: copy.harness, outcome: 'stayed', message: 'Already gone.' }); continue; }
-        results.push({ item: item.name, harness: copy.harness, outcome: 'failed', message: 'Could not be checked, so it stays.' }); continue;
-      }
-      const current = info.isDirectory() ? await readTree(copy.directory, { includeGit: true }) : undefined;
-      if (current?.hash !== copy.hash) { results.push({ item: item.name, harness: copy.harness, outcome: 'stayed', message: 'Changed since the copy, so it stays.' }); continue; }
-      const parked = join(await stagingFolder(dirname(copy.directory)), `${STAGE_PREFIX}${randomUUID()}`);
-      await rename(copy.directory, parked);
-      await rm(parked, { recursive: true, force: true });
-      removed++;
-      results.push({ item: item.name, harness: copy.harness, outcome: 'removed', message: 'Removed. Its source and the imported bytes stay.' });
-    }
+    // On record first: a record that cannot be saved stops this item before anything is removed.
+    const prior = item.state;
     item.state = 'dont-share';
+    try { await saveRecord(context.home, record); }
+    catch (error) { item.state = prior; results.push({ item: item.name, outcome: 'failed', message: `The sync record could not be saved, so nothing was removed. ${plainError(error)}` }); continue; }
+    if (!item.copies.some(copy => copy.created)) results.push({ item: item.name, outcome: 'stayed', message: 'Every copy was here before Start, so they stay.' });
+    let failed = false;
+    for (const copy of item.copies.filter(entry => entry.created)) {
+      try {
+        const result = await undoCopy(item, copy);
+        if (result.outcome === 'removed') removed++;
+        if (result.outcome === 'failed') failed = true;
+        results.push(result);
+      } catch (error) {
+        failed = true;
+        results.push({ item: item.name, harness: copy.harness, outcome: 'failed', message: `It could not be removed. ${plainError(error)}` });
+      }
+    }
+    if (failed) { item.state = prior; await saveRecord(context.home, record); }
   }
-  await saveRecord(context.home, record);
   return action(context, selected, [], results, removed);
 }

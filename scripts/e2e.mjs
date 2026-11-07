@@ -1,6 +1,6 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,6 +82,14 @@ function seedHome() {
     chmodSync(join(HOME, '.local/bin', name), 0o755);
   }
   writeFileSync(join(HOME, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
+  skill(CLAUDE, `very-long-${'n'.repeat(150)}`);
+  const locked = skill(CLAUDE, 'read-only-inside');
+  mkdirSync(join(locked, 'refs'));
+  writeFileSync(join(locked, 'refs/a.md'), 'a');
+  chmodSync(join(locked, 'refs'), 0o555);
+  const hidden = skill(CLAUDE, 'unreadable-file');
+  writeFileSync(join(hidden, 'secret-bits.md'), 'x');
+  chmodSync(join(hidden, 'secret-bits.md'), 0o000);
 }
 
 // ---------- App ----------
@@ -215,16 +223,37 @@ async function realHomeFlow() {
   check('malformed skill is no row', !rows.includes('bad-yaml'));
   check('read problem is reported', (await a.text('.band') ?? '').includes('read problem'), await a.text('.band'));
   await a.shot('real-overview');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
+  await a.click(`[id="row-very-long-${'n'.repeat(150)}"]`);
+  await a.shot('narrow-long-name');
+  const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth, close: document.querySelector('#panel-close')?.getBoundingClientRect().right ?? document.querySelector('#panel-back')?.getBoundingClientRect().right })`);
+  check('a very long name stays on screen at 960', fits.page <= fits.window && fits.close <= fits.window, fits);
+  await a.press('Escape');
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  await a.settle();
   await a.click('#share-open');
   await a.expand();
   const plan = await a.plan();
-  same('real-shaped plan', [plan.rich, plan['名前-skill'], plan.scoped, plan.plain, plan['.dot-skill'], plan.clash, plan.twin, plan['from-copilot'], plan['has-link'], plan.linked],
-    ['copy', 'copy', 'copy', 'held', 'held', 'collision', 'identical', 'copy', 'held', 'already-shared']);
+  same('real-shaped plan', [plan.rich, plan['名前-skill'], plan.scoped, plan.plain, plan['.dot-skill'], plan.clash, plan.twin, plan['from-copilot'], plan['has-link'], plan.linked, plan['read-only-inside'], plan['unreadable-file']],
+    ['copy', 'held', 'copy', 'held', 'held', 'collision', 'identical', 'copy', 'held', 'already-shared', 'copy', 'held']);
+  check('a refused name says why', (await a.text('.plan-card[data-key="名前-skill"]')).includes('will not load it'));
+  check('an unreadable skill is held, with the reason', (await a.text('.plan-card[data-key="unreadable-file"]')).includes('could not be read'));
+  // Only what the window shows may be written.
+  const wrongHome = await a.run(`window.centralKnot.start(['claude-cli','copilot-cli'], [], false, '/somewhere/else').then(r => [r.harnessWrites, r.stopped])`);
+  check('a Start for another home is refused', wrongHome[0] === 0 && /not the one open/.test(wrongHome[1]), wrongHome);
+  // Overview does not depend on the panel's ticks.
+  const statusesBefore = await a.all('.mx-item', "e.dataset.key + ':' + e.querySelector('.status-word').textContent");
+  await a.run(`document.querySelector('#tick-copilot-cli').click()`);
+  await a.settle();
+  same('Overview ignores unticked tools', await a.all('.mx-item', "e.dataset.key + ':' + e.querySelector('.status-word').textContent"), statusesBefore);
+  await a.run(`document.querySelector('#tick-copilot-cli').click()`);
+  await a.settle();
+  await a.expand();
   check('known limit named', (await a.text('.plan-card[data-key="scoped"]')).includes('paths'));
   await a.shot('real-share');
   if (!canWriteRealHome) {
     same('real home is preview only here', await a.run(`document.querySelector('#start').disabled`), true);
-    const refused = await a.run(`window.centralKnot.start(['claude-cli','copilot-cli'], [], false).then(r => [r.harnessWrites, r.stopped])`);
+    const refused = await a.run(`window.centralKnot.start(['claude-cli','copilot-cli'], [], false, document.querySelector('.status-home').title).then(r => [r.harnessWrites, r.stopped])`);
     same('main process refuses too', refused[0], 0);
     check('with a reason', /Preview only/.test(refused[1]), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
@@ -236,7 +265,10 @@ async function realHomeFlow() {
   same('bytes and modes copied, .git left out', tree(join(COPILOT, 'rich')), before.rich);
   same('source .git untouched', readFileSync(join(CLAUDE, 'rich/.git/HEAD'), 'utf8'), 'ref: refs/heads/main\n');
   same('exec bit kept', statSync(join(COPILOT, 'rich/scripts/run.sh')).mode & 0o777, 0o755);
-  check('non-Latin name copied', existsSync(join(COPILOT, '名前-skill/SKILL.md')));
+  check('a name Copilot refuses is not copied', !existsSync(join(COPILOT, '名前-skill')));
+  check('a skill with a read-only folder copied', existsSync(join(COPILOT, 'read-only-inside/refs/a.md')));
+  check('an unreadable skill not copied', !existsSync(join(COPILOT, 'unreadable-file')));
+  check('the announcement does not hide problems', /written to disk/.test(await a.text('#announcement')), await a.text('#announcement'));
   check('Copilot-only skill reached Claude', existsSync(join(CLAUDE, 'from-copilot/SKILL.md')));
   check('Don’t share held', !existsSync(join(COPILOT, 'private-one')));
   check('no-frontmatter skipped', !existsSync(join(COPILOT, 'plain')));
@@ -257,10 +289,11 @@ async function realHomeFlow() {
   await a.click('#start');
   same('held edit is not overwritten', readFileSync(join(COPILOT, 'rich/SKILL.md'), 'utf8'), text('rich', 'Edited by hand.'));
   await a.expand();
-  await a.click('[id="undo-名前-skill"]');
-  check('per-item Undo removes that copy', !existsSync(join(COPILOT, '名前-skill')));
-  check('its source stays', existsSync(join(CLAUDE, '名前-skill/SKILL.md')));
+  await a.click('[id="undo-read-only-inside"]');
+  check('per-item Undo removes a copy with a read-only folder', !existsSync(join(COPILOT, 'read-only-inside')));
+  check('its source stays', existsSync(join(CLAUDE, 'read-only-inside/refs/a.md')));
   check('another copy stays', existsSync(join(CLAUDE, 'from-copilot')));
+  same('nothing parked behind', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
 
@@ -277,6 +310,7 @@ async function realHomeFlow() {
   await b.click('#home-actual');
   await b.click('#share-open');
   same('damaged record stops Start', await b.run(`document.querySelector('#start').disabled`), true);
+  check('no Undo while stopped', !(await b.exists('#undo-all')) && !(await b.exists('[id^="undo-"]')));
   check('with the reason', (await b.text('#panel-body')).includes('damaged'));
   await b.shot('real-stopped');
   await b.quit();
@@ -294,6 +328,7 @@ async function realHomeFlow() {
 
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
 async function crashFlow() {
+  execChmod();
   rmSync(HOME, { recursive: true, force: true });
   mkdirSync(COPILOT, { recursive: true });
   const expected = {};
@@ -338,6 +373,8 @@ async function crashFlow() {
   check('at least one round really interrupted copying', interrupted > 0, interrupted);
 }
 
+const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
+
 // ---------- Run ----------
 const started = Date.now();
 try {
@@ -345,11 +382,13 @@ try {
   await practiceFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
+  execChmod();
 } catch (error) {
   failures.push(`aborted: ${error.message}`);
   console.error(error);
 } finally {
   app?.child.kill('SIGKILL');
+  execChmod();
   rmSync(scratch, { recursive: true, force: true, maxRetries: 3 });
 }
 console.log(`e2e: ${passes} passed, ${failures.length} failed, ${Math.round((Date.now() - started) / 1000)}s, ${process.platform}`);

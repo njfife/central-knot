@@ -9,6 +9,8 @@ export type Page = 'overview' | 'skills' | 'tools';
 export const state = {
   home: undefined as HomeView | undefined,
   preview: undefined as Preview | undefined,
+  /** What Overview and Skills show: every present tool, whatever the Share panel has ticked. */
+  overview: undefined as Preview | undefined,
   selected: [] as HarnessId[],
   dontShare: [] as string[],
   page: 'overview' as Page,
@@ -41,7 +43,10 @@ async function busy(message: string, work: () => Promise<void>) {
   announce(message);
   rerender();
   try { await work(); }
-  catch { announce(state.home ? 'That could not finish. The last good state stays. Try again.' : 'Could not read this home. Nothing changed. Try again.'); }
+  catch {
+    state.results = [];
+    announce(state.home ? `That could not finish. Still on ${state.home.label}. Read again to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
+  }
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
@@ -52,6 +57,7 @@ async function busy(message: string, work: () => Promise<void>) {
 function accept(view: HomeView) {
   state.home = view;
   state.preview = view.preview;
+  state.overview = view.preview;
   state.selected = view.preview.selected;
   state.dontShare = [];
   state.results = [];
@@ -69,6 +75,9 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
   const view = await api().refresh();
   if (!view) return;
   state.home = view;
+  state.overview = view.preview;
+  state.results = [];
+  state.stopped = undefined;
   state.preview = await api().preview(state.selected, state.dontShare);
   announce('Read complete. Nothing changed.');
 });
@@ -94,7 +103,7 @@ async function finish(action: ActionResult, done: string) {
   state.dontShare = state.dontShare.filter(key => action.preview.items.some(item => item.key === key));
   state.preview = action.preview;
   const view = await api().refresh().catch(() => null);
-  if (view) state.home = view;
+  if (view) { state.home = view; state.overview = view.preview; }
   // Undo plans without the session's Don't share ticks, so plan once more with them.
   state.preview = await api().preview(state.selected, state.dontShare).catch(() => action.preview);
   announce(action.stopped ?? done);
@@ -102,18 +111,25 @@ async function finish(action: ActionResult, done: string) {
 
 const copies = (count: number) => plural(count, 'copy', 'copies');
 
+function summary(action: ActionResult, done: string, nothing: string): string {
+  const failed = action.results.filter(result => result.outcome === 'failed').length;
+  const failedText = failed ? `${failed} failed. See What happened.` : '';
+  if (action.harnessWrites) return [done, failedText].filter(Boolean).join(' ');
+  return failedText || nothing;
+}
+
 export async function startSharing() {
   await busy('Copying…', async () => {
-    const action = await api().start(state.selected, state.dontShare, state.preview?.gate.state === 'needs-resume');
-    await finish(action, action.harnessWrites ? `${copies(action.harnessWrites)} written to disk.` : 'Done. Nothing needed copying.');
+    const action = await api().start(state.selected, state.dontShare, state.preview?.gate.state === 'needs-resume', state.home!.home);
+    await finish(action, summary(action, `${copies(action.harnessWrites)} written to disk.`, 'Done. Nothing needed copying.'));
   });
   document.getElementById('panel-body')?.scrollTo(0, 0);
 }
 
 export async function undoLast(only?: string) {
   await busy('Undoing…', async () => {
-    const action = await api().undo(state.selected, only);
-    await finish(action, only ? `${copies(action.harnessWrites)} removed.` : `${copies(action.harnessWrites)} removed. Those skills are now Don’t share.`);
+    const action = await api().undo(state.selected, only, state.home!.home);
+    await finish(action, summary(action, only ? `${copies(action.harnessWrites)} removed.` : `${copies(action.harnessWrites)} removed. Those skills are now Don’t share.`, 'Nothing was removed. See What happened.'));
   });
   document.getElementById('panel-body')?.scrollTo(0, 0);
 }

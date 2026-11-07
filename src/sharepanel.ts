@@ -1,6 +1,6 @@
 import { closePanel, setDontShare, setToolSelected, shownPath, startSharing, state, undoLast } from './app.ts';
 import { button, checkbox, eyebrow, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, outcomeOf, planGroups, planSummary, plural, toolName } from './model.ts';
+import { fullToolName, outcomeOf, planGroups, planSummary, plural, toolName, skillCount } from './model.ts';
 import { disclosure, statusGlyph } from './pages.ts';
 import type { HomeView, PlanItem, Preview } from './types.ts';
 
@@ -16,7 +16,7 @@ function toolTicks(home: HomeView) {
     checked: state.selected.includes(snapshot.harness),
     disabled: !!state.busy,
     onchange: on => setToolSelected(snapshot.harness, on),
-  }, fullToolName(snapshot), h('span.muted', {}, ` · ${plural(snapshot.skills.length, 'skill')}${home.mode === 'actual' ? ` · ${snapshot.detection}` : ''}`)))));
+  }, fullToolName(snapshot), h('span.muted', {}, ` · ${plural(skillCount(snapshot), 'skill')}${home.mode === 'actual' ? ` · ${snapshot.detection}` : ''}`)))));
 }
 
 function planPaths(item: PlanItem) {
@@ -34,8 +34,8 @@ function diffBlock(id: string, text: string) {
 function planCard(item: PlanItem, preview: Preview) {
   const allowed = preview.access.allowed;
   const limits = item.targets.flatMap(target => [...target.limits, ...(target.note ? [target.note] : [])]);
-  const canExclude = !item.locked && allowed && !item.undoable;
-  const canUndo = item.undoable && allowed;
+  const canExclude = !item.locked && allowed && !item.undoable && preview.gate.state !== 'stopped';
+  const canUndo = item.undoable && allowed && preview.gate.state === 'ready';
   return h('article.card.plan-card', { 'data-key': item.key, 'data-state': item.state },
     h('div.plan-name', {},
       h('h4', {}, item.name),
@@ -90,7 +90,7 @@ export function sharePanel() {
   const groups = planGroups(preview.items);
   // The notice above carries the full reason when Start is held, so the footer stays one line.
   const message = state.busy ?? (gate.state === 'stopped' ? 'Start is stopped.' : !preview.access.allowed ? 'Start is off here.' : gate.state === 'needs-resume' ? 'Start will resume the record.' : preview.access.reason);
-  const blocked = !preview.access.allowed || gate.state === 'stopped' || !state.selected.length;
+  const blocked = !preview.access.allowed || gate.state === 'stopped' || !preview.items.length;
   const closeLabel = state.results.length || state.stopped ? 'Close' : 'Cancel';
   return [
     h('div.scroll.panel-body', { id: 'panel-body', tabindex: '-1' },
@@ -111,7 +111,7 @@ export function sharePanel() {
       h('div.panel-actions', {},
         button({ variant: 'ghost', label: closeLabel, id: 'panel-cancel', onclick: closePanel }),
         h('div.panel-actions-end', {},
-          preview.canUndo && preview.access.allowed && button({ label: 'Undo the last Start', id: 'undo-all', disabled: !!state.busy, onclick: () => void undoLast() }),
+          preview.canUndo && preview.access.allowed && gate.state === 'ready' && button({ label: 'Undo the last Start', id: 'undo-all', disabled: !!state.busy, onclick: () => void undoLast() }),
           button({ variant: 'primary', label: gate.state === 'needs-resume' ? 'Resume and Start' : 'Start', id: 'start', disabled: blocked || !!state.busy, onclick: () => void startSharing() })))),
   ];
 }

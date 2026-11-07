@@ -5,7 +5,7 @@ const api: DesktopApi = {
   selectHome: mode => ipcRenderer.invoke('discovery:select', mode),
   refresh: () => ipcRenderer.invoke('discovery:refresh'),
   preview: (selected, dontShare) => ipcRenderer.invoke('share:preview', selected, dontShare),
-  start: (selected, dontShare, resume) => ipcRenderer.invoke('share:start', selected, dontShare, resume),
-  undo: (selected, only) => ipcRenderer.invoke('share:undo', selected, only),
+  start: (selected, dontShare, resume, home) => ipcRenderer.invoke('share:start', selected, dontShare, resume, home),
+  undo: (selected, only, home) => ipcRenderer.invoke('share:undo', selected, only, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

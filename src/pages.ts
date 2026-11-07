@@ -1,6 +1,6 @@
 import { announce, closePanel, disclosureOpen, loadHome, openPanel, readAgain, rerender, selectItem, shownPath, showPage, state } from './app.ts';
 import { button, emptyState, h, hiddenText, icon, middle, pathText, section } from './dom.ts';
-import { buildRows, copiesIn, fullToolName, lookOf, matches, plural, toolMonogram, toolName, type Row } from './model.ts';
+import { buildRows, copiesIn, fullToolName, lookOf, matches, plural, skillCount, toolMonogram, toolName, type Row } from './model.ts';
 import type { HarnessId, HomeView, Preview, Snapshot } from './types.ts';
 
 export const toolIds = (home: HomeView) => home.snapshots.map(snapshot => snapshot.harness);
@@ -110,7 +110,7 @@ export function overviewPage() {
     if (state.busy) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, skeletonRows()));
     return h('div.page', {}, emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome('fixture') })));
   }
-  const rows = buildRows(home, preview);
+  const rows = buildRows(home, state.overview ?? preview);
   const tools = toolIds(home);
   const region = h('div.scroll.matrix', { id: 'matrix-scroll' }, matrixBody(rows, tools));
   const count = h('span.result-count', {}, countText(rows.filter(row => matches(row, state.find)).length, rows.length));
@@ -232,7 +232,7 @@ function listRow(row: Row, tools: HarnessId[], selected: boolean) {
 export function skillsPage() {
   const { home, preview } = state;
   if (!home || !preview) return h('div.page');
-  const rows = buildRows(home, preview);
+  const rows = buildRows(home, state.overview ?? preview);
   const tools = toolIds(home);
   if (!rows.length) return h('div.page', {}, emptyState('wand-sparkles', 'No skills here yet', 'Neither tool has a user-wide skill in this home. Choose another home at the bottom left, or read this one again.', button({ icon: 'refresh-cw', label: 'Read again', id: 'empty-read', disabled: !!state.busy, onclick: () => void readAgain() })));
   const chosen = rows.find(row => row.key === state.item);
@@ -263,10 +263,11 @@ export function skillsPage() {
 
 // ---------- Tools ----------
 
-const dirname = (path: string) => path.replace(/[/\\][^/\\]*$/, '');
+/** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
+const dirname = (path: string) => path.replace(/^[A-Za-z]:\\/.test(path) ? /[/\\][^/\\]*$/ : /\/[^/]*$/, '');
 
 const discoveryLine = (snapshot: Snapshot) => ({
-  ready: plural(snapshot.skills.length, 'skill'),
+  ready: plural(skillCount(snapshot), 'skill'),
   empty: 'No standalone skills in this user-wide folder.',
   missing: 'No skills folder found.',
   restricted: 'Discovery needs attention. See the reason below.',
@@ -296,7 +297,7 @@ function toolCard(snapshot: Snapshot, preview: Preview) {
       h('div.tool-column', {},
         section('What it has',
           snapshot.skills.length
-            ? h('div.link-row', {}, button({ variant: 'link', size: 'micro', label: `${plural(snapshot.skills.length, 'skill')} in Overview`, id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('overview') }))
+            ? h('div.link-row', {}, button({ variant: 'link', size: 'micro', label: `${plural(skillCount(snapshot), 'skill')} in Overview`, id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('overview') }))
             : h('p', {}, discoveryLine(snapshot))),
         disclosed && section('Others that read its folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
         issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));

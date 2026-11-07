@@ -32,18 +32,26 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
   });
 }
 
-export function parseSkill(content: string, folder: string): Pick<Skill, 'name' | 'description' | 'notes' | 'hasFrontmatter' | 'metadataKeys'> {
-  const notes: string[] = [];
-  if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) {
-    return { name: folder, description: '', notes: ['No YAML frontmatter; loadability is not verified.'], hasFrontmatter: false, metadataKeys: [] };
-  }
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+const OPENING = /^﻿?---[ \t]*\r?\n/;
+const FRONTMATTER = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
+
+/** The metadata fields, or null when there is no frontmatter. Throws when it cannot be read. */
+function frontmatter(content: string): Record<string, unknown> | null {
+  if (!OPENING.test(content)) return null;
+  const match = content.match(FRONTMATTER);
   if (!match) throw new Error('Unclosed YAML frontmatter.');
-  const document = parseDocument(match[1], { uniqueKeys: true });
+  const document = parseDocument(match[1] ?? '', { uniqueKeys: true });
   if (document.errors.length) throw new Error('Malformed YAML frontmatter.');
   const metadata: unknown = document.toJS({ maxAliasCount: 100 });
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('Frontmatter must be a mapping.');
-  const fields = metadata as Record<string, unknown>;
+  if (metadata === null || metadata === undefined) return {};
+  if (typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('Frontmatter must be a mapping.');
+  return metadata as Record<string, unknown>;
+}
+
+export function parseSkill(content: string, folder: string): Pick<Skill, 'name' | 'description' | 'notes' | 'hasFrontmatter' | 'metadataKeys'> {
+  const notes: string[] = [];
+  const fields = frontmatter(content);
+  if (!fields) return { name: folder, description: '', notes: ['No YAML frontmatter; loadability is not verified.'], hasFrontmatter: false, metadataKeys: [] };
   if (typeof fields.name !== 'string' || !fields.name.trim()) notes.push('Missing name metadata; folder name shown.');
   if (typeof fields.description !== 'string') notes.push('Missing description metadata.');
   return {
@@ -57,6 +65,18 @@ export function parseSkill(content: string, folder: string): Pick<Skill, 'name' 
       ...(fields['disable-model-invocation'] === true ? ['disable-model-invocation: true'] : []),
     ],
   };
+}
+
+/** What Copilot CLI 1.0.107 refused when offered each case directly; its rules read the metadata name, or the folder without one. */
+export function copilotProblem(content: string, folder: string): string | undefined {
+  const fields = frontmatter(content);
+  if (!fields) return undefined;
+  const name = fields.name ?? folder;
+  if (typeof name !== 'string') return 'its metadata name is not text';
+  if (name.length > 64) return 'its name is longer than 64 characters';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._: -]*$/.test(name)) return 'its name must start with an ASCII letter or number and use only ASCII letters, numbers and simple separators';
+  if (typeof fields.description === 'string' && fields.description.length > 1024) return 'its description is longer than 1024 characters';
+  return undefined;
 }
 
 export async function discover(options: {
@@ -123,15 +143,20 @@ export async function discover(options: {
       try {
         const info = await lstat(skillPath);
         if (!info.isFile() && !info.isSymbolicLink()) continue;
+        // A link can lead to a pipe or device, and reading one of those never ends.
+        const target = await stat(skillPath);
+        if (target.isDirectory()) continue;
+        if (!target.isFile()) { snapshot.issues.push(`${entry.name}: SKILL.md is not a regular file.`); continue; }
         const content = await readFile(skillPath, 'utf8');
         const metadata = parseSkill(content, entry.name);
         if (entry.isSymbolicLink() || info.isSymbolicLink()) metadata.notes.push('Reached through a user link; read only.');
+        if (metadata.name !== entry.name) metadata.notes.push(`Its metadata names it “${metadata.name}”.`);
         const id = seen.has(entry.name) ? `${entry.name} (${skillRoot.label})` : entry.name;
         if (seen.has(entry.name)) metadata.notes.push(`Also found in another ${definition.name} folder; the harness shows one of them.`);
         seen.add(entry.name);
         snapshot.skills.push({
           id, folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
-          rootLabel: skillRoot.label, content, status: 'Not shared',
+          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name),
         });
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;

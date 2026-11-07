@@ -7,7 +7,7 @@ import { discover } from './discovery.ts';
 import { harnesses, harnessIds } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { buildPreview, start, undo, type ShareContext } from './share.ts';
-import type { HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import type { ActionResult, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
@@ -62,13 +62,17 @@ async function view(): Promise<HomeView> {
 }
 
 async function selectHome(mode: HomeMode): Promise<HomeView | null> {
+  let next: NonNullable<typeof current>;
   if (mode === 'custom') {
     const selection = await dialog.showOpenDialog(window, { title: 'Choose a simulated home folder', properties: ['openDirectory'] });
     if (selection.canceled) return null;
-    current = { mode, home: selection.filePaths[0], label: 'Selected folder' };
-  } else if (mode === 'actual') current = { mode, home: homedir(), label: 'This Mac’s home' };
-  else current = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
-  return view();
+    next = { mode, home: selection.filePaths[0], label: 'Selected folder' };
+  } else if (mode === 'actual') next = { mode, home: homedir(), label: 'This Mac’s home' };
+  else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
+  // A switch that fails changes nothing: the home on screen stays the home open here.
+  const previous = current;
+  current = next;
+  try { return await view(); } catch (error) { current = previous; throw error; }
 }
 
 const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is HarnessId => harnessIds.includes(id as HarnessId)) : []);
@@ -103,8 +107,10 @@ app.whenReady().then(async () => {
   });
   handle('discovery:refresh', async () => (current ? view() : null));
   handle('share:preview', async (selected, dontShare) => buildPreview(context(), ids(selected), strings(dontShare)));
-  handle('share:start', async (selected, dontShare, resume) => start(context(), ids(selected), strings(dontShare), resume === true));
-  handle('share:undo', async (selected, only) => undo(context(), ids(selected), typeof only === 'string' ? only : undefined));
+  // Writes act only on the home the window says it is showing.
+  const notShown = async (selected: unknown): Promise<ActionResult> => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0, preview: await buildPreview(context(), ids(selected), []) });
+  handle('share:start', async (selected, dontShare, resume, home) => (home === current?.home ? start(context(), ids(selected), strings(dontShare), resume === true) : notShown(selected)));
+  handle('share:undo', async (selected, only, home) => (home === current?.home ? undo(context(), ids(selected), typeof only === 'string' ? only : undefined) : notShown(selected)));
   await window.loadFile(join(__dirname, 'index.html'));
   if (smoke) {
     try {

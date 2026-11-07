@@ -328,7 +328,10 @@ ul { list-style: none; }
 @media (min-width: 1366px) { #panel { width: 384px; } }
 @media (min-width: 1600px) { #panel { width: 480px; } }
 .panel-replaces #main { display: none; }
-.panel-replaces #panel { flex: 1; width: auto; border-left: 0; }
+.panel-replaces #panel { flex: 1; width: auto; min-width: 0; border-left: 0; }
+#panel p, #detail-scroll p, #panel pre, #detail-scroll pre { overflow-wrap: anywhere; }
+#panel pre, #detail-scroll pre { white-space: pre-wrap; }
+.panel-body > *, .detail-scroll > * { min-width: 0; max-width: 100%; }
 .panel-replaces #panel .pane-header { min-height: 0; padding-top: 4px; padding-bottom: 4px; }
 .panel-replaces .panel-back { display: flex; }
 #panel-title:focus-visible { outline: none; }

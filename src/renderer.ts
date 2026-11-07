@@ -47,7 +47,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 }
 
 function renderSidebar() {
-  const rows = state.home && state.preview ? buildRows(state.home, state.preview) : [];
+  const rows = state.home && state.preview ? buildRows(state.home, state.overview ?? state.preview) : [];
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
     navRow('skills', 'Skills', 'wand-sparkles', state.home ? rows.length : undefined),
@@ -94,7 +94,7 @@ function renderPanel() {
     panel.replaceChildren(panelHeader('Share', 'Copy skills between tools'), ...sharePanel());
     return;
   }
-  const row = buildRows(state.home, state.preview).find(entry => entry.key === state.item);
+  const row = buildRows(state.home, state.overview ?? state.preview).find(entry => entry.key === state.item);
   if (!row) { state.panel = undefined; panel.hidden = true; panel.replaceChildren(); return; }
   panel.setAttribute('aria-label', 'Item detail');
   panel.replaceChildren(panelHeader(row.name, 'Skill', 'wand-sparkles'), h('div.scroll.panel-body', { id: 'panel-body', tabindex: '-1' }, itemSections(row, toolIds(state.home))));
