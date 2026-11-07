@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -302,7 +302,7 @@ async function realHomeFlow() {
   await a.expand();
   await a.run(`window.centralKnot.undo(['claude-cli', 'copilot-cli'], 'scoped', document.querySelector('.status-home').title)`);
   same('the only real folder survives Undo', tree(join(CLAUDE, 'scoped')), realFolder);
-  rmSync(join(COPILOT, 'scoped'));
+  unlinkSync(join(COPILOT, 'scoped'));
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
 
