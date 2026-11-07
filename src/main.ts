@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -90,8 +90,8 @@ app.on('second-instance', () => { if (window) { if (window.isMinimized()) window
 
 app.whenReady().then(async () => {
   window = new BrowserWindow({
-    width: 1180, height: 820, minWidth: 860, minHeight: 560, show: !smoke,
-    title: 'Central Knot', backgroundColor: '#f6f7f9',
+    width: 1280, height: 800, minWidth: 860, minHeight: 560, show: !smoke,
+    title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -113,7 +113,7 @@ app.whenReady().then(async () => {
         const check = async () => {
           if (document.body.dataset.ready === 'true') {
             const preview = await window.centralKnot.preview(['claude-cli', 'copilot-cli'], []);
-            resolveResult({ rows: document.querySelectorAll('.skill-row').length, home: document.querySelector('#home-label').textContent, plan: preview.items.map(item => item.key + ':' + item.state).join(','), allowed: preview.access.allowed });
+            resolveResult({ rows: document.querySelectorAll('.mx-cell[data-tool="claude-cli"][data-present="true"]').length, home: document.querySelector('#home-label').textContent, plan: preview.items.map(item => item.key + ':' + item.state).join(','), allowed: preview.access.allowed });
           } else if (Date.now() > deadline) rejectResult(new Error('Renderer did not become ready'));
           else setTimeout(check, 30);
         }; check();

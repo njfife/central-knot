@@ -3,51 +3,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'">
   <title>Central Knot</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header><div class="brand">◈ <strong>Central Knot</strong></div><span id="mode-note" class="mode-note"></span></header>
-  <div class="shell">
-    <nav aria-label="Central Knot sections">
-      <p class="eyebrow">TOOLS</p>
-      <div id="tool-list"></div>
-      <p class="eyebrow gap">SHARING</p>
-      <button id="nav-share" class="nav-row"><strong>Share skills</strong><small id="share-summary"></small></button>
-      <p class="eyebrow gap">READING FROM</p>
-      <strong id="home-label" class="home-label">…</strong>
-      <div class="home-buttons">
-        <button data-home="fixture">Practice copy</button>
-        <button data-home="custom">Another folder…</button>
-        <button data-home="actual">This Mac’s home</button>
-      </div>
-      <button id="refresh" class="refresh">Read again</button>
-    </nav>
-    <main>
-      <section id="tool-page">
-        <div class="page-heading"><h1 id="tool-title"></h1><p><span id="detection">Reading…</span><span class="separator">·</span><span id="version"></span></p></div>
-        <div class="workspace">
-          <section class="list-panel"><div class="panel-heading"><h3>Standalone skills</h3><span id="count" class="count"></span></div><div id="skills" aria-label="Discovered skills"></div></section>
-          <section class="detail" aria-label="Item detail"><p class="eyebrow">ITEM DETAIL</p><h2 id="detail-name">Choose a skill</h2><p id="detail-status" class="badge"></p><p id="detail-notes" class="notes"></p><details><summary>File location</summary><p id="detail-path" class="path"></p></details><pre id="detail-content" tabindex="0" aria-label="Original skill contents"></pre></section>
-        </div>
-        <p id="issues" class="issues" role="status"></p>
-      </section>
-      <section id="share-page" hidden>
-        <div class="page-heading"><h1>Share skills</h1><p>Pick the tools that should have the same skills. Start copies what is missing. Nothing changes before you press it.</p></div>
-        <fieldset id="tool-picks"><legend class="eyebrow">SHARE BETWEEN</legend></fieldset>
-        <div id="share-stop" class="stop" role="alert" hidden></div>
-        <div class="actions"><button id="start" class="primary">Start</button><button id="undo-all" hidden>Undo the last Start</button><p id="start-note" class="scope"></p></div>
-        <ul id="results" class="results" aria-label="What happened"></ul>
-        <div class="workspace">
-          <section class="list-panel"><div class="panel-heading"><h3>What will happen</h3><span id="plan-count" class="count"></span></div><div id="plan" aria-label="Sharing plan"></div></section>
-          <section class="detail" aria-label="Plan detail"><p class="eyebrow">ITEM DETAIL</p><h2 id="plan-name">Choose a skill</h2><p id="plan-status" class="badge"></p><p id="plan-reason" class="reason"></p><ul id="plan-limits" class="limits"></ul><label id="plan-exclude-label" class="exclude" hidden><input id="plan-exclude" type="checkbox"> Don’t share this skill</label><button id="plan-undo" hidden>Undo this skill</button><details><summary>File locations</summary><p id="plan-paths" class="path"></p></details><pre id="plan-diff" tabindex="0" aria-label="Difference between copies" hidden></pre></section>
-        </div>
-        <p id="disclosure" class="scope"></p>
-      </section>
-      <p id="announcement" class="announcement" aria-live="polite"></p>
-    </main>
+  <div id="frame">
+    <aside id="sidebar" aria-label="Central Knot">
+      <div class="brand"><span class="logo" aria-hidden="true">CK</span><span class="wordmark">Central Knot</span></div>
+      <nav id="nav" aria-label="Sections"></nav>
+      <div id="homes" role="group" aria-label="Home being read"></div>
+    </aside>
+    <div id="main">
+      <header id="header"></header>
+      <main id="page"></main>
+    </div>
+    <aside id="panel" hidden></aside>
   </div>
+  <footer id="status">
+    <div id="status-facts"></div>
+    <p id="announcement" aria-live="polite"></p>
+    <div id="status-end"><span class="status-name">Central Knot</span> <span id="status-version"></span></div>
+  </footer>
   <script type="module" src="renderer.js"></script>
 </body>
 </html>
