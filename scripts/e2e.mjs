@@ -90,7 +90,7 @@ async function launch(userData = join(scratch, 'data')) {
   const port = 9400 + randomInt(500);
   const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
-  if (process.env.DISPLAY) env.DISPLAY = process.env.DISPLAY;
+  for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
