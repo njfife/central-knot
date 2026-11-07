@@ -1,8 +1,6 @@
-# Central Knot — first look
+# Central Knot
 
-A fresh implementation, starting at plan slice **1a only**. There is no old application code or old Git history in this source tree.
-
-This package reads user-wide **Claude Code CLI standalone skills**. It opens on two bundled fixtures. Choose another simulated home folder, or explicitly choose **This Mac’s home** to read its actual user-wide skills and run a bounded `claude --version` probe. A selected folder means a simulated home, not a workspace to manage. `CLAUDE_CONFIG_DIR` is honored only for the actual home; an unknown relative override is reported, never replaced with a default.
+A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI** and **GitHub Copilot CLI**. It holds plan slices 1a, 1b's first checkpoint and 8a's Preview and First copy.
 
 ## Run
 
@@ -15,16 +13,32 @@ npm test
 npm run package:mac
 ```
 
-Mac packaging runs on the selected Apple Silicon Mac. The output is `release/Central-Knot-0.1.0-mac-arm64.zip`, containing `Central Knot.app`. Unzip and open it normally in Finder. This initial package is not a signing or ordinary-download proof; any macOS refusal remains an open V-10 result. No security bypass is part of the try.
+Mac packaging runs on the selected Apple Silicon Mac and produces `release/Central-Knot-0.2.0-mac-arm64.zip`. `npm run package:mac` applies and verifies an ad-hoc signature. That is not a Developer ID signature, so macOS still refuses a copy that arrives with a download's quarantine flag; this remains open as V-10, and no bypass is part of the try.
 
-`npm run smoke:mac` opens a hidden, fixture-only Electron window with disposable app data and checks that the renderer receives and displays the two fixtures. It does not select an actual home or invoke a real harness. Pure tests also run on Linux; that is not a Linux desktop release.
+`npm run smoke:mac` opens a hidden, fixture-only window with disposable app data and checks the rendered rows and sharing plan. It never selects an actual home.
 
-## What is and is not here
+## Homes
 
-- A read-only skill list and item detail; original contents and file locations appear only in detail.
-- Distinct missing, empty, restricted, failed and malformed results, with config-folder evidence kept separate from installation evidence.
-- No native lists, sign-in, session, MCP server, registry initialization or configuration writes.
-- No sharing, install, toggles, background task, instruction sync, owner record, content store, updater or Compatibility page.
-- No claim that a file has loaded in a harness; no system probe until the actual-home choice.
+- **Practice copy** (opens first): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Start and Undo really write here.
+- **Another folder…**: a simulated home. Start and Undo write only inside it. A folder that is, contains or links into your real home's harness folders is treated as read-only.
+- **This Mac’s home**: your real skills and a bounded `--version` probe of each CLI. **Preview only.** This package refuses Start and Undo here, in the main process as well as the UI.
 
-The approved product boundary is in `AGENTS.md`. Planning inputs live under `docs/`; their existing unresolved choices and proof gates remain open. `LEDGER.md` records this batch, not product proof that has not run.
+## What sharing does
+
+Preview writes nothing. Start replans from disk, then:
+
+- copies a skill one selected tool lacks into that tool's own folder, byte-exact with file modes, without nested `.git`;
+- takes over an identical copy, or tools already reading the same folder, with zero writes;
+- leaves same-name different skills separate and shows their diff as **Needs a decision**;
+- holds a skill containing a link, or a destination already occupied by something else, with the reason;
+- skips a destination that will not load the skill, and names known behaviour losses (`docs/capability-data.md` §4).
+
+State lives in `.central-knot/` inside the selected home: `sync.json` and imported revisions under `items/`. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing.
+
+**Undo** removes only copies a Start created that still match their recorded hash. Changed copies, sources and imported bytes stay. The item becomes Don't share.
+
+## Not here yet
+
+Choosing a version in a collision, Share after Don't share, History and Restore, background sync, two-way edits, other kinds and tools, and any writing to a real home. Nothing here claims a skill has loaded in a session: Written means the bytes are on disk.
+
+The product boundary is in `AGENTS.md`. Planning inputs are under `docs/`. `LEDGER.md` records what was run.

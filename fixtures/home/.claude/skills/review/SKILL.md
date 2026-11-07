@@ -1,5 +1,5 @@
 ---
-name: Review changes
+name: review
 description: Read a small diff and summarize the important changes.
 ---
 

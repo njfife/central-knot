@@ -1,8 +1,8 @@
 {
   "name": "central-knot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Read-only first look at user-wide Claude Code skills",
+  "description": "Sees and shares user-wide Claude Code and Copilot CLI skills",
   "type": "module",
   "main": "dist/main.cjs",
   "engines": { "node": ">=24.9.0" },

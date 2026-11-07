@@ -1,5 +1,5 @@
 ---
-name: Clear notes
+name: notes
 description: Turn rough notes into a short, useful handoff.
 ---
 

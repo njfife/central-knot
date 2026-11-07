@@ -4,16 +4,8 @@ import { execFile } from 'node:child_process';
 import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
-import type { HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
-
-export const capability = {
-  surface: 'Claude Code CLI',
-  kind: 'Standalone skills',
-  defaultConfig: '.claude',
-  reservedSkill: 'synced',
-  testedVersion: '2.1.318',
-  evidence: 'CD §§3–4; no session-loading claim',
-} as const;
+import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
+import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 
 function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN';
@@ -40,10 +32,10 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
   });
 }
 
-export function parseSkill(content: string, folder: string): Pick<Skill, 'name' | 'description' | 'notes'> {
+export function parseSkill(content: string, folder: string): Pick<Skill, 'name' | 'description' | 'notes' | 'hasFrontmatter' | 'metadataKeys'> {
   const notes: string[] = [];
   if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) {
-    return { name: folder, description: '', notes: ['No YAML frontmatter; loadability is not verified.'] };
+    return { name: folder, description: '', notes: ['No YAML frontmatter; loadability is not verified.'], hasFrontmatter: false, metadataKeys: [] };
   }
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) throw new Error('Unclosed YAML frontmatter.');
@@ -58,27 +50,36 @@ export function parseSkill(content: string, folder: string): Pick<Skill, 'name' 
     name: typeof fields.name === 'string' && fields.name.trim() ? fields.name : folder,
     description: typeof fields.description === 'string' ? fields.description : '',
     notes,
+    hasFrontmatter: true,
+    metadataKeys: [
+      ...('paths' in fields ? ['paths'] : []),
+      ...(fields['user-invocable'] === false ? ['user-invocable: false'] : []),
+      ...(fields['disable-model-invocation'] === true ? ['disable-model-invocation: true'] : []),
+    ],
   };
 }
 
 export async function discover(options: {
   home: string;
   mode: HomeMode;
+  harness?: HarnessId;
   configOverride?: string;
   binaries?: string[];
   runProbes?: boolean;
   timeoutMs?: number;
 }): Promise<Snapshot> {
+  const definition: HarnessDefinition = harnesses[options.harness ?? 'claude-cli'];
   const home = resolve(options.home);
-  const root = options.configOverride === undefined ? join(home, capability.defaultConfig) : options.configOverride;
+  const root = configRoot(definition, home, options.configOverride);
   const snapshot: Snapshot = {
-    mode: options.mode, label: options.mode === 'actual' ? "This Mac’s home" : options.mode === 'fixture' ? 'Bundled fixture' : 'Selected folder',
+    harness: definition.id, harnessName: definition.name, surface: definition.surface,
+    mode: options.mode, label: options.mode === 'actual' ? 'This Mac’s home' : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
     root, detection: 'Not found', probe: { state: 'not-run', detail: 'System probes run only when you select this Mac’s home.' },
     discovery: 'missing', skills: [], issues: [],
   };
   if (!isAbsolute(root)) {
     snapshot.discovery = 'failed';
-    snapshot.issues.push('CLAUDE_CONFIG_DIR is not absolute; root unknown. No default substituted.');
+    snapshot.issues.push(`${definition.configEnv} is not absolute; root unknown. No default substituted.`);
     return snapshot;
   }
   let configExists = false;
@@ -93,7 +94,7 @@ export async function discover(options: {
   }
   if (configExists) snapshot.detection = 'Config found but app not detected';
   if (options.runProbes) {
-    snapshot.probe = { state: 'missing', detail: 'No Claude executable in the bounded candidate list.' };
+    snapshot.probe = { state: 'missing', detail: `No ${definition.binary} executable in the bounded candidate list.` };
     for (const binary of options.binaries ?? []) {
       const probe = await probeVersion(binary, options.timeoutMs);
       if (probe.state === 'missing') continue;
@@ -102,31 +103,50 @@ export async function discover(options: {
       break;
     }
   }
-  const skillsRoot = join(root, 'skills');
-  let entries;
-  try {
-    entries = await readdir(skillsRoot, { withFileTypes: true });
-  } catch (error) {
-    snapshot.discovery = errorCode(error) === 'ENOENT' ? 'missing' : errorCode(error) === 'EACCES' ? 'restricted' : 'failed';
-    snapshot.issues.push(snapshot.discovery === 'missing' ? 'No user-wide skills folder found.' : 'Skills folder could not be read.');
-    return snapshot;
-  }
-  for (const entry of entries.sort((first, second) => first.name.localeCompare(second.name))) {
-    if (entry.name.startsWith('.') || entry.name === capability.reservedSkill || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
-    const skillPath = join(skillsRoot, entry.name, 'SKILL.md');
+  const seen = new Set<string>();
+  const rootResults: Snapshot['discovery'][] = [];
+  for (const skillRoot of definition.skillRoots(root, home)) {
+    let entries;
     try {
-      const info = await lstat(skillPath);
-      if (!info.isFile() && !info.isSymbolicLink()) continue;
-      const content = await readFile(skillPath, 'utf8');
-      const metadata = parseSkill(content, entry.name);
-      if (entry.isSymbolicLink() || info.isSymbolicLink()) metadata.notes.push('Reached through a user link; read only.');
-      snapshot.skills.push({ id: entry.name, ...metadata, path: await realpath(skillPath), content, status: 'Not shared' });
+      entries = await readdir(skillRoot.path, { withFileTypes: true });
     } catch (error) {
-      if (errorCode(error) === 'ENOENT') continue;
-      const reason = errorCode(error) === 'EACCES' ? 'Permission restricted.' : error instanceof Error && errorCode(error) === 'UNKNOWN' ? error.message : 'Could not read skill.';
-      snapshot.issues.push(`${entry.name}: ${reason}`);
+      const result = errorCode(error) === 'ENOENT' ? 'missing' : errorCode(error) === 'EACCES' ? 'restricted' : 'failed';
+      rootResults.push(result);
+      if (result !== 'missing') snapshot.issues.push(`${skillRoot.label}: folder could not be read.`);
+      continue;
+    }
+    rootResults.push('empty');
+    for (const entry of entries.sort((first, second) => first.name.localeCompare(second.name))) {
+      if (entry.name.startsWith('.') || definition.reservedSkills.includes(entry.name) || (!entry.isDirectory() && !entry.isSymbolicLink())) continue;
+      const directory = join(skillRoot.path, entry.name);
+      const skillPath = join(directory, 'SKILL.md');
+      try {
+        const info = await lstat(skillPath);
+        if (!info.isFile() && !info.isSymbolicLink()) continue;
+        const content = await readFile(skillPath, 'utf8');
+        const metadata = parseSkill(content, entry.name);
+        if (entry.isSymbolicLink() || info.isSymbolicLink()) metadata.notes.push('Reached through a user link; read only.');
+        const id = seen.has(entry.name) ? `${entry.name} (${skillRoot.label})` : entry.name;
+        if (seen.has(entry.name)) metadata.notes.push(`Also found in another ${definition.name} folder; the harness shows one of them.`);
+        seen.add(entry.name);
+        snapshot.skills.push({
+          id, folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
+          rootLabel: skillRoot.label, content, status: 'Not shared',
+        });
+      } catch (error) {
+        if (errorCode(error) === 'ENOENT') continue;
+        const reason = errorCode(error) === 'EACCES' ? 'Permission restricted.' : error instanceof Error && errorCode(error) === 'UNKNOWN' ? error.message : 'Could not read skill.';
+        snapshot.issues.push(`${entry.name}: ${reason}`);
+      }
     }
   }
-  snapshot.discovery = snapshot.skills.length ? 'ready' : snapshot.issues.length ? 'failed' : 'empty';
+  const worst = rootResults.find(result => result === 'restricted' || result === 'failed');
+  if (snapshot.skills.length) snapshot.discovery = 'ready';
+  else if (snapshot.issues.length) snapshot.discovery = worst ?? 'failed';
+  else if (rootResults.includes('empty')) snapshot.discovery = 'empty';
+  else {
+    snapshot.discovery = 'missing';
+    snapshot.issues.push('No user-wide skills folder found.');
+  }
   return snapshot;
 }

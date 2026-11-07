@@ -181,5 +181,5 @@ test('Finder-like PATH still yields bounded explicit candidates, never project p
 
 test('metadata parsing retains original values without interpreting Markdown as markup', () => {
   const content = '---\nname: "<script>unchanged</script>"\ndescription: "  Original spacing  "\n---\nBody';
-  assert.deepEqual(parseSkill(content, 'fallback'), { name: '<script>unchanged</script>', description: '  Original spacing  ', notes: [] });
+  assert.deepEqual(parseSkill(content, 'fallback'), { name: '<script>unchanged</script>', description: '  Original spacing  ', notes: [], hasFrontmatter: true, metadataKeys: [] });
 });
