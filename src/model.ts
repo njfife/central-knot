@@ -38,7 +38,7 @@ export function buildRows(home: HomeView, preview: Preview): Row[] {
 }
 
 /** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */
-export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder)).size;
+export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder.normalize('NFC').toLowerCase())).size;
 
 export const copiesIn = (row: Row, tool: HarnessId) => row.copies.filter(copy => copy.tool === tool);
 

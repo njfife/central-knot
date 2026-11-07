@@ -71,10 +71,11 @@ export function parseSkill(content: string, folder: string): Pick<Skill, 'name' 
 export function copilotProblem(content: string, folder: string): string | undefined {
   const fields = frontmatter(content);
   if (!fields) return undefined;
-  const name = fields.name ?? folder;
+  const name = 'name' in fields ? fields.name : folder;
   if (typeof name !== 'string') return 'its metadata name is not text';
   if (name.length > 64) return 'its name is longer than 64 characters';
   if (!/^[A-Za-z0-9][A-Za-z0-9._: -]*$/.test(name)) return 'its name must start with an ASCII letter or number and use only ASCII letters, numbers and simple separators';
+  if ('description' in fields && typeof fields.description !== 'string') return 'its metadata description is not text';
   if (typeof fields.description === 'string' && fields.description.length > 1024) return 'its description is longer than 1024 characters';
   return undefined;
 }
@@ -167,7 +168,7 @@ export async function discover(options: {
   }
   const worst = rootResults.find(result => result === 'restricted' || result === 'failed');
   if (snapshot.skills.length) snapshot.discovery = 'ready';
-  else if (snapshot.issues.length) snapshot.discovery = worst ?? 'failed';
+  else if (worst) snapshot.discovery = worst;
   else if (rootResults.includes('empty')) snapshot.discovery = 'empty';
   else {
     snapshot.discovery = 'missing';

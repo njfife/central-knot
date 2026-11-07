@@ -196,7 +196,7 @@ async function practiceFlow() {
   same('results', (await a.all('.result', 'e.dataset.outcome')).sort(), ['held', 'written', 'written']);
   await a.shot('practice-after-start');
   await a.click('#start');
-  check('repeat copies nothing', /Nothing needed copying/.test(await a.text('#announcement')), await a.text('#announcement'));
+  check('repeat copies nothing', /Nothing was copied|Nothing needed copying/.test(await a.text('#announcement')), await a.text('#announcement'));
   await a.click('#undo-all');
   same('Undo removes only its copies', [existsSync(join(practice, '.copilot/skills/release-notes')), existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.copilot/skills/standup'))], [false, false, true, true]);
   await a.expand();
@@ -294,6 +294,15 @@ async function realHomeFlow() {
   check('its source stays', existsSync(join(CLAUDE, 'read-only-inside/refs/a.md')));
   check('another copy stays', existsSync(join(CLAUDE, 'from-copilot')));
   same('nothing parked behind', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
+  // Undo never removes the only real folder, even once the destination is a link to its source.
+  const realFolder = tree(join(CLAUDE, 'scoped'));
+  rmSync(join(COPILOT, 'scoped'), { recursive: true });
+  symlinkSync(join(CLAUDE, 'scoped'), join(COPILOT, 'scoped'));
+  await a.click('#header-refresh');
+  await a.expand();
+  await a.run(`window.centralKnot.undo(['claude-cli', 'copilot-cli'], 'scoped', document.querySelector('.status-home').title)`);
+  same('the only real folder survives Undo', tree(join(CLAUDE, 'scoped')), realFolder);
+  rmSync(join(COPILOT, 'scoped'));
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
 

@@ -63,7 +63,7 @@ function planGroup(status: string, items: PlanItem[], preview: Preview) {
 function results() {
   if (!state.results.length && !state.stopped) return null;
   return h('section.section', {}, eyebrow('What happened'),
-    state.stopped && notice('danger', 'Start stopped', state.stopped),
+    state.stopped && state.stopped !== (state.preview?.gate as { reason?: string } | undefined)?.reason && notice('danger', 'Stopped', state.stopped),
     state.results.length > 0 && h('ul.results', { 'aria-label': 'What happened' }, state.results.map(result => {
       const outcome = outcomeOf(result.outcome);
       return h('li.card.result', { 'data-outcome': result.outcome },
@@ -90,7 +90,7 @@ export function sharePanel() {
   const groups = planGroups(preview.items);
   // The notice above carries the full reason when Start is held, so the footer stays one line.
   const message = state.busy ?? (gate.state === 'stopped' ? 'Start is stopped.' : !preview.access.allowed ? 'Start is off here.' : gate.state === 'needs-resume' ? 'Start will resume the record.' : preview.access.reason);
-  const blocked = !preview.access.allowed || gate.state === 'stopped' || !preview.items.length;
+  const blocked = !preview.access.allowed || gate.state === 'stopped' || !preview.items.some(item => item.state !== 'collision' && item.state !== 'held');
   const closeLabel = state.results.length || state.stopped ? 'Close' : 'Cancel';
   return [
     h('div.scroll.panel-body', { id: 'panel-body', tabindex: '-1' },

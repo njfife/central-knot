@@ -279,11 +279,12 @@ test('First writes: an interrupted write leaves no partial skill, and a retry co
     assert.deepEqual(insideDuringWrite, [], 'a tool loading this folder never sees a half-written copy');
     assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
     assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'no stage left behind');
-    await mkdir(join(box.home, '.copilot', '.ck-stage-from-a-real-crash', 'half'), { recursive: true });
+    await mkdir(join(box.home, '.copilot', '.ck-stage-00000000-0000-4000-8000-000000000000', 'half'), { recursive: true });
+    await mkdir(join(box.home, '.copilot', '.ck-stage-mine'));
     const retry = await start(ctx(box), both, []);
     assert.equal(retry.harnessWrites, 1);
     assert.deepEqual(await readdir(join(box.home, COPILOT)), ['solo']);
-    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'a stale stage is cleared');
+    assert.deepEqual((await readdir(join(box.home, '.copilot'))).sort(), ['.ck-stage-mine', 'skills'], 'its own stale stage is cleared; a user folder of a similar name is not');
   } finally { await box.cleanup(); }
 });
 
@@ -635,7 +636,7 @@ test('A stuck leftover does not stop later Starts', { skip: noPosix || process.g
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'solo');
-    const stuck = join(box.home, '.copilot', '.ck-stage-stuck');
+    const stuck = join(box.home, '.copilot', '.ck-stage-00000000-0000-4000-8000-000000000001');
     await mkdir(join(stuck, 'inner'), { recursive: true });
     await writeFile(join(stuck, 'inner/x'), 'x');
     await chmod(join(stuck, 'inner'), 0o555);
@@ -686,6 +687,7 @@ test('Undo keeps a copy whose source is gone, so the last copy is never removed'
     assert.equal(undone.harnessWrites, 0);
     assert.equal(await exists(join(box.home, COPILOT, 'solo/SKILL.md')), true);
     assert.match(undone.results[0].message, /source is gone/);
+    assert.equal(undone.preview.items[0].state, 'dont-share', 'per the card, even a copy that stays stops being managed');
   } finally { await box.cleanup(); }
 });
 
@@ -836,6 +838,153 @@ test('Start with nothing to share writes nothing, not even a record', async () =
     const result = await start(ctx(box), both, []);
     assert.equal(result.harnessWrites, 0);
     assert.equal(await exists(storeDirectory(box.home)), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo: a skills root replaced by a link to the source removes nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const source = await skill(box.home, CLAUDE, 'one');
+    await start(ctx(box), both, []);
+    await rm(join(box.home, COPILOT), { recursive: true });
+    await symlink(join(box.home, CLAUDE), join(box.home, COPILOT));
+    const before = await tree(source);
+    const undone = await undo(ctx(box), both, 'one');
+    assert.equal(undone.harnessWrites, 0);
+    assert.deepEqual(await tree(source), before, 'the only real folder survives');
+    assert.match(undone.results[0].message, /same folder/);
+  } finally { await box.cleanup(); }
+});
+
+for (const [label, damage] of [
+  ['emptied', async (source: string) => { await rm(join(source, 'SKILL.md')); }],
+  ['replaced by a file', async (source: string) => { await rm(source, { recursive: true }); await writeFile(source, 'x'); }],
+  ['a dangling link', async (source: string) => { await rm(source, { recursive: true }); await symlink(join(source, '..', 'nowhere'), source); }],
+] as const) {
+  test(`Undo: a source ${label} does not lose the last copy`, { skip: noPosix }, async () => {
+    const box = await sandbox();
+    try {
+      const source = await skill(box.home, CLAUDE, 'solo');
+      await start(ctx(box), both, []);
+      await damage(source);
+      const undone = await undo(ctx(box), both);
+      assert.equal(undone.harnessWrites, 0);
+      assert.equal(await exists(join(box.home, COPILOT, 'solo/SKILL.md')), true);
+    } finally { await box.cleanup(); }
+  });
+}
+
+test('A tool whose only skill is bad still receives copies', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, COPILOT, 'broken', '---\nname: [unclosed\n---\nb\n');
+    await skill(box.home, CLAUDE, 'good');
+    const result = await start(ctx(box), both, []);
+    assert.equal(result.harnessWrites, 1, JSON.stringify(result.preview.items));
+    assert.equal(await exists(join(box.home, COPILOT, 'good/SKILL.md')), true);
+  } finally { await box.cleanup(); }
+});
+
+test('Two separate one-tool Starts keep a collision', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'clash', text('clash', 'A'));
+    await skill(box.home, COPILOT, 'clash', text('clash', 'B'));
+    await start(ctx(box), ['claude-cli'], []);
+    const second = await start(ctx(box), ['copilot-cli'], []);
+    assert.equal(second.harnessWrites, 0);
+    assert.equal(state(second.preview, 'clash'), 'held');
+    assert.match(second.preview.items[0].reason, /different skill/);
+    const both_ = await buildPreview(ctx(box), both, []);
+    assert.equal(state(both_, 'clash'), 'collision');
+    assert.match(both_.items[0].diff!, /\+ B/);
+    assert.equal(both_.items[0].undoable, false);
+  } finally { await box.cleanup(); }
+});
+
+test('SKL-02: empty or non-text metadata Copilot CLI refuses is skipped', () => {
+  for (const line of ['description: 123', 'description: [a]', 'description:', 'name:', 'name: 12']) {
+    const text_ = line.startsWith('name') ? `---\n${line}\ndescription: x\n---\nb\n` : `---\nname: ok\n${line}\n---\nb\n`;
+    assert.ok(copilotProblem(text_, 'folder'), line);
+  }
+});
+
+test('Don\'t share ticked on an unreadable skill is remembered', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    const locked = await skill(box.home, CLAUDE, 'locked');
+    await writeFile(join(locked, 'ref.md'), 'x');
+    await chmod(join(locked, 'ref.md'), 0o000);
+    await skill(box.home, CLAUDE, 'other');
+    await start(ctx(box), both, ['locked']);
+    await chmod(join(locked, 'ref.md'), 0o644);
+    const next = await start(ctx(box), both, []);
+    assert.equal(state(next.preview, 'locked'), 'dont-share');
+    assert.equal(await exists(join(box.home, COPILOT, 'locked')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A crash then a one-tool Start claims no copy that is not there', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    const fault = (step: string) => { if (step === 'before-rename') throw new Error('fault: crash'); };
+    await assert.rejects(start(ctx(box, { fault }), both, []), /fault:/);
+    const one = await start(ctx(box), ['claude-cli'], []);
+    assert.equal(one.preview.items[0].status, 'Not shared');
+    const retry = await start(ctx(box), both, []);
+    assert.equal(retry.harnessWrites, 1, 'it copies, instead of reporting a lost copy');
+    assert.equal(retry.preview.items[0].status, 'Written');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo: a crash after its save leaves a state a second Undo finishes', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await start(ctx(box), both, []);
+    const record = await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8');
+    await rm(join(box.home, COPILOT, 'solo'), { recursive: true }); // Removed, then a crash before the state was saved.
+    await writeFile(join(storeDirectory(box.home), 'sync.json'), record);
+    const finished = await undo(ctx(box), both, 'solo');
+    assert.equal(state(finished.preview, 'solo'), 'dont-share');
+  } finally { await box.cleanup(); }
+});
+
+test('A read-only config folder still works, and Undo leaves its copy\'s modes alone on failure', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await mkdir(join(box.home, COPILOT), { recursive: true });
+    await chmod(join(box.home, '.copilot'), 0o555);
+    const started = await start(ctx(box), both, []);
+    assert.equal(started.harnessWrites, 1, JSON.stringify(started.results));
+    const undone = await undo(ctx(box), both);
+    assert.equal(undone.harnessWrites, 1, JSON.stringify(undone.results));
+    assert.deepEqual(await readdir(join(box.home, COPILOT)), []);
+    await chmod(join(box.home, '.copilot'), 0o755);
+  } finally { await box.cleanup(); }
+});
+
+test('Nothing workable: only collisions make no record and report the holds', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'clash', text('clash', 'A'));
+    await skill(box.home, COPILOT, 'clash', text('clash', 'B'));
+    const result = await start(ctx(box), both, []);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await exists(storeDirectory(box.home)), false);
+    assert.deepEqual(result.results.map(entry => entry.outcome), ['held']);
+  } finally { await box.cleanup(); }
+});
+
+test('A folder named .DS_Store is a real difference', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'twin');
+    const other = await skill(box.home, COPILOT, 'twin');
+    await mkdir(join(other, '.DS_Store'));
+    assert.equal(state(await buildPreview(ctx(box), both, []), 'twin'), 'collision');
   } finally { await box.cleanup(); }
 });
 

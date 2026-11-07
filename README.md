@@ -27,7 +27,7 @@ Mac packaging runs on the selected Apple Silicon Mac and produces `release/Centr
 
 Preview writes nothing. Start replans from disk, then:
 
-- copies a skill one selected tool lacks into that tool's own folder, byte-exact with file modes, without nested `.git`;
+- copies a skill one selected tool lacks into that tool's own folder, byte-exact with file modes, without nested `.git` or Finder's `.DS_Store` files;
 - takes over an identical copy, or tools already reading the same folder, with zero writes;
 - leaves same-name different skills separate and shows their diff as **Needs a decision**;
 - holds a skill containing a link, or a destination already occupied by something else, with the reason;
@@ -35,7 +35,7 @@ Preview writes nothing. Start replans from disk, then:
 
 State lives in one folder with no second copy, `.central-knot/` inside the selected home: `sync.json` and imported revisions under `items/`. Nathan accepted that limit on November 7, 2026, so owner-restore and overwritten-record rollback (AT-62(f), (g)) stay Unmet. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing.
 
-**Undo** removes only copies a Start created that still match their recorded hash. Changed copies, sources and imported bytes stay. The item becomes Don't share.
+**Undo** removes only copies a Start created that still match their recorded hash, and never the last real copy of a skill. Changed copies, sources and imported bytes stay. An item it removed becomes Don't share.
 
 ## Not here yet
 

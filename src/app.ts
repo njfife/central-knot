@@ -115,7 +115,8 @@ function summary(action: ActionResult, done: string, nothing: string): string {
   const failed = action.results.filter(result => result.outcome === 'failed').length;
   const failedText = failed ? `${failed} failed. See What happened.` : '';
   if (action.harnessWrites) return [done, failedText].filter(Boolean).join(' ');
-  return failedText || nothing;
+  const held = action.results.filter(result => result.outcome === 'held').length;
+  return failedText || (held ? `Nothing was copied. ${held} held. See What happened.` : nothing);
 }
 
 export async function startSharing() {
