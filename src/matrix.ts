@@ -18,7 +18,7 @@ const view = {
   draft: new Map<string, Draft>(),
   filter: 'all' as Filter,
   find: '',
-  /** The skill whose differing copies are open for comparison. */
+  /** The skill whose details are open under its row. */
   comparing: undefined as string | undefined,
 };
 
@@ -144,8 +144,39 @@ function cell(skill: SampleSkill, tool: HarnessId) {
       look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'ring-strong' : '') : null));
 }
 
-/** The decision for differing copies, opened in place under the row. */
-function compare(skill: SampleSkill) {
+const toolLine = (skill: SampleSkill, tool: HarnessId): string => {
+  const base = committedOf(skill.key);
+  const state = cellOf(skill, tool);
+  const was = cellOf(base, tool);
+  const version = skill.versions?.[tool];
+  if (skill.cannot?.[tool]) return skill.cannot[tool]!;
+  if (state === 'synced') return was === 'synced' ? 'Synced. Same copy as the other tool.' : 'Will be synced when you Apply all. It already has the same copy, so nothing needs copying.';
+  if (state === 'will-sync') return was === 'will-sync' ? 'Set to sync, but it has no copy yet. Central Knot writes one when you Apply all.' : 'You turned syncing on. Central Knot writes a copy when you Apply all.';
+  if (state === 'differs' || state === 'present-differs') return `Has a different copy${version ? ` (${version.lines}, ${version.changed})` : ''}. Choose which copy both tools use, below.`;
+  if (state === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : 'Has its own copy. Central Knot is not managing this skill.';
+  return skill.managed ? 'No copy, and syncing here is turned off.' : 'No copy.';
+};
+
+/** Everything about one skill, opened in place under its row. Differing copies add the choice of which one to use. */
+function details(skill: SampleSkill) {
+  const draft = view.draft.get(skill.key);
+  const differs = tools.some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
+  const status = skill.separate ? 'Unmanaged. Both copies are kept as they are.' : skill.managed
+    ? `Managed. Syncing to ${tools.filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]).join(' and ') || 'no tool'}.`
+    : 'Unmanaged. Central Knot leaves every copy alone.';
+  return h(`div.compare.details${differs ? '.details-differs' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
+    h('div.details-head', {},
+      h('p.details-description', {}, skill.description),
+      h('p.details-status', {}, status, draft ? h('span.details-pending', {}, ' Not applied yet.') : null)),
+    h('div.details-tools', {}, tools.map(tool => h('div.details-tool', {},
+      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', {}, `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}`)),
+      h('div.details-tool-body', {}, cell(skill, tool), h('span', {}, toolLine(skill, tool)))))),
+    differs ? compareChoices(skill) : null,
+    h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })));
+}
+
+/** The decision for differing copies. */
+function compareChoices(skill: SampleSkill) {
   const versions = skill.versions ?? {};
   const choice = (tool: HarnessId) => {
     const version = versions[tool];
@@ -155,13 +186,12 @@ function compare(skill: SampleSkill) {
       version ? h('span.version-text', {}, `“${version.text}”`) : null,
       h('span.version-effect', {}, `Replaces the copy in ${names[other(tool)]} on Apply all`));
   };
-  return h('div.compare', { role: 'region', 'aria-label': `Copies of ${skill.key} differ` },
+  return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The two copies of ${skill.key} differ. Which one should both tools use?`),
     h('div.compare-choices', {}, tools.map(choice),
       h('button.version.version-quiet', { type: 'button', id: `separate-${skill.key}`, onclick: () => resolve(skill.key, 'separate') },
         h('span.version-head', {}, h('strong', {}, 'Keep both as they are')),
-        h('span.version-effect', {}, 'Each tool keeps its own copy; Central Knot leaves this skill unmanaged'))),
-    h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })));
+        h('span.version-effect', {}, 'Each tool keeps its own copy; Central Knot leaves this skill unmanaged'))));
 }
 
 function row(skill: SampleSkill) {
@@ -169,15 +199,17 @@ function row(skill: SampleSkill) {
   const attention = syncOf(skill) === 'attention';
   const decided = draft?.resolve;
   return [
-    h(`div.ov-row${draft ? '.changed' : ''}${skill.managed ? '' : '.unmanaged'}`, { role: 'row', 'data-key': skill.key },
+    h(`div.ov-row${draft ? '.changed' : ''}${skill.managed ? '' : '.unmanaged'}${view.comparing === skill.key ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(view.comparing === skill.key), onclick: () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } },
       h('div.ov-name', { role: 'cell', title: skill.description },
+        h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } },
+          icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.key),
         attention ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', {}, decided === 'separate' ? 'Keeping both' : `Using ${names[decided]}`, smallAction('Undo', `undo-${skill.key}`, () => resolve(skill.key, undefined))) : null),
       h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.key}`, on => setManaged([skill.key], on))),
       tools.map(tool => cell(skill, tool)),
       h('div.ov-fill')),
-    view.comparing === skill.key ? compare(skill) : null,
+    view.comparing === skill.key ? details(skill) : null,
   ];
 }
 

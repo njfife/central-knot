@@ -1,5 +1,14 @@
 [
  {
+  "name": "6-details-sec-api-dark",
+  "actions": [
+   "#open-sec-api"
+  ],
+  "reset": [
+   "#close-sec-api"
+  ]
+ },
+ {
   "name": "3-use-all-in-copilot-dark",
   "actions": [
    "#lane-copilot-cli"
