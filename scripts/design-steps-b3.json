@@ -1,23 +1,53 @@
 [
  {
-  "name": "3-claude-menu-three-tools-dark",
-  "actions": [
-   "#tool-claude-cli"
-  ]
- },
- {
-  "name": "4-copilot-menu-three-tools-dark",
+  "name": "a-copilot-menu-dark",
   "actions": [
    "#tool-copilot-cli"
   ]
  },
  {
-  "name": "5-stopped-all-copilot-dark",
+  "name": "b-claude-menu-dark",
   "actions": [
-   "#menu-stop-copilot-cli"
+   "#tool-claude-cli"
+  ]
+ },
+ {
+  "name": "d-copilot-menu-conflicts-ticked-dark",
+  "actions": [
+   "#tool-copilot-cli",
+   "#menu-conflicts-copilot-cli-claude-cli"
+  ]
+ },
+ {
+  "name": "c-added-copilot-to-claude-with-conflicts-dark",
+  "actions": [
+   "#menu-add-copilot-cli-claude-cli"
+  ]
+ },
+ {
+  "name": "e-added-review-details-dark",
+  "actions": [
+   "#open-review"
+  ],
+  "reset": [
+   "#close-review",
+   "#discard"
+  ]
+ },
+ {
+  "name": "f-added-without-conflicts-dark",
+  "actions": [
+   "#tool-copilot-cli",
+   "#menu-add-copilot-cli-claude-cli"
   ],
   "reset": [
    "#discard"
+  ]
+ },
+ {
+  "name": "g-codex-menu-dark",
+  "actions": [
+   "#tool-codex-cli"
   ]
  }
 ]

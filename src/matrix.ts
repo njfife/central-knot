@@ -4,7 +4,7 @@
 import { applyManage, rerender, announce, shownPath, state } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
-import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
+import { applied, cellOf, comparedTools, copiesDiffer, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts } from './types.ts';
 
 const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
@@ -49,6 +49,8 @@ const view = {
   comparing: undefined as string | undefined,
   /** The tool whose header menu is open. */
   toolMenu: undefined as Tool | undefined,
+  /** Menu rows ("from>to") where Add also takes differing copies. Each menu opens with none. */
+  addConflicts: new Set<string>(),
   /** What the Skills page list is narrowed to. */
   listFind: '',
 };
@@ -288,8 +290,10 @@ function row(skill: SampleSkill) {
   ];
 }
 
+/** A cell's look, small, for keys and counts. */
+const swatch = (state: Cell, on: boolean) => h(`span.legend-cell.${cellLook[state].tone}${on ? '.cell-on' : ''}`, { 'aria-hidden': 'true' }, cellLook[state].glyph ? icon(cellLook[state].glyph!, state === 'present' ? 10 : 12, state === 'present' ? 'ring-strong' : '') : null);
+
 function legend() {
-  const swatch = (state: Cell, on: boolean) => h(`span.legend-cell.${cellLook[state].tone}${on ? '.cell-on' : ''}`, { 'aria-hidden': 'true' }, cellLook[state].glyph ? icon(cellLook[state].glyph!, state === 'present' ? 10 : 12, state === 'present' ? 'ring-strong' : '') : null);
   const entry = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend', { 'aria-label': 'Key' },
     h('span.legend-rule', {}, h('span.legend-cell.cell-synced.cell-on', { 'aria-hidden': 'true' }), 'Filled: syncing on'),
@@ -299,16 +303,104 @@ function legend() {
 
 // ---------- What differs between the options ----------
 
-/** Skills one tool has and the other lacks (or does not sync), ready to send across. */
-const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => list.filter(skill => {
-  const now = effective(skill);
-  return now.copies[from] !== undefined && !now.held && !now.cannot?.[to] && !now.cannot?.[from] && syncOf(now, toolList()) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
-});
-const send = (from: Tool, to: Tool, list: SampleSkill[]) => {
-  const keys = sendable(from, to, list).map(skill => skill.key);
-  for (const key of keys) edit(key, (skill, draft) => ({ managed: true, off: skill.off.filter(entry => entry !== to), resolve: draft?.resolve }));
+/** One tool's skills, sorted by what adding them to another tool would do there. Read from the page as it will be after Apply all. */
+interface AddPlan {
+  /** The target has no copy: one is copied in. */
+  fresh: SampleSkill[];
+  /** The target already has the same copy: adding only makes it managed. Nothing is copied. */
+  same: SampleSkill[];
+  /** Copies differ once it syncs: adding means every tool uses the source's copy. `replaced` are the tools whose copies give way. */
+  differ: { skill: SampleSkill; replaced: Tool[] }[];
+  /** Differing copies where the source's copy cannot be used everywhere it would sync. */
+  blocked: { skill: SampleSkill; reason: string }[];
+  /** Managed and syncing to both already: nothing to do. */
+  synced: SampleSkill[];
+  /** Cannot go there at all. */
+  skip: { skill: SampleSkill; reason: string }[];
+}
+
+/** The tools Apply all would write for a skill, exactly as the engine counts them: syncing and able to load it. */
+const syncingTools = (skill: SampleSkill) => toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]);
+/** Managed, with both tools on: the source's copy then counts. */
+const withBoth = (skill: SampleSkill, from: Tool, to: Tool): SampleSkill => ({ ...skill, managed: true, separate: false, off: skill.off.filter(tool => tool !== from && tool !== to) });
+
+function planAdd(from: Tool, to: Tool, list: SampleSkill[]): AddPlan {
+  const plan: AddPlan = { fresh: [], same: [], differ: [], blocked: [], synced: [], skip: [] };
+  for (const skill of list) {
+    const now = effective(skill);
+    if (now.copies[from] === undefined) continue;
+    const skip = now.held ? `Can’t be managed: ${now.held}` : now.cannot?.[to] ?? now.cannot?.[from] ?? (now.separate ? 'You chose to keep its differing copies as they are.' : undefined);
+    if (skip) { plan.skip.push({ skill: now, reason: skip }); continue; }
+    if (now.managed && !now.off.includes(from) && !now.off.includes(to) && !copiesDiffer(now)) { plan.synced.push(now); continue; }
+    const next = withBoth(now, from, to);
+    if (!copiesDiffer(next)) { (now.copies[to] === undefined ? plan.fresh : plan.same).push(now); continue; }
+    // The same rule Apply all uses: a block counts for a tool the skill would sync to.
+    const block = committedOf(skill.key).blocks?.[from]?.find(entry => syncingTools(next).includes(entry.tool));
+    if (block) plan.blocked.push({ skill: now, reason: block.reason });
+    else plan.differ.push({ skill: now, replaced: comparedTools(next).filter(tool => next.copies[tool] !== next.copies[from]) });
+  }
+  return plan;
+}
+
+/** Skills one tool can add to another without deciding between differing copies. */
+const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => { const plan = planAdd(from, to, list); return [...plan.fresh, ...plan.same]; };
+
+/**
+ * Adds a tool's skills to another as pending changes. New and same copies become managed with both tools on.
+ * With `conflicts`, differing copies also become managed, choosing the source's copy, tied to the copy seen now.
+ */
+function send(from: Tool, to: Tool, list: SampleSkill[], conflicts = false) {
+  const plan = planAdd(from, to, list);
+  for (const skill of [...plan.fresh, ...plan.same]) edit(skill.key, (now, draft) => ({ managed: true, off: withBoth(now, from, to).off, ...keepChoice(keepResolve(true, draft?.resolve), draft) }));
+  if (conflicts) for (const { skill } of plan.differ) edit(skill.key, (now, draft) => ({
+    managed: true, off: withBoth(now, from, to).off, resolve: from,
+    // As choosing a copy by hand: undoing the choice puts Managed back as it was.
+    prior: draft?.resolve ? draft.prior ?? committedOf(skill.key).managed : now.managed,
+    seen: committedOf(skill.key).hashes?.[from],
+  }));
   rerender();
-};
+}
+
+const skillNames = (list: SampleSkill[]) => list.slice(0, 12).map(skill => skill.name ?? skill.key).join(', ') + (list.length > 12 ? ` and ${list.length - 12} more` : '');
+const andList = (items: string[]) => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+
+/** One count in a menu row, drawn with the cell the target's column shows for those skills today. */
+function addGroup(state: Cell, on: boolean, count: number, word: string, title: string, extra = '') {
+  if (!count) return null;
+  const mark = swatch(state, on);
+  // No copy yet: a plus says one will be written, so it does not read as an empty checkbox.
+  if (state === 'absent') { mark.classList.add('add-new'); mark.append(icon('plus', 11)); }
+  return h(`span.add-group${extra}`, { title, 'data-group': word }, mark, h('strong', {}, String(count)), h('span', {}, word));
+}
+
+/** One other tool in a tool's menu: what adding this tool's skills there would do, and Add. */
+function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
+  const plan = planAdd(from, to, list);
+  const key = `${from}>${to}`;
+  const conflicts = view.addConflicts.has(key) && plan.differ.length > 0;
+  const count = plan.fresh.length + plan.same.length + (conflicts ? plan.differ.length : 0);
+  const replaced = toolList().filter(tool => plan.differ.some(entry => entry.replaced.includes(tool)));
+  const idle = !count && !plan.differ.length;
+  return h(`div.add-target${conflicts ? '.add-target-conflicts' : ''}`, { 'data-target': to },
+    h('div.tool-menu-row', {},
+      brandMark(to, 16), h('span.tool-menu-name', {}, names[to]),
+      idle ? h('span.tool-menu-count', {}, plan.synced.length ? 'Has them all' : 'Nothing to add') : null,
+      button({ variant: count ? 'outline' : 'ghost', size: 'small', label: count ? `Add ${count}` : 'Add', name: `Add all ${names[from]} skills to ${names[to]}: ${count}`, id: `menu-add-${from}-${to}`, disabled: !count,
+        onclick: () => { send(from, to, list, conflicts); view.toolMenu = undefined; rerender(); } })),
+    h('div.add-groups', {},
+      addGroup('absent', false, plan.fresh.length, 'new', `New in ${names[to]}: a copy is written there on Apply all.\n${skillNames(plan.fresh)}`),
+      addGroup('present', false, plan.same.length, 'same', `${names[to]} already has the same copy. Adding only makes them managed; nothing is copied.\n${skillNames(plan.same)}`),
+      addGroup('synced', true, plan.synced.length, 'synced', `Already managed and syncing to ${names[to]}. Nothing to do.\n${skillNames(plan.synced)}`, '.add-group-quiet'),
+      addGroup('cannot', false, plan.skip.length, 'can’t', plan.skip.slice(0, 12).map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.reason}`).join('\n'), '.add-group-quiet')),
+    plan.differ.length || plan.blocked.length ? h('div.add-conflict', {},
+      plan.differ.length ? h('span.add-group', { 'data-group': 'different', title: `${names[to]} or another tool it would sync to has a different copy.\n${skillNames(plan.differ.map(entry => entry.skill))}` },
+        swatch('differs', true), h('strong', {}, String(plan.differ.length)), h('span', {}, `different: use ${names[from]}'s copy`)) : null,
+      plan.blocked.length ? h('span.add-group.add-group-quiet', { 'data-group': 'blocked', title: plan.blocked.slice(0, 12).map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.reason}`).join('\n') },
+        swatch('differs', false), h('strong', {}, String(plan.blocked.length)), h('span', {}, `can’t use ${names[from]}'s copy`)) : null,
+      plan.differ.length ? toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}'s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`) : null) : null,
+    conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
+      h('span', {}, `You accept ${names[from]}'s copy: every tool ${plan.differ.length === 1 ? 'it syncs' : `these ${plan.differ.length} sync`} to will use it. The ${replaced.length === 1 && plan.differ.length === 1 ? 'copy' : 'copies'} in ${andList(replaced.map(tool => names[tool]))} ${replaced.length === 1 && plan.differ.length === 1 ? 'is' : 'are'} replaced; Central Knot's store keeps ${replaced.length === 1 && plan.differ.length === 1 ? 'it' : 'them'}.`)) : null);
+}
 
 /** Option B: a tool's header opens a menu offering to use all its skills in each other tool. It grows by one line per tool. */
 function toolMenu(tool: Tool, list: SampleSkill[]) {
@@ -320,13 +412,7 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
       button({ variant: 'ghost', size: 'small', label: 'Stop all', name: `Stop syncing all ${syncingHere.length} skills to ${names[tool]}`, id: `menu-stop-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })),
     h('p.tool-menu-note', {}, syncingHere.length ? `${syncingHere.length} managed ${syncingHere.length === 1 ? 'skill syncs' : 'skills sync'} here. Stop all keeps their copies but stops updating them.` : 'No managed skills sync here.'),
     h('p.tool-menu-label', {}, `Add all ${names[tool]} skills to`),
-    others(tool).map(target => {
-      const count = sendable(tool, target, list).length;
-      return h('div.tool-menu-row', {},
-        brandMark(target, 16), h('span.tool-menu-name', {}, names[target]),
-        h('span.tool-menu-count', {}, count ? `${count} to add` : 'Has them all'),
-        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Add all', name: `Add all ${names[tool]} skills to ${names[target]}`, id: `menu-add-${tool}-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
-    }));
+    others(tool).map(target => addRow(tool, target, list)));
 }
 
 /** Option A: the actions sit in the headers. A tool's header adds everything the other tool has; a group header manages the group. */
@@ -335,7 +421,7 @@ function toolHead(tool: Tool, list: SampleSkill[]) {
   if (variant === 'b') {
     const open = view.toolMenu === tool;
     return h('div.ov-cell.ov-tool-head.tool-head-b', { role: 'columnheader' },
-      h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: add its skills to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
+      h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: add its skills to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; view.addConflicts.clear(); rerender(); } },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
       open ? toolMenu(tool, list) : null);
   }
