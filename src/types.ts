@@ -65,6 +65,8 @@ export interface DesktopApi {
   applyMcp(changes: Change[], home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   applyAgents(changes: Change[], home: string): Promise<McpResult>;
+  /** The home last opened, else the practice copy. */
+  startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;

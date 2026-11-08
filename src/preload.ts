@@ -8,6 +8,7 @@ const api: DesktopApi = {
   history: () => ipcRenderer.invoke('history:list'),
   applyMcp: (changes, home) => ipcRenderer.invoke('mcp:apply', changes, home),
   writeClaude: (names, home) => ipcRenderer.invoke('mcp:write-claude', names, home),
+  startHome: () => ipcRenderer.invoke('discovery:start'),
   applyAgents: (changes, home) => ipcRenderer.invoke('agents:apply', changes, home),
   setSync: on => ipcRenderer.invoke('sync:set', on),
   syncNow: home => ipcRenderer.invoke('sync:now', home),

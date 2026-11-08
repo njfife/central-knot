@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
@@ -11,6 +11,7 @@ import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, 
 import { applyMcp, mcpView, restoreMcp } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
+import { trayIconPng } from './trayicon.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -69,6 +70,76 @@ async function saveSyncSetting(on: boolean) {
   syncOn = on;
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
+  refreshTray();
+}
+
+// ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
+
+/** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean }
+const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
+let appSettings: AppSettings = {};
+async function loadAppSettings() { try { appSettings = JSON.parse(await readFile(appSettingsPath(), 'utf8')) ?? {}; } catch { appSettings = {}; } }
+async function saveAppSettings(change: Partial<AppSettings>) {
+  appSettings = { ...appSettings, ...change };
+  if (smoke) return;
+  await mkdir(app.getPath('userData'), { recursive: true });
+  await writeFile(appSettingsPath(), `${JSON.stringify(appSettings, null, 2)}\n`);
+}
+/** A login item is registered only for an installed app, so a test or dev build never adds itself to sign-in. */
+const canStartAtSignIn = () => app.isPackaged && !smoke && (process.platform !== 'darwin' || app.getPath('exe').startsWith('/Applications/'));
+function applySignIn() {
+  if (canStartAtSignIn()) app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: ['--hidden'] });
+}
+const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
+
+let tray: Tray | undefined;
+let quitting = false;
+/** Sync changed something while the window was closed or in the background: the menu bar icon shows it until seen. */
+let unseen = false;
+function showWindow() {
+  if (!app.isReady()) return;
+  if (!window || window.isDestroyed()) { createWindow(true); return; }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+function trayMenu() {
+  const where = current?.label ?? 'No home open yet';
+  return Menu.buildFromTemplate([
+    { label: 'Open Central Knot', click: showWindow },
+    { type: 'separator' },
+    { label: unseen ? 'Sync made changes. Open to see them.' : `${syncOn ? 'Sync on' : 'Sync off'} · ${where}`, enabled: false },
+    { label: 'Sync', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+    { label: 'Sync now', enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+    { type: 'separator' },
+    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: canStartAtSignIn() && appSettings.startAtSignIn !== false, enabled: canStartAtSignIn(),
+      click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
+    { type: 'separator' },
+    { label: 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
+  ]);
+}
+function refreshTray() {
+  if (!tray) return;
+  tray.setContextMenu(trayMenu());
+  tray.setToolTip(unseen ? 'Central Knot: sync made changes' : 'Central Knot');
+  if (process.platform === 'darwin') tray.setTitle(unseen ? '•' : '');
+}
+/** Menu bar actions take their turn like the page's, then tell the page. */
+async function fromTray(work: () => Promise<void>) {
+  const next = queue.then(work);
+  queue = next.catch(() => undefined);
+  await next.catch(() => undefined);
+  refreshTray();
+  if (window && !window.isDestroyed()) window.webContents.send('sync:changed');
+}
+function makeTray() {
+  if (smoke || tray) return;
+  const image = nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 });
+  image.setTemplateImage(true);
+  tray = new Tray(image);
+  tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
+  refreshTray();
 }
 
 /** What background passes did since the page last read, so no notice is lost between reads. */
@@ -143,6 +214,7 @@ function background() {
     pendingResults.push(...result.results);
     pendingNotices.push(...(result.notices ?? []));
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
+    if (!window.isDestroyed() && (!window.isVisible() || !window.isFocused())) { unseen = true; refreshTray(); }
   });
   queue = work.catch(() => undefined);
 }
@@ -234,18 +306,36 @@ async function pluginsView(fresh?: string): Promise<PluginsView> {
   return { home: current!.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!plugins.binaries[tool]])), canWrite: access.allowed, reason: access.allowed ? undefined : access.reason, marketplaces };
 }
 
-async function selectHome(mode: HomeMode): Promise<HomeView | null> {
+async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView | null> {
   let next: NonNullable<typeof current>;
   if (mode === 'custom') {
-    const selection = await dialog.showOpenDialog(window, { title: 'Choose a simulated home folder', properties: ['openDirectory'] });
-    if (selection.canceled) return null;
-    next = { mode, home: selection.filePaths[0], label: 'Selected folder' };
+    let folder = remembered;
+    if (!folder) {
+      const selection = await dialog.showOpenDialog(window, { title: 'Choose a simulated home folder', properties: ['openDirectory'] });
+      if (selection.canceled) return null;
+      folder = selection.filePaths[0];
+    }
+    next = { mode, home: folder, label: 'Selected folder' };
   } else if (mode === 'actual') next = { mode, home: homedir(), label: 'This Mac’s home' };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;
   current = next;
-  try { const shown = await view(); void startWatching(); return shown; } catch (error) { current = previous; throw error; }
+  try {
+    const shown = await view();
+    void startWatching();
+    await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
+    refreshTray();
+    return shown;
+  } catch (error) { current = previous; throw error; }
+}
+
+/** At launch: the home last opened, else the practice copy. A remembered folder that is gone falls back to the practice copy. */
+async function startHome(): Promise<HomeView | null> {
+  const last = smoke ? undefined : appSettings.home;
+  if (last?.mode === 'actual') return selectHome('actual');
+  if (last?.mode === 'custom' && last.path) { try { await access(last.path); return await selectHome('custom', last.path); } catch { /* gone */ } }
+  return selectHome('fixture');
 }
 
 const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is HarnessId => harnessIds.includes(id as HarnessId)) : []);
@@ -261,23 +351,41 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
   });
 }
 
-if (!smoke && !app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
-
-app.whenReady().then(async () => {
-  await loadSyncSetting();
+/** The main window. Closing it hides it (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
+let loading: Promise<void> = Promise.resolve();
+function createWindow(show: boolean) {
   window = new BrowserWindow({
-    width: 1280, height: 800, minWidth: 860, minHeight: 560, show: !smoke,
+    width: 1280, height: 800, minWidth: 860, minHeight: 560, show,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
     webPreferences: { preload: join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
+  window.on('close', event => { if (quitting || !tray) return; event.preventDefault(); window.hide(); });
+  window.on('focus', () => { if (unseen) { unseen = false; refreshTray(); } });
+  const design = process.argv.find(arg => arg.startsWith('--design-preview'));
+  loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
+}
+
+if (!smoke && !app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', showWindow);
+app.on('activate', showWindow);
+app.on('before-quit', () => { quitting = true; });
+// A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
+
+app.whenReady().then(async () => {
+  await loadSyncSetting();
+  await loadAppSettings();
+  applySignIn();
+  makeTray();
+  createWindow(!smoke && !startedHidden());
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
     return selectHome(mode as HomeMode);
   });
+  handle('discovery:start', async () => startHome());
   handle('discovery:refresh', async () => (current ? view() : null));
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
@@ -355,7 +463,7 @@ app.whenReady().then(async () => {
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
-  await window.loadFile(join(__dirname, 'index.html'), process.argv.some(arg => arg.startsWith('--design-preview')) ? { query: { design: process.argv.find(arg => arg.startsWith('--design-preview'))!.split('=')[1] ?? 'b3' } } : undefined);
+  await loading;
   if (smoke) {
     try {
       const result = await window.webContents.executeJavaScript(`new Promise((resolveResult, rejectResult) => {
@@ -379,5 +487,5 @@ app.whenReady().then(async () => {
   }
 }).catch(() => { console.error('Central Knot could not open.'); app.exit(1); });
 
-app.on('window-all-closed', () => { stopWatching(); app.quit(); });
+app.on('window-all-closed', () => { if (tray && !quitting) return; stopWatching(); app.quit(); });
 app.on('will-quit', () => { stopWatching(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });

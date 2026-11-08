@@ -87,6 +87,12 @@ export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', 
   if (view) { accept(view); announce('Read complete. Nothing changed.'); } else announce('');
 });
 
+/** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
+export const startHome = () => busy('Reading user-wide skills…', async () => {
+  const view = await api().startHome();
+  if (view) { accept(view); announce('Read complete.'); } else announce('');
+});
+
 export const readAgain = () => busy('Reading user-wide skills…', async () => {
   const view = await api().refresh();
   if (!view) return;

@@ -386,3 +386,21 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
 - AT-68 session proofs (they need Nathan's sign-ins).
 
 **Validation.** 141 unit tests (6 new: two-way edits, one-way limits and stopping, preserving updates with tricky TOML, a collision choice, deletion with settle and Restore, a missing folder, unreadable files). Linux e2e 118/118, including the Agents page.
+
+## Running in the background (7a, no plugin part), November 8, 2026
+
+- **Menu bar (PLT-04).** Central Knot has a menu bar icon (two linked rings, a template image) with these items:
+  - Open Central Knot;
+  - a status line: Sync on or off, and the home;
+  - a Sync checkbox and Sync now, which take their turn in the same queue as the page;
+  - Start at sign-in;
+  - Quit Central Knot.
+- **Closing the window hides it,** and watching and polling go on. Quit, Cmd+Q, SIGTERM and SIGINT stop everything. If the window is ever gone, Open makes a new one.
+- **Unseen changes (D-36).** When sync changes something while the window is hidden or in the background, the icon shows a dot and the menu says so. Focusing the window clears it.
+- **Start at sign-in (PLT-03).**
+  - On by default, but registered only for an installed app in `/Applications`. A test or dev build never adds itself; the menu item says to move the app first.
+  - A start at sign-in opens hidden (`--hidden`, or `wasOpenedAtLogin` where macOS reports it).
+- **The last home is reopened** at launch (`userData/app-settings.json`), so a start at sign-in syncs it again. A remembered folder that is gone falls back to the practice copy.
+- **Found on the way:** a page-made `window.close()` destroys the window without a `close` event (probed in Electron 45). A real close only hides it.
+
+**Validation.** 141 unit tests. Linux e2e 120/120: with the window destroyed, the app keeps running and an agent edit spreads in the background. On macOS, the e2e also checks that a new launch opens the last home.

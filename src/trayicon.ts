@@ -1,0 +1,2 @@
+// The menu bar icon: two linked rings, black on transparent, used as a macOS template image at 2x (32 px for 16 pt).
+export const trayIconPng = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAuUlEQVR42u2W4QmEMAyFO4IjdJSOdCO4iaM4QkdwhI5wVyE/HtHURjlSIR8ElGdCksa2ITiO8yJStRksdWqPmChgqfY9sXKhzRTjFrFaFoJrLFMsdeUbBNmfP9TaSai6kJboW+6v6sQKzgtz5toC7ysrQtIuh01ykjRMKjWK6RpOzDp2apF1JXRqp2wwPBotw3prtAOtbFsadkejjZeA+RKYD6H5b2i+EQ2xFZsfRkMcx0NcSBzH+Ts/9dvaZTvUT+kAAAAASUVORK5CYII=';

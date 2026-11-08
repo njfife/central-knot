@@ -1,6 +1,6 @@
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
@@ -138,4 +138,4 @@ document.addEventListener('keydown', event => {
   }
 });
 
-void loadHome('fixture');
+void startHome();

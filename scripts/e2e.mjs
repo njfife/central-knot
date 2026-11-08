@@ -432,6 +432,16 @@ async function practiceFlow() {
   check('Remove from list forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.click('#nav-overview');
   same('no page errors, practice', a.pageErrors, []);
+  // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
+  // destroys the window outright (a real close only hides it), which is the stronger case: background work needs no window.
+  await a.run(`setTimeout(() => window.close(), 50), true`);
+  await wait(800);
+  same('with the window gone the app keeps running', a.child.exitCode, null);
+  const notesToml = join(practice, '.codex/agents/release-notes.toml');
+  writeFileSync(notesToml, readFileSync(notesToml, 'utf8').replace('one line each.', 'one line each. Edited with no window.'));
+  let spreadClosed = false;
+  for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Edited with no window.'); }
+  check('an agent edit spreads in the background with no window', spreadClosed);
   await a.quit();
 }
 
@@ -494,6 +504,11 @@ async function realHomeFlow() {
   await a.shot('real-applied');
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
+  // The next launch opens the home last used, so a start at sign-in syncs it again.
+  const again = await launch();
+  await again.settle();
+  same('a new launch opens the home last used', await again.run(`document.querySelector('.status-home')?.title`), HOME);
+  await again.quit();
 
   const record = join(HOME, '.central-knot/sync.json');
   const good = readFileSync(record, 'utf8');
