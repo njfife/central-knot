@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
@@ -131,15 +131,34 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
 
 const knownTool = (value: unknown) => typeof value === 'string' && Object.hasOwn(harnesses, value);
 
+/** Where a path really is, or would be once made: its nearest existing folder resolved, plus the rest. Case-folded where the disk ignores case. */
+export async function landingOf(path: string): Promise<string | undefined> {
+  const rest: string[] = [];
+  let current = resolvePath(path);
+  for (;;) {
+    try {
+      const real = join(await realpath(current), ...rest.reverse());
+      return process.platform === 'linux' ? real : real.toLowerCase();
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT' && errorCode(error) !== 'ENOTDIR') return undefined;
+      const parent = dirname(current);
+      if (parent === current) return undefined;
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
+
 function validItems(items: unknown): boolean {
   if (typeof items !== 'object' || items === null || Array.isArray(items)) return false;
   return Object.values(items).every(item => typeof item === 'object' && item !== null
     && typeof item.name === 'string' && typeof item.hash === 'string' && (item.state === 'shared' || item.state === 'dont-share')
+    && typeof item.startId === 'string' && typeof item.observedAt === 'string'
     && (item.off === undefined || (Array.isArray(item.off) && item.off.every(knownTool)))
     && (item.separate === undefined || typeof item.separate === 'boolean')
     && (item.use === undefined || (typeof item.use === 'object' && item.use !== null && knownTool(item.use.tool) && typeof item.use.hash === 'string'))
     && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy === 'object' && copy !== null
-      && typeof copy.directory === 'string' && typeof copy.hash === 'string' && knownTool(copy.harness)
+      && typeof copy.directory === 'string' && isAbsolute(copy.directory) && typeof copy.hash === 'string' && knownTool(copy.harness)
       && (copy.status === 'pending' || copy.status === 'written') && typeof copy.created === 'boolean'));
 }
 
@@ -151,7 +170,8 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
     const record = JSON.parse(text) as SyncRecord;
     if (!Number.isInteger(record?.formatVersion) || record.formatVersion < 1) return { problem: 'The sync record is damaged.' };
     if (record.formatVersion > FORMAT_VERSION) return { problem: 'The sync record was written by a newer Central Knot.' };
-    if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || !validItems(record.items)) return { problem: 'The sync record is damaged.' };
+    if (typeof record.generation !== 'string' || typeof record.owner !== 'string' || !validItems(record.items)
+      || ![record.lastStartId, record.activeStartId].every(id => id === undefined || typeof id === 'string')) return { problem: 'The sync record is damaged.' };
     // No prototype: a skill may be called constructor or __proto__.
     record.items = Object.assign(Object.create(null), record.items);
     return { record };
@@ -204,17 +224,19 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
   const realHome = (await real(context.realHome)) ?? context.realHome;
-  const protectedRoots = (await Promise.all(['.claude', '.copilot', '.agents'].map(name => real(join(realHome, name))))).filter((path): path is string => !!path);
+  const protectedRoots = await Promise.all(['.claude', '.copilot', '.agents'].map(async name => (await real(join(realHome, name))) ?? join(realHome, name)));
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
   // A folder inside a real configuration folder would put copies and a record among the real ones.
   if ([...protectedRoots, join(realHome, '.central-knot')].some(root => inside(home, root))) return refused;
-  for (const id of Object.keys(harnesses) as HarnessId[]) {
-    for (const path of [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)]) {
-      const resolved = await real(path);
-      if (resolved && protectedRoots.some(root => inside(resolved, root))) return refused;
-    }
+  // Every folder this home would write, followed through links, even where it does not exist yet.
+  const fold = (path: string) => (process.platform === 'linux' ? path : path.toLowerCase());
+  const guarded = [...protectedRoots, join(realHome, '.central-knot')].map(fold);
+  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...(Object.keys(harnesses) as HarnessId[]).flatMap(id => [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)])];
+  for (const path of writes) {
+    const resolved = await landingOf(path);
+    if (!resolved || guarded.some(root => inside(resolved, root))) return refused;
   }
   return { allowed: true, reason: 'Disposable home: Apply all writes only inside it.' };
 }

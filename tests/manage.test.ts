@@ -240,7 +240,10 @@ test('A different copy Copilot reads in the shared .agents folder is shown, neve
     assert.equal(view.extra[0].writable, false);
     const result = await applyChanges(ctx(box), [{ ...manage('dup'), use: 'claude-cli' }]);
     assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('dup', 'B'), 'the shared folder is never changed');
-    assert.ok(result.results.some(entry => /folder other tools share/.test(entry.message)), JSON.stringify(result.results));
+    assert.ok(result.results.some(entry => /\.agents\/skills\/dup, which Central Knot does not change/.test(entry.message)), JSON.stringify(result.results));
+    assert.equal(result.harnessWrites, 0);
+    assert.equal((await facts(box, 'dup')).managed, false, 'a choice that cannot be carried out changes nothing, not even Managed');
+    assert.deepEqual(view.choiceBlocks['claude-cli']?.map(block => block.tool), ['copilot-cli'], 'the page is told before anyone chooses');
   } finally { await box.cleanup(); }
 });
 
@@ -629,5 +632,83 @@ test('Another folder inside a real configuration folder stays preview-only', { s
     }
     const elsewhere = await mkdtemp(join(box.base, 'sim-'));
     assert.equal((await manageView({ ...ctx(box), home: elsewhere, read: read(elsewhere), realHome })).access.allowed, true);
+  } finally { await box.cleanup(); }
+});
+
+// ---------- Break-it round 3 re-check ----------
+
+test('A skills folder not made yet is still refused when it would land in a shared folder', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'a');
+    await mkdir(join(box.home, '.agents'), { recursive: true });
+    await rm(join(box.home, '.copilot'), { recursive: true });
+    await symlink(join(box.home, '.agents'), join(box.home, '.copilot'));
+    const view = await manageView(ctx(box));
+    assert.match(view.writes['copilot-cli']?.blocked ?? '', /same folder/);
+    const result = await applyChanges(ctx(box), [manage('a')]);
+    assert.equal(result.harnessWrites, 0, JSON.stringify(result.results));
+    assert.equal(await exists(join(box.home, '.agents/skills/a')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Two tools whose skills folders would be one folder are both refused', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'a');
+    const context = ctx(box, { overrides: { 'copilot-cli': join(box.home, '.claude') } });
+    const view = await manageView(context);
+    assert.ok(view.writes['copilot-cli']?.blocked && view.writes['claude-cli']?.blocked, JSON.stringify(view.writes));
+    const result = await applyChanges(context, [manage('a')]);
+    assert.equal(result.harnessWrites, 0, JSON.stringify(result.results));
+  } finally { await box.cleanup(); }
+});
+
+test('A copy another tool could not load is not offered, and choosing it anyway changes nothing', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'loose', 'No frontmatter here.\n');
+    await skill(box.home, COPILOT, 'loose', text('loose'));
+    const view = await facts(box, 'loose');
+    assert.match(view.choiceBlocks['claude-cli']?.[0]?.reason ?? '', /could not load/);
+    assert.deepEqual(view.choiceBlocks['copilot-cli'], []);
+    const result = await applyChanges(ctx(box), [{ key: 'loose', managed: true, off: [], use: 'claude-cli' }]);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await readFile(join(box.home, COPILOT, 'loose/SKILL.md'), 'utf8'), text('loose'), 'Copilot keeps the copy it can load');
+    assert.equal((await facts(box, 'loose')).managed, false);
+  } finally { await box.cleanup(); }
+});
+
+test('A choice is tied to the copy the person saw: changed or gone since means nothing changes', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'pick', text('pick', 'Claude as seen.'));
+    await skill(box.home, COPILOT, 'pick', text('pick', 'Copilot.'));
+    const seen = (await facts(box, 'pick')).copies['claude-cli']!.hash;
+    await writeFile(join(box.home, CLAUDE, 'pick/SKILL.md'), text('pick', 'Claude edited later.'));
+    const changed = await applyChanges(ctx(box), [{ key: 'pick', managed: true, off: [], use: 'claude-cli', useHash: seen }]);
+    assert.equal(changed.harnessWrites, 0);
+    assert.match(changed.results[0]?.message ?? '', /changed since you chose it/);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pick/SKILL.md'), 'utf8'), text('pick', 'Copilot.'));
+    assert.equal((await facts(box, 'pick')).managed, false, 'not even Managed changes');
+    await rm(join(box.home, COPILOT, 'pick'), { recursive: true });
+    const gone = await applyChanges(ctx(box), [{ key: 'pick', managed: true, off: [], use: 'copilot-cli' }]);
+    assert.match(gone.results[0]?.message ?? '', /is gone/);
+    assert.equal((await facts(box, 'pick')).managed, false);
+    assert.equal((await applyChanges(ctx(box), [])).harnessWrites, 0, 'and the next read copies nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('Another folder whose .central-knot links to the real one stays preview-only', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    await mkdir(join(realHome, '.central-knot'), { recursive: true });
+    await symlink(join(realHome, '.central-knot'), join(box.home, '.central-knot'));
+    assert.equal((await manageView(ctx(box, { realHome }))).access.allowed, false);
+    await rm(join(box.home, '.central-knot'));
+    await mkdir(join(realHome, '.agents'), { recursive: true });
+    await symlink(join(realHome, '.agents'), join(box.home, '.agents'));
+    assert.equal((await manageView(ctx(box, { realHome }))).access.allowed, false, 'a linked .agents too');
   } finally { await box.cleanup(); }
 });

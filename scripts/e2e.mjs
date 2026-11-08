@@ -278,6 +278,10 @@ async function practiceFlow() {
     same('undoing the choice puts Managed back', await switchOn(a, 'notes'), !notesManaged);
   } else check('notes offers a copy choice here', false, await a.text('.ov-row[data-key="notes"]'));
   if (await a.exists('#discard')) await a.click('#discard');
+  // Open details never repeat an id.
+  await a.click('#open-review');
+  same('no duplicate ids with details open', await a.run(`(() => { const ids = [...document.querySelectorAll('[id]')].map(node => node.id); return ids.filter((id, index) => ids.indexOf(id) !== index); })()`), []);
+  await a.click('#open-review');
   // Slash finds on the Skills page too.
   await a.click('#nav-skills');
   await a.run(`document.activeElement?.blur()`);

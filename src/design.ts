@@ -23,6 +23,10 @@ export interface SampleSkill {
   separate?: boolean;
   /** Why this skill cannot be managed at all. */
   held?: string;
+  /** For each tool's copy, what stops every tool from using it, by the tool concerned. */
+  blocks?: Partial<Record<Tool, { tool: Tool; reason: string }[]>>;
+  /** Each tool's main copy's content ID, to tie a choice to what was seen. */
+  hashes?: Partial<Record<Tool, string>>;
   /** Where each copy lives, for the details. */
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */

@@ -16,6 +16,7 @@ const ago = (iso: string) => {
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
   key: facts.key, name: facts.name, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate,
+  blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
   extra: facts.extra.map(extra => ({ tool: extra.tool, directory: extra.directory, summary: extra.summary, writable: extra.writable, same: extra.hash === facts.copies[extra.tool]?.hash })),
@@ -37,7 +38,7 @@ const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
 type Resolution = Tool | 'separate';
 /** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
-interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean }
+interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string }
 
 const view = {
   committed: sample.map(skill => ({ ...skill })),
@@ -87,14 +88,15 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
 const keepResolve = (managed: boolean, resolve?: Resolution) => (managed ? (resolve === 'separate' ? undefined : resolve) : undefined);
 
 const keepPrior = (resolve: Resolution | undefined, draft?: Draft) => (resolve ? draft?.prior : undefined);
+const keepChoice = (resolve: Resolution | undefined, draft?: Draft) => ({ resolve, prior: keepPrior(resolve, draft), seen: resolve ? draft?.seen : undefined });
 
 function setManaged(keys: string[], managed: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => { const resolve = keepResolve(managed, draft?.resolve); return { managed, off: skill.off, resolve, prior: keepPrior(resolve, draft) }; });
+  for (const key of keys) edit(key, (skill, draft) => { return { managed, off: skill.off, ...keepChoice(keepResolve(managed, draft?.resolve), draft) }; });
   rerender();
 }
 
 function setTool(keys: string[], tool: Tool, on: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; const resolve = keepResolve(managed, draft?.resolve); return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve, prior: keepPrior(resolve, draft) }; });
+  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], ...keepChoice(keepResolve(managed, draft?.resolve), draft) }; });
   rerender();
 }
 
@@ -102,7 +104,7 @@ function resolve(key: string, choice: Resolution | undefined) {
   edit(key, (skill, draft) => {
     const prior = draft?.resolve ? draft.prior ?? committedOf(key).managed : skill.managed;
     const off = draft?.off ?? skill.off;
-    return choice ? { managed: choice !== 'separate', off, resolve: choice, prior } : { managed: prior, off };
+    return choice ? { managed: choice !== 'separate', off, resolve: choice, prior, seen: choice === 'separate' ? undefined : committedOf(key).hashes?.[choice] } : { managed: prior, off };
   });
   view.comparing = undefined;
   rerender();
@@ -111,7 +113,7 @@ function resolve(key: string, choice: Resolution | undefined) {
 function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
-    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve })) as Change[];
+    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen })) as Change[];
     void applyManage(changes, () => view.draft.clear());
     return;
   }
@@ -185,7 +187,7 @@ function changeBar(bulk = true) {
   return h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
 }
 
-function cell(skill: SampleSkill, tool: Tool) {
+function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const base = committedOf(skill.key);
   const state = cellOf(skill, tool);
   const on = skill.managed && !skill.off.includes(tool);
@@ -197,7 +199,7 @@ function cell(skill: SampleSkill, tool: Tool) {
   const action = state === 'cannot' ? '' : differs ? 'Compare the copies' : on ? `Stop syncing to ${names[tool]}` : `Sync to ${names[tool]}`;
   const text = skill.cannot?.[tool] ?? `${names[tool]}: ${look.label}${pending ? ' (not applied yet)' : ''}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
-    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${view.comparing === skill.key ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
+    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'ring-strong' : '') : null));
 }
@@ -233,7 +235,7 @@ function details(skill: SampleSkill, closable = true) {
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     h('div.details-tools', {}, toolList().map(tool => h('div.details-tool', {},
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
-      h('div.details-tool-body', {}, cell(skill, tool), h('span', {}, toolLine(skill, tool)))))),
+      h('div.details-tool-body', {}, cell(skill, tool, true), h('span', {}, toolLine(skill, tool)))))),
     differs ? compareChoices(skill) : null,
     closable ? h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })) : null);
 }
@@ -243,6 +245,12 @@ function compareChoices(skill: SampleSkill) {
   const versions = skill.versions ?? {};
   const choice = (tool: Tool) => {
     const version = versions[tool];
+    // A block counts only for a tool it syncs to that can load the skill.
+    const block = skill.blocks?.[tool]?.find(entry => !skill.off.includes(entry.tool) && !skill.cannot?.[entry.tool]);
+    if (block) return h('button.version.version-blocked', { type: 'button', id: `use-${skill.key}-${tool}`, disabled: true, title: block.reason },
+      h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${names[tool]}'s copy`)),
+      version ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
+      h('span.version-effect.version-why', {}, icon('circle-alert', 12, 'tone-warning'), block.reason));
     return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, onclick: () => resolve(skill.key, tool) },
       h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${names[tool]}'s copy`)),
       version ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
@@ -386,6 +394,9 @@ function notices() {
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
   else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
+  const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written');
+  if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
   const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written').map(result => result.item))];
   if (caughtNames.length && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
     h('span.band-text', {}, `Caught up: copied ${caughtNames.slice(0, 4).join(', ')}${caughtNames.length > 4 ? ` and ${caughtNames.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`)));
@@ -396,8 +407,13 @@ function notices() {
 function forgetOtherHomes() {
   if (!designMode && state.home?.home !== draftHome) { view.draft.clear(); view.comparing = undefined; draftHome = state.home?.home; }
   // A change for a skill that is no longer there has nothing to apply to.
-  const keys = new Set(committedList().map(skill => skill.key));
-  for (const key of [...view.draft.keys()]) if (!keys.has(key)) view.draft.delete(key);
+  // So is a choice of a copy that has gone or changed since it was chosen.
+  const byKey = new Map(committedList().map(skill => [skill.key, skill]));
+  for (const [key, draft] of [...view.draft]) {
+    const skill = byKey.get(key);
+    const stale = draft.resolve && draft.resolve !== 'separate' && skill?.hashes && skill.hashes[draft.resolve] !== draft.seen;
+    if (!skill || stale) { view.draft.delete(key); if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`); }
+  }
 }
 
 export function designOverview() {

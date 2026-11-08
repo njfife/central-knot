@@ -62,7 +62,7 @@ async function view(): Promise<HomeView> {
   const snapshots = await read();
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots,
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'failed')),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message)))),
   };
 }
 
@@ -113,7 +113,7 @@ app.whenReady().then(async () => {
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
-    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use))).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use }));
+    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));

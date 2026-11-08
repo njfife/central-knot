@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, realpath, rename, stat } from 'node:fs/promises
 import { dirname, join } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
-  FORMAT_VERSION, clearStaleStages, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
+  FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, syncGate, targetFor, writeAccess, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, ManageView, Skill, SkillFacts, Snapshot, ToolCopy } from './types.ts';
@@ -30,7 +30,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       let entry = map.get(key);
       if (!entry) {
         const recorded = record?.items[key];
-        entry = { facts: { key, name: skill.folder, description: skill.description, copies: {}, extra: [], managed: recorded?.state === 'shared', off: recorded?.off ?? [], cannot: {}, separate: recorded?.separate === true }, skills: {}, locations: [] };
+        entry = { facts: { key, name: skill.folder, description: skill.description, copies: {}, extra: [], managed: recorded?.state === 'shared', off: recorded?.off ?? [], cannot: {}, separate: recorded?.separate === true, choiceBlocks: {} }, skills: {}, locations: [] };
         map.set(key, entry);
       }
       entry.facts.description ||= skill.description;
@@ -70,8 +70,38 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       try { await lstat(directory); entry.facts.cannot[tool] = `${definition.name} already has something at ${directory} that is not a readable skill.`; }
       catch (error) { if (errorCode(error) !== 'ENOENT') entry.facts.cannot[tool] = `${directory} could not be checked.`; }
     }
+    for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
   }
   return map;
+}
+
+/** The skill as found at a tool's main copy. */
+const skillAt = (entry: Gathered, tool: HarnessId) => entry.skills[tool]?.find(skill => skill.directory === entry.facts.copies[tool]?.directory);
+
+/** What stops every tool from using one tool's copy: differing copies Central Knot does not change, and tools with a copy that could not load this one. */
+function blocksFor(entry: Gathered, source: HarnessId): { tool: HarnessId; reason: string }[] {
+  const chosen = entry.facts.copies[source]!;
+  const skill = skillAt(entry, source);
+  const blocks: { tool: HarnessId; reason: string }[] = [];
+  for (const location of entry.locations) {
+    if (location.copy.hash === chosen.hash || location.copy.writable) continue;
+    blocks.push({ tool: location.tool, reason: `${harnesses[location.tool].name} also reads a different copy at ${location.copy.directory}, which Central Knot does not change.` });
+  }
+  for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
+    if (tool === source || !skill || entry.facts.copies[tool]!.hash === chosen.hash) continue;
+    const refused = targetFor(tool, entry.facts.copies[tool]!.directory, skill).skipped;
+    if (refused) blocks.push({ tool, reason: `${harnesses[tool].name} could not load ${harnesses[source].name}'s copy: ${refused}` });
+  }
+  return blocks;
+}
+
+/** Why a choice cannot be carried out for the tools it syncs to, if it cannot. */
+function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): string | undefined {
+  const copy = entry.facts.copies[use];
+  if (!copy) return `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`;
+  if (hash !== undefined && copy.hash !== hash) return `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`;
+  const block = entry.facts.choiceBlocks[use]?.find(entry => syncing.includes(entry.tool));
+  return block ? `${block.reason} Nothing was changed.` : undefined;
 }
 
 const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[tool], context.home, context.overrides?.[tool]);
@@ -84,15 +114,17 @@ export async function rootProblem(context: ShareContext, tool: HarnessId): Promi
   const root = rootOf(context, tool);
   const name = harnesses[tool].name;
   try { if ((await lstat(root)).isSymbolicLink()) return `${name}'s skills folder is a link, so Central Knot does not write through it.`; }
-  catch (error) { return errorCode(error) === 'ENOENT' ? undefined : `${name}'s skills folder could not be checked.`; }
-  const real = await realpath(root).catch(() => undefined);
+  catch (error) { if (errorCode(error) !== 'ENOENT') return `${name}'s skills folder could not be checked.`; }
+  // A folder not made yet still lands somewhere: through a linked parent, or where another tool's folder is.
+  const real = await landingOf(root);
   if (!real) return `${name}'s skills folder could not be checked.`;
   const others = [...(Object.keys(harnesses) as HarnessId[]).filter(other => other !== tool).map(other => rootOf(context, other)), join(context.home, '.agents/skills')];
   for (const other of others) {
-    if ((await realpath(other).catch(() => undefined)) === real) return `${name}'s skills folder is the same folder as ${other}, so Central Knot does not write there.`;
+    if (await landingOf(other) === real) return `${name}'s skills folder is the same folder as ${other}, so Central Knot does not write there.`;
   }
   return undefined;
 }
+
 
 /** Only a real folder directly in the tool's own skills folder is written: never through a link, never a shared folder. */
 async function writable(context: ShareContext, tool: HarnessId, directory: string, problems: Map<HarnessId, string | undefined>): Promise<boolean> {
@@ -164,22 +196,28 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   let saved = JSON.stringify(record);
   const save = async () => { const text = JSON.stringify(record); if (text !== saved) { await saveRecord(context.home, record!); saved = text; } };
 
+  const results: DestinationResult[] = [];
   for (const change of changes) {
     const entry = gathered.get(change.key);
     if (!entry) continue;
+    // A choice that cannot be carried out changes nothing at all: not even Managed.
+    if (change.use && change.use !== 'separate') {
+      const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
+      const problem = choiceProblem(entry, change.use, change.useHash, syncing);
+      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', message: problem }); continue; }
+    }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
     item.off = change.off.filter(tool => harnesses[tool]);
     item.separate = change.use === 'separate' ? true : change.managed ? undefined : item.separate;
     // The choice is on record before any copy is replaced, so a crash part-way finishes it at the next pass instead of losing it.
-    if (change.use && change.use !== 'separate') item.use = { tool: change.use, hash: entry.facts.copies[change.use]?.hash ?? '' };
+    if (change.use && change.use !== 'separate') item.use = { tool: change.use, hash: entry.facts.copies[change.use]!.hash };
     else if (!change.managed || change.use === 'separate') delete item.use;
     record.items[change.key] = item;
   }
   await save();
   await clearStaleStages(context, tools.map(tool => writeRoot(harnesses[tool], context.home, context.overrides?.[tool])));
 
-  const results: DestinationResult[] = [];
   let writes = 0;
   for (const [key, entry] of gathered) {
     const item = record.items[key];
@@ -189,20 +227,25 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const syncing = tools.filter(tool => !item.off?.includes(tool));
     const locations = entry.locations.filter(location => syncing.includes(location.tool) && !entry.facts.cannot[location.tool]);
     const chosen = item.use?.tool;
-    if (item.use && entry.facts.copies[item.use.tool]?.hash !== item.use.hash) {
-      results.push({ item: name, outcome: 'held', message: `The copy you chose in ${harnesses[item.use.tool].name} is gone or has changed since. Nothing was changed; choose again.` });
-      delete item.use;
-      continue;
+    if (item.use) {
+      // A choice recorded before a crash is finished only if it still holds.
+      const problem = choiceProblem(entry, item.use.tool, item.use.hash, syncing.filter(tool => !entry.facts.cannot[tool]));
+      if (problem) { results.push({ item: name, outcome: 'held', message: problem }); delete item.use; continue; }
     }
     if (!locations.length) { results.push({ item: name, outcome: 'held', message: 'No tool it syncs to has a copy to start from.' }); continue; }
     const hashes = new Set(locations.map(location => location.copy.hash));
     try {
       let source = locations[0].copy;
+      let sourceTool = locations[0].tool;
       if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
         source = entry.facts.copies[chosen]!;
+        sourceTool = chosen;
         for (const location of locations) {
           if (location.copy.hash === source.hash) continue;
+          // Checked again just before writing: a folder can become a link after the page was read.
+          const late = await rootProblem(context, location.tool);
+          if (late) { results.push({ item: name, harness: location.tool, outcome: 'held', message: late }); continue; }
           if (!location.copy.writable) {
             results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} also reads a different copy at ${location.copy.directory}, which is a link or a folder other tools share. Central Knot does not change it; change or remove it yourself.` });
             continue;
@@ -219,9 +262,12 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       for (const location of locations) {
         if (!item.copies.some(known => known.directory === location.copy.directory)) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: tree.hash, created: false, status: 'written' });
       }
+      const sourceSkill = entry.skills[sourceTool]?.find(skill => skill.directory === source.directory);
       for (const tool of syncing.filter(entryTool => !entry.locations.some(location => location.tool === entryTool))) {
         if (entry.facts.cannot[tool]) continue;
         const directory = join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), entry.facts.name);
+        const refused = (sourceSkill && targetFor(tool, directory, sourceSkill).skipped) || await rootProblem(context, tool);
+        if (refused) { results.push({ item: name, harness: tool, outcome: 'held', message: refused }); continue; }
         const intent = { harness: tool, directory, hash: tree.hash, created: true, status: 'pending' as const };
         item.copies = [...item.copies.filter(known => known.directory !== directory), intent];
         await save();

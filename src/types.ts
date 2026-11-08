@@ -93,6 +93,11 @@ export interface SkillFacts {
   held?: string;
   /** The person chose to keep differing copies as they are. */
   separate?: boolean;
+  /**
+   * For each tool's copy, what stops Apply all from making every tool use it: a differing copy Central Knot does not change,
+   * or a tool that cannot load it. Each names the tool it concerns, so a tool turned off no longer counts.
+   */
+  choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
 }
 
 export interface ManageView {
@@ -112,6 +117,8 @@ export interface Change {
   off: HarnessId[];
   /** For differing copies: the tool whose copy every tool should use, or keep both. */
   use?: HarnessId | 'separate';
+  /** The content ID of the chosen copy as the person saw it. A copy changed since is not used. */
+  useHash?: string;
 }
 
 export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number }

@@ -597,3 +597,5 @@ ul { list-style: none; }
 .detail-scroll > .details { margin: 4px 0 0; }
 .detail-switch-label { font-size: 13px; color: var(--ink-soft); margin-right: -4px; }
 .held-pill { flex: none; white-space: nowrap; }
+.version-blocked { opacity: 0.75; cursor: not-allowed; }
+.version-why { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-soft); }
