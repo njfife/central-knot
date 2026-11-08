@@ -150,6 +150,7 @@ async function practiceFlow() {
   same('practice shows both tools', [await a.all('.mx-cell[data-tool="claude-cli"][data-present="true"]').then(r => r.length), await a.all('.mx-cell[data-tool="copilot-cli"][data-present="true"]').then(r => r.length)], [3, 3]);
   same('rows and order', await a.all('.mx-item', 'e.dataset.key'), ['notes', 'release-notes', 'review', 'standup']);
   same('statuses', await a.all('.mx-item .status-word'), ['Not shared', 'Not shared', 'Needs a decision', 'Not shared']);
+  same('Share counts every skill it would manage', (await a.text('#share-open')).trim(), 'Share 3');
   await a.shot('practice-overview');
 
   await a.press('/', 'Slash');

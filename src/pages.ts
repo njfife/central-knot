@@ -121,7 +121,8 @@ export function overviewPage() {
     region.replaceChildren(matrixBody(rows, tools));
     count.textContent = countText(rows.filter(row => matches(row, state.find)).length, rows.length);
   };
-  const toCopy = preview.items.filter(item => item.state === 'copy').length;
+  // Every skill Share would start managing, including ones already identical that need no copy.
+  const toCopy = preview.items.filter(item => ['copy', 'identical', 'already-shared'].includes(item.state) && !['Written', 'With limits'].includes(item.status)).length;
   const sharing = state.panel === 'share';
   return h('div.page', {},
     noticeBand(home, preview),
@@ -130,7 +131,7 @@ export function overviewPage() {
       h('div.toolbar-end', {}, count,
         button({
           variant: sharing ? 'secondary' : 'primary', size: 'small', id: 'share-open', label: toCopy ? `Share ${toCopy}` : 'Share',
-          name: toCopy ? `Share ${toCopy} ${toCopy === 1 ? 'skill' : 'skills'} to copy` : 'Share',
+          name: toCopy ? `Share ${toCopy} ${toCopy === 1 ? 'skill' : 'skills'}` : 'Share',
           attrs: { 'aria-expanded': String(sharing) },
           onclick: () => (sharing ? closePanel() : openPanel('share')),
         }))),
