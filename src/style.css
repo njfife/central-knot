@@ -572,3 +572,6 @@ ul { list-style: none; }
 
 .held-pill { font-size: 11.5px; color: var(--ink-soft); border: 1px solid var(--control-line); border-radius: 999px; padding: 1px 7px; }
 .bands { display: flex; flex-direction: column; }
+
+.mono-14 { width: 14px; height: 14px; font-size: 8px; }
+.mono-16 { width: 16px; height: 16px; font-size: 9px; }

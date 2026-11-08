@@ -121,7 +121,7 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
 export function brandMark(tool: Tool, size = 16): Element {
   const holder = document.createElement('template');
   const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool];
-  if (!brand) return h('span.mono-mark', { 'aria-hidden': 'true', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.55)}px` }, names[tool].slice(0, 2));
+  if (!brand) return h(`span.mono-mark.mono-${size}`, { 'aria-hidden': 'true' }, names[tool].slice(0, 2));
   holder.innerHTML = `<svg class="brand-mark" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="${brand.color}"><path d="${brand.path}"/></svg>`;
   return holder.content.firstElementChild as SVGElement;
 }
@@ -350,6 +350,12 @@ function section(label: string, list: SampleSkill[], after: number) {
 
 let draftHome: string | undefined;
 
+/** The column count goes through the style object: the page's security policy refuses inline style attributes. */
+function withToolCount(table: HTMLElement) {
+  table.style.setProperty('--tool-count', String(toolList().length));
+  return table;
+}
+
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
 function notices() {
   if (designMode || !state.home) return null;
@@ -381,14 +387,14 @@ export function designOverview() {
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
-      h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync', style: `--tool-count: ${toolList().length}` },
+      withToolCount(h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync' },
         h('div.ov-row.ov-head', { role: 'row' },
           h('div.ov-name', { role: 'columnheader' }, 'Skill'),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
           h('div.ov-fill')),
         section('Managed', shown.filter(skill => committedOf(skill.key).managed), shown.filter(skill => skill.managed).length),
-        section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length)),
+        section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length))),
       legend()));
 }
 

@@ -350,6 +350,8 @@ async function crashFlow() {
   check('at least one round really interrupted copying', interrupted > 0, interrupted);
 }
 
+const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
+
 // ---------- Run ----------
 const started = Date.now();
 try {
