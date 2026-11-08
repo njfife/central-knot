@@ -1,6 +1,6 @@
 # Central Knot
 
-A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI** and **GitHub Copilot CLI**. It holds plan slices 1a, 1b's first checkpoint and 8a's Preview and First copy. The interface follows `docs/ui-reference.md`.
+A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI** and **GitHub Copilot CLI**. It holds plan slices 1a, 1b's first checkpoint and 8a, with the managed Overview Nathan chose on November 8, 2026. The interface follows `docs/ui-reference.md`.
 
 ## Run
 
@@ -21,26 +21,28 @@ Mac packaging runs on the selected Apple Silicon Mac and produces `release/Centr
 
 ## Homes
 
-- **Practice copy** (opens first): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Start and Undo really write here.
-- **Another folder…**: a simulated home. Start and Undo write only inside it. A folder that is, contains or links into your real home's harness folders is read-only.
+- **Practice copy** (opens first): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Apply all really writes here.
+- **Another folder…**: a simulated home. Apply all writes only inside it. A folder that is, contains or links into your real home's harness folders is read-only.
 - **This Mac’s home**: your real skills and a bounded `--version` probe of each CLI. Only choosing this writes real folders, and only on macOS; each launch opens on the practice copy again.
 
-## What sharing does
+## The Overview
 
-Preview writes nothing. Start replans from disk, then:
+One row per skill, one column per installed tool. Nothing is managed until you choose it.
 
-- copies a skill one selected tool lacks into that tool's own folder, byte-exact with file modes, without nested `.git` or Finder's `.DS_Store` files;
-- takes over an identical copy, or tools already reading the same folder, with zero writes;
-- leaves same-name different skills separate and shows their diff as **Needs a decision**;
-- holds a skill containing a link, or a destination already occupied by something else, with the reason;
-- skips a destination that will not load the skill, and names known behaviour losses (`docs/capability-data.md` §4).
+- **Managed** switch: a managed skill keeps one copy in every tool it syncs to. Unmanaged skills are left alone.
+- **Tool cells** are toggles. Filled means syncing to that tool is on. Green check: synced. Blue: waits for Apply all. Amber: copies differ. Ring: has a copy that is not synced. Empty: no copy. Hatched: that tool cannot load it, with the reason.
+- **Tool menus**, from a column header: **Add all** of that tool's skills to another tool, or **Stop all** syncing to it (copies stay).
+- **Manage all** queues every unmanaged skill without differing copies. Changes wait for **Apply all**, or **Discard**.
+- **Copies differ**: open the row and choose which tool's copy every tool uses (the replaced copy is kept in `.central-knot/items`), or keep both as they are.
+- **Catch-up**: opening a home or **Read again** copies a managed skill back into a tool it syncs to that lacks it, and says which. Turn a tool off for a skill to stop that.
+- Copies are written only into each tool's own skills folder, byte-exact with file modes, without nested `.git` or Finder's `.DS_Store`. Central Knot never writes through a link or into a folder other tools share, such as `~/.agents/skills`; a differing copy there is reported for you to change.
 
 State lives in one folder with no second copy, `.central-knot/` inside the selected home: `sync.json` and imported revisions under `items/`. Nathan accepted that limit on November 7, 2026, so owner-restore and overwritten-record rollback (AT-62(f), (g)) stay Unmet. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing.
 
-**Undo** removes only copies a Start created that still match their recorded hash, and never the last real copy of a skill. Changed copies, sources and imported bytes stay. An item it removed becomes Don't share.
+`--design-preview` (or `=b`, `=b3`) opens the Overview on sample data, without touching any files.
 
 ## Not here yet
 
-Choosing a version in a collision, Share after Don't share, History and Restore, background sync, two-way edits, and other kinds and tools. Nothing here claims a skill has loaded in a session: Written means the bytes are on disk.
+History and Restore, background sync while the app is open, two-way edits (an edit in one tool shows as copies differ), spreading deletions (catch-up brings a deleted copy back while the tool stays on), the Skills and Tools pages in the new design, and other kinds and tools. Nothing here claims a skill has loaded in a session: Written means the bytes are on disk.
 
 The product boundary is in `AGENTS.md`. Planning inputs are under `docs/`. `LEDGER.md` records what was run.
