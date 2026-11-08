@@ -325,7 +325,10 @@ async function crashFlow() {
   for (let round = 0; round < crashRounds; round++) {
     const a = await launch(join(scratch, 'crash-data'));
     await a.click('#home-actual');
-    if (round === 0) {
+    // Until the choices are on record (a kill can land before Apply all saves them), choose again; after that, opening catches up.
+    const record = join(HOME, '.central-knot/sync.json');
+    const chosen = existsSync(record) && (() => { try { return Object.values(JSON.parse(readFileSync(record, 'utf8')).items).some(item => item.state === 'shared'); } catch { return false; } })();
+    if (!chosen) {
       await a.click('#manage-all');
       await a.run(`document.querySelector('#apply').click()`);
     } else await a.run(`document.querySelector('#header-refresh').click()`);
@@ -336,7 +339,6 @@ async function crashFlow() {
       check(`round ${round}: nothing half-written in a loaded folder (${name})`, !name.startsWith('.'), name);
       if (expected[name]) same(`round ${round}: ${name} is complete or absent`, tree(join(COPILOT, name)), expected[name]);
     }
-    const record = join(HOME, '.central-knot/sync.json');
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
   }
   const a = await launch(join(scratch, 'crash-data'));
