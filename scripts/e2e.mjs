@@ -253,6 +253,21 @@ async function practiceFlow() {
   same('focus stays on the switch', await a.run(`document.activeElement?.id`), 'switch-release-notes');
   if (await a.exists('#discard')) await a.click('#discard');
 
+  // Skills page: every skill in a list, and one skill's details with the same choices and Apply all as the Overview.
+  await a.click('#nav-skills');
+  same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
+  await a.click('#list-standup');
+  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
+  check('its folders and contents are shown', (await a.text('#detail-scroll .details')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
+  await a.click('#detail-switch-standup');
+  check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
+  await a.shot('practice-skills');
+  await a.click('#nav-overview');
+  same('the Overview shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
+  await a.click('#discard');
+  same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
+
   // Keyboard and find.
   await a.press('/', 'Slash');
   same('slash focuses find', await a.run(`document.activeElement?.id`), 'find');

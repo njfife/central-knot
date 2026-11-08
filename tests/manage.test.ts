@@ -290,3 +290,246 @@ test('A managed skill whose only copy is in a tool turned off is left alone', as
     assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
   } finally { await box.cleanup(); }
 });
+
+// ---------- Guarantees carried over from the first copy engine ----------
+
+/** Every path, type, mode, mtime and content hash under a directory. */
+async function snapshotTree(directory: string, skip: string[] = []): Promise<Record<string, string>> {
+  const { createHash } = await import('node:crypto');
+  const out: Record<string, string> = {};
+  async function visit(current: string) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (skip.includes(entry.name)) continue;
+      const path = join(current, entry.name);
+      const info = await lstat(path);
+      if (entry.isSymbolicLink()) out[path] = `link:${await readlink(path)}`;
+      else if (entry.isDirectory()) { out[path] = `dir:${info.mode}`; await visit(path); }
+      else out[path] = `file:${info.mode}:${info.mtimeMs}:${createHash('sha256').update(await readFile(path)).digest('hex')}`;
+    }
+  }
+  await visit(directory);
+  return out;
+}
+
+test('Bytes and modes are copied, .git is not, the source is untouched, and a repeat writes nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const source = await skill(box.home, CLAUDE, 'rich', text('rich', 'Values stay as they are: token=abc123'));
+    await mkdir(join(source, 'scripts'));
+    await writeFile(join(source, 'scripts/run.sh'), '#!/bin/sh\necho hi\n');
+    await chmod(join(source, 'scripts/run.sh'), 0o755);
+    await writeFile(join(source, 'asset.bin'), Buffer.from([0, 1, 2, 255, 254]));
+    await mkdir(join(source, 'empty'));
+    await mkdir(join(source, '.git'));
+    await writeFile(join(source, '.git/HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(join(box.home, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
+    const beforeSource = await snapshotTree(join(box.home, '.claude'));
+    const result = await applyChanges(ctx(box), [manage('rich')]);
+    assert.equal(result.harnessWrites, 1);
+    const copy = join(box.home, COPILOT, 'rich');
+    assert.equal(await readFile(join(copy, 'SKILL.md'), 'utf8'), await readFile(join(source, 'SKILL.md'), 'utf8'));
+    assert.deepEqual(await readFile(join(copy, 'asset.bin')), Buffer.from([0, 1, 2, 255, 254]));
+    assert.equal((await stat(join(copy, 'scripts/run.sh'))).mode & 0o777, 0o755);
+    assert.equal(await exists(join(copy, '.git')), false, 'nested .git is not copied');
+    assert.equal(await exists(join(copy, 'empty')), true);
+    assert.deepEqual(await snapshotTree(join(box.home, '.claude')), beforeSource, 'source and unrelated bytes unchanged');
+    const beforeRepeat = await snapshotTree(box.base);
+    const repeat = await applyChanges(ctx(box), []);
+    assert.equal(repeat.harnessWrites, 0);
+    assert.deepEqual(await snapshotTree(box.base), beforeRepeat, 'a repeat changes no byte anywhere');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill with an internal link is held; no link is created or followed', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const directory = await skill(box.home, CLAUDE, 'has-link');
+    await writeFile(join(box.base, 'outside.txt'), 'outside');
+    await symlink(join(box.base, 'outside.txt'), join(directory, 'asset'));
+    assert.match((await facts(box, 'has-link')).held ?? '', /link \(asset\)/);
+    const result = await applyChanges(ctx(box), [manage('has-link')]);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await exists(join(box.home, COPILOT, 'has-link')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A folder without SKILL.md where a copy would go is never overwritten', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'taken');
+    await mkdir(join(box.home, COPILOT, 'taken'), { recursive: true });
+    await writeFile(join(box.home, COPILOT, 'taken/notes.txt'), 'mine');
+    assert.match((await facts(box, 'taken')).cannot['copilot-cli'] ?? '', /not a readable skill/);
+    const result = await applyChanges(ctx(box), [manage('taken')]);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await readFile(join(box.home, COPILOT, 'taken/notes.txt'), 'utf8'), 'mine');
+  } finally { await box.cleanup(); }
+});
+
+test('An unreadable skills folder gets nothing', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await mkdir(join(box.home, COPILOT), { recursive: true });
+    await chmod(join(box.home, COPILOT), 0o000);
+    const result = await applyChanges(ctx(box), [manage('solo')]);
+    await chmod(join(box.home, COPILOT), 0o755);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A stuck leftover stage does not stop later applies, and is cleared', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await mkdir(join(box.home, COPILOT), { recursive: true });
+    const stuck = join(box.home, '.copilot', '.ck-stage-00000000-0000-4000-8000-000000000001');
+    await mkdir(join(stuck, 'inner'), { recursive: true });
+    await writeFile(join(stuck, 'inner/x'), 'x');
+    await chmod(join(stuck, 'inner'), 0o555);
+    await chmod(stuck, 0o555);
+    assert.equal((await applyChanges(ctx(box), [manage('solo')])).harnessWrites, 1);
+    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'Central Knot clears its own leftover');
+  } finally { await box.cleanup(); }
+});
+
+test('.DS_Store is no difference and is not copied', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'twin');
+    const twin = await skill(box.home, COPILOT, 'twin');
+    await writeFile(join(twin, '.DS_Store'), 'finder');
+    const source = await skill(box.home, CLAUDE, 'solo');
+    await writeFile(join(source, '.DS_Store'), 'finder');
+    const view = await facts(box, 'twin');
+    assert.equal(view.copies['claude-cli']!.hash, view.copies['copilot-cli']!.hash);
+    await applyChanges(ctx(box), [manage('twin'), manage('solo')]);
+    assert.equal(await exists(join(box.home, COPILOT, 'solo/SKILL.md')), true);
+    assert.equal(await exists(join(box.home, COPILOT, 'solo/.DS_Store')), false);
+    await writeFile(join(box.home, COPILOT, 'solo/.DS_Store'), 'finder again');
+    const solo = await facts(box, 'solo');
+    assert.equal(solo.copies['claude-cli']!.hash, solo.copies['copilot-cli']!.hash);
+  } finally { await box.cleanup(); }
+});
+
+test('Odd valid names sync and are remembered: constructor, __proto__ and long non-Latin folders', async () => {
+  const box = await sandbox();
+  try {
+    const long = 'あ'.repeat(60);
+    const names = ['constructor', '__proto__', long, '🎉'.repeat(30)];
+    for (const name of names) await skill(box.home, CLAUDE, name, text('ok-name'));
+    const result = await applyChanges(ctx(box), names.map(name => manage(name)));
+    assert.equal(result.harnessWrites, 4, JSON.stringify(result.results));
+    for (const name of names) assert.equal(await exists(join(box.home, COPILOT, name, 'SKILL.md')), true, name);
+    for (const name of names) assert.equal((await facts(box, name)).managed, true, `${name} is remembered as managed`);
+    await applyChanges(ctx(box), [{ key: '__proto__', managed: false, off: [] }]);
+    assert.equal((await facts(box, '__proto__')).managed, false);
+    assert.equal((await facts(box, 'constructor')).managed, true);
+  } finally { await box.cleanup(); }
+});
+
+test('Every stop writes nothing: damaged, missing, another generation, a newer format and another owner', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await applyChanges(ctx(box), [manage('solo')]);
+    await skill(box.home, CLAUDE, 'new-one');
+    const path = join(storeDirectory(box.home), 'sync.json');
+    const good = await readFile(path, 'utf8');
+    const record = JSON.parse(good);
+    const attempt = async (bad: string | null, expected: RegExp) => {
+      if (bad === null) await rm(path); else await writeFile(path, bad);
+      const before = await snapshotTree(box.home);
+      const result = await applyChanges(ctx(box), [manage('new-one')]);
+      assert.match(result.stopped ?? '', expected);
+      assert.equal(result.harnessWrites, 0);
+      assert.deepEqual(await snapshotTree(box.home), before);
+    };
+    await attempt('{ not json', /damaged/);
+    await attempt(null, /missing/);
+    await attempt(JSON.stringify({ ...record, generation: 'other' }), /not the one/);
+    await attempt(JSON.stringify({ ...record, formatVersion: record.formatVersion + 1 }), /newer/);
+    await attempt(JSON.stringify({ ...record, owner: 'someone-else' }), /another Central Knot/);
+    await writeFile(path, good);
+    assert.equal((await applyChanges(ctx(box), [manage('new-one')])).harnessWrites, 1, 'restoring the record then retrying works');
+  } finally { await box.cleanup(); }
+});
+
+test('Lost settings wait for an explicit resume that keeps the record', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await applyChanges(ctx(box), [manage('solo')]);
+    const record = await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8');
+    await rm(join(box.base, 'settings.json'));
+    await skill(box.home, CLAUDE, 'new-one');
+    assert.equal((await manageView(ctx(box))).gate.state, 'needs-resume');
+    const blocked = await applyChanges(ctx(box), [manage('new-one')]);
+    assert.match(blocked.stopped ?? '', /no memory/);
+    assert.equal(blocked.harnessWrites, 0);
+    const resumed = await applyChanges(ctx(box), [manage('new-one')], true);
+    assert.equal(resumed.harnessWrites, 1);
+    assert.equal(JSON.parse(await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8')).generation, JSON.parse(record).generation);
+  } finally { await box.cleanup(); }
+});
+
+test('Write guard: the real home stays read-only however it is reached', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    await skill(realHome, CLAUDE, 'real-skill');
+    await mkdir(join(realHome, '.copilot/skills'), { recursive: true });
+    const attempt = async (home: string, mode: 'actual' | 'custom') => {
+      const before = await snapshotTree(realHome);
+      const context: ShareContext = { home, mode, read: read(home, mode), build: 'test', settingsPath: join(box.base, 'settings.json'), realHome };
+      assert.equal((await manageView(context)).access.allowed, false);
+      const result = await applyChanges(context, [manage('real-skill')]);
+      assert.match(result.stopped ?? '', /Preview only/);
+      assert.deepEqual(await snapshotTree(realHome), before);
+    };
+    await attempt(realHome, 'actual');
+    await attempt(realHome, 'custom');
+    await attempt(box.base, 'custom');
+    const linked = await mkdtemp(join(box.base, 'sim-'));
+    await symlink(join(realHome, '.claude'), join(linked, '.claude'));
+    await attempt(linked, 'custom');
+    const roots = await mkdtemp(join(box.base, 'sim-'));
+    await mkdir(join(roots, '.copilot'));
+    await symlink(join(realHome, '.copilot/skills'), join(roots, '.copilot/skills'));
+    await attempt(roots, 'custom');
+  } finally { await box.cleanup(); }
+});
+
+test('Real home: written only when allowed; a relative override stops it and an absent tool gets nothing', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    await skill(realHome, CLAUDE, 'real-skill');
+    const context: ShareContext = { home: realHome, mode: 'actual', read: read(realHome, 'actual'), build: 'test', settingsPath: join(box.base, 'settings.json'), realHome, allowActualWrites: true };
+    const before = await snapshotTree(realHome);
+    const relative = await applyChanges({ ...context, overrides: { 'copilot-cli': 'relative-root' } }, [manage('real-skill')]);
+    assert.match(relative.stopped ?? '', /COPILOT_HOME is not an absolute path/);
+    assert.deepEqual(await snapshotTree(realHome), before);
+    assert.deepEqual((await manageView(context)).tools, ['claude-cli'], 'Copilot is not detected in this home, so it is no column');
+    const absent = await applyChanges(context, [manage('real-skill')]);
+    assert.equal(absent.harnessWrites, 0);
+    assert.equal(await exists(join(realHome, COPILOT)), false);
+    await mkdir(join(realHome, '.copilot'));
+    const written = await applyChanges(context, []);
+    assert.equal(written.harnessWrites, 1, 'once Copilot is there, the managed skill catches up');
+    assert.equal(await exists(join(realHome, COPILOT, 'real-skill/SKILL.md')), true);
+  } finally { await box.cleanup(); }
+});
+
+test('Practice fixture: the bundled home shows each kind of skill', async () => {
+  const fixture = join(import.meta.dirname, '../fixtures/home');
+  const context: ShareContext = { home: fixture, mode: 'fixture', read: read(fixture, 'fixture'), build: 'test', settingsPath: join(tmpdir(), 'ck-unused-settings.json'), realHome: join(tmpdir(), 'ck-unused-home') };
+  const view = await manageView(context);
+  const shape = view.skills.map(item => {
+    const hashes = new Set(Object.values(item.copies).map(copy => copy!.hash));
+    return `${item.key}:${Object.keys(item.copies).length}${hashes.size > 1 ? ':differs' : ''}`;
+  });
+  assert.deepEqual(shape, ['notes:2', 'release-notes:1', 'review:2:differs', 'standup:1']);
+  assert.ok(view.writes['copilot-cli']?.to.endsWith('.copilot/skills'));
+});

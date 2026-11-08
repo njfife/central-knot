@@ -3,12 +3,11 @@ import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
-import type { ActionResult, DestinationResult, Disclosure, HarnessId, HomeMode, PlanCopy, PlanItem, PlanTarget, Preview, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
 const STAGE_NAME = /^\.ck-stage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 /** Finder drops these into any folder it opens; they are no change to a skill. */
 const NOISE = new Set(['.DS_Store']);
 
@@ -111,50 +110,6 @@ export async function removeTree(path: string) {
   await rm(path, { recursive: true, force: true });
 }
 
-// ---------- Differences ----------
-
-function lineDiff(first: string, second: string): string {
-  const a = first.split('\n'), b = second.split('\n');
-  if (a.length * b.length > 4_000_000) return '  (too long to compare line by line)';
-  const table = Array.from({ length: a.length + 1 }, () => new Uint32Array(b.length + 1));
-  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) table[i][j] = a[i] === b[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
-  const lines: string[] = [];
-  let i = 0, j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) { lines.push(`  ${a[i]}`); i++; j++; }
-    else if (i < a.length && (j === b.length || table[i + 1][j] >= table[i][j + 1])) lines.push(`- ${a[i++]}`);
-    else lines.push(`+ ${b[j++]}`);
-  }
-  return lines.join('\n');
-}
-
-const isText = (bytes: Buffer) => !bytes.subarray(0, 8000).includes(0);
-
-async function describeDifference(first: PlanCopy, second: PlanCopy): Promise<string> {
-  const [treeA, treeB] = await Promise.all([readTree(first.directory), readTree(second.directory)]);
-  const names = [...new Set([...treeA.files.keys(), ...treeB.files.keys()])].sort();
-  const label = (copy: PlanCopy) => `${harnesses[copy.harness].name}${first.harness === second.harness ? `, ${copy.rootLabel}` : ''}`;
-  const sections = [`- ${label(first)}`, `+ ${label(second)}`];
-  for (const name of [...new Set([...treeA.directories, ...treeB.directories])].sort()) {
-    if (!treeA.directories.includes(name)) sections.push(`\n${name}/: folder only in ${label(second)}`);
-    else if (!treeB.directories.includes(name)) sections.push(`\n${name}/: folder only in ${label(first)}`);
-  }
-  for (const name of names) {
-    const a = treeA.files.get(name), b = treeB.files.get(name);
-    if (!a) sections.push(`\n${name}: only in ${label(second)}`);
-    else if (!b) sections.push(`\n${name}: only in ${label(first)}`);
-    else if (a.sha256 !== b.sha256) {
-      const [sizeA, sizeB] = await Promise.all([stat(join(first.directory, name)), stat(join(second.directory, name))]).then(sizes => sizes.map(info => info.size));
-      if (Math.max(sizeA, sizeB) > MAX_DIFF_BYTES) { sections.push(`\n${name}:\n  (too large to compare line by line)`); continue; }
-      const [bytesA, bytesB] = await Promise.all([readFile(join(first.directory, name)), readFile(join(second.directory, name))]);
-      sections.push(`\n${name}:\n${isText(bytesA) && isText(bytesB) ? lineDiff(bytesA.toString('utf8'), bytesB.toString('utf8')) : '  (binary files differ)'}`);
-    } else if ((a.mode & 0o111) !== (b.mode & 0o111)) sections.push(`\n${name}: executable permission differs`);
-  }
-  return sections.join('\n');
-}
-
-// ---------- Limits per target (SKL-02, SKL-03) ----------
-
 const copilotLosses: Record<string, string> = {
   paths: 'Copilot CLI ignores `paths`, so the skill applies more widely.',
   'user-invocable: false': 'Copilot CLI ignores `user-invocable: false`, so the model is still offered it.',
@@ -173,7 +128,6 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
 
 // ---------- State ----------
 
-const startCopied = (item: RecordItem, startId?: string) => item.startId === startId && item.state === 'shared' && item.copies.some(copy => copy.created);
 
 function validItems(items: unknown): boolean {
   if (typeof items !== 'object' || items === null || Array.isArray(items)) return false;
@@ -256,104 +210,6 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   return { allowed: true, reason: 'Disposable home: Start and Undo write only inside it.' };
 }
 
-// ---------- Preview ----------
-
-export async function buildPreview(context: ShareContext, selected: HarnessId[], dontShare: string[]): Promise<Preview> {
-  const { record } = await readRecord(context.home);
-  const groups = new Map<string, { harness: HarnessId; skill: Skill }[]>();
-  const snapshots = await context.read();
-  for (const snapshot of snapshots) {
-    if (!selected.includes(snapshot.harness)) continue;
-    for (const skill of snapshot.skills) {
-      const key = itemKey(skill.folder);
-      groups.set(key, [...(groups.get(key) ?? []), { harness: snapshot.harness, skill }]);
-    }
-  }
-  const excluded = new Set(dontShare.map(itemKey));
-  const items: PlanItem[] = [];
-  for (const [key, group] of [...groups].sort(([first], [second]) => first.localeCompare(second))) {
-    items.push(await planItem(context, key, group, selected, excluded.has(key), record?.items[key], snapshots));
-  }
-  const disclosures: Disclosure[] = selected.map(id => ({ harness: id, name: harnesses[id].name, writesTo: writeRoot(harnesses[id], context.home, context.overrides?.[id]), alsoReadBy: harnesses[id].otherReaders }));
-  const canUndo = !!record?.lastStartId && Object.values(record.items).some(item => startCopied(item, record.lastStartId));
-  return { selected, items, disclosures, access: await writeAccess(context), gate: await syncGate(context), canUndo };
-}
-
-async function planItem(context: ShareContext, key: string, group: { harness: HarnessId; skill: Skill }[], selected: HarnessId[], excluded: boolean, recorded: RecordItem | undefined, snapshots: Snapshot[]): Promise<PlanItem> {
-  const name = group[0].skill.folder;
-  const copies: PlanCopy[] = [];
-  const trees: Tree[] = [];
-  const shared = recorded?.state === 'shared';
-  // Written means it reached a second tool. An import from one selected tool shared nothing.
-  const spansTools = new Set(recorded?.copies.filter(copy => copy.status === 'written').map(copy => copy.harness)).size > 1;
-  const base = { key, name, copies, targets: [] as PlanTarget[], locked: false, undoable: shared && spansTools };
-  let unreadable: string | undefined;
-  for (const { harness, skill } of group) {
-    try {
-      const tree = await readTree(skill.directory);
-      trees.push(tree);
-      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: tree.hash, rootLabel: skill.rootLabel });
-    } catch (error) {
-      copies.push({ harness, directory: skill.directory, realDirectory: skill.realDirectory, hash: '', rootLabel: skill.rootLabel });
-      unreadable ??= `${harnesses[harness].name}'s copy could not be read completely${errorCode(error) === 'EACCES' ? ' (permission denied)' : ''}. Nothing is copied.`;
-    }
-  }
-  if (recorded?.state === 'dont-share') return { ...base, locked: true, undoable: false, state: 'dont-share', status: 'Don’t share', reason: 'Stays as it is and is not copied again. Sharing it again arrives in a later version.' };
-  if (excluded) return { ...base, state: 'dont-share', status: 'Don’t share', reason: 'Excluded. Every copy stays as it is.' };
-  if (unreadable) return { ...base, state: 'held', status: 'Not known yet', reason: unreadable };
-  const held = trees.find(tree => tree.held)?.held;
-  if (held) return { ...base, state: 'held', status: 'Not known yet', reason: `${held} Nothing is copied.` };
-  const hashes = [...new Set(copies.map(copy => copy.hash))];
-  if (shared) {
-    // Two-way changes arrive with 8b. Until then a change or loss after sharing is held, never guessed at.
-    const lost = recorded.copies.filter(copy => copy.status === 'written' && selected.includes(copy.harness) && !copies.some(found => found.directory === copy.directory));
-    if (lost.length) return { ...base, state: 'held', status: 'Not known yet', reason: `A shared copy in ${harnesses[lost[0].harness].name} is gone. Nothing is recreated or deleted.` };
-    // A copy never recorded, such as one in a newly selected tool, is an unrelated skill, not an edit.
-    const known = copies.filter(copy => recorded.copies.some(entry => entry.directory === copy.directory));
-    if (!known.length && hashes.length === 1 && hashes[0] !== recorded.hash) return { ...base, undoable: false, state: 'held', status: 'Not shared', reason: 'A different skill with this name is recorded for another tool. Tick both tools to compare them.' };
-    if (known.some(copy => copy.hash !== recorded.hash)) return { ...base, state: 'held', status: 'Not known yet', reason: 'Changed since it was shared. Nothing is overwritten; carrying edits across arrives in a later version.' };
-  }
-  if (hashes.length > 1) {
-    const other = copies.find(copy => copy.hash !== copies[0].hash)!;
-    return { ...base, undoable: false, state: 'collision', status: 'Needs a decision', reason: 'Different skills share this name. Each copy stays separate and unchanged, and neither spreads. Choosing one arrives in a later version.', diff: await describeDifference(copies[0], other) };
-  }
-  const missing = selected.filter(id => !copies.some(copy => copy.harness === id));
-  if (!missing.length) {
-    const sameFolder = new Set(copies.map(copy => copy.realDirectory)).size === 1;
-    if (selected.length < 2 && !spansTools) return { ...base, state: 'already-shared', status: 'Not shared', reason: shared ? 'Imported from the selected tool. Tick another tool to share it.' : 'Start imports it. Tick another tool to share it.' };
-    if (shared && !spansTools) return { ...base, state: sameFolder ? 'already-shared' : 'identical', status: sameFolder ? 'Already shared' : 'Already identical', reason: 'Every copy already matches. Start records them with zero writes.' };
-    if (shared) {
-      const losses = copies.some(copy => copy.harness === 'copilot-cli') ? group[0].skill.metadataKeys.map(key => copilotLosses[key]) : [];
-      return { ...base, state: sameFolder ? 'already-shared' : 'identical', status: losses.length ? 'With limits' : 'Written', reason: ['Shared. Every copy matches what was recorded.', ...losses].join(' ') };
-    }
-    return sameFolder
-      ? { ...base, state: 'already-shared', status: 'Already shared', reason: 'These tools already read the same folder. Nothing to copy.' }
-      : { ...base, state: 'identical', status: 'Already identical', reason: 'Every copy already matches. Taken over with zero writes.' };
-  }
-  const source = group[0].skill;
-  const targets: PlanTarget[] = [];
-  const problems: string[] = [];
-  for (const harness of missing) {
-    const definition = harnesses[harness];
-    const directory = join(writeRoot(definition, context.home, context.overrides?.[harness]), source.folder);
-    const snapshot = snapshots.find(entry => entry.harness === harness);
-    if (snapshot?.discovery === 'restricted' || snapshot?.discovery === 'failed') { problems.push(`${definition.name}'s folder could not be read, so nothing is copied into it.`); continue; }
-    if (context.mode === 'actual' && snapshot?.detection === 'Not found') { targets.push({ harness, directory, limits: [], skipped: `${definition.name} was not found on this machine.` }); continue; }
-    if (definition.reservedSkills.includes(source.folder)) { targets.push({ harness, directory, limits: [], skipped: `${definition.name} reserves the name “${source.folder}”.` }); continue; }
-    try {
-      await lstat(directory);
-      problems.push(`${definition.name} already has something at ${directory} that is not a readable skill. It stays untouched.`);
-      continue;
-    } catch (error) { if (errorCode(error) !== 'ENOENT') { problems.push(`${directory} could not be checked.`); continue; } }
-    targets.push(targetFor(harness, directory, source));
-  }
-  if (problems.length) return { ...base, state: 'held', status: 'Not known yet', reason: problems.join(' ') };
-  const writable = targets.filter(target => !target.skipped);
-  const skippedText = targets.filter(target => target.skipped).map(target => target.skipped).join(' ');
-  if (!writable.length) return { ...base, targets, state: 'held', status: 'Not available here', reason: skippedText };
-  return { ...base, targets, state: 'copy', status: 'Will copy', reason: [`Copies to ${writable.map(target => harnesses[target.harness].name).join(', ')}.`, skippedText].filter(Boolean).join(' ') };
-}
-
 // ---------- Start ----------
 
 /** Readable when the name allows it; a name too long or too odd for every disk gets a short safe form. */
@@ -411,180 +267,6 @@ export async function placeCopy(context: ShareContext, source: string, target: P
   } catch (error) { await removeTree(stage).catch(() => undefined); throw error; }
 }
 
-async function action(context: ShareContext, selected: HarnessId[], dontShare: string[], results: DestinationResult[], harnessWrites: number, stopped?: string): Promise<ActionResult> {
-  return { stopped, results, harnessWrites, preview: await buildPreview(context, selected, dontShare) };
-}
-
-/** First copy: imports selected skills and copies non-colliding ones. Replans from disk; never trusts an earlier preview. */
-export async function start(context: ShareContext, selected: HarnessId[], dontShare: string[], resume = false): Promise<ActionResult> {
-  try { return await runStart(context, selected, dontShare, resume); }
-  catch (error) {
-    if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-    return action(context, selected, dontShare, [], 0, `Start could not finish. ${plainError(error)} Read again to see where things stand.`);
-  }
-}
-
-async function runStart(context: ShareContext, selected: HarnessId[], dontShare: string[], resume: boolean): Promise<ActionResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return action(context, selected, dontShare, [], 0, access.reason);
-  const gate = await syncGate(context);
-  if (gate.state === 'stopped') return action(context, selected, dontShare, [], 0, gate.reason);
-  if (gate.state === 'needs-resume' && !resume) return action(context, selected, dontShare, [], 0, gate.reason);
-
-  const preview = await buildPreview(context, selected, dontShare);
-  if (!preview.items.some(item => item.state !== 'collision' && item.state !== 'held')) {
-    return action(context, selected, dontShare, preview.items.map(item => ({ item: item.name, outcome: 'held', message: item.reason })), 0);
-  }
-  const results: DestinationResult[] = [];
-  let record = (await readRecord(context.home)).record;
-  // Order matters: a crash between these leaves an intact record that this build can resume.
-  if (!record) { record = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, record); }
-  if (gate.state !== 'ready') await remember(context, record.generation);
-  await clearStaleStages(context, preview.disclosures.map(disclosure => disclosure.writesTo));
-
-  const startId = record.activeStartId ?? randomUUID();
-  let changed = false, writes = 0;
-  for (const item of preview.items) {
-    const existing = record.items[item.key];
-    if (item.state === 'dont-share') {
-      if (!existing) { record.items[item.key] = { name: item.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] }; changed = true; }
-      else if (existing.state !== 'dont-share') { existing.state = 'dont-share'; changed = true; }
-      results.push({ item: item.name, outcome: 'kept', message: item.reason });
-      continue;
-    }
-    if (item.state === 'collision' || item.state === 'held') { results.push({ item: item.name, outcome: 'held', message: item.reason }); continue; }
-    try {
-      const sourceCopy = item.copies[0];
-      const tree = await readTree(sourceCopy.directory);
-      await importRevision(context, item.key, sourceCopy.directory, tree);
-      const entry: RecordItem = existing ?? { name: item.name, hash: tree.hash, state: 'shared', startId, observedAt: new Date().toISOString(), copies: [] };
-      if (!existing) changed = true;
-      for (const copy of item.copies) {
-        if (copy.hash === entry.hash && !entry.copies.some(known => known.directory === copy.directory)) {
-          entry.copies.push({ harness: copy.harness, directory: copy.directory, hash: copy.hash, created: false, status: 'written' });
-          changed = true;
-        }
-      }
-      record.items[item.key] = entry;
-      for (const target of item.targets) {
-        if (target.skipped) { results.push({ item: item.name, harness: target.harness, outcome: 'held', message: target.skipped }); continue; }
-        // Intent goes on record first, so a crash after the rename still leaves an undoable copy.
-        const intent: RecordCopy = { harness: target.harness, directory: target.directory, hash: tree.hash, created: true, status: 'pending' };
-        entry.copies = [...entry.copies.filter(known => known.directory !== target.directory), intent];
-        entry.startId = startId;
-        record.lastStartId = startId;
-        record.activeStartId = startId;
-        await saveRecord(context.home, record);
-        try { await placeCopy(context, sourceCopy.directory, target, tree); }
-        catch (error) {
-          // It was never ours, so Undo must not treat whatever is there as a copy this Start made.
-          entry.copies = entry.copies.filter(known => known !== intent);
-          changed = true;
-          throw error;
-        }
-        writes++;
-        context.fault?.('after-rename');
-        intent.status = 'written';
-        changed = true;
-        results.push({ item: item.name, harness: target.harness, outcome: 'written', message: [harnesses[target.harness].nextStep, ...target.limits].join(' ') });
-      }
-      if (!item.targets.length) {
-        // A recorded pending copy that made it to disk is ours: a crash between rename and record.
-        for (const known of [...entry.copies]) {
-          if (known.status !== 'pending') continue;
-          if (await exists(known.directory)) known.status = 'written';
-          else entry.copies = entry.copies.filter(other => other !== known);
-          changed = true;
-        }
-        results.push({ item: item.name, outcome: 'kept', message: item.reason });
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-      results.push({ item: item.name, outcome: 'failed', message: plainError(error) });
-    }
-  }
-  if (record.activeStartId) { delete record.activeStartId; changed = true; }
-  if (changed) await saveRecord(context.home, record);
-  return action(context, selected, dontShare, results, writes);
-}
-
-// ---------- Undo ----------
-
-/** Removes only copies a Start created that still match their recorded hash. Those items become Don't share; a whole-Start Undo leaves skills it did not copy alone. */
-export async function undo(context: ShareContext, selected: HarnessId[], only?: string): Promise<ActionResult> {
-  try { return await runUndo(context, selected, only); }
-  catch (error) { return action(context, selected, [], [], 0, `Undo could not finish. ${plainError(error)} Read again to see where things stand.`); }
-}
-
 export async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch { return false; }
-}
-
-/** A source counts only if a skill is really there, and it is not the very folder being removed. */
-async function sourceSurvives(item: RecordItem, realCopy: string): Promise<boolean> {
-  for (const source of item.copies.filter(other => !other.created)) {
-    try {
-      if ((await realpath(source.directory)) !== realCopy && (await stat(join(source.directory, 'SKILL.md'))).isFile()) return true;
-    } catch { /* gone */ }
-  }
-  return false;
-}
-
-async function undoCopy(context: ShareContext, item: RecordItem, copy: RecordCopy): Promise<DestinationResult> {
-  const result = (outcome: DestinationResult['outcome'], message: string): DestinationResult => ({ item: item.name, harness: copy.harness, outcome, message });
-  let info;
-  try { info = await lstat(copy.directory); }
-  catch (error) { return errorCode(error) === 'ENOENT' ? result('stayed', 'Already gone.') : result('failed', 'Could not be checked, so it stays.'); }
-  const current = info.isDirectory() ? await readTree(copy.directory, { includeGit: true }) : undefined;
-  if (current?.hash !== copy.hash) return result('stayed', 'Changed since the copy, so it stays.');
-  if (!(await sourceSurvives(item, await realpath(copy.directory)))) return result('stayed', 'Its source is gone or is this same folder, so this copy stays.');
-  const mode = info.mode & 0o777;
-  const parked = join(await stagingFolder(context, dirname(copy.directory)), `${STAGE_PREFIX}${randomUUID()}`);
-  try {
-    await chmod(copy.directory, mode | 0o700);
-    await rename(copy.directory, parked);
-  } catch (error) {
-    await chmod(copy.directory, mode).catch(() => undefined);
-    throw error;
-  }
-  try { await removeTree(parked); }
-  catch (error) {
-    await rename(parked, copy.directory).catch(() => undefined);
-    throw error;
-  }
-  return result('removed', 'Removed. Its source and the imported bytes stay.');
-}
-
-async function runUndo(context: ShareContext, selected: HarnessId[], only?: string): Promise<ActionResult> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return action(context, selected, [], [], 0, access.reason);
-  const gate = await syncGate(context);
-  if (gate.state !== 'ready') return action(context, selected, [], [], 0, 'reason' in gate ? gate.reason : 'Nothing to undo.');
-  const record = (await readRecord(context.home)).record!;
-  const results: DestinationResult[] = [];
-  let removed = 0;
-  const keys = only ? [itemKey(only)] : Object.keys(record.items).filter(key => startCopied(record.items[key], record.lastStartId));
-  for (const key of keys) {
-    const item = record.items[key];
-    if (!item) continue;
-    // A record that cannot be saved stops this item before anything is removed. The state itself changes
-    // only afterwards, so a crash here leaves an item that a second Undo can finish, never a stranded copy.
-    try { await saveRecord(context.home, record); }
-    catch (error) { results.push({ item: item.name, outcome: 'failed', message: `The sync record could not be saved, so nothing was removed. ${plainError(error)}` }); continue; }
-    if (!item.copies.some(copy => copy.created)) results.push({ item: item.name, outcome: 'stayed', message: 'Every copy was here before Start, so they stay.' });
-    let failed = false;
-    for (const copy of item.copies.filter(entry => entry.created)) {
-      try {
-        const result = await undoCopy(context, item, copy);
-        if (result.outcome === 'removed') removed++;
-        if (result.outcome === 'failed') failed = true;
-        results.push(result);
-      } catch (error) {
-        failed = true;
-        results.push({ item: item.name, harness: copy.harness, outcome: 'failed', message: `It could not be removed. ${plainError(error)}` });
-      }
-    }
-    if (!failed) { item.state = 'dont-share'; await saveRecord(context.home, record); }
-  }
-  return action(context, selected, [], results, removed);
 }

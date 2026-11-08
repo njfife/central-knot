@@ -2,7 +2,7 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { applyManage, rerender, announce, shownPath, state } from './app.ts';
-import { button, h, hiddenText, icon } from './dom.ts';
+import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts } from './types.ts';
@@ -47,6 +47,8 @@ const view = {
   comparing: undefined as string | undefined,
   /** The tool whose header menu is open. */
   toolMenu: undefined as Tool | undefined,
+  /** What the Skills page list is narrowed to. */
+  listFind: '',
 };
 
 // A click elsewhere or Escape closes a tool menu.
@@ -157,11 +159,12 @@ const manageable = () => committedList().filter(skill => !skill.held).filter(ski
 const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
 const resumeNeeded = () => !designMode && state.home?.manage.gate.state === 'needs-resume';
 
-function changeBar() {
+/** Pending changes and Apply all. `bulk` adds Manage all, which belongs with the whole list. */
+function changeBar(bulk = true) {
   const count = view.draft.size;
   const waiting = pendingSyncs(committedList());
   const ready = manageable();
-  const manageAll = variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: 'Manage all', name: `Manage all ${ready.length} unmanaged skills`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: 'Manage all', name: `Manage all ${ready.length} unmanaged skills`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   if (count) return h('div.apply', {}, manageAll,
     h('span.apply-count.apply-quiet', {}, `${count} ${count === 1 ? 'change' : 'changes'}`),
     button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded.'); rerender(); } }),
@@ -204,7 +207,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
 };
 
 /** Everything about one skill, opened in place under its row. Differing copies add the choice of which one to use. */
-function details(skill: SampleSkill) {
+function details(skill: SampleSkill, closable = true) {
   const draft = view.draft.get(skill.key);
   const differs = toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Both copies are kept as they are.' : skill.managed
@@ -221,7 +224,7 @@ function details(skill: SampleSkill) {
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
       h('div.details-tool-body', {}, cell(skill, tool), h('span', {}, toolLine(skill, tool)))))),
     differs ? compareChoices(skill) : null,
-    h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })));
+    closable ? h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })) : null);
 }
 
 /** The decision for differing copies. */
@@ -321,18 +324,6 @@ function toolHead(tool: Tool, list: SampleSkill[]) {
       icon('arrow-down', 12), count ? `Add ${count}` : 'All here') : null);
 }
 
-/** Option B: one band that says what each tool is missing from the other, with one button each way. */
-function directionBand(list: SampleSkill[]) {
-  const lane = (from: Tool, to: Tool) => {
-    const count = sendable(from, to, list).length;
-    return h('div.lane', {},
-      brandMark(from, 16), h('span.lane-name', {}, names[from]), icon('arrow-right', 14, 'tone-muted'), brandMark(to, 16), h('span.lane-name', {}, names[to]),
-      h('span.lane-count', {}, count ? `${count} ${count === 1 ? 'skill' : 'skills'} to add` : 'Nothing to add'),
-      button({ variant: 'outline', size: 'small', label: `Use all in ${names[to]}`, id: `lane-${to}`, disabled: !count, onclick: () => send(from, to, list) }));
-  };
-  return h('div.band-lanes', {}, lane('claude-cli', 'copilot-cli'), lane('copilot-cli', 'claude-cli'));
-}
-
 /** Option C: whatever the filter or search shows is the set the actions apply to. */
 function shownStrip(shown: SampleSkill[]) {
   const unmanaged = shown.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention');
@@ -389,8 +380,13 @@ function notices() {
   return bands.length ? h('div.bands', {}, bands) : null;
 }
 
-export function designOverview() {
+/** Pending changes belong to one home: opening another starts clean. */
+function forgetOtherHomes() {
   if (!designMode && state.home?.home !== draftHome) { view.draft.clear(); view.comparing = undefined; draftHome = state.home?.home; }
+}
+
+export function designOverview() {
+  forgetOtherHomes();
   const all = rows();
   const needle = view.find.trim().toLowerCase();
   const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill, toolList()) === 'attention'))
@@ -413,4 +409,62 @@ export function designOverview() {
       legend()));
 }
 
-void hiddenText;
+
+// ---------- Skills page ----------
+
+/** A small cell for the list: the same look as the Overview's, without the button. */
+const miniCell = (skill: SampleSkill, tool: Tool) => {
+  const state = cellOf(skill, tool);
+  const base = committedOf(skill.key);
+  const pending = state !== 'cannot' && (state !== cellOf(base, tool) || (skill.managed && !skill.off.includes(tool)) !== (base.managed && !base.off.includes(tool)));
+  const look = pending && state === 'synced' ? cellLook['will-sync'] : cellLook[state];
+  const on = skill.managed && !skill.off.includes(tool);
+  return h(`span.legend-cell.mini-cell.${look.tone}${on ? '.cell-on' : ''}`, { title: `${names[tool]}: ${look.label}` }, look.glyph ? icon(look.glyph, state === 'present' ? 9 : 11, state === 'present' ? 'ring-strong' : '') : null);
+};
+
+/** A list of every skill beside one skill's details: the same choices as the Overview, and the same Apply all. `more` adds files and contents. */
+export function skillsBrowser(more: (key: string) => (Node | null | false)[], select: (key: string | undefined) => void) {
+  forgetOtherHomes();
+  const all = rows();
+  const needle = view.listFind.trim().toLowerCase();
+  const shown = all.filter(skill => !needle || skill.key.includes(needle) || (skill.name ?? '').toLowerCase().includes(needle) || skill.description.toLowerCase().includes(needle));
+  const chosen = all.find(skill => skill.key === state.item);
+  // Two panes always show a skill. One pane shows the list until a skill is chosen.
+  const onePane = document.body.classList.contains('one-pane');
+  const shownDetail = chosen ?? shown[0] ?? all[0];
+  const highlighted = chosen ?? (onePane ? undefined : shownDetail);
+  document.body.classList.toggle('has-item', !!chosen);
+  const listRow = (skill: SampleSkill) => h(`button.list-row${skill === highlighted ? '.selected' : ''}${view.draft.has(skill.key) ? '.list-changed' : ''}`, {
+    type: 'button', id: `list-${skill.key}`, 'aria-pressed': String(skill === highlighted),
+    'aria-label': `${skill.name ?? skill.key}, ${skill.managed ? 'managed' : 'unmanaged'}${view.draft.has(skill.key) ? ', changed, not applied yet' : ''}`,
+    onclick: () => select(skill.key),
+  },
+    h(`span.list-managed${skill.managed ? '.on' : ''}`, { 'aria-hidden': 'true', title: skill.managed ? 'Managed' : 'Unmanaged' }),
+    middle(skill.name ?? skill.key, 12, 'list-name'),
+    h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
+  const find = h('input.find-input', { id: 'list-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
+    oninput: (event: Event) => { view.listFind = (event.target as HTMLInputElement).value; rerender(); document.getElementById('list-find')?.focus(); } });
+  const list = shown.length
+    ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.map(listRow))
+    : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
+  const skill = shownDetail;
+  const draft = view.draft.get(skill.key);
+  return h('div.page.split', {},
+    h('div.list-column', {},
+      h('div.toolbar.list-toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
+      h('div.scroll.list-scroll', { id: 'list-scroll' }, list)),
+    h('section.detail-column', { 'aria-label': 'Skill details' },
+      h('div.pane-header', {},
+        h('div.crumb', {},
+          button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Skills', id: 'detail-back', onclick: () => select(undefined) }),
+          h('span.crumb-sep', { 'aria-hidden': 'true' }, '/')),
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', {}, `${skill.managed ? 'Managed' : 'Unmanaged'}${draft ? ' · not applied yet' : ''}`)),
+        h('div.detail-actions', {},
+          h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
+          toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
+          changeBar(false))),
+      notices(),
+      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false), ...more(skill.key))));
+}
+
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.listFind && (event.target as HTMLElement | null)?.id === 'list-find') { view.listFind = ''; rerender(); } });

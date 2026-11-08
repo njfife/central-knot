@@ -86,7 +86,9 @@ export async function manageView(context: ShareContext, caughtUp: DestinationRes
   const { record } = await readRecord(context.home);
   const gathered = await gather(context, snapshots, record);
   const skills = [...gathered.values()].map(entry => entry.facts).sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')));
-  return { tools: presentTools(snapshots), skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp };
+  const tools = presentTools(snapshots);
+  const writes = Object.fromEntries(tools.map(tool => [tool, { to: writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), alsoReadBy: harnesses[tool].otherReaders }]));
+  return { tools, writes, skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp };
 }
 
 /** Moves a different copy aside and puts the chosen one in its place. The replaced bytes are kept in the store first. */
@@ -133,6 +135,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   // A crash between these steps leaves an intact record this build can resume.
   if (!record) { record = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, record); }
   if (gate.state !== 'ready') await remember(context, record.generation);
+  // The record is saved only when it changed: catch-up runs on every read, and a read that finds nothing to do writes nothing.
+  let saved = JSON.stringify(record);
+  const save = async () => { const text = JSON.stringify(record); if (text !== saved) { await saveRecord(context.home, record!); saved = text; } };
 
   const uses = new Map<string, HarnessId>();
   for (const change of changes) {
@@ -145,7 +150,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (change.use && change.use !== 'separate') uses.set(change.key, change.use);
     record.items[change.key] = item;
   }
-  await saveRecord(context.home, record);
+  await save();
   await clearStaleStages(context, tools.map(tool => writeRoot(harnesses[tool], context.home, context.overrides?.[tool])));
 
   const results: DestinationResult[] = [];
@@ -188,7 +193,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         const directory = join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), entry.facts.name);
         const intent = { harness: tool, directory, hash: tree.hash, created: true, status: 'pending' as const };
         item.copies = [...item.copies.filter(known => known.directory !== directory), intent];
-        await saveRecord(context.home, record);
+        await save();
         try { await mkdir(dirname(directory), { recursive: true }); await placeCopy(context, source.directory, { harness: tool, directory, limits: [] }, tree); }
         catch (error) {
           item.copies = item.copies.filter(known => known !== intent);
@@ -211,7 +216,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (copy.status !== 'pending') continue;
     if (await exists(copy.directory)) copy.status = 'written'; else item.copies = item.copies.filter(other => other !== copy);
   }
-  await saveRecord(context.home, record);
+  await save();
   return { results, harnessWrites: writes };
 }
 
