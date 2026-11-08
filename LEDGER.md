@@ -331,3 +331,23 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
   - Manage, an edit, competing edits, a deletion, Restore and Delete everywhere were all correct. Codex and Copilot listed the trial skill.
   - The other 488 entries were byte-identical.
   - Codex rewrites its own `.codex/skills/.system` whenever its app server starts, so the trial no longer counts that folder.
+
+## MCP servers, checkpoint 1, November 8, 2026
+
+**Built.**
+- **Reading.** `src/mcp.ts` reads each tool's user-wide servers into one neutral record (transport, command, args, env, cwd, url, headers): Claude Code `~/.claude.json` (moves with `CLAUDE_CONFIG_DIR`), Copilot `mcp-config.json`, and Codex `config.toml` `[mcp_servers.*]` with its `env` subtable. Each tool's own fields (Copilot `tools`, Codex timeouts, `enabled`, approval mode) stay at that tool and are not compared (MCP-01).
+- **Never offered:** ChatGPT desktop's own entries (`node_repl`, or a command inside an app bundle).
+- **Unsupported:** SSE to Codex is "can't load".
+- **Values as-is:** headers and env are copied verbatim (AT-18).
+- **Preserving editors (FIL-02).** `src/textedit.ts` edits one JSON member, or one TOML server table with its subtables, and leaves every other byte as it was, comments included. Every write rereads the file and checks the entry is still what was decided on.
+- **Same model as skills,** in its own record `.central-knot/mcp.json`: Managed and per-tool off, copies where missing, a choice when copies differ, one-sided edits spreading, deletions spreading after a settle, and competing edits by the fixed order.
+- **Claude Code (MCP-02):** never written in the background. A band names what waits and offers **Write now**, after quitting Claude Code. It edits only those entries.
+- **The page.** A new MCP page reuses the Overview's table, with separate pending changes for MCP. The practice copy now has servers in all three tools.
+
+**Not yet:**
+- MCP History, Undo and Restore (CON-02);
+- the observation intervals skills use for proved order;
+- background MCP passes between page reads (they run on each read and with Sync now);
+- Claude desktop's `claude_desktop_config.json` (D-11).
+
+**Validation.** 134 unit tests (10 new, including byte-preservation of JSON and TOML). Mac e2e 188/188 with 4 crash rounds, including the MCP page, Apply all, a byte-identical config.toml prefix and Write now. Linux unit 134/134 and e2e 113/113. The real-home two-way trial was not rerun; MCP was not exercised on the real home.

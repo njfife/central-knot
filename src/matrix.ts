@@ -1,7 +1,7 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
-import { applyManage, deleteEverywhereKey, rerender, announce, restoreEvent, shownPath, showPage, state, syncNow } from './app.ts';
+import { applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, shownPath, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
@@ -22,18 +22,23 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
   extra: facts.extra.map(extra => ({ tool: extra.tool, directory: extra.directory, summary: extra.summary, writable: extra.writable, same: extra.hash === facts.copies[extra.tool]?.hash })),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
-  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description }])),
+  // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
+  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
 });
 
-let factsCache: { from: unknown; list: SampleSkill[] } | undefined;
+/** What this table shows: skills, or MCP servers. Each keeps its own pending changes; the same marks mean the same things. */
+type Kind = 'skills' | 'mcp';
+let kind: Kind = 'skills';
+const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
-  const manage = state.home?.manage;
-  if (!manage) return [];
-  if (factsCache?.from !== manage) factsCache = { from: manage, list: manage.skills.map(fromFacts) };
-  return factsCache.list;
+  const source = kind === 'mcp' ? state.home?.mcp : state.home?.manage;
+  const facts = kind === 'mcp' ? state.home?.mcp?.servers : state.home?.manage.skills;
+  if (!source || !facts) return [];
+  if (factsCache[kind]?.from !== source) factsCache[kind] = { from: source, list: facts.map(fromFacts) };
+  return factsCache[kind]!.list;
 }
-const toolList = (): Tool[] => (designMode ? sampleTools : state.home?.manage.tools ?? []);
+const toolList = (): Tool[] => (designMode ? sampleTools : (kind === 'mcp' ? state.home?.mcp?.tools : state.home?.manage.tools) ?? []);
 const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
 const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
@@ -41,7 +46,7 @@ type Resolution = Tool | 'separate';
 /** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
 interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string; /** Whether the skill was managed when this change was first made: a change made against an older state is dropped, never applied. */ seenManaged?: boolean }
 
-const view = {
+const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
   draft: new Map<string, Draft>(),
   filter: 'all' as Filter,
@@ -58,7 +63,10 @@ const view = {
   listFind: '',
   /** The skill whose Delete everywhere is waiting for its confirming click. */
   confirmDelete: undefined as string | undefined,
-};
+});
+const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView() };
+let view = views.skills;
+let draftHomes: Partial<Record<Kind, string>> = {};
 
 // A click elsewhere or Escape closes a tool menu.
 document.addEventListener('click', () => { if (view.toolMenu) { view.toolMenu = undefined; rerender(); } });
@@ -122,7 +130,9 @@ function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
     const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged })) as Change[];
-    void applyManage(changes, () => view.draft.clear());
+    const drafts = view.draft;
+    if (kind === 'mcp') void applyMcpChanges(changes, () => drafts.clear());
+    else void applyManage(changes, () => drafts.clear());
     return;
   }
   view.committed = view.committed.map(skill => applied(effective(skill)));
@@ -172,7 +182,8 @@ function filterBar() {
 }
 
 // Edits waiting for Sync are not Apply all's to write: the Sync-off banner offers Sync now for them.
-const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync')).length;
+// MCP entries for Claude Code wait for Write now, not Apply all (MCP-02), so they are not counted here either.
+const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync' && !(kind === 'mcp' && tool === 'claude-cli'))).length;
 const manageable = () => committedList().filter(skill => !skill.held).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
 
 const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
@@ -249,7 +260,7 @@ function details(skill: SampleSkill, closable = true) {
     differs ? compareChoices(skill) : null,
     h('div.compare-foot', {},
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
-      !designMode && committedOf(skill.key).managed
+      !designMode && kind === 'skills' && committedOf(skill.key).managed
         ? view.confirmDelete === skill.key
           ? smallAction(`Delete ${skill.name ?? skill.key} from every tool`, `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; void deleteEverywhereKey(skill.key); }, '.text-danger')
           : smallAction('Delete everywhere', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger')
@@ -444,7 +455,6 @@ function section(label: string, list: SampleSkill[], after: number) {
     sorted.flatMap(row));
 }
 
-let draftHome: string | undefined;
 
 /** The column count goes through the style object: the page's security policy refuses inline style attributes. */
 function withToolCount(table: HTMLElement) {
@@ -453,8 +463,25 @@ function withToolCount(table: HTMLElement) {
 }
 
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
+function mcpNotices() {
+  const mcp = state.home!.mcp;
+  const bands: HTMLElement[] = [];
+  if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
+  for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
+  // Claude Code rewrites ~/.claude.json while it runs, so its entries wait for an explicit write with Claude closed (MCP-02).
+  if (mcp.claudePending.length) bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, `${mcp.claudePending.join(', ')} ${mcp.claudePending.length === 1 ? 'waits' : 'wait'} for Claude Code. Quit Claude Code first, then Write now; Claude rewrites its settings file while it runs.`),
+    smallAction('Write now', 'mcp-write-claude', () => void writeClaudeNow(mcp.claudePending))));
+  const applied = state.mcpResult;
+  if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
+  const problems = (applied?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/Copies differ|Write now/.test(result.message)));
+  if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · '))));
+  return bands.length ? h('div.bands', {}, bands) : null;
+}
+
 function notices() {
   if (designMode || !state.home) return null;
+  if (kind === 'mcp') return mcpNotices();
   const manage = state.home.manage;
   const bands: HTMLElement[] = [];
   if (!state.home.syncOn) bands.push(h('div.band', { role: 'status' }, icon('circle-minus', 14, 'tone-warning'), h('span.band-text', {}, 'Sync is off. Edits and deletions are noted and spread when you turn it back on; Apply all still writes what it shows.'),
@@ -486,7 +513,7 @@ function notices() {
 
 /** Pending changes belong to one home: opening another starts clean. */
 function forgetOtherHomes() {
-  if (!designMode && state.home?.home !== draftHome) { view.draft.clear(); view.comparing = undefined; draftHome = state.home?.home; }
+  if (!designMode && state.home?.home !== draftHomes[kind]) { view.draft.clear(); view.comparing = undefined; draftHomes[kind] = state.home?.home; }
   // A change for a skill that is no longer there has nothing to apply to.
   // So is a choice of a copy that has gone or changed since it was chosen.
   const byKey = new Map(committedList().map(skill => [skill.key, skill]));
@@ -517,7 +544,9 @@ function syncNotice(notice: SyncNotice) {
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), h('span', {}, text), action);
 }
 
-export function designOverview() {
+export function designOverview(which: Kind = 'skills') {
+  kind = which;
+  view = views[which];
   forgetOtherHomes();
   const all = rows();
   const needle = view.find.trim().toLowerCase();
@@ -530,9 +559,9 @@ export function designOverview() {
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
-      withToolCount(h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync' },
+      withToolCount(h('div.ov', { role: 'table', 'aria-label': kind === 'mcp' ? 'MCP servers and where they sync' : 'Skills and where they sync' },
         h('div.ov-row.ov-head', { role: 'row' },
-          h('div.ov-name', { role: 'columnheader' }, 'Skill'),
+          h('div.ov-name', { role: 'columnheader' }, kind === 'mcp' ? 'Server' : 'Skill'),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
           h('div.ov-fill')),
@@ -556,6 +585,8 @@ const miniCell = (skill: SampleSkill, tool: Tool) => {
 
 /** A list of every skill beside one skill's details: the same choices as the Overview, and the same Apply all. `more` adds files and contents. */
 export function skillsBrowser(more: (key: string) => (Node | null | false)[], select: (key: string | undefined) => void) {
+  kind = 'skills';
+  view = views.skills;
   forgetOtherHomes();
   const all = rows();
   const needle = view.listFind.trim().toLowerCase();

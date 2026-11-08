@@ -1,0 +1,11 @@
+{
+  "numStartups": 3,
+  "theme": "dark",
+  "mcpServers": {
+    "docs": {
+      "type": "http",
+      "url": "https://docs.example.test/mcp",
+      "headers": { "Authorization": "Bearer practice-token" }
+    }
+  }
+}

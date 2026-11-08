@@ -7,7 +7,8 @@ import { discover } from './discovery.ts';
 import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, manageView, readHistory, restoreFromHistory } from './manage.ts';
+import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
+import { applyMcp, mcpView } from './mcp.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
@@ -78,7 +79,10 @@ let lastStopped: string | undefined;
 async function pass(explicit = false): Promise<ApplyResult | undefined> {
   const shared = context();
   if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return undefined;
-  return applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
+  const result = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
+  // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
+  if (syncOn || explicit) await applyMcp(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+  return result;
 }
 
 async function view(explicit = false): Promise<HomeView> {
@@ -93,6 +97,7 @@ async function view(explicit = false): Promise<HomeView> {
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
+    mcp: await mcpView(shared, presentTools(snapshots)),
   };
 }
 
@@ -312,6 +317,13 @@ app.whenReady().then(async () => {
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });
   handle('sync:now', async home => (home === current?.home ? view(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
+  // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
+  handle('mcp:apply', async (list, home) => (home === current?.home
+    ? applyMcp(context(), (await manageView(context())).tools, changes(list))
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+  handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
+    ? applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string') })
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));

@@ -1,10 +1,10 @@
-import type { ApplyResult, Change, DesktopApi, HarnessId, HistoryEvent, HomeMode, HomeView, PluginActionResult, PluginsView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, HarnessId, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'plugins' | 'history' | 'tools';
+export type Page = 'overview' | 'skills' | 'mcp' | 'plugins' | 'history' | 'tools';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -13,6 +13,8 @@ export const state = {
   /** The skill shown in the Skills detail. */
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
+  /** What the last MCP Apply all or Write now did. */
+  mcpResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
   /** Marketplaces and what each tool has installed, read when the Plugins page opens. */
@@ -206,4 +208,24 @@ api().onSyncChanged(async () => {
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
   try { const view = await api().refresh(); if (view) { state.home = view; rerender(); } } finally { refreshing = false; }
+});
+
+// ---------- MCP servers ----------
+
+export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
+  const result = await api().applyMcp(changes, state.home!.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.mcpResult = result;
+  if (!result.stopped) onDone();
+  announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'entry', 'entries')} written.` : 'Applied. Nothing needed writing.'));
+});
+
+/** Write now: Claude Code's entries, once the person has quit Claude Code (MCP-02). */
+export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code…', async () => {
+  const result = await api().writeClaude(names, state.home!.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.mcpResult = result;
+  announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`);
 });

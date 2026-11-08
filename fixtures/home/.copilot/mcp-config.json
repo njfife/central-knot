@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "files": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "@example/files-mcp", "/tmp"],
+      "tools": ["*"]
+    }
+  }
+}

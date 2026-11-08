@@ -55,13 +55,15 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
   history(): Promise<HistoryEvent[]>;
+  applyMcp(changes: Change[], home: string): Promise<McpResult>;
+  writeClaude(names: string[], home: string): Promise<McpResult>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
@@ -234,3 +236,17 @@ export interface PluginsView {
   reason?: string;
   marketplaces: MarketplaceView[];
 }
+
+// ---------- MCP servers ----------
+export interface McpView {
+  tools: HarnessId[];
+  servers: SkillFacts[];
+  /** Claude Code entries are written only by Write now with Claude closed, until a background write is proved safe (V-09). */
+  claudePending: string[];
+  access: WriteAccess;
+  gate: SyncGate;
+  /** Files that could not be read, so their entries are not offered. */
+  problems: string[];
+}
+
+export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number }

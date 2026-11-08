@@ -1,0 +1,7 @@
+# Practice Codex settings: Central Knot edits only MCP server tables it manages.
+model = "gpt-6"
+
+[mcp_servers.files]
+command = "npx"
+args = ["-y", "@example/files-mcp", "/tmp"]
+startup_timeout_sec = 20

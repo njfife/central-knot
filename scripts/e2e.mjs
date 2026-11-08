@@ -379,6 +379,25 @@ async function practiceFlow() {
   same('find filters', await rowKeys(a), ['standup']);
   await a.press('Escape');
   same('Escape clears find', (await rowKeys(a)).length, 4);
+  // MCP: each tool's servers on one page; Apply all writes Copilot and Codex by editing only that entry; Claude Code waits for Write now.
+  await a.click('#nav-mcp');
+  same('MCP servers from every tool', (await rowKeys(a)).sort(), ['docs', 'files']);
+  same('files is the same in Copilot and Codex, absent in Claude', [await cellState(a, 'files', 'copilot-cli'), await cellState(a, 'files', 'codex-cli'), await cellState(a, 'files', 'claude-cli')], ['present', 'present', 'absent']);
+  const tomlBefore = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
+  await a.click('#manage-all');
+  await applyAll(a);
+  const copilotMcp = JSON.parse(readFileSync(join(practice, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
+  same('docs reached Copilot with its header as-is', copilotMcp.docs, { type: 'http', url: 'https://docs.example.test/mcp', headers: { Authorization: 'Bearer practice-token' }, tools: ['*'] });
+  const tomlAfter = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
+  check('docs reached Codex, and config.toml kept its comment and the files table byte for byte', tomlAfter.startsWith(tomlBefore) && tomlAfter.includes('[mcp_servers.docs]') && tomlAfter.includes('url = "https://docs.example.test/mcp"'), tomlAfter);
+  const claudeBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
+  check('Claude Code waits for Write now', (await a.text('.bands') ?? '').includes('Write now') && !JSON.parse(claudeBefore).mcpServers.files, await a.text('.bands'));
+  await a.shot('practice-mcp');
+  await a.click('#mcp-write-claude');
+  const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
+  same('Write now adds files to Claude Code and keeps its other settings', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups], ['npx', 'dark', 3]);
+  await a.click('#nav-overview');
+
   // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.
   const market = join(scratch, 'market');
   mkdirSync(join(market, '.claude-plugin'), { recursive: true });

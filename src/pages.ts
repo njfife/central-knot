@@ -23,6 +23,14 @@ export function overviewPage() {
   return designOverview();
 }
 
+// ---------- MCP servers ----------
+
+export function mcpPage() {
+  if (!state.home) return notRead();
+  if (!state.home.mcp.servers.length) return h('div.page', {}, emptyState('plug', 'No MCP servers yet', 'None of your tools has a user-wide MCP server in this home. Add one in a tool, then read again.', button({ icon: 'refresh-cw', label: 'Read again', id: 'mcp-read-again', onclick: () => void readAgain() })));
+  return designOverview('mcp');
+}
+
 // ---------- Skills ----------
 
 const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd', {}, value)];
