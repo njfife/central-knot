@@ -4,14 +4,14 @@
 import { rerender, announce } from './app.ts';
 import { button, h, hiddenText, icon } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
-import { applied, cellOf, sample, syncOf, tools, variant, type Cell, type SampleSkill } from './design.ts';
-import type { HarnessId } from './types.ts';
+import { applied, cellOf, sample, syncOf, tools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 
-const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI' };
-const other = (tool: HarnessId) => tools.find(entry => entry !== tool)!;
+const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+const other = (tool: Tool) => tools.find(entry => entry !== tool)!;
+const others = (tool: Tool) => tools.filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
-type Resolution = HarnessId | 'separate';
-interface Draft { managed: boolean; off: HarnessId[]; resolve?: Resolution }
+type Resolution = Tool | 'separate';
+interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution }
 
 const view = {
   committed: sample.map(skill => ({ ...skill })),
@@ -20,7 +20,13 @@ const view = {
   find: '',
   /** The skill whose details are open under its row. */
   comparing: undefined as string | undefined,
+  /** The tool whose header menu is open. */
+  toolMenu: undefined as Tool | undefined,
 };
+
+// A click elsewhere or Escape closes a tool menu.
+document.addEventListener('click', () => { if (view.toolMenu) { view.toolMenu = undefined; rerender(); } });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { view.toolMenu = undefined; rerender(); document.getElementById('tool-menu-button')?.focus(); } });
 
 const committedOf = (key: string) => view.committed.find(skill => skill.key === key)!;
 
@@ -52,7 +58,7 @@ function setManaged(keys: string[], managed: boolean) {
   rerender();
 }
 
-function setTool(keys: string[], tool: HarnessId, on: boolean) {
+function setTool(keys: string[], tool: Tool, on: boolean) {
   for (const key of keys) edit(key, (skill, draft) => ({ managed: on ? true : skill.managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve: draft?.resolve }));
   rerender();
 }
@@ -84,9 +90,10 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
   cannot: { tone: 'cell-cannot', label: 'Cannot load it' },
 };
 
-export function brandMark(tool: HarnessId, size = 16) {
+export function brandMark(tool: Tool, size = 16): Element {
   const holder = document.createElement('template');
-  const brand = brands[tool];
+  const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool];
+  if (!brand) return h('span.mono-mark', { 'aria-hidden': 'true', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.55)}px` }, names[tool].slice(0, 2));
   holder.innerHTML = `<svg class="brand-mark" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="${brand.color}"><path d="${brand.path}"/></svg>`;
   return holder.content.firstElementChild as SVGElement;
 }
@@ -127,7 +134,7 @@ function changeBar() {
   return h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
 }
 
-function cell(skill: SampleSkill, tool: HarnessId) {
+function cell(skill: SampleSkill, tool: Tool) {
   const base = committedOf(skill.key);
   const state = cellOf(skill, tool);
   const on = skill.managed && !skill.off.includes(tool);
@@ -144,7 +151,7 @@ function cell(skill: SampleSkill, tool: HarnessId) {
       look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'ring-strong' : '') : null));
 }
 
-const toolLine = (skill: SampleSkill, tool: HarnessId): string => {
+const toolLine = (skill: SampleSkill, tool: Tool): string => {
   const base = committedOf(skill.key);
   const state = cellOf(skill, tool);
   const was = cellOf(base, tool);
@@ -178,7 +185,7 @@ function details(skill: SampleSkill) {
 /** The decision for differing copies. */
 function compareChoices(skill: SampleSkill) {
   const versions = skill.versions ?? {};
-  const choice = (tool: HarnessId) => {
+  const choice = (tool: Tool) => {
     const version = versions[tool];
     return h('button.version', { type: 'button', id: `use-${skill.key}-${tool}`, onclick: () => resolve(skill.key, tool) },
       h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${names[tool]}'s copy`)),
@@ -225,19 +232,41 @@ function legend() {
 // ---------- What differs between the options ----------
 
 /** Skills one tool has and the other lacks (or does not sync), ready to send across. */
-const sendable = (from: HarnessId, to: HarnessId, list: SampleSkill[]) => list.filter(skill => {
+const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => list.filter(skill => {
   const now = effective(skill);
   return now.copies[from] !== undefined && !now.cannot?.[to] && syncOf(now) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
 });
-const send = (from: HarnessId, to: HarnessId, list: SampleSkill[]) => {
+const send = (from: Tool, to: Tool, list: SampleSkill[]) => {
   const keys = sendable(from, to, list).map(skill => skill.key);
   for (const key of keys) edit(key, (skill, draft) => ({ managed: true, off: skill.off.filter(entry => entry !== to), resolve: draft?.resolve }));
   rerender();
 };
 
+/** Option B: a tool's header opens a menu offering to use all its skills in each other tool. It grows by one line per tool. */
+function toolMenu(tool: Tool, list: SampleSkill[]) {
+  const mine = list.filter(skill => effective(skill).copies[tool] !== undefined).length;
+  return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
+    h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `${mine} ${mine === 1 ? 'skill' : 'skills'}`)),
+    h('p.tool-menu-label', {}, `Use all ${names[tool]} skills in`),
+    others(tool).map(target => {
+      const count = sendable(tool, target, list).length;
+      return h('div.tool-menu-row', {},
+        brandMark(target, 16), h('span.tool-menu-name', {}, names[target]),
+        h('span.tool-menu-count', {}, count ? `${count} to add` : 'Has them all'),
+        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Use all', name: `Use all ${names[tool]} skills in ${names[target]}`, id: `use-all-${tool}-in-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
+    }));
+}
+
 /** Option A: the actions sit in the headers. A tool's header adds everything the other tool has; a group header manages the group. */
-function toolHead(tool: HarnessId, list: SampleSkill[]) {
+function toolHead(tool: Tool, list: SampleSkill[]) {
   const count = sendable(other(tool), tool, list).length;
+  if (variant === 'b') {
+    const open = view.toolMenu === tool;
+    return h('div.ov-cell.ov-tool-head.tool-head-b', { role: 'columnheader' },
+      h('button.tool-head-button', { type: 'button', id: open ? 'tool-menu-button' : `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: use its skills in other tools`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
+        brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
+      open ? toolMenu(tool, list) : null);
+  }
   return h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]),
     variant === 'a' ? h('button.head-action', { type: 'button', id: `fill-${tool}`, disabled: !count, title: count ? `Use all ${count} ${names[other(tool)]} skills in ${names[tool]}` : `${names[tool]} already has everything ${names[other(tool)]} has`, onclick: () => send(other(tool), tool, list) },
       icon('arrow-down', 12), count ? `Add ${count}` : 'All here') : null);
@@ -245,7 +274,7 @@ function toolHead(tool: HarnessId, list: SampleSkill[]) {
 
 /** Option B: one band that says what each tool is missing from the other, with one button each way. */
 function directionBand(list: SampleSkill[]) {
-  const lane = (from: HarnessId, to: HarnessId) => {
+  const lane = (from: Tool, to: Tool) => {
     const count = sendable(from, to, list).length;
     return h('div.lane', {},
       brandMark(from, 16), h('span.lane-name', {}, names[from]), icon('arrow-right', 14, 'tone-muted'), brandMark(to, 16), h('span.lane-name', {}, names[to]),
@@ -293,9 +322,8 @@ export function designOverview() {
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
     h('div.scroll.matrix', {},
-      variant === 'b' ? directionBand(all) : null,
       variant === 'c' ? shownStrip(shown) : null,
-      h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync' },
+      h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync', style: `--tool-count: ${tools.length}` },
         h('div.ov-row.ov-head', { role: 'row' },
           h('div.ov-name', { role: 'columnheader' }, 'Skill'),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),

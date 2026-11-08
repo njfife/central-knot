@@ -1,0 +1,14 @@
+[
+ {
+  "name": "3-claude-menu-three-tools-dark",
+  "actions": [
+   "#tool-claude-cli"
+  ]
+ },
+ {
+  "name": "4-copilot-menu-three-tools-dark",
+  "actions": [
+   "#tool-copilot-cli"
+  ]
+ }
+]

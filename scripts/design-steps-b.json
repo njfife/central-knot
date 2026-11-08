@@ -1,5 +1,20 @@
 [
  {
+  "name": "3-claude-menu-dark",
+  "actions": [
+   "#tool-claude-cli"
+  ]
+ },
+ {
+  "name": "4-used-all-in-copilot-dark",
+  "actions": [
+   "#use-all-claude-cli-in-copilot-cli"
+  ],
+  "reset": [
+   "#discard"
+  ]
+ },
+ {
   "name": "6-details-sec-api-dark",
   "actions": [
    "#open-sec-api"
@@ -9,24 +24,9 @@
   ]
  },
  {
-  "name": "3-use-all-in-copilot-dark",
-  "actions": [
-   "#lane-copilot-cli"
-  ],
-  "reset": [
-   "#discard"
-  ]
- },
- {
-  "name": "4-compare-open-dark",
+  "name": "7-compare-open-dark",
   "actions": [
    "#decide-review"
-  ]
- },
- {
-  "name": "5-version-chosen-dark",
-  "actions": [
-   "#use-review-copilot-cli"
   ]
  }
 ]

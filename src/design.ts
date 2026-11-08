@@ -1,21 +1,24 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 // Nothing here reads or writes disk; the controls act on this sample alone.
-import type { HarnessId } from './types.ts';
 
-export const tools: HarnessId[] = ['claude-cli', 'copilot-cli'];
+/** A tool column. The design preview can add a third, imagined tool to show how the page grows. */
+export type Tool = string;
+const params = new URLSearchParams(location.search);
+export const threeTools = (params.get('design') ?? '').endsWith('3');
+export const tools: Tool[] = threeTools ? ['claude-cli', 'copilot-cli', 'codex-cli'] : ['claude-cli', 'copilot-cli'];
 
 /** A copy's content id per tool (same id = same bytes), or absent. */
 export interface SampleSkill {
   key: string;
   description: string;
-  copies: Partial<Record<HarnessId, string>>;
+  copies: Partial<Record<Tool, string>>;
   managed: boolean;
-  off: HarnessId[];
-  cannot?: Partial<Record<HarnessId, string>>;
+  off: Tool[];
+  cannot?: Partial<Record<Tool, string>>;
   /** Copies that differ, left as separate skills on purpose. */
   separate?: boolean;
   /** For the compare view: one line per copy that differs. */
-  versions?: Partial<Record<HarnessId, { lines: string; changed: string; text: string }>>;
+  versions?: Partial<Record<Tool, { lines: string; changed: string; text: string }>>;
 }
 
 export const sample: SampleSkill[] = [
@@ -37,7 +40,17 @@ export const sample: SampleSkill[] = [
 
 export const designMode = new URLSearchParams(location.search).has('design');
 /** Which layout option to show: a, b or c. */
-export const variant = (() => { const value = new URLSearchParams(location.search).get('design') ?? 'a'; return ['a', 'b', 'c'].includes(value) ? value : 'a'; })();
+export const variant = (() => { const value = (params.get('design') ?? 'b').replace(/3$/, ''); return ['a', 'b', 'c'].includes(value) ? value : 'b'; })();
+
+if (threeTools) {
+  const codex: Record<string, string | undefined> = { 'code-review': 'a', tdd: 'b', 'grill-me': 'f', 'writing-shape': 'l', wizard: 'e', standup: 'i', 'release-notes': undefined };
+  for (const skill of sample) {
+    const id = codex[skill.key];
+    if (id) skill.copies['codex-cli'] = id;
+    if (skill.key === 'tdd' || skill.key === 'code-review') skill.off = skill.off.filter(tool => tool !== 'codex-cli');
+    if (skill.key === 'sec-api') skill.off = [...skill.off, 'codex-cli'];
+  }
+}
 
 /** --design-preview=large adds generated skills, to see the page with hundreds of them. */
 if (new URLSearchParams(location.search).get('design') === 'large') {
@@ -58,7 +71,7 @@ if (new URLSearchParams(location.search).get('design') === 'large') {
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot';
 export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';
 
-export function cellOf(skill: SampleSkill, tool: HarnessId): Cell {
+export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   const has = skill.copies[tool] !== undefined;
   if (skill.cannot?.[tool]) return 'cannot';
   const ids = new Set(Object.values(skill.copies));
