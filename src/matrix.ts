@@ -245,15 +245,19 @@ const send = (from: Tool, to: Tool, list: SampleSkill[]) => {
 /** Option B: a tool's header opens a menu offering to use all its skills in each other tool. It grows by one line per tool. */
 function toolMenu(tool: Tool, list: SampleSkill[]) {
   const mine = list.filter(skill => effective(skill).copies[tool] !== undefined).length;
+  // Stop all: every managed skill stops syncing to this tool. Copies already there stay as they are.
+  const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
-    h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `${mine} ${mine === 1 ? 'skill' : 'skills'}`)),
-    h('p.tool-menu-label', {}, `Use all ${names[tool]} skills in`),
+    h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `${mine} ${mine === 1 ? 'skill' : 'skills'}`),
+      button({ variant: 'ghost', size: 'small', label: 'Stop all', name: `Stop syncing all ${syncingHere.length} skills to ${names[tool]}`, id: `stop-all-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })),
+    h('p.tool-menu-note', {}, syncingHere.length ? `${syncingHere.length} managed ${syncingHere.length === 1 ? 'skill syncs' : 'skills sync'} here. Stop all keeps their copies but stops updating them.` : 'No managed skills sync here.'),
+    h('p.tool-menu-label', {}, `Add all ${names[tool]} skills to`),
     others(tool).map(target => {
       const count = sendable(tool, target, list).length;
       return h('div.tool-menu-row', {},
         brandMark(target, 16), h('span.tool-menu-name', {}, names[target]),
         h('span.tool-menu-count', {}, count ? `${count} to add` : 'Has them all'),
-        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Use all', name: `Use all ${names[tool]} skills in ${names[target]}`, id: `use-all-${tool}-in-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
+        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Add all', name: `Add all ${names[tool]} skills to ${names[target]}`, id: `use-all-${tool}-in-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
     }));
 }
 
@@ -263,7 +267,7 @@ function toolHead(tool: Tool, list: SampleSkill[]) {
   if (variant === 'b') {
     const open = view.toolMenu === tool;
     return h('div.ov-cell.ov-tool-head.tool-head-b', { role: 'columnheader' },
-      h('button.tool-head-button', { type: 'button', id: open ? 'tool-menu-button' : `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: use its skills in other tools`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
+      h('button.tool-head-button', { type: 'button', id: open ? 'tool-menu-button' : `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: add its skills to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
       open ? toolMenu(tool, list) : null);
   }

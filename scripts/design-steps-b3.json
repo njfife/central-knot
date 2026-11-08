@@ -10,5 +10,14 @@
   "actions": [
    "#tool-copilot-cli"
   ]
+ },
+ {
+  "name": "5-stopped-all-copilot-dark",
+  "actions": [
+   "#stop-all-copilot-cli"
+  ],
+  "reset": [
+   "#discard"
+  ]
  }
 ]

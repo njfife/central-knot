@@ -4,7 +4,7 @@
 /** A tool column. The design preview can add a third, imagined tool to show how the page grows. */
 export type Tool = string;
 const params = new URLSearchParams(location.search);
-export const threeTools = (params.get('design') ?? '').endsWith('3');
+export const threeTools = (params.get('design') ?? '').endsWith('3') || ['1', ''].includes(params.get('design') ?? '');
 export const tools: Tool[] = threeTools ? ['claude-cli', 'copilot-cli', 'codex-cli'] : ['claude-cli', 'copilot-cli'];
 
 /** A copy's content id per tool (same id = same bytes), or absent. */
