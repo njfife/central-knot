@@ -170,17 +170,52 @@ function skipTomlSpace(text: string, at: number, newlines: boolean): number {
   }
 }
 
+/** A multi-line string: the first newline is trimmed, up to two quotes may touch the closing delimiter, basic strings unescape. */
+function parseMultiline(text: string, at: number): { value: TomlValue; next: number } {
+  const quote = text.slice(at, at + 3);
+  let index = at + 3;
+  if (text[index] === '\r' && text[index + 1] === '\n') index += 2;
+  else if (text[index] === '\n') index++;
+  let out = '';
+  const escapes: Record<string, string> = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', e: '\x1b', '"': '"', '\\': '\\' };
+  for (;;) {
+    if (index >= text.length) throw new Error('Unterminated multi-line string.');
+    if (text.startsWith(quote, index)) {
+      let length = 3;
+      while (length < 5 && text[index + length] === quote[0]) length++;
+      return { value: out + quote[0].repeat(length - 3), next: index + length };
+    }
+    const char = text[index];
+    if (quote === '"""' && char === '\\') {
+      const escape = text[index + 1];
+      if (escape === ' ' || escape === '\t' || escape === '\n' || escape === '\r') {
+        let after = index + 1;
+        while (text[after] === ' ' || text[after] === '\t') after++;
+        if (text[after] !== '\n' && text[after] !== '\r') throw new Error('Bad escape in a string.');
+        while (after < text.length && /[ \t\r\n]/.test(text[after])) after++;
+        index = after;
+        continue;
+      }
+      if (escape in escapes) { out += escapes[escape]; index += 2; continue; }
+      if (escape === 'u' || escape === 'U') {
+        const size = escape === 'u' ? 4 : 8;
+        const hex = text.slice(index + 2, index + 2 + size);
+        if (!new RegExp(`^[0-9a-fA-F]{${size}}$`).test(hex)) throw new Error('Bad escape in a string.');
+        out += String.fromCodePoint(parseInt(hex, 16));
+        index += 2 + size;
+        continue;
+      }
+      throw new Error('Bad escape in a string.');
+    }
+    out += char;
+    index++;
+  }
+}
+
 function parseTomlValue(text: string, at: number): { value: TomlValue; next: number } {
   at = skipTomlSpace(text, at, false);
   const char = text[at];
-  if (text.startsWith('"""', at) || text.startsWith("'''", at)) {
-    const quote = text.slice(at, at + 3);
-    const end = text.indexOf(quote, at + 3);
-    if (end < 0) throw new Error('Unterminated multi-line string.');
-    let body = text.slice(at + 3, end).replace(/^\r?\n/, '');
-    if (quote === '"""') body = JSON.parse(`"${body.replace(/\\\r?\n\s*/g, '').replace(/\r?\n/g, '\\n').replace(/"/g, '\\"').replace(/\\\\"/g, '\\"')}"`);
-    return { value: body, next: end + 3 };
-  }
+  if (text.startsWith('"""', at) || text.startsWith("'''", at)) return parseMultiline(text, at);
   if (char === '"') { const end = scanString(text, at); return { value: JSON.parse(text.slice(at, end)), next: end }; }
   if (char === "'") { const end = text.indexOf("'", at + 1); if (end < 0) throw new Error('Unterminated string.'); return { value: text.slice(at + 1, end), next: end + 1 }; }
   if (char === '[') {

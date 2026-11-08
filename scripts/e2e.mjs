@@ -396,6 +396,19 @@ async function practiceFlow() {
   await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
   same('Write now adds files to Claude Code and keeps its other settings', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups], ['npx', 'dark', 3]);
+
+  // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
+  await a.click('#nav-agents');
+  same('agents from every tool', (await rowKeys(a)).sort(), ['code-reviewer', 'release-notes']);
+  await a.click('#manage-all');
+  await applyAll(a);
+  const copilotAgent = readFileSync(join(practice, '.copilot/agents/code-reviewer.agent.md'), 'utf8');
+  check('code-reviewer reached Copilot with name, description and prompt, without Claude-only fields', copilotAgent.includes('description: Reviews a change') && copilotAgent.includes('You are a careful code reviewer.') && !copilotAgent.includes('tools:') && !copilotAgent.includes('model:'), copilotAgent);
+  check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
+  check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
+  await a.click('#open-code-reviewer');
+  check('the details name the limits', (await a.text('.details') ?? '').includes('With limits: no equivalent here for tools, model from Claude Code'), await a.text('.details'));
+  await a.shot('practice-agents');
   await a.click('#nav-overview');
 
   // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.

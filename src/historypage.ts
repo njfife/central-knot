@@ -20,6 +20,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   }
 }
 
+/** Skills, MCP servers and agents share History; each row says which it is. */
+const kindOf = (key: string) => (key.startsWith('mcp:') ? 'MCP server' : key.startsWith('agent:') ? 'Agent' : 'Skill');
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 export function historyPage() {
@@ -30,7 +32,7 @@ export function historyPage() {
     const about = describe(event);
     return h('li.history-row', { 'data-kind': event.kind },
       h('span.history-when', {}, when(event.at)),
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('strong', {}, event.item), h('span', {}, about.text)),
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', {}, event.item), h('span', {}, about.text)),
       event.undoneBy ? h('span.history-done', {}, 'Undone') : about.action
         ? button({ variant: 'outline', size: 'small', label: about.action, name: `${about.action} ${event.item}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) })
         : h('span'));

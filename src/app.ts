@@ -4,7 +4,7 @@ import { plural } from './model.ts';
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'plugins' | 'history' | 'tools';
+export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'plugins' | 'history' | 'tools';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -15,6 +15,7 @@ export const state = {
   busy: undefined as string | undefined,
   /** What the last MCP Apply all or Write now did. */
   mcpResult: undefined as McpResult | undefined,
+  agentsResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
   /** Marketplaces and what each tool has installed, read when the Plugins page opens. */
@@ -219,6 +220,17 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   state.mcpResult = result;
   if (!result.stopped) onDone();
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'entry', 'entries')} written.` : 'Applied. Nothing needed writing.'));
+});
+
+// ---------- Agents ----------
+
+export const applyAgentsChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
+  const result = await api().applyAgents(changes, state.home!.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.agentsResult = result;
+  if (!result.stopped) onDone();
+  announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
 
 /** Write now: Claude Code's entries, once the person has quit Claude Code (MCP-02). */

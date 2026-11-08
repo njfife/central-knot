@@ -35,6 +35,10 @@ export interface SampleSkill {
   paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
   versions?: Partial<Record<Tool, { lines: string; changed: string; text: string }>>;
+  /** Agents: the With limits label for each tool that lacks some of the origin's fields. */
+  limits?: Partial<Record<Tool, string>>;
+  /** Agents: one-way tools edited or deleted there, no longer updated. */
+  stopped?: Tool[];
 }
 
 export const sample: SampleSkill[] = [

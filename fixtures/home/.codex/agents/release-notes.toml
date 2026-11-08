@@ -1,0 +1,6 @@
+name = "release-notes"
+description = "Writes release notes from the commits since the last tag."
+developer_instructions = """
+Read the commits since the last tag and write release notes.
+Group them as Added, Changed and Fixed. Plain language, one line each.
+"""

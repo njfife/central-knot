@@ -9,6 +9,7 @@ import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpView, restoreMcp } from './mcp.ts';
+import { agentTools, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
@@ -87,7 +88,10 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
   if (syncOn || explicit) {
     const mcp = await applyMcp(shared, (await manageView(shared)).tools, []).catch(() => undefined);
     pendingMcpNotices.push(...(mcp?.notices ?? []));
-    mcpChanged = !!(mcp?.writes || mcp?.notices?.length);
+    // Agents follow the same switch and rules (D-32).
+    const agents = await applyAgents(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+    pendingMcpNotices.push(...(agents?.notices ?? []));
+    mcpChanged = !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length);
   }
   return result;
 }
@@ -104,7 +108,13 @@ async function view(explicit = false): Promise<HomeView> {
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
-    mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
+    ...(await (async () => {
+      const notices = pendingMcpNotices.splice(0);
+      return {
+        mcp: await mcpView(shared, presentTools(snapshots), notices.filter(notice => !notice.key.startsWith('agent:'))),
+        agents: await agentsView(shared, presentTools(snapshots), notices.filter(notice => notice.key.startsWith('agent:'))),
+      };
+    })()),
   };
 }
 
@@ -152,6 +162,8 @@ async function startWatching() {
   if (!current || smoke) return;
   const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
   roots.add(join(current.home, '.agents/skills'));
+  // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
+  for (const id of agentTools) roots.add(join(overrideFor(id) ?? join(current.home, harnesses[id].defaultConfig), 'agents'));
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }
   }
@@ -316,9 +328,13 @@ app.whenReady().then(async () => {
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   handle('history:restore', async (eventId, resume, home) => (home === current?.home && typeof eventId === 'string'
-    ? ((await readHistory(current!.home)).find(entry => entry.id === eventId)?.key.startsWith('mcp:')
-      ? restoreMcp(context(), (await manageView(context())).tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }))
-      : restoreFromHistory(context(), eventId, resume === true))
+    ? await (async () => {
+      const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
+      const tools = (await manageView(context())).tools;
+      if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      return restoreFromHistory(context(), eventId, resume === true);
+    })()
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)
@@ -329,6 +345,9 @@ app.whenReady().then(async () => {
   // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, home) => (home === current?.home
     ? applyMcp(context(), (await manageView(context())).tools, changes(list))
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+  handle('agents:apply', async (list, home) => (home === current?.home
+    ? applyAgents(context(), (await manageView(context())).tools, changes(list))
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     ? applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string') })

@@ -31,6 +31,14 @@ export function mcpPage() {
   return designOverview('mcp');
 }
 
+// ---------- Agents ----------
+
+export function agentsPage() {
+  if (!state.home) return notRead();
+  if (!state.home.agents?.servers.length) return h('div.page', {}, emptyState('bot', 'No agents yet', 'None of your tools has a user-wide agent in this home. Add one in Claude Code, Copilot or Codex, then read again.', button({ icon: 'refresh-cw', label: 'Read again', id: 'agents-read-again', onclick: () => void readAgain() })));
+  return designOverview('agents');
+}
+
 // ---------- Skills ----------
 
 const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd', {}, value)];

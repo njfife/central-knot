@@ -362,3 +362,27 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
   - A deleted server whose name is set up again with other settings is not overwritten, and Undo of an edit after a deletion is refused.
 
 **Validation.** 135 unit tests (1 new, covering an edit spread, Undo, a second Undo refused, a deletion and Restore). Linux unit and e2e below. The Mac e2e will run after the judges finish with the Mac checkout.
+
+## Agents (9b), checkpoint 1, November 8, 2026
+
+- **Formats.** Claude Code `~/.claude/agents/*.md`, Copilot `~/.copilot/agents/*.agent.md`, Codex `$CODEX_HOME/agents/*.toml` (`name`, `description`, `developer_instructions`). A file that cannot be read is reported on the page and never written.
+- **What crosses (TRN-01).** Name, description and prompt are Representable everywhere. Every other field (tools, model, permission mode, hooks, Codex keys and tables) belongs to its origin tool, because no equivalent is recorded. A destination without them gets the agent **With limits**, and the details name the missing fields.
+- **Direction (TRN-02, D-26).**
+  - Two-way among copies that hold all of the origin's fields.
+  - One-way to a copy that lacks some. An edit or deletion there stays local. Central Knot stops updating that copy and says so.
+- **Rules (D-32).** Same model as skills and MCP, in `.central-knot/agents.json`:
+  - Managed and per-tool off.
+  - A choice when copies with the same name differ.
+  - One-sided edits spread, and competing edits are decided by the fixed order.
+  - A deletion of a two-way copy spreads after a 2 s settle. A missing agents folder is never a deletion: the copy is put back.
+  - Kept versions go in `items/agents/`. History events are keyed `agent:<name>`, with Undo and Restore (`restoreAgent`).
+- **Preserving.** Updating a destination writes only name, description and prompt. That tool's own frontmatter fields, comments, Codex keys and tables stay. The TOML reader now parses multi-line strings properly: escapes, tabs, and quotes next to the delimiter.
+- **The page.** A new Agents page uses the same table. The details show the With limits line per tool and a note that runtime equivalence is unchecked (AGT-01, V-07). History rows now say Skill, MCP server or Agent. Agents folders are watched, and they follow the Sync switch.
+- **Practice copy.** `code-reviewer`, a Claude agent with `tools` and `model`, reaches the others With limits. `release-notes`, a plain Codex agent, is two-way.
+
+**Not yet:**
+- Convert to skill (AGT-02, AGT-03);
+- per-destination invocation modes in the details;
+- AT-68 session proofs (they need Nathan's sign-ins).
+
+**Validation.** 141 unit tests (6 new: two-way edits, one-way limits and stopping, preserving updates with tricky TOML, a collision choice, deletion with settle and Restore, a missing folder, unreadable files). Linux e2e 118/118, including the Agents page.

@@ -55,7 +55,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -64,6 +64,7 @@ export interface DesktopApi {
   history(): Promise<HistoryEvent[]>;
   applyMcp(changes: Change[], home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
+  applyAgents(changes: Change[], home: string): Promise<McpResult>;
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
@@ -119,6 +120,10 @@ export interface SkillFacts {
    * or a tool that cannot load it. Each names the tool it concerns, so a tool turned off no longer counts.
    */
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
+  /** Agents: for each tool that cannot hold every field, the With limits label naming what it lacks (TRN-01). */
+  limits?: Partial<Record<HarnessId, string>>;
+  /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
+  stopped?: HarnessId[];
 }
 
 export interface ManageView {
