@@ -304,3 +304,30 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
 - **Everything else unchanged:** 559 entries (Nathan's skills, the `.agents` links, the `.agents` folder) are byte-identical, mtimes included.
 
 **Exercised Real, listing only:** a second disposable skill managed from Claude Code was listed by real Codex (`skills/list`: `~/.codex/skills/ck-trial-load`) and real Copilot CLI (`copilot skill list`). Delete everywhere then removed it. Session turns still need sign-ins.
+
+## Two-way third check, November 8, 2026
+
+**The verdict was "not safe yet".** It confirmed two permanent-loss paths, one deletion of a just-installed skill, and silent stuck sync. Fixed, each with a regression test (T1–T9, P8):
+- **Nothing overwritten goes unreferenced.**
+  - A competing edit that loses while a deletion races is now named in the `kept-edit` event.
+  - A copy replaced by "use this copy" gets a `chosen` History event, which can be undone.
+  - Hashes mentioned in a moved-aside unreadable History are never pruned.
+- **Deletion works copy by copy.** A copy that can't be removed (read-only folder, locked file) no longer aborts the pass. It is kept as `removing` and retried while unchanged. The record and History are always written, and a pass that stops now shows on the page.
+- **Gone from every tool.** A managed skill missing from every reachable tool becomes a deletion after the settle window, so a later install is new and unmanaged, never deleted or revived.
+- **Content actually held.** Each copy records what it holds, including what a replace actually wrote. The baseline is the content the pass decided on, so an edit saved mid-spread is never reverted.
+- **Moves.** A copy moved into another folder its tool reads (for example `~/.agents/skills`) with the same content is a move, not a deletion.
+- **Folder identity.** A folder's new identity isn't saved while skills in it were skipped, so a reset first seen by a Sync-off Apply all is still a reset.
+- **Restored folders.** A folder restored from an older backup catches up: an earlier stored revision in a reset folder is behind, not an edit.
+- **Undo after deletion.** Undo of an edit is refused once the skill was deleted; Restore the deletion instead.
+
+**Known, accepted for now:**
+- A clock jump of more than 30 days forward drops History in one pass (P9).
+- A skills folder swapped out wholesale with `mv` reads as a reset and puts skills back, per the spec (P11).
+- An installer that removes a skill and rewrites it more than about 2.5 s later spreads a deletion (P12).
+
+**Validation.**
+- 124 unit tests (10 new). Mac e2e 338/338 with 8 crash rounds, smoke pass. Linux unit 124/124 and e2e 107/107.
+- **Real home again** (`scripts/real-home-trial.ts`, backup `~/ck-real-backup-2026-11-08T22-40-00-190Z.tgz`):
+  - Manage, an edit, competing edits, a deletion, Restore and Delete everywhere were all correct. Codex and Copilot listed the trial skill.
+  - The other 488 entries were byte-identical.
+  - Codex rewrites its own `.codex/skills/.system` whenever its app server starts, so the trial no longer counts that folder.

@@ -15,6 +15,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}'s.${order}`, action: 'Undo' };
     case 'deleted': return { glyph: 'circle-minus', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, and removed from the tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit was kept over a deletion in ${list(event.losers.map(loser => loser.tool))}.${order}` };
+    case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}'s copy; it replaced ${list(event.losers.map(loser => loser.tool))}'s.`, action: 'Undo' };
     case 'restored': return { glyph: 'undo-2', text: 'Restored an earlier version from History.', action: 'Undo' };
   }
 }

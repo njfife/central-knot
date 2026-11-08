@@ -167,7 +167,7 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored';
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen';
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string }[];

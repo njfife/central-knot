@@ -72,6 +72,7 @@ async function saveSyncSetting(on: boolean) {
 /** What background passes did since the page last read, so no notice is lost between reads. */
 let pendingResults: ApplyResult['results'] = [];
 let pendingNotices: NonNullable<ApplyResult['notices']> = [];
+let lastStopped: string | undefined;
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
 async function pass(explicit = false): Promise<ApplyResult | undefined> {
@@ -83,7 +84,8 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
 async function view(explicit = false): Promise<HomeView> {
   const shared = context();
   const result = await pass(explicit);
-  const caughtUp = [...pendingResults, ...(result?.results ?? [])];
+  // A pass that could not finish says so on the page instead of failing quietly.
+  const caughtUp = [...pendingResults, ...(result?.results ?? []), ...(result?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: result.stopped }] : [])];
   const notices = [...pendingNotices, ...(result?.notices ?? [])];
   pendingResults = [];
   pendingNotices = [];
@@ -109,6 +111,12 @@ function background() {
     const result = await pass();
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
     if (result?.settling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
+    if (result?.stopped && result.stopped !== lastStopped) {
+      lastStopped = result.stopped;
+      pendingResults.push({ item: 'Sync', outcome: 'failed', message: result.stopped });
+      if (!window.isDestroyed()) window.webContents.send('sync:changed');
+    }
+    if (!result?.stopped) lastStopped = undefined;
     if (!result || (!result.harnessWrites && !result.notices?.length)) return;
     pendingResults.push(...result.results);
     pendingNotices.push(...(result.notices ?? []));
