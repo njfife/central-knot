@@ -146,6 +146,16 @@ async function folderExists(path: string): Promise<boolean> {
 const historyPath = (home: string) => join(storeDirectory(home), 'history.json');
 
 /** History, newest last. Unreadable history reads as empty; sync never depends on it. */
+/** Adds events to the shared History (used by MCP sync too), with the same retention and moving aside of an unreadable file. */
+/** Writes History as given (for marking an event undone alongside a new one). */
+export async function replaceHistory(context: ShareContext, events: HistoryEvent[]) {
+  await saveHistory(context.home, events, clock(context));
+}
+
+export async function appendHistory(context: ShareContext, events: HistoryEvent[]) {
+  if (events.length) await saveHistory(context.home, [...await readHistory(context.home), ...events], clock(context));
+}
+
 export async function readHistory(home: string): Promise<HistoryEvent[]> {
   try { const parsed = JSON.parse(await readFile(historyPath(home), 'utf8')); return Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
 }

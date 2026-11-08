@@ -351,3 +351,14 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
 - Claude desktop's `claude_desktop_config.json` (D-11).
 
 **Validation.** 134 unit tests (10 new, including byte-preservation of JSON and TOML). Mac e2e 188/188 with 4 crash rounds, including the MCP page, Apply all, a byte-identical config.toml prefix and Write now. Linux unit 134/134 and e2e 113/113. The real-home two-way trial was not rerun; MCP was not exercised on the real home.
+
+## MCP servers, checkpoint 2: History, Undo and Restore, November 8, 2026
+
+- **Kept versions.** Every server version Central Knot replaces or removes is kept first in `.central-knot/items/mcp/<name>/<hash>.json`.
+- **History.** An MCP edit that spread, a conflict and a deletion are History events in the shared `history.json`, keyed `mcp:<name>`, with notices on the MCP page. Background and catch-up MCP notices reach the page as skills' do.
+- **Undo and Restore** (`restoreMcp`, routed from History):
+  - The kept version becomes the baseline and is written to Copilot and Codex; Claude Code still waits for Write now.
+  - Undo runs once.
+  - A deleted server whose name is set up again with other settings is not overwritten, and Undo of an edit after a deletion is refused.
+
+**Validation.** 135 unit tests (1 new, covering an edit spread, Undo, a second Undo refused, a deletion and Restore). Linux unit and e2e below. The Mac e2e will run after the judges finish with the Mac checkout.

@@ -104,3 +104,31 @@ test('SSE cannot go to Codex, and an unreadable file is never written', async ()
     assert.match((await mcpView(box.context, tools)).servers[0].cannot['codex-cli'] ?? '', /SSE/);
   } finally { await box.cleanup(); }
 });
+
+test('MCP History: an edit that spread and a deletion are kept, and Undo or Restore put them back', async () => {
+  const box = await sandbox();
+  const { readHistory } = await import('../src/manage.ts');
+  const { restoreMcp } = await import('../src/mcp.ts');
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { tool: { type: 'local', command: 'a', tools: ['*'] } } }, null, 2));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
+    await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "a"', 'command = "b"'));
+    const spread = await applyMcp(box.context, tools, []);
+    assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
+    const [edit] = await readHistory(box.home);
+    assert.equal(edit.key, 'mcp:tool');
+    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
+    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
+    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "a"'), 'and in Codex');
+    assert.match((await restoreMcp(box.context, tools, edit.id)).stopped ?? '', /already undone/);
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }, null, 2));
+    await applyMcp(box.context, tools, [], { now: 1000 });
+    const gone = await applyMcp(box.context, tools, [], { now: 5000 });
+    assert.equal(gone.notices?.[0]?.kind, 'deleted');
+    const back = await restoreMcp(box.context, tools, gone.notices![0].history);
+    assert.equal(back.stopped, undefined, JSON.stringify(back));
+    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Restore brought it back');
+    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'));
+  } finally { await box.cleanup(); }
+});

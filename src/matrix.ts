@@ -472,6 +472,8 @@ function mcpNotices() {
   if (mcp.claudePending.length) bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, `${mcp.claudePending.join(', ')} ${mcp.claudePending.length === 1 ? 'waits' : 'wait'} for Claude Code. Quit Claude Code first, then Write now; Claude rewrites its settings file while it runs.`),
     smallAction('Write now', 'mcp-write-claude', () => void writeClaudeNow(mcp.claudePending))));
+  const told = [...mcp.notices, ...(state.mcpResult?.notices ?? [])];
+  if (told.length) bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, told.slice(0, 6).map(syncNotice))));
   const applied = state.mcpResult;
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
   const problems = (applied?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/Copies differ|Write now/.test(result.message)));

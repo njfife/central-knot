@@ -8,7 +8,7 @@ import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
-import { applyMcp, mcpView } from './mcp.ts';
+import { applyMcp, mcpView, restoreMcp } from './mcp.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
@@ -74,6 +74,9 @@ async function saveSyncSetting(on: boolean) {
 let pendingResults: ApplyResult['results'] = [];
 let pendingNotices: NonNullable<ApplyResult['notices']> = [];
 let lastStopped: string | undefined;
+/** What MCP sync did on its own since the page last read, and whether the last pass changed anything. */
+let pendingMcpNotices: NonNullable<ApplyResult['notices']> = [];
+let mcpChanged = false;
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
 async function pass(explicit = false): Promise<ApplyResult | undefined> {
@@ -81,7 +84,11 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
   if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return undefined;
   const result = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
-  if (syncOn || explicit) await applyMcp(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+  if (syncOn || explicit) {
+    const mcp = await applyMcp(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+    pendingMcpNotices.push(...(mcp?.notices ?? []));
+    mcpChanged = !!(mcp?.writes || mcp?.notices?.length);
+  }
   return result;
 }
 
@@ -97,7 +104,7 @@ async function view(explicit = false): Promise<HomeView> {
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
-    mcp: await mcpView(shared, presentTools(snapshots)),
+    mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
   };
 }
 
@@ -122,7 +129,7 @@ function background() {
       if (!window.isDestroyed()) window.webContents.send('sync:changed');
     }
     if (!result?.stopped) lastStopped = undefined;
-    if (!result || (!result.harnessWrites && !result.notices?.length)) return;
+    if (!result || (!result.harnessWrites && !result.notices?.length && !mcpChanged)) return;
     pendingResults.push(...result.results);
     pendingNotices.push(...(result.notices ?? []));
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
@@ -309,7 +316,9 @@ app.whenReady().then(async () => {
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   handle('history:restore', async (eventId, resume, home) => (home === current?.home && typeof eventId === 'string'
-    ? restoreFromHistory(context(), eventId, resume === true)
+    ? ((await readHistory(current!.home)).find(entry => entry.id === eventId)?.key.startsWith('mcp:')
+      ? restoreMcp(context(), (await manageView(context())).tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }))
+      : restoreFromHistory(context(), eventId, resume === true))
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)

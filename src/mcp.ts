@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, readRecord, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
-import type { Change, DestinationResult, HarnessId, McpResult, McpView, SkillFacts, ToolCopy } from './types.ts';
+import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
 // ---------- Shapes ----------
@@ -152,6 +153,18 @@ async function editEntry(context: ShareContext, tool: HarnessId, name: string, e
   return undefined;
 }
 
+// ---------- Kept versions (CON-02) ----------
+
+/** Every server version Central Knot replaces or removes is kept first, so History can put it back. */
+const keptPath = (context: ShareContext, name: string, hash: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name), `${hash}.json`);
+async function keep(context: ShareContext, name: string, server: NeutralServer) {
+  const path = keptPath(context, name, serverHash(server));
+  try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
+}
+async function kept(context: ShareContext, name: string, hash: string): Promise<NeutralServer | undefined> {
+  try { return JSON.parse(await readFile(keptPath(context, name, hash), 'utf8')); } catch { return undefined; }
+}
+
 // ---------- Record ----------
 
 const recordPath = (home: string) => join(storeDirectory(home), 'mcp.json');
@@ -176,7 +189,7 @@ async function gatherAll(context: ShareContext, tools: HarnessId[]) {
   return { byName, problems };
 }
 
-export async function mcpView(context: ShareContext, tools: HarnessId[]): Promise<McpView> {
+export async function mcpView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => mcpTools.includes(tool));
   const { byName, problems } = await gatherAll(context, present);
   const record = await readMcpRecord(context.home);
@@ -194,7 +207,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[]): Promis
     if (item?.state === 'shared' && !slot['claude-cli'] && !item.off.includes('claude-cli') && present.includes('claude-cli')) claudePending.push(name);
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
   }
-  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems };
+  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }
 
 // ---------- Apply ----------
@@ -219,6 +232,9 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const { byName, problems } = await gatherAll(context, present);
   const record = await readMcpRecord(context.home);
   const results: DestinationResult[] = [];
+  const events: HistoryEvent[] = [];
+  const notices: SyncNotice[] = [];
+  const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), ...fields }; events.push(made); return made.id; };
   let writes = 0;
   // Servers whose copy the person chose in this Apply all: the chosen copy replaces the others.
   const chosenNow = new Set<string>();
@@ -251,13 +267,18 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) continue;
       const edited = entries.filter(entry => recorded.has(entry.tool) && recorded.get(entry.tool) !== entry.hash);
       if (!edited.length) {
+        const removed: HarnessId[] = [];
+        for (const entry of entries) await keep(context, name, entry.server);
         for (const entry of entries) {
           if (entry.tool === 'claude-cli' && !options.claudeNow?.includes(name)) { results.push({ item: name, harness: entry.tool, outcome: 'held', message: 'Deleted elsewhere. Close Claude, then use Write now to remove it from Claude Code.' }); continue; }
           const problem = await editEntry(context, entry.tool, name, entry.hash, undefined);
           if (problem) { results.push({ item: name, harness: entry.tool, outcome: 'held', message: problem }); continue; }
           writes++;
+          removed.push(entry.tool);
           results.push({ item: name, harness: entry.tool, outcome: 'removed', message: `Deleted in ${harnesses[missing[0].tool].name}, so removed here too.` });
         }
+        const id = event({ key: `mcp:${name}`, item: name, kind: 'deleted', winner: { tool: missing[0].tool, hash: item.hash }, losers: [], orderProved: true, previous: item.hash });
+        notices.push({ key: `mcp:${name}`, item: name, kind: 'deleted', winner: missing[0].tool, losers: removed, orderProved: true, history: id });
         item.state = 'dont-share';
         item.deleted = { at: new Date(now).toISOString(), tool: missing[0].tool, hash: item.hash };
         item.copies = [];
@@ -275,17 +296,26 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (!source) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
     // An unrecorded copy that differs, with no baseline to call it behind, is a same-name collision: it needs a choice.
     if (!chosenNow.has(name) && entries.some(entry => !recorded.has(entry.tool) && entry.hash !== source.hash && entry.hash !== item.hash)) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
-    if (edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1) results.push({ item: name, outcome: 'written', message: `Competing edits: ${harnesses[source.tool].name}'s won by the fixed tool order (the order could not be proved).` });
+    const competing = edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1;
+    const replaced: { tool: HarnessId; hash: string }[] = [];
+    await keep(context, name, source.server);
     for (const tool of syncing) {
       const here = slot[tool];
       if (here?.hash === source.hash) continue;
       const reason = cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !options.claudeNow?.includes(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
+      if (here) await keep(context, name, here.server);
       const problem = await editEntry(context, tool, name, here?.hash, source.server, here?.extras);
       if (problem) { results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
       writes++;
+      if (here) replaced.push({ tool, hash: here.hash });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
+    }
+    // An edit that spread is History, with what it replaced kept (CON-02); a first copy into a tool is not.
+    if (edited.length && replaced.length) {
+      const id = event({ key: `mcp:${name}`, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
+      notices.push({ key: `mcp:${name}`, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
     // Every copy is recorded with what it holds now; one not written (Claude waiting, a refusal) keeps its own content.
     const after = await gatherAll(context, syncing);
@@ -293,5 +323,66 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     item.copies = syncing.filter(tool => after.byName.get(name)?.[tool]).map(tool => ({ tool, hash: after.byName.get(name)![tool]!.hash }));
   }
   await saveMcpRecord(context.home, record);
+  await appendHistory(context, events);
+  return { results, writes, notices };
+}
+
+/** The version an MCP event's Undo or Restore puts back. */
+function restorable(past: HistoryEvent): string | undefined {
+  if (past.kind === 'deleted' || past.kind === 'edit' || past.kind === 'restored') return past.previous;
+  if (past.kind === 'conflict') return past.losers.find(loser => loser.hash !== past.previous && loser.hash !== past.winner?.hash)?.hash ?? past.previous;
+  return undefined;
+}
+
+/**
+ * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to.
+ * Claude Code gets it through Write now, as always (MCP-02).
+ */
+export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string): Promise<McpResult> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
+  const history = await readHistory(context.home);
+  const past = history.find(entry => entry.id === eventId);
+  const name = past?.key.replace(/^mcp:/, '');
+  const hash = past && restorable(past);
+  if (!past || !name || !hash) return { stopped: 'That change can’t be restored.', results: [], writes: 0 };
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
+  const server = await kept(context, name, hash);
+  if (!server) return { stopped: 'The kept version is no longer in Central Knot’s store, so it can’t be restored.', results: [], writes: 0 };
+  const record = await readMcpRecord(context.home);
+  const item: McpRecordItem = record.items[name] ?? { state: 'shared', off: [], hash: '', copies: [] };
+  const present = tools.filter(tool => mcpTools.includes(tool));
+  const { byName } = await gatherAll(context, present);
+  const slot = byName.get(name) ?? {};
+  // A server deleted earlier whose name is in use again with other settings: never overwrite the new one.
+  if (item.state !== 'shared' && Object.values(slot).some(entry => entry && entry.hash !== hash)) return { stopped: `A different “${name}” is set up now. Remove or rename it, then restore.`, results: [], writes: 0 };
+  if (past.kind !== 'deleted' && item.state !== 'shared') return { stopped: `${name} was deleted since. Restore the deletion instead.`, results: [], writes: 0 };
+  const results: DestinationResult[] = [];
+  let writes = 0;
+  const before = item.state === 'shared' ? item.hash : undefined;
+  const replaced: { tool: HarnessId; hash: string }[] = [];
+  for (const tool of present.filter(candidate => !item.off.includes(candidate))) {
+    const here = slot[tool];
+    if (here?.hash === hash) continue;
+    const reason = cannotHold(tool, server);
+    if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
+    if (tool === 'claude-cli') { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now to restore it there.' }); continue; }
+    if (here) await keep(context, name, here.server);
+    const problem = await editEntry(context, tool, name, here?.hash, server, here?.extras);
+    if (problem) { results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
+    writes++;
+    if (here) replaced.push({ tool, hash: here.hash });
+    results.push({ item: name, harness: tool, outcome: 'written', message: 'Restored.' });
+  }
+  const after = await gatherAll(context, present);
+  item.state = 'shared';
+  item.hash = hash;
+  delete item.deleted;
+  item.copies = present.filter(tool => after.byName.get(name)?.[tool]).map(tool => ({ tool, hash: after.byName.get(name)![tool]!.hash }));
+  record.items[name] = item;
+  await saveMcpRecord(context.home, record);
+  const id = randomUUID();
+  past.undoneBy = id;
+  await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: name, kind: 'restored', winner: { tool: replaced[0]?.tool ?? 'copilot-cli', hash }, losers: replaced, orderProved: true, previous: before }]);
   return { results, writes };
 }

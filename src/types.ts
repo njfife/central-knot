@@ -247,6 +247,8 @@ export interface McpView {
   gate: SyncGate;
   /** Files that could not be read, so their entries are not offered. */
   problems: string[];
+  /** What MCP sync did on its own since the page last read. */
+  notices: SyncNotice[];
 }
 
-export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number }
+export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[] }
