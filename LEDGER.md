@@ -404,3 +404,19 @@ Nathan opened the Mac's real home for testing, real skills included. Before the 
 - **Found on the way:** a page-made `window.close()` destroys the window without a `close` event (probed in Electron 45). A real close only hides it.
 
 **Validation.** 141 unit tests. Linux e2e 120/120: with the window destroyed, the app keeps running and an agent edit spreads in the background. On macOS, the e2e also checks that a new launch opens the last home.
+
+## Two-way fourth check (Astra and computer use on 09db120), November 8, 2026
+
+Astra: "not safe yet", with 8 reproduced cases. Computer use: 8 of 9 steps passed; step 6 failed (with Sync off, an edit still showed Synced until Read again). All are fixed. Each Astra case is now a regression test in `tests/twoway-recovery.test.ts`; all 11 tests fail on the old engine and pass now.
+
+1. **Edit made during a replace.** `replaceCopy` takes the content the pass decided to replace. If the copy holds anything else, or changes between being kept and being moved aside, it is put back untouched and held. The next pass sees it as an edit.
+2. **Crash between destinations.** Content about to be overwritten or removed goes on record first (`RecordItem.displaced`), before the disk changes. Pruning keeps it. The next pass gives any displaced content no event names its own History entry, and only then drops the hold.
+3. **Delete everywhere failing part-way.** Each copy is tried on its own. One that can't go is recorded as `removing` and retried. The record and History are always written, and an unspread edit is put on record before removal.
+4. **Unreadable is not absent.** A deletion needs the tool's folder to be readable and the copy's folder to be really gone (ENOENT). A copy folder that exists but did not read as a skill (permissions, a SKILL.md broken for now) holds the skill until it reads again.
+5. **Every folder restored to the same older backup.** This now catches up to the newest content from the store, instead of rolling the baseline back.
+6. **Retrying a removal after a folder reset.** A folder made again holds a new install, so the old removal is dropped.
+7. **Retrying a removal outside Apply all's scope.** With Sync off, Apply all for one skill no longer finishes another skill's deletion.
+8. **Every folder made again empty.** The skill is put back from the store, with the reset notice, instead of becoming a deletion.
+- **Computer use, step 6.** With Sync off, a watcher event makes the page read again quietly, so an edit shows as waiting. The e2e now checks this without clicking Read again.
+
+**Validation.** 152 unit tests. Linux e2e 121/121.

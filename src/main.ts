@@ -201,7 +201,11 @@ function background() {
   if (!current || smoke) return;
   const work = queue.then(async () => {
     if (!current) return;
+    const fromEvent = touched;
+    touched = false;
     const result = await pass();
+    // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
+    if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
     if (result?.settling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
     if (result?.stopped && result.stopped !== lastStopped) {
@@ -219,7 +223,9 @@ function background() {
   queue = work.catch(() => undefined);
 }
 
-const nudge = () => { clearTimeout(soon); soon = setTimeout(background, DEBOUNCE_MS); };
+/** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
+let touched = false;
+const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(background, DEBOUNCE_MS); };
 
 function stopWatching() {
   for (const watcher of watchers) watcher.close();

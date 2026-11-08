@@ -166,7 +166,7 @@ const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 async function pruneStore(context: ShareContext, record: SyncRecord, events: HistoryEvent[]) {
   const keep = new Map<string, Set<string>>();
   const hold = (key: string, hash?: string) => { if (!hash) return; let set = keep.get(key); if (!set) { set = new Set(); keep.set(key, set); } set.add(hash); };
-  for (const [key, item] of Object.entries(record.items)) { hold(key, item.hash); hold(key, item.deleted?.hash); hold(key, item.use?.hash); for (const copy of item.copies) hold(key, copy.hash); }
+  for (const [key, item] of Object.entries(record.items)) { hold(key, item.hash); hold(key, item.deleted?.hash); hold(key, item.use?.hash); for (const copy of item.copies) hold(key, copy.hash); for (const entry of item.displaced ?? []) hold(key, entry.hash); }
   for (const entry of events) { hold(entry.key, entry.winner?.hash); hold(entry.key, entry.previous); for (const loser of entry.losers) hold(entry.key, loser.hash); }
   // History moved aside because it could not be read may still be recovered by hand: nothing it mentions is pruned.
   const mentioned = new Set<string>();
@@ -245,10 +245,17 @@ export async function manageView(context: ShareContext, caughtUp: DestinationRes
   return { tools, writes, skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
 
-/** Moves a different copy aside and puts the chosen one in its place. The replaced bytes are kept in the store first. */
-async function replaceCopy(context: ShareContext, key: string, source: string, target: string): Promise<string> {
+/** A copy changed between being read and being replaced: it is left as it is, for the next pass to see as an edit. */
+const changedWhileSyncing = () => Object.assign(new Error('It changed while syncing, so it was left as it is. The next pass looks at it again.'), { code: 'CK_CHANGED' });
+
+/**
+ * Moves a different copy aside and puts the chosen one in its place. The replaced bytes are kept in the store first. `expected` is the
+ * content the pass decided to replace: a copy holding anything else (an edit made meanwhile) is never replaced.
+ */
+async function replaceCopy(context: ShareContext, key: string, source: string, target: string, expected?: string): Promise<string> {
   if ((await lstat(target)).isSymbolicLink()) throw Object.assign(new Error('That copy is a link.'), { code: 'CK_LINK' });
   const old = await readTree(target);
+  if (expected !== undefined && old.hash !== expected) throw changedWhileSyncing();
   await importRevision(context, key, target, old);
   const tree = await readTree(source);
   const folder = await stagingFolder(context, dirname(target));
@@ -258,6 +265,14 @@ async function replaceCopy(context: ShareContext, key: string, source: string, t
   if ((await readTree(stage)).hash !== tree.hash) { await removeTree(stage); throw new Error('The staged copy did not match its source.'); }
   context.fault?.('before-replace');
   await rename(target, parked);
+  // Saved into the copy after it was read and kept: put it back untouched, so that work is never lost.
+  let parkedHash: string | undefined;
+  try { parkedHash = (await readTree(parked)).hash; } catch { /* checked below */ }
+  if (parkedHash !== old.hash) {
+    await rename(parked, target).catch(async () => { if (parkedHash) await importRevision(context, key, parked, await readTree(parked)); });
+    await removeTree(stage).catch(() => undefined);
+    throw changedWhileSyncing();
+  }
   context.fault?.('mid-replace');
   try { await rename(stage, target); }
   catch (error) { await rename(parked, target).catch(() => undefined); await removeTree(stage).catch(() => undefined); throw error; }
@@ -265,6 +280,12 @@ async function replaceCopy(context: ShareContext, key: string, source: string, t
   await removeTree(parked).catch(() => undefined);
   // What actually went in: the source as it was at this moment, which may be newer than when the pass first read it.
   return tree.hash;
+}
+
+/** Puts content about to be overwritten or removed on record first (see RecordItem.displaced). */
+function displace(item: RecordItem, tool: HarnessId, hash: string) {
+  item.displaced ??= [];
+  if (!item.displaced.some(entry => entry.hash === hash)) item.displaced.push({ tool, hash });
 }
 
 /**
@@ -305,6 +326,15 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const save = async () => { const text = JSON.stringify(record); if (text !== saved) { await saveRecord(context.home, record!); saved = text; } };
 
   const results: DestinationResult[] = [];
+  // Content displaced by an earlier pass that stopped before History named it (a crash, a failure part-way): named this pass.
+  const carried = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
+  // A missing copy is a deletion only when its tool's folder could be read and the copy's folder is really gone (DEL-01).
+  // A folder that is there but was not read as a skill (unreadable, or its SKILL.md broken for now) is held, never deleted.
+  const readable = new Map(snapshots.map(snapshot => [snapshot.harness, snapshot.discovery !== 'restricted' && snapshot.discovery !== 'failed']));
+  const presence = async (copy: { harness: HarnessId; directory: string }): Promise<'gone' | 'unreadable' | 'unknown'> => {
+    if (!readable.get(copy.harness) || !(await folderExists(dirname(copy.directory)))) return 'unknown';
+    try { await lstat(copy.directory); return 'unreadable'; } catch (error) { return errorCode(error) === 'ENOENT' ? 'gone' : 'unknown'; }
+  };
   for (const change of changes) {
     const entry = gathered.get(change.key);
     if (!entry) continue;
@@ -416,14 +446,20 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // A folder that was deleted and made again (a reset or reinstall, even while the app was closed) is no deletion: its copies are put back.
       const deletions: { tool: HarnessId; directory: string }[] = [];
       let waiting = false;
+      let unreadable: HarnessId | undefined;
       for (const copy of item.copies) {
         if (copy.status !== 'written' || !syncing.includes(copy.harness) || entry.locations.some(location => location.copy.directory === copy.directory)) continue;
-        if (resetRoots.has(dirname(copy.directory)) || !(await folderExists(dirname(copy.directory)))) continue;
+        if (resetRoots.has(dirname(copy.directory))) continue;
+        const state = await presence(copy);
+        if (state === 'unreadable') unreadable ??= copy.harness;
+        if (state !== 'gone') { delete mark(copy.directory).missingSince; continue; }
         const seen = mark(copy.directory);
         seen.missingSince ??= now;
         if (now - seen.missingSince >= (context.settleMs ?? 2000)) deletions.push({ tool: copy.harness, directory: copy.directory }); else waiting = true;
       }
       if (resetRoots.size) item.copies = item.copies.filter(copy => !resetRoots.has(dirname(copy.directory)) || entry.locations.some(location => location.copy.directory === copy.directory));
+      // A copy still on disk that could not be read as a skill: nothing about this skill is decided until it reads again.
+      if (unreadable) { skip(); results.push({ item: name, harness: unreadable, outcome: 'held', message: `${harnesses[unreadable].name}'s copy is there but could not be read as a skill right now. Nothing is changed until it reads again.` }); continue; }
       // Never act on a copy that may have just gone: wait until every missing copy has settled, then decide once.
       if (waiting) { settling = true; continue; }
       // Sync off: the evidence above is kept, so order can be proved later; nothing is written now.
@@ -454,7 +490,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
               if (location.copy.hash !== baseline) {
                 await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
                 // Only an edit is content the deletion took; a behind copy is an older revision already kept.
-                if (location.copy.hash !== recordedHash.get(location.copy.directory)) lost.push({ tool: location.tool, hash: location.copy.hash });
+                if (location.copy.hash !== recordedHash.get(location.copy.directory)) { lost.push({ tool: location.tool, hash: location.copy.hash }); displace(item, location.tool, location.copy.hash); await save(); }
               }
               await removeTree(location.copy.directory);
             } catch (error) {
@@ -518,11 +554,15 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           if (refusal) { results.push({ item: name, harness: location.tool, outcome: 'held', message: refusal }); continue; }
           // The intent is on record first: a crash mid-replace then reads as an unfinished copy, never as a deletion.
           const known = item.copies.find(copy => copy.directory === location.copy.directory);
-          if (known) { known.status = 'pending'; await save(); }
-          try { written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory)); }
+          if (known) known.status = 'pending';
+          displace(item, location.tool, location.copy.hash);
+          await save();
+          try { written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory, location.copy.hash)); }
           catch (error) {
             if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-            results.push({ item: name, harness: location.tool, outcome: 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
+            // Not replaced: its content is still on disk, so it is not displaced.
+            if (item.displaced) item.displaced = item.displaced.filter(entry => entry.hash !== location.copy.hash);
+            results.push({ item: name, harness: location.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
             continue;
           }
           writes++;
@@ -531,8 +571,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           losers.push({ tool: location.tool, hash: location.copy.hash });
           results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
         }
-      } else if (hashes.size > 1 && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))) {
-        // Copies that are only behind (a write that failed, a folder switched back) catch up to the synced content, quietly.
+      } else if ((hashes.size > 1 || !hashes.has(item.hash)) && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))
+        && (active.some(location => location.copy.hash === item.hash) || await exists(storedRevision(context, key, item.hash)))) {
+        // Copies that are only behind (a write that failed, a folder switched back, every folder restored from an older backup)
+        // catch up to the synced content, quietly, from the store when no tool holds it.
         const holder = active.find(location => location.copy.hash === item.hash);
         source = holder?.copy ?? { ...active[0].copy, directory: storedRevision(context, key, item.hash), hash: item.hash };
         sourceTool = holder?.tool ?? active[0].tool;
@@ -543,10 +585,12 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           if (refusal) { results.push({ item: name, harness: location.tool, outcome: 'held', message: refusal }); continue; }
           const known = item.copies.find(copy => copy.directory === location.copy.directory);
           if (known) { known.status = 'pending'; await save(); }
-          try { written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory)); }
+          try { written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory, location.copy.hash)); }
           catch (error) {
             if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-            results.push({ item: name, harness: location.tool, outcome: 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
+            // Not replaced: its content is still on disk, so it is not displaced.
+            if (item.displaced) item.displaced = item.displaced.filter(entry => entry.hash !== location.copy.hash);
+            results.push({ item: name, harness: location.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
             continue;
           }
           writes++;
@@ -566,7 +610,16 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
             results.push({ item: name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} also reads a different copy at ${location.copy.directory}, which is a link or a folder other tools share. Central Knot does not change it; change or remove it yourself.` });
             continue;
           }
-          written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory));
+          displace(item, location.tool, location.copy.hash);
+          await save();
+          try { written.set(location.copy.directory, await replaceCopy(context, key, source.directory, location.copy.directory, location.copy.hash)); }
+          catch (error) {
+            if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+            // Not replaced: its content is still on disk, so it is not displaced.
+            if (item.displaced) item.displaced = item.displaced.filter(entry => entry.hash !== location.copy.hash);
+            results.push({ item: name, harness: location.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
+            continue;
+          }
           writes++;
           inSync.add(location.copy.directory);
           chosenLosers.push({ tool: location.tool, hash: location.copy.hash });
@@ -628,8 +681,12 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (!options.observeOnly) {
     const now = clock(context);
     for (const [key, item] of Object.entries(record.items)) {
+      // Apply all with Sync off writes only what it shows: no earlier deletion finishes alongside it.
+      if (options.only && !options.only.has(key)) continue;
       // A copy a deletion could not remove is retried while it still holds what it held; changed or gone, it is let go.
+      // A folder made again since (a reset or reinstall) holds a new install: the old deletion has no say over it.
       for (const copy of item.copies.filter(entry => entry.status === 'removing')) {
+        if (resetRoots.has(dirname(copy.directory))) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
         try {
           if ((await readTree(copy.directory)).hash === copy.hash) { await removeTree(copy.directory); writes++; results.push({ item: item.name, harness: copy.harness, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); }
           item.copies = item.copies.filter(entry => entry !== copy);
@@ -639,12 +696,38 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       }
       // A managed skill gone from every tool at once (an uninstaller, or while the app was closed) is a deletion once settled,
       // never a hidden managed record that later acts on a new install (D-37).
-      if (item.state !== 'shared' || gathered.has(key) || (options.only && !options.only.has(key))) continue;
-      const recordedCopies = item.copies.filter(copy => copy.status === 'written' && !item.off?.includes(copy.harness));
+      if (item.state !== 'shared' || gathered.has(key)) continue;
+      const recordedCopies = item.copies.filter(copy => copy.status === 'written' && !item.off?.includes(copy.harness) && tools.includes(copy.harness));
       if (!recordedCopies.length) continue;
+      // Folders made again empty (a reset): the skill is put back from the store, never read as deleted everywhere.
+      const reset = recordedCopies.filter(copy => resetRoots.has(dirname(copy.directory)));
+      if (reset.length) {
+        const kept = storedRevision(context, key, item.hash);
+        let tree;
+        try { tree = await readTree(kept); } catch { results.push({ item: item.name, outcome: 'held', message: 'Its folders were made again empty, and its synced content is no longer in the store to put back.' }); continue; }
+        for (const copy of reset) {
+          const refused = await rootProblem(context, copy.harness);
+          if (refused) { results.push({ item: item.name, harness: copy.harness, outcome: 'held', message: refused }); continue; }
+          try {
+            copy.status = 'pending';
+            await save();
+            await mkdir(dirname(copy.directory), { recursive: true });
+            await placeCopy(context, kept, { harness: copy.harness, directory: copy.directory, limits: [] }, tree);
+            copy.status = 'written';
+            copy.hash = tree.hash;
+            writes++;
+            putBack.add(copy.harness);
+            results.push({ item: item.name, harness: copy.harness, outcome: 'written', message: harnesses[copy.harness].nextStep });
+          } catch (error) {
+            if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+            results.push({ item: item.name, harness: copy.harness, outcome: 'failed', message: `Could not put it back in ${harnesses[copy.harness].name}. ${plainError(error)}` });
+          }
+        }
+        continue;
+      }
       let ready = true;
       for (const copy of recordedCopies) {
-        if (resetRoots.has(dirname(copy.directory)) || !(await folderExists(dirname(copy.directory)))) { ready = false; continue; }
+        if ((await presence(copy)) !== 'gone') { ready = false; delete mark(copy.directory).missingSince; continue; }
         const seen = mark(copy.directory);
         seen.missingSince ??= now;
         if (now - seen.missingSince < (context.settleMs ?? 2000)) { ready = false; settling = true; }
@@ -671,11 +754,29 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       try { const info = await stat(root); if (info.isDirectory()) record.roots[root] = { ino: info.ino, birth: Math.round(info.birthtimeMs) }; } catch { /* unreachable */ }
     }
   }
+  // Displaced content no event of this pass names (left by a pass that stopped part-way) gets its own History entry, so it can be put back.
+  const named = (key: string, hash: string) => events.some(made => made.key === key && (made.previous === hash || made.winner?.hash === hash || made.losers.some(loser => loser.hash === hash)));
+  for (const left of carried) {
+    const item = record.items[left.key];
+    if (!item || named(left.key, left.hash)) continue;
+    const gone = item.state !== 'shared' && item.deleted;
+    event(gone
+      ? { key: left.key, item: item.name, kind: 'deleted', winner: { tool: item.deleted!.tool, hash: item.deleted!.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: item.deleted!.hash }
+      : { key: left.key, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
+  }
   await save();
   if (events.length) {
     await saveHistory(context.home, [...await readHistory(context.home), ...events], clock(context));
     await pruneStore(context, record, await readHistory(context.home));
   }
+  // Now that History names it, displaced content needs no other hold. Content displaced this pass that no event names stays on record.
+  let cleared = false;
+  for (const [key, item] of Object.entries(record.items)) {
+    if (!item.displaced?.length) continue;
+    const left = item.displaced.filter(entry => !named(key, entry.hash));
+    if (left.length !== item.displaced.length) { cleared = true; if (left.length) item.displaced = left; else delete item.displaced; }
+  }
+  if (cleared) await save();
   return { results, harnessWrites: writes, notices, settling };
 }
 
@@ -746,7 +847,13 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
       const here = entry?.facts.copies[tool];
       if (here) {
         if (!here.writable) { results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} reads a copy at ${here.directory}, which Central Knot does not change.` }); continue; }
-        if (here.hash !== tree.hash) { await replaceCopy(context, past.key, kept, here.directory); writes++; replaced.push({ tool, hash: here.hash }); }
+        if (here.hash !== tree.hash) {
+          displace(item, tool, here.hash);
+          await saveRecord(context.home, record);
+          await replaceCopy(context, past.key, kept, here.directory, here.hash);
+          writes++;
+          replaced.push({ tool, hash: here.hash });
+        }
         copies.push({ harness: tool, directory: here.directory, hash: tree.hash, created: false, status: 'written' });
       } else {
         const directory = join(rootOf(context, tool), item.name);
@@ -766,6 +873,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const id = randomUUID();
     past.undoneBy = id;
     await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: replaced[0]?.tool ?? 'claude-cli', hash: tree.hash }, losers: replaced, orderProved: true, previous: before }], clock(context));
+    if (item.displaced) { item.displaced = item.displaced.filter(entry => !replaced.some(gone => gone.hash === entry.hash)); if (!item.displaced.length) delete item.displaced; await saveRecord(context.home, record); }
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
@@ -785,6 +893,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     if (!item || !entry) return { stopped: 'That skill is not there any more.', results: [], harnessWrites: 0 };
     const results: DestinationResult[] = [];
     const lost: { tool: HarnessId; hash: string }[] = [];
+    const leftover: RecordItem['copies'] = [];
     let writes = 0;
     const own = new Map(item.copies.map(copy => [copy.directory, copy.hash]));
     for (const location of entry.locations.filter(candidate => !item.off?.includes(candidate.tool))) {
@@ -793,19 +902,32 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
       if (!location.copy.writable) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} reads a copy at ${location.copy.directory}, which Central Knot does not change. Remove it yourself.` }); continue; }
       const late = await rootProblem(context, location.tool);
       if (late) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: late }); continue; }
-      await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
-      await removeTree(location.copy.directory);
-      writes++;
       // An edit not yet spread is the newest content: Restore prefers it. A copy only behind is an older revision, already kept.
-      if (location.copy.hash === item.hash || location.copy.hash !== own.get(location.copy.directory)) lost.push({ tool: location.tool, hash: location.copy.hash });
+      const newest = location.copy.hash === item.hash || location.copy.hash !== own.get(location.copy.directory);
+      try {
+        await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
+        // On record before it goes, so a crash or a failure later in this action never lets it be pruned.
+        if (newest) { displace(item, location.tool, location.copy.hash); await saveRecord(context.home, record); }
+        await removeTree(location.copy.directory);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+        // One copy that can't go never stops the rest: it is retried by later passes while it is unchanged.
+        leftover.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'removing' });
+        results.push({ item: item.name, harness: location.tool, outcome: 'failed', message: `Could not remove ${harnesses[location.tool].name}'s copy yet: ${plainError(error)} Central Knot will try again.` });
+        continue;
+      }
+      writes++;
+      if (newest) lost.push({ tool: location.tool, hash: location.copy.hash });
       results.push({ item: item.name, harness: location.tool, outcome: 'removed', message: 'Deleted. Restore it from History.' });
     }
     const hash = item.hash || lost[0]?.hash || '';
-    item.copies = [];
+    item.copies = leftover;
     item.state = 'dont-share';
     item.deleted = { at: new Date(clock(context)).toISOString(), tool: lost[0]?.tool ?? 'claude-cli', hash };
     await saveRecord(context.home, record);
+    // History first, then the hold is dropped: a crash between leaves the hold, never content no one can restore.
     await saveHistory(context.home, [...await readHistory(context.home), { id: randomUUID(), at: new Date(clock(context)).toISOString(), key, item: item.name, kind: 'deleted', losers: lost, orderProved: true, previous: hash }], clock(context));
+    if (item.displaced) { item.displaced = item.displaced.filter(entry => !lost.some(gone => gone.hash === entry.hash) && entry.hash !== hash); if (!item.displaced.length) delete item.displaced; await saveRecord(context.home, record); }
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;

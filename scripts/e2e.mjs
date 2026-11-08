@@ -233,7 +233,9 @@ async function practiceFlow() {
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
   writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited with Sync off.\n'));
-  await wait(3000);
+  let shownPending = false;
+  for (let tries = 0; tries < 40 && !shownPending; tries++) { await wait(250); shownPending = (await cellState(a, 'standup', 'claude-cli')) === 'will-sync'; }
+  check('with Sync off the page shows the edit as pending on its own, without Read again', shownPending);
   await a.click('#header-refresh');
   check('with Sync off nothing spreads', !readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
   same('the edit shows as pending, not as a choice', [await cellState(a, 'standup', 'claude-cli'), await a.exists('#decide-standup')], ['will-sync', false]);
