@@ -12,7 +12,7 @@ export interface HarnessDefinition {
   defaultConfig: string;
   /** Claude Code keeps this skills folder for itself. */
   reservedSkills: string[];
-  /** Observed: Claude Code 2.1.309 lists dot-folders as skills; Copilot CLI 1.0.107 skips them. */
+  /** Observed: Claude Code 2.1.309 lists dot-folders as skills; Copilot CLI 1.0.107 and Codex 0.142.3 skip them. */
   loadsDotFolders: boolean;
   /** Other products that read the folder this harness is written through (CD Appendix A). */
   otherReaders: string[];
@@ -36,6 +36,18 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     nextStep: 'Written. In Copilot CLI, run /skills reload or start a new session to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Copilot skills' },
+      { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
+    ],
+  },
+  // Codex reads its own folder and the shared .agents folder (both listed by `codex app-server` skills/list on 0.142.3).
+  // It installs its own skills under `.system`, which the dot-folder rule leaves alone. The ChatGPT desktop app reads the same ~/.codex.
+  'codex-cli': {
+    id: 'codex-cli', name: 'Codex', surface: 'CLI', binary: 'codex',
+    configEnv: 'CODEX_HOME', defaultConfig: '.codex', reservedSkills: ['.system'], loadsDotFolders: false,
+    otherReaders: ['ChatGPT desktop (Codex), which reads the same ~/.codex'],
+    nextStep: 'Written. Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
+    skillRoots: (config, home) => [
+      { path: join(config, 'skills'), label: 'Codex skills' },
       { path: join(home, '.agents/skills'), label: 'Shared .agents skills' },
     ],
   },

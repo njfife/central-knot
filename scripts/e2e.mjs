@@ -30,7 +30,7 @@ const same = (name, actual, expected) => check(name, JSON.stringify(actual) === 
 // ---------- Disposable home ----------
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'ck-e2e-')));
 const HOME = join(scratch, 'home');
-const CLAUDE = join(HOME, '.claude/skills'), COPILOT = join(HOME, '.copilot/skills'), AGENTS = join(HOME, '.agents/skills');
+const CLAUDE = join(HOME, '.claude/skills'), COPILOT = join(HOME, '.copilot/skills'), AGENTS = join(HOME, '.agents/skills'), CODEX = join(HOME, '.codex/skills');
 const text = (name, body = 'Body.', extra = '') => `---\nname: ${name}\ndescription: The ${name} skill.\n${extra}---\n\n${body}\n`;
 function skill(base, folder, content = text(folder)) {
   const directory = join(base, folder);
@@ -77,7 +77,7 @@ function seedHome() {
   const shared = skill(AGENTS, 'linked');
   symlinkSync(shared, join(CLAUDE, 'linked'));
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
-  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.']]) {
+  for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
     writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
     chmodSync(join(HOME, '.local/bin', name), 0o755);
   }
@@ -176,6 +176,8 @@ async function practiceFlow() {
   await applyAll(a);
   same('copies written both ways', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md'))], [true, true]);
   same('copy bytes match', tree(join(practice, '.copilot/skills/release-notes')), tree(join(practice, '.claude/skills/release-notes')));
+  same('Codex is a column and gets its copies too', [await a.exists('#tool-codex-cli'), existsSync(join(practice, '.codex/skills/notes/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
+  check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
   same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
   same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);
   same('managed after Apply all', await switchOn(a, 'release-notes'), true);
@@ -309,7 +311,8 @@ async function realHomeFlow() {
   same('real home is never the machine’s own', HOME.startsWith(scratch), true);
   await a.click('#nav-tools');
   const tools = await a.text('#tools-scroll');
-  check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107'), tools.slice(0, 300));
+  check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
+  check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
   await a.click('#nav-overview');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
@@ -341,6 +344,9 @@ async function realHomeFlow() {
   await applyAll(a);
   same('bytes and modes copied, .git left out', tree(join(COPILOT, 'rich')), before.rich);
   same('exec bit kept', statSync(join(COPILOT, 'rich/scripts/run.sh')).mode & 0o777, 0o755);
+  same('Codex gets the same bytes in its own folder', tree(join(CODEX, 'rich')), before.rich);
+  check('a dot folder never reaches Codex', !existsSync(join(CODEX, '.dot-skill')));
+  same('nothing new in the shared .agents folder', readdirSync(AGENTS).sort(), ['linked']);
   check('Copilot-only skill reached Claude', existsSync(join(CLAUDE, 'from-copilot/SKILL.md')));
   check('the one switched back off was not copied', !existsSync(join(COPILOT, 'private-one')));
   check('refused name not copied', !existsSync(join(COPILOT, '名前-skill')));

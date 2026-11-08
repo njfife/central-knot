@@ -21,7 +21,7 @@ Central Knot (CK) is a simple local desktop app that moves configuration. It kee
 
 ## 2. Confirmed intent
 
-Stated by the user [UD, B]. Two features are core: Claude and GitHub Copilot desktop and CLI support (I-18), and optional bundled marketplace distribution (I-16, I-17).
+Stated by the user [UD, B]. Two features are core: Claude, GitHub Copilot and Codex desktop and CLI support (I-18; Codex added November 8, 2026), and optional bundled marketplace distribution (I-16, I-17).
 
 | ID | Confirmed intent | Rules | Tests |
 | --- | --- | --- | --- |
@@ -42,7 +42,7 @@ Stated by the user [UD, B]. Two features are core: Claude and GitHub Copilot des
 | I-15 | The work GitLab needs the company network or VPN, which CK does not configure | MKT-04 | AT-41 |
 | I-16 | **Optional organization builds,** reusable from any GitLab or GitHub marketplace, carry the whole catalog and all installable content, for recipients with no source access. Bundling is not installation. Standard public builds carry no private marketplace or feed | ORG-01, ORG-02, ORG-03, ORG-04 | AT-24, AT-43, AT-44, AT-59 |
 | I-17 | **Marketplace content releases independently of the application,** with no rebuild per plugin release, and automatically updates installed plugins at their existing destinations, preserving selections, disabled states and exclusions. **Automatic organization application updates** are a separate requirement for bundled distribution. The final organization-specific update delivery is best effort for v1 | ORG-01, ORG-05, ORG-06, PLG-09, PLT-02 | AT-03, AT-04, AT-24, AT-56, AT-43, AT-44, AT-45, AT-59, AT-61, AT-64 |
-| I-18 | **Highest priority:** the actual GitHub Copilot app and Copilot CLI, Claude Desktop's Cowork and Code, and Claude Code CLI. Cowork-only and Code-only journeys are independent. Pi, Codex and OpenCode follow | Section 5.1, DET-01, REC-03, PLG-04 | AT-03, AT-04, AT-20, AT-24, AT-44, AT-56, AT-68 |
+| I-18 | **Highest priority:** the actual GitHub Copilot app and Copilot CLI, Claude Desktop's Cowork and Code, Claude Code CLI, and **Codex CLI with the ChatGPT desktop app's Codex** (added to this tier by Nathan, November 8, 2026: a v1 staple). Cowork-only and Code-only journeys are independent. Pi and OpenCode follow | Section 5.1, DET-01, REC-03, PLG-04 | AT-03, AT-04, AT-20, AT-24, AT-44, AT-56, AT-68 |
 | I-19 | Install defaults to all compatible managed harnesses, with include and exclude controls that survive updates. A plugin on the default expands to newly detected compatible harnesses. Uninstall records an exclusion until Install again | PLG-02, PLG-06, PLG-07, OWN-04 | AT-03, AT-04, AT-24, AT-44, AT-46, AT-56, AT-58 |
 | I-20 | Settings can change the default destinations and turn off expansion, without overwriting per-plugin choices | PLG-06 | AT-57 |
 | I-21 | **Newest action wins** for concurrent edit/edit and delete/edit of a synced item, with recoverable history and a non-blocking notice. No dialog. **Where order genuinely cannot be established,** CK still resolves automatically, an edit beating a deletion and competing edits chosen deterministically: an accepted degraded outcome, not proof of chronology (CON-04) | CON-01, CON-02, CON-04 | AT-11, AT-49, AT-50 |
@@ -124,8 +124,10 @@ The two tiers are confirmed (I-18) and set sequence, not scope; the order within
 | **Claude app, Cowork** | Account state; no documented local target | None validated. Cowork accepts plugins (Documented); CK's automatic route is the open question. Candidates, one User-reported: [CD §7] | V-15, V-17, V-04, V-06 |
 | **Claude app, Code tab** | Same files as the CLI; MCP write: V-09; actual reading per OS, especially MCP and agents: V-06 | Candidates only (PLG-04); settings route Exercised on one Mac build with a test key | V-01, V-04, V-06, V-09, V-16, V-17 |
 | **Claude Code CLI** | Full; MCP write: V-09 | Native commands (Exercised on the GitHub fixture) | V-02, V-09, V-16, V-17 |
+| **Codex CLI** | Full: `$CODEX_HOME/skills` written, `~/.agents/skills` read only; skill load rules measured on 0.142.3 | Native `codex plugin`; Claude plugins with named failures (Appendix D) | V-02, V-06, V-16, V-17 |
+| **ChatGPT desktop (Codex local)** | Shares `~/.codex` with the CLI on macOS (Exercised, signed out); bundles its own `codex`; its host-bound config entries are never shared | Through the shared `~/.codex`; desktop session load unproven | V-05, V-06, V-16, V-17 |
 
-**Priority 2,** in scope at lower priority: Pi CLI; Codex CLI; OpenCode CLI 1.x and 2.x; ChatGPT desktop and OpenCode desktop beta (V-05); pi-gui, **third-party** and labelled so, since no official Pi desktop is established; VS Code with built-in Copilot, never a substitute for the Copilot app (placement proposed).
+**Priority 2,** in scope at lower priority: Pi CLI; OpenCode CLI 1.x and 2.x; OpenCode desktop beta (V-05); pi-gui, **third-party** and labelled so, since no official Pi desktop is established; VS Code with built-in Copilot, never a substitute for the Copilot app (placement proposed).
 
 **Not in the order:** Claude Chat, same account state as Cowork and not separately required: an account card, never an installable harness or mode. **Not harnesses:** GitHub Desktop, a Git client with no customization target; `gh`, a helper and not a write route. Other Copilot IDEs are not claimed. SSH, WSL, cloud sessions and remote OpenCode servers are at most "separate environment, not managed".
 

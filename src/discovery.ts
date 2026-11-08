@@ -80,6 +80,17 @@ export function copilotProblem(content: string, folder: string): string | undefi
   return undefined;
 }
 
+/** What Codex 0.142.3 refused when offered each case (skills/list errors): frontmatter is required, a description is required text, a name is at most 64 characters. */
+export function codexProblem(content: string, folder: string): string | undefined {
+  const fields = frontmatter(content);
+  if (!fields) return 'it has no YAML frontmatter';
+  if (typeof fields.description !== 'string' || !fields.description.trim()) return 'it has no description text';
+  const name = 'name' in fields ? fields.name : folder;
+  if (typeof name !== 'string') return 'its metadata name is not text';
+  if (name.length > 64) return 'its name is longer than 64 characters';
+  return undefined;
+}
+
 export async function discover(options: {
   home: string;
   mode: HomeMode;
@@ -157,7 +168,7 @@ export async function discover(options: {
         seen.add(entry.name);
         snapshot.skills.push({
           id, folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
-          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name),
+          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name), codexProblem: codexProblem(content, entry.name),
         });
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;

@@ -712,3 +712,46 @@ test('Another folder whose .central-knot links to the real one stays preview-onl
     assert.equal((await manageView(ctx(box, { realHome }))).access.allowed, false, 'a linked .agents too');
   } finally { await box.cleanup(); }
 });
+
+// ---------- Codex as a third tool ----------
+
+const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+const readAll = (home: string) => () => Promise.all(all.map(harness => discover({ home, mode: 'custom', harness })));
+
+test('With Codex present, a managed skill reaches Codex’s own folder and never the shared one', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.codex/skills/.system/imagegen'), { recursive: true });
+    await writeFile(join(box.home, '.codex/skills/.system/imagegen/SKILL.md'), text('imagegen'));
+    await skill(box.home, CLAUDE, 'solo');
+    await skill(box.home, CLAUDE, 'plain', 'No frontmatter.\n');
+    const context = ctx(box, { read: readAll(box.home) });
+    const view = await manageView(context);
+    assert.deepEqual(view.tools, all);
+    assert.ok(view.writes['codex-cli']?.to.endsWith('.codex/skills') && !view.writes['codex-cli']?.blocked);
+    assert.ok(!view.skills.some(item => item.key === 'imagegen'), 'Codex’s own .system skills are not offered');
+    assert.match(view.skills.find(item => item.key === 'plain')!.cannot['codex-cli'] ?? '', /Codex will not load it/);
+    const result = await applyChanges(context, [manage('solo'), manage('plain')]);
+    assert.equal(await readFile(join(box.home, '.codex/skills/solo/SKILL.md'), 'utf8'), text('solo'));
+    assert.equal(await exists(join(box.home, '.codex/skills/plain')), false);
+    assert.equal(await exists(join(box.home, '.agents')), false, 'nothing goes to the shared folder');
+    assert.equal(result.results.filter(entry => entry.outcome === 'written').length, 2, JSON.stringify(result.results));
+    assert.ok(await exists(join(box.home, '.codex/skills/.system/imagegen/SKILL.md')), 'its .system folder is untouched');
+  } finally { await box.cleanup(); }
+});
+
+test('A skill in the shared .agents folder counts for both Copilot and Codex and is never written', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.codex'), { recursive: true });
+    await skill(box.home, '.agents/skills', 'both', text('both', 'Shared.'));
+    await skill(box.home, CLAUDE, 'both', text('both', 'Claude.'));
+    const context = ctx(box, { read: readAll(box.home) });
+    const facts3 = (await manageView(context)).skills.find(item => item.key === 'both')!;
+    assert.ok(facts3.copies['copilot-cli'] && facts3.copies['codex-cli']);
+    assert.deepEqual(facts3.choiceBlocks['claude-cli']?.map(block => block.tool).sort(), ['codex-cli', 'copilot-cli']);
+    const result = await applyChanges(context, [{ key: 'both', managed: true, off: [], use: 'claude-cli' }]);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await readFile(join(box.home, '.agents/skills/both/SKILL.md'), 'utf8'), text('both', 'Shared.'));
+  } finally { await box.cleanup(); }
+});

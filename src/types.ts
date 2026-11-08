@@ -1,5 +1,5 @@
 export type HomeMode = 'fixture' | 'custom' | 'actual';
-export type HarnessId = 'claude-cli' | 'copilot-cli';
+export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
 
 export interface ProbeResult {
@@ -23,6 +23,8 @@ export interface Skill {
   metadataKeys: string[];
   /** Why Copilot CLI refuses this skill, measured against 1.0.107. */
   copilotProblem?: string;
+  /** Why Codex would refuse this skill, by the rules measured on Codex 0.142.3. */
+  codexProblem?: string;
   content: string;
   notes: string[];
   status: string;

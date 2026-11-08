@@ -123,6 +123,11 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
     if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
     return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
   }
+  if (harness === 'codex-cli') {
+    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+    if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
+    return { harness, directory, limits: [] };
+  }
   return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
 }
 

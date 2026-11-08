@@ -108,3 +108,34 @@ test('SKL-02: empty or non-text metadata Copilot CLI refuses is skipped', () => 
   }
 });
 
+
+// ---------- Codex (measured on codex-cli 0.142.3 through `codex app-server` skills/list) ----------
+
+test('Codex reads its own folder and the shared .agents folder, and leaves its .system skills alone', async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-codex-')));
+  try {
+    const write = async (path: string, text: string) => { await mkdir(join(base, path), { recursive: true }); await writeFile(join(base, path, 'SKILL.md'), text); };
+    await write('.codex/skills/own', '---\nname: own\ndescription: Own.\n---\nB\n');
+    await write('.codex/skills/.system/imagegen', '---\nname: imagegen\ndescription: System.\n---\nB\n');
+    await write('.codex/skills/.dot', '---\nname: dot\ndescription: Dot.\n---\nB\n');
+    await write('.agents/skills/shared', '---\nname: shared\ndescription: Shared.\n---\nB\n');
+    const snapshot = await discover({ home: base, mode: 'custom', harness: 'codex-cli' });
+    assert.deepEqual(snapshot.skills.map(skill => `${skill.folder}:${skill.rootLabel}`), ['own:Codex skills', 'shared:Shared .agents skills']);
+    assert.equal(snapshot.detection, 'Config found but app not detected');
+    const moved = await discover({ home: base, mode: 'custom', harness: 'codex-cli', configOverride: join(base, 'elsewhere') });
+    assert.deepEqual(moved.skills.map(skill => skill.folder), ['shared'], 'CODEX_HOME moves its own folder, not .agents');
+  } finally { await rm(base, { recursive: true, force: true }); }
+});
+
+test('Codex load rules: frontmatter and a description are required, a name is at most 64 characters', async () => {
+  const { codexProblem } = await import('../src/discovery.ts');
+  assert.equal(codexProblem('---\nname: ok\ndescription: Fine.\n---\nB\n', 'ok'), undefined);
+  assert.equal(codexProblem('---\ndescription: No name, folder used.\n---\nB\n', 'no-name'), undefined);
+  assert.equal(codexProblem('---\nname: Has Space 日本\ndescription: Codex takes any text name.\n---\nB\n', 'x'), undefined);
+  assert.equal(codexProblem(`---\nname: d\ndescription: ${'d'.repeat(1100)}\n---\nB\n`, 'd'), undefined, 'a long description loads');
+  assert.match(codexProblem('Just text.\n', 'plain') ?? '', /frontmatter/);
+  assert.match(codexProblem('---\nname: n\n---\nB\n', 'n') ?? '', /description/);
+  assert.match(codexProblem('---\nname: n\ndescription: ""\n---\nB\n', 'n') ?? '', /description/);
+  assert.match(codexProblem('---\nname: n\ndescription: [a, b]\n---\nB\n', 'n') ?? '', /description/);
+  assert.match(codexProblem(`---\nname: ${'a'.repeat(65)}\ndescription: Long.\n---\nB\n`, 'long') ?? '', /64/);
+});

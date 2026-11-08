@@ -35,9 +35,9 @@ Priority tiers are confirmed (I-18); the order within a tier is proposed. Upstre
 | 1 | **Claude app, Code tab** | All; Linux beta (apt on Ubuntu 22.04+, Debian 12+; no official Arch route) | Reads the same files as the CLI. Binary is embedded, not on `PATH`, and its version differs. Windows is an MSIX with no Git or SSH inside. Plugins: V-01. Actual reading of shared MCP and agents per OS: V-06 |
 | 1 | **Claude Code CLI** | macOS 13+, Windows 10 1809+, Linux | Full target for skills, MCP (V-09), agents, instructions, plugins |
 | 2 | **Pi CLI** | All; Windows normally needs Git Bash | Skills, MCP, instructions; no native agents; Pi packages only for plugins |
-| 2 | **Codex CLI** | All; WSL is separate | Full target. Claude plugins with named failures (Appendix D) |
+| 1 | **Codex CLI** | All; WSL is separate | Full target. Claude plugins with named failures (Appendix D) |
 | 2 | **OpenCode CLI, 1.x and 2.x** | All | Two lines, two adapters (section 8). Claude plugins refused |
-| 2 | **ChatGPT desktop (Codex local)** | All; Linux preview | Shares `~/.codex` on macOS (Exercised: real app, signed out, disposable home; the CLI-installed plugin's MCP process started, no model turn). Runtime otherwise V-05. Its host-bound config entries are never shared |
+| 1 | **ChatGPT desktop (Codex local)** | All; Linux preview | Shares `~/.codex` on macOS (Exercised: real app, signed out, disposable home; the CLI-installed plugin's MCP process started, no model turn). Runtime otherwise V-05. Its host-bound config entries are never shared |
 | 2 | **OpenCode desktop, beta** | All; Linux never run | Bundles its own CLI and uses the shared 2.x background service, which outlives the app. V-05 |
 | 2 | **VS Code with built-in Copilot** (placement proposed) | Detect at runtime | Never a substitute for the Copilot app. See facts below. V-05 |
 | 2 | **pi-gui 1.0.1** | All per release assets; only macOS inspected | **Third-party** (Matthew Lam), not official, and no official Pi desktop is established. Label it. Shares `~/.pi/agent` by source and README; GUI not run. Bundles SDK 0.87.1 with **no MCP**, so MCP is shown CLI-only for that build [VP] |
