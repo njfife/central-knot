@@ -1,0 +1,19 @@
+[
+ {
+  "name": "3-search-and-manage-dark",
+  "actions": [],
+  "typing": "re"
+ },
+ {
+  "name": "4-compare-open-dark",
+  "actions": [
+   "#decide-review"
+  ]
+ },
+ {
+  "name": "5-version-chosen-dark",
+  "actions": [
+   "#use-review-copilot-cli"
+  ]
+ }
+]

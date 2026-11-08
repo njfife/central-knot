@@ -12,6 +12,10 @@ export interface SampleSkill {
   managed: boolean;
   off: HarnessId[];
   cannot?: Partial<Record<HarnessId, string>>;
+  /** Copies that differ, left as separate skills on purpose. */
+  separate?: boolean;
+  /** For the compare view: one line per copy that differs. */
+  versions?: Partial<Record<HarnessId, { lines: string; changed: string; text: string }>>;
 }
 
 export const sample: SampleSkill[] = [
@@ -19,17 +23,21 @@ export const sample: SampleSkill[] = [
   { key: 'tdd', description: 'Test-driven development, one failing test at a time.', copies: { 'claude-cli': 'b', 'copilot-cli': 'b' }, managed: true, off: [] },
   { key: 'handoff', description: 'Hand the conversation to a fresh agent.', copies: { 'claude-cli': 'c' }, managed: true, off: ['copilot-cli'] },
   { key: 'sec-api', description: 'Query SEC filing metadata.', copies: { 'claude-cli': 'd' }, managed: true, off: [] },
-  { key: 'wizard', description: 'Step-by-step setup helper.', copies: { 'claude-cli': 'e', 'copilot-cli': 'e2' }, managed: true, off: [] },
+  { key: 'wizard', description: 'Step-by-step setup helper.', copies: { 'claude-cli': 'e', 'copilot-cli': 'e2' }, managed: true, off: [],
+    versions: { 'claude-cli': { lines: '42 lines', changed: 'edited 3 days ago', text: 'Ask one question at a time, then confirm the whole plan.' }, 'copilot-cli': { lines: '38 lines', changed: 'edited yesterday', text: 'Ask every question up front, then start.' } } },
   { key: 'grill-me', description: 'Relentless questions about a plan.', copies: { 'claude-cli': 'f', 'copilot-cli': 'f' }, managed: false, off: [] },
   { key: 'triage', description: 'Sort incoming issues by urgency.', copies: { 'claude-cli': 'g', 'copilot-cli': 'g' }, managed: false, off: [] },
   { key: 'release-notes', description: 'Draft release notes from merged changes.', copies: { 'claude-cli': 'h' }, managed: false, off: [] },
   { key: 'standup', description: 'Three-line standup from yesterday’s commits.', copies: { 'copilot-cli': 'i' }, managed: false, off: [] },
-  { key: 'review', description: 'Summarize a diff.', copies: { 'claude-cli': 'j', 'copilot-cli': 'j2' }, managed: false, off: [] },
+  { key: 'review', description: 'Summarize a diff.', copies: { 'claude-cli': 'j', 'copilot-cli': 'j2' }, managed: false, off: [],
+    versions: { 'claude-cli': { lines: '12 lines', changed: 'edited 2 weeks ago', text: 'Summarize what changed and what to check.' }, 'copilot-cli': { lines: '19 lines', changed: 'edited 4 days ago', text: 'List defects first, then missing tests.' } } },
   { key: '.scratch', description: 'Private notes skill.', copies: { 'claude-cli': 'k' }, managed: false, off: [], cannot: { 'copilot-cli': 'Copilot CLI does not load folders starting with a dot.' } },
   { key: 'writing-shape', description: 'Shape a draft before polishing it.', copies: { 'claude-cli': 'l', 'copilot-cli': 'l' }, managed: true, off: [] },
 ];
 
 export const designMode = new URLSearchParams(location.search).has('design');
+/** Which layout option to show: a, b or c. */
+export const variant = (() => { const value = new URLSearchParams(location.search).get('design') ?? 'a'; return ['a', 'b', 'c'].includes(value) ? value : 'a'; })();
 
 /** --design-preview=large adds generated skills, to see the page with hundreds of them. */
 if (new URLSearchParams(location.search).get('design') === 'large') {
@@ -54,6 +62,7 @@ export function cellOf(skill: SampleSkill, tool: HarnessId): Cell {
   const has = skill.copies[tool] !== undefined;
   if (skill.cannot?.[tool]) return 'cannot';
   const ids = new Set(Object.values(skill.copies));
+  if (skill.separate) return has ? 'present' : 'absent';
   if (!skill.managed) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
   if (skill.off.includes(tool)) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
   if (!has) return 'will-sync';

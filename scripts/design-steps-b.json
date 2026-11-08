@@ -1,0 +1,23 @@
+[
+ {
+  "name": "3-use-all-in-copilot-dark",
+  "actions": [
+   "#lane-copilot-cli"
+  ],
+  "reset": [
+   "#discard"
+  ]
+ },
+ {
+  "name": "4-compare-open-dark",
+  "actions": [
+   "#decide-review"
+  ]
+ },
+ {
+  "name": "5-version-chosen-dark",
+  "actions": [
+   "#use-review-copilot-cli"
+  ]
+ }
+]

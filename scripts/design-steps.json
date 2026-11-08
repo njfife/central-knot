@@ -1,5 +1,0 @@
-[
-  { "name": "3-share-all-dark", "actions": ["#share-all"], "reset": ["#discard"] },
-  { "name": "4-range-select-dark", "actions": ["[data-key='grill-me'] .select-box"], "shiftActions": ["[data-key='triage'] .select-box"], "reset": ["#bulk-clear"] },
-  { "name": "5-in-one-tool-filter-dark", "actions": ["button.chip:nth-of-type(4)"] }
-]
