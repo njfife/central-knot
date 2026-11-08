@@ -362,7 +362,7 @@ async function crashFlow() {
       await a.click('#manage-all');
       await a.run(`document.querySelector('#apply').click()`);
     } else await a.run(`document.querySelector('#header-refresh').click()`);
-    await wait(30 + round * 90 + randomInt(40));
+    await wait(30 + Math.round(round * 700 / Math.max(1, crashRounds - 1)) + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;
     for (const name of readdirSync(COPILOT)) {
@@ -371,8 +371,12 @@ async function crashFlow() {
     }
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
   }
+  const onRecord = existsSync(join(HOME, '.central-knot/sync.json'));
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
+  // If every kill landed before the choices were saved, there is nothing to catch up: finish with a real Apply all.
+  if (!onRecord) { await a.click('#manage-all'); await applyAll(a); }
+  console.log(`crash finish: ${onRecord ? 'caught up on open' : 'no choices were saved before the kills; applied again'}`);
   same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
   same('stale stages are cleared', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
