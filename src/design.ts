@@ -77,7 +77,7 @@ export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';
 
 export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   const has = skill.copies[tool] !== undefined;
-  if (skill.cannot?.[tool]) return 'cannot';
+  if (skill.cannot?.[tool] || (skill.held && !has)) return 'cannot';
   const ids = new Set(Object.values(skill.copies));
   if (skill.separate) return has ? 'present' : 'absent';
   if (!skill.managed) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';

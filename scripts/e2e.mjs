@@ -284,7 +284,8 @@ async function realHomeFlow() {
   same('link stays a link', lstatSync(join(CLAUDE, 'linked')).isSymbolicLink(), true);
   same('nothing staged in a loaded folder', [...readdirSync(COPILOT), ...readdirSync(CLAUDE)].filter(name => name.startsWith('.ck-')), []);
   same('unrelated bytes unchanged', readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8'), before.unrelated);
-  check('the problems are reported', (await a.text('.bands') ?? '').length > 0, await a.text('.bands'));
+  check('expected holds do not raise a warning band', !(await a.text('.bands') ?? '').includes('does not load'), await a.text('.bands'));
+  same('a held skill shows it cannot go to the tool that lacks it', await cellState(a, 'has-link', 'copilot-cli'), 'cannot');
   await a.shot('real-applied');
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
