@@ -1,4 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
+import { comparedTools, copiesDiffer } from './syncrules.ts';
+export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
 /** A tool column. The design preview can add a third, imagined tool to show how the page grows. */
@@ -83,10 +85,6 @@ if (new URLSearchParams(location.search).get('design') === 'large') {
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot';
 export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';
 
-/** The tools whose copies count: those it syncs to that can load it. A tool turned off, or one that cannot load it, keeps its own copy. */
-export const comparedTools = (skill: SampleSkill) => Object.keys(skill.copies).filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]);
-/** Copies differ only between the tools that count, exactly as Apply all sees them. */
-export const copiesDiffer = (skill: SampleSkill) => new Set(comparedTools(skill).map(tool => skill.copies[tool])).size > 1;
 
 export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   const has = skill.copies[tool] !== undefined;

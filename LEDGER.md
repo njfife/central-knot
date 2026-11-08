@@ -196,3 +196,19 @@ Disposable `HOME` (and `CODEX_HOME`, which must already exist or Codex refuses t
 - A session pass: the marker plugin used in a new Claude Code, Copilot and Codex session needs sign-ins, so it is Nathan's try.
 - Private-source (V-16) tries against his real Git hosts.
 - Update and Disable controls belong to later slices.
+
+## Add all, told apart (three implementers and a judge panel), November 8, 2026
+
+Nathan saw "32 to add" from Copilot CLI to Claude Code, when most were identical copies that only needed managing. Three implementers worked in separate worktrees: A was GPT-6 Astra, B Claude Opus 5.5, C Grok 4.7. Three blind judges (the same three models) scored them. **B won 2–1**, with totals of B 121, A 117 and C 107 out of 150.
+
+**B, as shipped.** Each target tool in a tool's menu shows its counts with the table's own cell marks: new, same, off here, synced and can't. Differing copies sit on their own line, "N different: use <source>'s copy", with a switch that is off by default. Turning it on adds them to the count and shows: "You accept <source>'s copy: on Apply all, every tool these sync to uses it. The differing copies in … are replaced; Central Knot's store keeps them." Drafts go through the same resolve, prior and seen path as choosing a copy by hand, so nothing is written until Apply all.
+
+**Fixes the panel asked for, added on top of B:**
+- A pair already syncing one copy stays "synced" even when a third tool differs. Before, adding Claude to Codex could replace Copilot's copy as a side effect.
+- Managed skills with syncing turned off are counted as "off here", not "same".
+- The planner moved to `src/addplan.ts`, and the copy rules to `src/syncrules.ts`, with 6 unit tests: the groups, a third-tool conflict, a conflict only elsewhere, a source or target that is off, blocked, held, unloadable and kept-separate skills, and blocks that don't apply.
+- The menu scrolls past a height limit, for more tools.
+- "Can't" opens a keyboard-reachable list of each skill and its reason, borrowed from A.
+- The button says "Manage N" when nothing gets copied, borrowed from C.
+
+**Validation.** 80 unit tests. Mac e2e 395/395 with 8 crash rounds, smoke pass. Linux e2e 86/86. Nathan's own real-home state (`talk-like-a-dork`, managed at 13:24) is unchanged.

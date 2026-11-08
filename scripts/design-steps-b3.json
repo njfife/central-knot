@@ -12,6 +12,15 @@
   ]
  },
  {
+  "name": "b2-claude-menu-why-dark",
+  "actions": [
+   "#menu-why-claude-cli-copilot-cli"
+  ],
+  "reset": [
+   "#tool-claude-cli"
+  ]
+ },
+ {
   "name": "d-copilot-menu-conflicts-ticked-dark",
   "actions": [
    "#tool-copilot-cli",
