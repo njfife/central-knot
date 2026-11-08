@@ -60,8 +60,8 @@ function effective(skill: SampleSkill): SampleSkill {
   const draft = view.draft.get(skill.key);
   if (!draft) return skill;
   const next: SampleSkill = { ...skill, managed: draft.managed, off: draft.off };
+  if (draft.managed && draft.resolve !== 'separate') next.separate = false;
   if (draft.resolve === 'separate') next.separate = true;
-  else if (draft.managed) next.separate = false;
   else if (draft.resolve) {
     const id = skill.copies[draft.resolve]!;
     next.copies = Object.fromEntries(Object.keys(skill.copies).map(tool => [tool, id]));
@@ -254,8 +254,10 @@ function row(skill: SampleSkill) {
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.name ?? skill.key),
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
-        attention ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
-        decided ? h('span.decided', {}, decided === 'separate' ? 'Keeping both' : `Using ${names[decided]}`, smallAction('Undo', `undo-${skill.key}`, () => resolve(skill.key, undefined))) : null),
+        attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
+        decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping both copies as they are, on Apply all' : `Every tool will use ${names[decided]}'s copy, on Apply all` },
+          decided === 'separate' ? h('span', {}, 'Keeping both') : [brandMark(decided, 12), h('span', {}, `${names[decided]}'s copy`)],
+          h('button.decided-undo', { type: 'button', id: `undo-${skill.key}`, 'aria-label': 'Undo this choice', title: 'Undo this choice', onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); } }, icon('undo-2', 12))) : null),
       h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `switch-${skill.key}`)),
       toolList().map(tool => cell(skill, tool)),
       h('div.ov-fill')),
