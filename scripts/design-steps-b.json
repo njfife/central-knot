@@ -8,7 +8,7 @@
  {
   "name": "4-used-all-in-copilot-dark",
   "actions": [
-   "#use-all-claude-cli-in-copilot-cli"
+   "#menu-add-claude-cli-copilot-cli"
   ],
   "reset": [
    "#discard"

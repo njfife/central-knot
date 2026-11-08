@@ -119,7 +119,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
         section('Folders', h('dl.facts', {},
           ...fact('Config folder', path(snapshot.root)),
           ...[...roots].flatMap(([root, label]) => fact(label, path(root))),
-          ...(disclosed ? fact('New copies go to', path(disclosed.to)) : [])))),
+          ...(disclosed ? fact('New copies go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',
           snapshot.skills.length

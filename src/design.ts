@@ -79,20 +79,27 @@ if (new URLSearchParams(location.search).get('design') === 'large') {
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot';
 export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';
 
+/** The tools whose copies count: those it syncs to that can load it. A tool turned off, or one that cannot load it, keeps its own copy. */
+export const comparedTools = (skill: SampleSkill) => Object.keys(skill.copies).filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]);
+/** Copies differ only between the tools that count, exactly as Apply all sees them. */
+export const copiesDiffer = (skill: SampleSkill) => new Set(comparedTools(skill).map(tool => skill.copies[tool])).size > 1;
+
 export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   const has = skill.copies[tool] !== undefined;
   if (skill.cannot?.[tool] || (skill.held && !has)) return 'cannot';
-  const ids = new Set(Object.values(skill.copies));
   if (skill.separate) return has ? 'present' : 'absent';
-  if (!skill.managed) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
-  if (skill.off.includes(tool)) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
+  const counts = has && !skill.off.includes(tool);
+  if (!skill.managed) return has ? (counts && copiesDiffer(skill) ? 'present-differs' : 'present') : 'absent';
+  if (skill.off.includes(tool)) return has ? 'present' : 'absent';
   // Nothing can be copied here unless a tool it syncs to has a copy to start from.
-  if (!has) return Object.keys(skill.copies).some(other => !skill.off.includes(other) && !skill.cannot?.[other]) ? 'will-sync' : 'absent';
-  return ids.size > 1 ? 'differs' : 'synced';
+  if (!has) return comparedTools(skill).length ? 'will-sync' : 'absent';
+  return copiesDiffer(skill) ? 'differs' : 'synced';
 }
 
 export function syncOf(skill: SampleSkill, toolList: Tool[] = tools): Sync {
   const cells = toolList.map(tool => cellOf(skill, tool));
+  // A skill that cannot be managed offers no decision: there is nothing Apply all would do with one.
+  if (skill.held) return skill.managed ? 'in-sync' : 'none';
   if (cells.includes('differs') || cells.includes('present-differs')) return 'attention';
   if (!skill.managed) return 'none';
   if (cells.includes('will-sync')) return 'pending';

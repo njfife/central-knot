@@ -25,11 +25,11 @@ export interface ShareContext {
   allowActualWrites?: boolean;
   overrides?: Partial<Record<HarnessId, string>>;
   /** Test seam: throws at a named step, standing in for a crash. */
-  fault?: (step: 'before-rename' | 'after-rename') => void;
+  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace') => void;
 }
 
 export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; status: 'pending' | 'written' }
-export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean }
+export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string } }
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
@@ -129,11 +129,18 @@ export function targetFor(harness: HarnessId, directory: string, source: Skill):
 // ---------- State ----------
 
 
+const knownTool = (value: unknown) => typeof value === 'string' && Object.hasOwn(harnesses, value);
+
 function validItems(items: unknown): boolean {
   if (typeof items !== 'object' || items === null || Array.isArray(items)) return false;
   return Object.values(items).every(item => typeof item === 'object' && item !== null
     && typeof item.name === 'string' && typeof item.hash === 'string' && (item.state === 'shared' || item.state === 'dont-share')
-    && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy?.directory === 'string' && typeof copy.hash === 'string'));
+    && (item.off === undefined || (Array.isArray(item.off) && item.off.every(knownTool)))
+    && (item.separate === undefined || typeof item.separate === 'boolean')
+    && (item.use === undefined || (typeof item.use === 'object' && item.use !== null && knownTool(item.use.tool) && typeof item.use.hash === 'string'))
+    && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy === 'object' && copy !== null
+      && typeof copy.directory === 'string' && typeof copy.hash === 'string' && knownTool(copy.harness)
+      && (copy.status === 'pending' || copy.status === 'written') && typeof copy.created === 'boolean'));
 }
 
 export async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
@@ -192,7 +199,7 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
       const override = context.overrides?.[id];
       if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };
     }
-    return { allowed: true, reason: 'Your real folders: Start and Undo write here.' };
+    return { allowed: true, reason: 'Your real folders: Apply all writes here.' };
   }
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
@@ -201,13 +208,15 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
+  // A folder inside a real configuration folder would put copies and a record among the real ones.
+  if ([...protectedRoots, join(realHome, '.central-knot')].some(root => inside(home, root))) return refused;
   for (const id of Object.keys(harnesses) as HarnessId[]) {
     for (const path of [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)]) {
       const resolved = await real(path);
       if (resolved && protectedRoots.some(root => inside(resolved, root))) return refused;
     }
   }
-  return { allowed: true, reason: 'Disposable home: Start and Undo write only inside it.' };
+  return { allowed: true, reason: 'Disposable home: Apply all writes only inside it.' };
 }
 
 // ---------- Start ----------

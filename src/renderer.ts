@@ -120,11 +120,11 @@ window.addEventListener('resize', () => {
 document.addEventListener('keydown', event => {
   const typing = event.target instanceof HTMLInputElement && event.target.type === 'text';
   if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey) {
-    const find = document.getElementById('find');
+    const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
   if (event.key === 'Escape') {
-    if (typing && state.find) { document.getElementById('find-clear')?.click(); return; }
+    if (typing) return; // Escape in a find box clears it; see the Overview.
     if (state.page === 'skills' && document.body.classList.contains('one-pane') && state.item) selectItem(undefined);
   }
 });

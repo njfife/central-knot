@@ -4,7 +4,7 @@
 import { applyManage, rerender, announce, shownPath, state } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
-import { applied, cellOf, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
+import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts } from './types.ts';
 
 const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
@@ -36,7 +36,8 @@ const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
 const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
 type Resolution = Tool | 'separate';
-interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution }
+/** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
+interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean }
 
 const view = {
   committed: sample.map(skill => ({ ...skill })),
@@ -66,7 +67,8 @@ function effective(skill: SampleSkill): SampleSkill {
   if (draft.resolve === 'separate') next.separate = true;
   else if (draft.resolve) {
     const id = skill.copies[draft.resolve]!;
-    next.copies = Object.fromEntries(Object.keys(skill.copies).map(tool => [tool, id]));
+    const compared = comparedTools(next);
+    next.copies = Object.fromEntries(Object.entries(skill.copies).map(([tool, copy]) => [tool, compared.includes(tool) ? id : copy]));
   }
   return next;
 }
@@ -84,18 +86,24 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
 // Turning a skill on undoes "keep both"; turning it off drops a chosen copy. The page then shows what Apply all will do.
 const keepResolve = (managed: boolean, resolve?: Resolution) => (managed ? (resolve === 'separate' ? undefined : resolve) : undefined);
 
+const keepPrior = (resolve: Resolution | undefined, draft?: Draft) => (resolve ? draft?.prior : undefined);
+
 function setManaged(keys: string[], managed: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => ({ managed, off: skill.off, resolve: keepResolve(managed, draft?.resolve) }));
+  for (const key of keys) edit(key, (skill, draft) => { const resolve = keepResolve(managed, draft?.resolve); return { managed, off: skill.off, resolve, prior: keepPrior(resolve, draft) }; });
   rerender();
 }
 
 function setTool(keys: string[], tool: Tool, on: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve: keepResolve(managed, draft?.resolve) }; });
+  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; const resolve = keepResolve(managed, draft?.resolve); return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve, prior: keepPrior(resolve, draft) }; });
   rerender();
 }
 
 function resolve(key: string, choice: Resolution | undefined) {
-  edit(key, (skill, draft) => ({ managed: choice === 'separate' ? false : choice ? true : committedOf(key).managed, off: draft?.off ?? skill.off, resolve: choice }));
+  edit(key, (skill, draft) => {
+    const prior = draft?.resolve ? draft.prior ?? committedOf(key).managed : skill.managed;
+    const off = draft?.off ?? skill.off;
+    return choice ? { managed: choice !== 'separate', off, resolve: choice, prior } : { managed: prior, off };
+  });
   view.comparing = undefined;
   rerender();
 }
@@ -165,11 +173,14 @@ function changeBar(bulk = true) {
   const waiting = pendingSyncs(committedList());
   const ready = manageable();
   const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: 'Manage all', name: `Manage all ${ready.length} unmanaged skills`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  const label = resumeNeeded() ? 'Resume and apply all' : 'Apply all';
   if (count) return h('div.apply', {}, manageAll,
     h('span.apply-count.apply-quiet', {}, `${count} ${count === 1 ? 'change' : 'changes'}`),
     button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded.'); rerender(); } }),
-    button({ variant: 'primary', size: 'small', label: resumeNeeded() ? 'Resume and apply all' : 'Apply all', id: 'apply', disabled: !canWrite(), onclick: applyAll }));
-  if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'apply', disabled: !canWrite(), onclick: applyAll }));
+    button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
+  if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
+  // Lost settings stop catch-up until the person resumes, even when nothing is waiting.
+  if (resumeNeeded()) return h('div.apply', {}, manageAll, button({ variant: 'primary', size: 'small', label: 'Resume', id: 'apply', disabled: !canWrite(), onclick: applyAll }));
   if (manageAll) return h('div.apply', {}, manageAll);
   return h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
 }
@@ -209,7 +220,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
 /** Everything about one skill, opened in place under its row. Differing copies add the choice of which one to use. */
 function details(skill: SampleSkill, closable = true) {
   const draft = view.draft.get(skill.key);
-  const differs = toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
+  const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Both copies are kept as they are.' : skill.managed
     ? `Managed. Syncing to ${toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]).join(' and ') || 'no tool'}.`
     : 'Unmanaged. Central Knot leaves every copy alone.';
@@ -236,11 +247,12 @@ function compareChoices(skill: SampleSkill) {
       h('span.version-head', {}, brandMark(tool, 14), h('strong', {}, `Use ${names[tool]}'s copy`)),
       version ? h('span.version-meta', {}, `${version.lines} · ${version.changed}`) : null,
       version ? h('span.version-text', {}, `“${version.text}”`) : null,
-      h('span.version-effect', {}, `Replaces the copy in ${names[other(tool)]} on Apply all`));
+      h('span.version-effect', {}, `Replaces the copy in ${comparedTools(skill).filter(entry => entry !== tool).map(entry => names[entry]).join(' and ')} on Apply all`));
   };
+  const compared = toolList().filter(tool => comparedTools(skill).includes(tool));
   return h('div.compare-block', {},
-    h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The two copies of ${skill.key} differ. Which one should both tools use?`),
-    h('div.compare-choices', {}, toolList().map(choice),
+    h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The copies of ${skill.key} differ. Which one should ${compared.length > 2 ? 'every tool' : 'both tools'} use?`),
+    h('div.compare-choices', {}, compared.map(choice),
       h('button.version.version-quiet', { type: 'button', id: `separate-${skill.key}`, onclick: () => resolve(skill.key, 'separate') },
         h('span.version-head', {}, h('strong', {}, 'Keep both as they are')),
         h('span.version-effect', {}, 'Each tool keeps its own copy; Central Knot leaves this skill unmanaged'))));
@@ -297,7 +309,7 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `${mine} ${mine === 1 ? 'skill' : 'skills'}`),
-      button({ variant: 'ghost', size: 'small', label: 'Stop all', name: `Stop syncing all ${syncingHere.length} skills to ${names[tool]}`, id: `stop-all-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })),
+      button({ variant: 'ghost', size: 'small', label: 'Stop all', name: `Stop syncing all ${syncingHere.length} skills to ${names[tool]}`, id: `menu-stop-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })),
     h('p.tool-menu-note', {}, syncingHere.length ? `${syncingHere.length} managed ${syncingHere.length === 1 ? 'skill syncs' : 'skills sync'} here. Stop all keeps their copies but stops updating them.` : 'No managed skills sync here.'),
     h('p.tool-menu-label', {}, `Add all ${names[tool]} skills to`),
     others(tool).map(target => {
@@ -305,7 +317,7 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
       return h('div.tool-menu-row', {},
         brandMark(target, 16), h('span.tool-menu-name', {}, names[target]),
         h('span.tool-menu-count', {}, count ? `${count} to add` : 'Has them all'),
-        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Add all', name: `Add all ${names[tool]} skills to ${names[target]}`, id: `use-all-${tool}-in-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
+        button({ variant: count ? 'outline' : 'ghost', size: 'small', label: 'Add all', name: `Add all ${names[tool]} skills to ${names[target]}`, id: `menu-add-${tool}-${target}`, disabled: !count, onclick: () => { send(tool, target, list); view.toolMenu = undefined; rerender(); } }));
     }));
 }
 
@@ -383,6 +395,9 @@ function notices() {
 /** Pending changes belong to one home: opening another starts clean. */
 function forgetOtherHomes() {
   if (!designMode && state.home?.home !== draftHome) { view.draft.clear(); view.comparing = undefined; draftHome = state.home?.home; }
+  // A change for a skill that is no longer there has nothing to apply to.
+  const keys = new Set(committedList().map(skill => skill.key));
+  for (const key of [...view.draft.keys()]) if (!keys.has(key)) view.draft.delete(key);
 }
 
 export function designOverview() {
@@ -442,8 +457,8 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
     h(`span.list-managed${skill.managed ? '.on' : ''}`, { 'aria-hidden': 'true', title: skill.managed ? 'Managed' : 'Unmanaged' }),
     middle(skill.name ?? skill.key, 12, 'list-name'),
     h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
-  const find = h('input.find-input', { id: 'list-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
-    oninput: (event: Event) => { view.listFind = (event.target as HTMLInputElement).value; rerender(); document.getElementById('list-find')?.focus(); } });
+  const find = h('input.find-input', { id: 'skills-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
+    oninput: (event: Event) => { view.listFind = (event.target as HTMLInputElement).value; rerender(); document.getElementById('skills-find')?.focus(); } });
   const list = shown.length
     ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.map(listRow))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
@@ -452,7 +467,7 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
   return h('div.page.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
-      h('div.scroll.list-scroll', { id: 'list-scroll' }, list)),
+      h('div.scroll.list-scroll', { id: 'skills-list' }, list)),
     h('section.detail-column', { 'aria-label': 'Skill details' },
       h('div.pane-header', {},
         h('div.crumb', {},
@@ -467,4 +482,10 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
       h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false), ...more(skill.key))));
 }
 
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.listFind && (event.target as HTMLElement | null)?.id === 'list-find') { view.listFind = ''; rerender(); } });
+// Escape in a find box clears it.
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const id = (event.target as HTMLElement | null)?.id;
+  if (id === 'skills-find' && view.listFind) { view.listFind = ''; rerender(); }
+  if (id === 'find' && view.find) { view.find = ''; rerender(); }
+});

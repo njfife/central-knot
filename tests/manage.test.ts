@@ -533,3 +533,101 @@ test('Practice fixture: the bundled home shows each kind of skill', async () => 
   assert.deepEqual(shape, ['notes:2', 'release-notes:1', 'review:2:differs', 'standup:1']);
   assert.ok(view.writes['copilot-cli']?.to.endsWith('.copilot/skills'));
 });
+
+// ---------- Break-it round 3 ----------
+
+test('A skills folder that is a link to the shared .agents folder is never written through', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const agents = join(box.home, '.agents/skills');
+    await skill(box.home, '.agents/skills', 'gamma', text('gamma', 'Shared.'));
+    await symlink(agents, join(box.home, COPILOT));
+    await skill(box.home, CLAUDE, 'mine');
+    await skill(box.home, CLAUDE, 'gamma', text('gamma', 'Claude.'));
+    const view = await manageView(ctx(box));
+    assert.match(view.writes['copilot-cli']?.blocked ?? '', /link/);
+    assert.match(view.skills.find(item => item.key === 'mine')!.cannot['copilot-cli'] ?? '', /link/);
+    const before = await readdir(agents);
+    const result = await applyChanges(ctx(box), [manage('mine'), { key: 'gamma', managed: true, off: [], use: 'claude-cli' }]);
+    assert.equal(result.harnessWrites, 0, JSON.stringify(result.results));
+    assert.deepEqual(await readdir(agents), before, 'nothing new in .agents');
+    assert.equal(await readFile(join(agents, 'gamma/SKILL.md'), 'utf8'), text('gamma', 'Shared.'), 'the shared copy is unchanged');
+  } finally { await box.cleanup(); }
+});
+
+test('Claude Code’s skills folder linked to .agents is not written through either', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const agents = join(box.home, '.agents/skills');
+    await skill(box.home, '.agents/skills', 'shared', text('shared', 'Agents.'));
+    await symlink(agents, join(box.home, CLAUDE));
+    await skill(box.home, COPILOT, 'shared', text('shared', 'Copilot.'));
+    const result = await applyChanges(ctx(box), [{ key: 'shared', managed: true, off: [], use: 'copilot-cli' }]);
+    assert.equal(result.harnessWrites, 0, JSON.stringify(result.results));
+    assert.equal(await readFile(join(agents, 'shared/SKILL.md'), 'utf8'), text('shared', 'Agents.'));
+  } finally { await box.cleanup(); }
+});
+
+test('A copy choice survives a crash part-way and finishes at the next pass', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'pick', text('pick', 'Claude.'));
+    await skill(box.home, COPILOT, 'pick', text('pick', 'Copilot.'));
+    const fault = (step: string) => { if (step === 'before-replace') throw new Error('fault: crash'); };
+    await assert.rejects(applyChanges(ctx(box, { fault }), [{ key: 'pick', managed: true, off: [], use: 'claude-cli' }]), /fault/);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pick/SKILL.md'), 'utf8'), text('pick', 'Copilot.'), 'not replaced yet');
+    const next = await applyChanges(ctx(box), []);
+    assert.equal(next.harnessWrites, 1, JSON.stringify(next.results));
+    assert.equal(await readFile(join(box.home, COPILOT, 'pick/SKILL.md'), 'utf8'), text('pick', 'Claude.'));
+    const record = JSON.parse(await readFile(join(storeDirectory(box.home), 'sync.json'), 'utf8'));
+    assert.equal(record.items.pick.use, undefined, 'the finished choice leaves the record');
+  } finally { await box.cleanup(); }
+});
+
+test('A recorded choice whose copy changed since is held, not applied', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'pick', text('pick', 'Claude.'));
+    await skill(box.home, COPILOT, 'pick', text('pick', 'Copilot.'));
+    const fault = (step: string) => { if (step === 'before-replace') throw new Error('fault: crash'); };
+    await assert.rejects(applyChanges(ctx(box, { fault }), [{ key: 'pick', managed: true, off: [], use: 'claude-cli' }]), /fault/);
+    await writeFile(join(box.home, CLAUDE, 'pick/SKILL.md'), text('pick', 'Claude, edited.'));
+    const next = await applyChanges(ctx(box), []);
+    assert.equal(next.harnessWrites, 0);
+    assert.match(next.results.map(result => result.message).join(' '), /changed since/);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pick/SKILL.md'), 'utf8'), text('pick', 'Copilot.'));
+  } finally { await box.cleanup(); }
+});
+
+test('A record with a wrongly shaped off list or copy counts as damaged', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    await applyChanges(ctx(box), [manage('solo')]);
+    const path = join(storeDirectory(box.home), 'sync.json');
+    const record = JSON.parse(await readFile(path, 'utf8'));
+    for (const bad of [
+      { ...record.items.solo, off: 'claude-cli' },
+      { ...record.items.solo, copies: [{ ...record.items.solo.copies[0], harness: 'nope' }] },
+      { ...record.items.solo, copies: [{ ...record.items.solo.copies[0], status: 7 }] },
+    ]) {
+      await writeFile(path, JSON.stringify({ ...record, items: { solo: bad } }));
+      assert.match((await applyChanges(ctx(box), [])).stopped ?? '', /damaged/);
+    }
+  } finally { await box.cleanup(); }
+});
+
+test('Another folder inside a real configuration folder stays preview-only', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    for (const name of ['.claude/skills', '.copilot', '.agents/skills']) await mkdir(join(realHome, name), { recursive: true });
+    for (const inside of ['.claude', '.claude/skills', '.copilot', '.agents']) {
+      const home = join(realHome, inside);
+      const context: ShareContext = { home, mode: 'custom', read: read(home), build: 'test', settingsPath: join(box.base, 'settings.json'), realHome };
+      assert.equal((await manageView(context)).access.allowed, false, inside);
+    }
+    const elsewhere = await mkdtemp(join(box.base, 'sim-'));
+    assert.equal((await manageView({ ...ctx(box), home: elsewhere, read: read(elsewhere), realHome })).access.allowed, true);
+  } finally { await box.cleanup(); }
+});

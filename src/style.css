@@ -596,3 +596,4 @@ ul { list-style: none; }
 .detail-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
 .detail-scroll > .details { margin: 4px 0 0; }
 .detail-switch-label { font-size: 13px; color: var(--ink-soft); margin-right: -4px; }
+.held-pill { flex: none; white-space: nowrap; }

@@ -98,7 +98,7 @@ export interface SkillFacts {
 export interface ManageView {
   tools: HarnessId[];
   /** Where each tool's new copies go, and which other tools read that folder too. */
-  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[] }>>;
+  writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; /** Why Central Knot does not write there, if it does not. */ blocked?: string }>>;
   skills: SkillFacts[];
   access: WriteAccess;
   gate: SyncGate;

@@ -14,7 +14,7 @@
  {
   "name": "5-stopped-all-copilot-dark",
   "actions": [
-   "#stop-all-copilot-cli"
+   "#menu-stop-copilot-cli"
   ],
   "reset": [
    "#discard"

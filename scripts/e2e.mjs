@@ -210,9 +210,9 @@ async function practiceFlow() {
 
   // Stop all for Copilot: copies stay, syncing stops.
   await a.click('#tool-copilot-cli');
-  check('the tool menu opens', await a.exists('#stop-all-copilot-cli'));
+  check('the tool menu opens', await a.exists('#menu-stop-copilot-cli'));
   await a.shot('practice-tool-menu');
-  await a.click('#stop-all-copilot-cli');
+  await a.click('#menu-stop-copilot-cli');
   await applyAll(a);
   same('Stop all keeps the copies', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), true);
   rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
@@ -221,7 +221,7 @@ async function practiceFlow() {
 
   // Add all from Claude Code to Copilot turns it back on.
   await a.click('#tool-claude-cli');
-  await a.click('#use-all-claude-cli-in-copilot-cli');
+  await a.click('#menu-add-claude-cli-copilot-cli');
   await applyAll(a);
   same('Add all copies again', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), true);
 
@@ -267,6 +267,23 @@ async function practiceFlow() {
   same('the Overview shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
+  // Undoing a copy choice puts Managed back as it was before the choice.
+  const notesManaged = await switchOn(a, 'notes');
+  await a.click('#switch-notes');
+  if (await a.exists('#decide-notes')) {
+    await a.click('#decide-notes');
+    await a.click('#use-notes-claude-cli');
+    same('choosing a copy turns Managed on', await switchOn(a, 'notes'), true);
+    await a.click('#undo-notes');
+    same('undoing the choice puts Managed back', await switchOn(a, 'notes'), !notesManaged);
+  } else check('notes offers a copy choice here', false, await a.text('.ov-row[data-key="notes"]'));
+  if (await a.exists('#discard')) await a.click('#discard');
+  // Slash finds on the Skills page too.
+  await a.click('#nav-skills');
+  await a.run(`document.activeElement?.blur()`);
+  await a.press('/', 'Slash');
+  same('slash focuses find on the Skills page', await a.run(`document.activeElement?.id`), 'skills-find');
+  await a.click('#nav-overview');
 
   // Keyboard and find.
   await a.press('/', 'Slash');
@@ -274,6 +291,8 @@ async function practiceFlow() {
   await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'stand'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.settle();
   same('find filters', await rowKeys(a), ['standup']);
+  await a.press('Escape');
+  same('Escape clears find', (await rowKeys(a)).length, 4);
   same('no page errors, practice', a.pageErrors, []);
   await a.quit();
 }
