@@ -7,7 +7,7 @@ import { applied, cellOf, sample, syncOf, tools, type Cell, type SampleSkill, ty
 import type { HarnessId } from './types.ts';
 
 const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI' };
-type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
+type Filter = 'all' | 'managed' | 'unmanaged' | 'single' | 'attention';
 
 const view = {
   committed: sample.map(skill => ({ ...skill })),
@@ -15,7 +15,15 @@ const view = {
   selected: new Set<string>(),
   filter: 'all' as Filter,
   find: '',
+  /** The last row ticked, so a shift-click can select the range up to the next one. */
+  anchor: undefined as string | undefined,
+  collapsed: new Set<string>(),
+  order: [] as string[],
 };
+
+const inOneToolOnly = (skill: SampleSkill) => tools.filter(tool => skill.copies[tool] !== undefined).length === 1;
+/** What Share all queues: every skill not shared yet that can be shared without a decision. */
+const shareable = () => view.committed.filter(skill => !effective(skill).managed && syncOf(skill) !== 'attention');
 
 const effective = (skill: SampleSkill): SampleSkill => ({ ...skill, ...view.draft.get(skill.key) });
 const rows = () => view.committed.map(effective);
@@ -70,9 +78,9 @@ function toggle(on: boolean, label: string, onchange: (on: boolean) => void) {
     h('span.switch-knob'));
 }
 
-function selectBox(checked: boolean | 'mixed', label: string, onchange: (on: boolean) => void) {
+function selectBox(checked: boolean | 'mixed', label: string, onchange: (on: boolean, shift: boolean) => void) {
   const glyph: IconName = checked === 'mixed' ? 'square-minus' : checked ? 'square-check' : 'square';
-  return h('button.select-box', { type: 'button', role: 'checkbox', 'aria-checked': String(checked), 'aria-label': label, onclick: (event: Event) => { event.stopPropagation(); onchange(checked !== true); } },
+  return h('button.select-box', { type: 'button', role: 'checkbox', 'aria-checked': String(checked), 'aria-label': label, onclick: (event: MouseEvent) => { event.stopPropagation(); onchange(checked !== true, event.shiftKey); } },
     icon(glyph, 16, checked ? 'tone-accent' : 'tone-faint'));
 }
 
@@ -93,7 +101,8 @@ function filterBar(list: SampleSkill[]) {
   const chip = (id: Filter, label: string, count: number, warn = false) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn ? '.chip-warn' : ''}`, { type: 'button', 'aria-pressed': String(view.filter === id), 'aria-label': `${label}, ${count}`, onclick: () => { view.filter = id; rerender(); } },
     label, warn ? h('span.chip-count', {}, String(count)) : null);
   return h('div.chips', { role: 'group', 'aria-label': 'Show' },
-    chip('all', 'All', total.all), chip('managed', 'Managed', total.managed), chip('unmanaged', 'Not managed', total.unmanaged),
+    chip('all', 'All', total.all), chip('managed', 'Shared', total.managed), chip('unmanaged', 'Not shared', total.unmanaged),
+    chip('single', 'In one tool', view.committed.filter(inOneToolOnly).length),
     total.attention ? chip('attention', 'Needs attention', total.attention, true) : null);
 }
 
@@ -106,8 +115,8 @@ function bulkBar(keys: string[]) {
   };
   return h('div.bulk', { role: 'toolbar', 'aria-label': `${keys.length} selected` },
     h('strong.bulk-count', {}, `${keys.length} selected`),
-    managed < picked.length && button({ variant: 'outline', size: 'small', label: 'Manage', id: 'bulk-manage', onclick: () => setManaged(keys, true) }),
-    managed > 0 && button({ variant: 'outline', size: 'small', label: 'Stop managing', id: 'bulk-unmanage', onclick: () => setManaged(keys, false) }),
+    managed < picked.length && button({ variant: 'outline', size: 'small', label: 'Share', id: 'bulk-manage', onclick: () => setManaged(keys, true) }),
+    managed > 0 && button({ variant: 'outline', size: 'small', label: 'Stop sharing', id: 'bulk-unmanage', onclick: () => setManaged(keys, false) }),
     h('span.bulk-divider', { 'aria-hidden': 'true' }),
     h('span.bulk-label', {}, 'Sync to'),
     tools.map(tool => {
@@ -128,10 +137,13 @@ function changeBar(list: SampleSkill[], shown: SampleSkill[]) {
     button({ variant: 'outline', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded.'); rerender(); } }),
     button({ variant: 'primary', size: 'small', label: 'Apply', id: 'apply', onclick: apply }));
   const hidden = waiting - pendingSyncs(view.committed.filter(skill => shown.some(entry => entry.key === skill.key)));
-  if (waiting) return h('div.apply', {},
+  const ready = shareable();
+  const shareAll = ready.length ? button({ variant: waiting ? 'outline' : 'primary', size: 'small', label: 'Share all', name: `Share all ${ready.length} skills not shared yet`, id: 'share-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  if (waiting) return h('div.apply', {}, shareAll,
     h('span.apply-count.apply-quiet', {}, `${waiting} to sync`, hidden ? h('span.apply-hidden', {}, ` · ${hidden} not shown`) : null),
     button({ variant: 'primary', size: 'small', label: 'Apply', id: 'apply', onclick: apply }));
   void list;
+  if (shareAll) return h('div.apply', {}, shareAll);
   return h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
 }
 
@@ -140,7 +152,8 @@ function cell(skill: SampleSkill, tool: HarnessId) {
   const state = cellOf(skill, tool);
   const on = skill.managed && !skill.off.includes(tool);
   const wasOn = base.managed && !base.off.includes(tool);
-  const pending = state !== cellOf(base, tool) || on !== wasOn;
+  // A cell the tool cannot load never changes, so it never shows as edited.
+  const pending = state !== 'cannot' && (state !== cellOf(base, tool) || on !== wasOn);
   // Green means applied. Anything turned on but not applied yet is blue: a check if the copy is there, an arrow if one must be written.
   const look = pending && state === 'synced' ? cellLook['will-sync'] : cellLook[state];
   const usable = state !== 'cannot';
@@ -156,11 +169,19 @@ function row(skill: SampleSkill) {
   const picked = view.selected.has(skill.key);
   const attention = syncOf(skill) === 'attention';
   return h(`div.ov-row${view.selected.size ? '.selecting' : ''}${picked ? '.picked' : ''}${changed(skill.key) ? '.changed' : ''}${skill.managed ? '' : '.unmanaged'}`, { role: 'row', 'data-key': skill.key },
-    h('div.ov-select', { role: 'cell' }, selectBox(picked, `Select ${skill.key}`, on => { if (on) view.selected.add(skill.key); else view.selected.delete(skill.key); rerender(); })),
+    h('div.ov-select', { role: 'cell' }, selectBox(picked, `Select ${skill.key}`, (on, shift) => {
+      // Shift-click selects or clears everything between the last ticked row and this one, in the order shown.
+      const from = view.anchor ? view.order.indexOf(view.anchor) : -1;
+      const to = view.order.indexOf(skill.key);
+      const range = shift && from >= 0 && to >= 0 ? view.order.slice(Math.min(from, to), Math.max(from, to) + 1) : [skill.key];
+      for (const key of range) if (on) view.selected.add(key); else view.selected.delete(key);
+      view.anchor = skill.key;
+      rerender();
+    })),
     h('div.ov-name', { role: 'cell', title: skill.description },
       h('span.ov-name-text', {}, skill.key),
       attention && h('span.attention-dot', { title: 'Copies differ: needs a decision' }, hiddenText('Copies differ: needs a decision'))),
-    h(`div.ov-managed${skill.managed !== view.committed.find(entry => entry.key === skill.key)!.managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.key}`, on => setManaged([skill.key], on))),
+    h(`div.ov-managed${skill.managed !== view.committed.find(entry => entry.key === skill.key)!.managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Share ${skill.key}`, on => setManaged([skill.key], on))),
     tools.map(tool => cell(skill, tool)),
     h('div.ov-fill'));
 }
@@ -185,22 +206,30 @@ const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => tools.some(to
 
 function section(label: string, list: SampleSkill[], after: number) {
   if (!list.length) return null;
-  const keys = list.map(skill => skill.key);
+  const sorted = [...list].sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')));
+  const keys = sorted.map(skill => skill.key);
   const picked = keys.filter(key => view.selected.has(key)).length;
   const state: boolean | 'mixed' = picked === 0 ? false : picked === keys.length ? true : 'mixed';
+  const collapsed = view.collapsed.has(label);
+  if (!collapsed) view.order.push(...keys);
   return h('div', { role: 'rowgroup' },
     h('div.ov-section', { role: 'row' },
-      h('div.ov-select', { role: 'cell' }, selectBox(state, `Select all ${label.toLowerCase()}`, on => { for (const key of keys) if (on) view.selected.add(key); else view.selected.delete(key); rerender(); })),
-      h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
-        after !== list.length ? h('span.ov-section-after', { title: 'After Apply' }, icon('arrow-right', 12), String(after)) : null)),
-    [...list].sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, ''))).map(row));
+      h('div.ov-select', { role: 'cell' }, selectBox(state, `Select all ${list.length} ${label.toLowerCase()}`, on => { for (const key of keys) if (on) view.selected.add(key); else view.selected.delete(key); rerender(); })),
+      h('div.ov-section-label', { role: 'cell' },
+        h('button.section-toggle', { type: 'button', 'aria-expanded': String(!collapsed), 'aria-label': `${collapsed ? 'Show' : 'Hide'} ${label.toLowerCase()}`, onclick: () => { if (collapsed) view.collapsed.delete(label); else view.collapsed.add(label); rerender(); } },
+          icon(collapsed ? 'chevron-right' : 'chevron-down', 14), h('strong', {}, label)),
+        h('span.ov-section-count', {}, String(list.length)),
+        after !== list.length ? h('span.ov-section-after', { title: 'After Apply' }, icon('arrow-right', 12), String(after)) : null,
+        picked ? h('span.ov-section-picked', {}, `${picked} selected`) : null)),
+    collapsed ? null : sorted.map(row));
 }
 
 export function designOverview() {
   const all = rows();
   const needle = view.find.trim().toLowerCase();
   const committedOf = (skill: SampleSkill) => view.committed.find(entry => entry.key === skill.key)!;
-  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill).managed : view.filter === 'unmanaged' ? !committedOf(skill).managed : syncOf(skill) === 'attention'))
+  view.order = [];
+  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill).managed : view.filter === 'unmanaged' ? !committedOf(skill).managed : view.filter === 'single' ? inOneToolOnly(skill) : syncOf(skill) === 'attention'))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
   // Rows stay where they were until Apply; a group header shows its size after Apply when that differs.
   const wasManaged = (skill: SampleSkill) => view.committed.find(entry => entry.key === skill.key)!.managed;
@@ -215,12 +244,12 @@ export function designOverview() {
     h('div.scroll.matrix', {},
       h('div.ov', { role: 'table', 'aria-label': 'Skills and where they are synced' },
         h('div.ov-row.ov-head', { role: 'row' },
-          h('div.ov-select', { role: 'columnheader' }),
-          h('div.ov-name', { role: 'columnheader' }, 'Skill'),
-          h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
+          h('div.ov-select', { role: 'columnheader' }, selectBox(keys.length === 0 ? false : keys.length === shown.length ? true : 'mixed', `Select all ${shown.length} shown`, on => { for (const skill of shown) if (on) view.selected.add(skill.key); else view.selected.delete(skill.key); rerender(); })),
+          h('div.ov-name', { role: 'columnheader' }, view.find || view.filter !== 'all' ? `Skill · ${shown.length} shown` : 'Skill'),
+          h('div.ov-managed', { role: 'columnheader' }, 'Shared'),
           tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))),
           h('div.ov-fill')),
-        section('Managed', shown.filter(wasManaged), shown.filter(skill => skill.managed).length),
-        section('Not managed', shown.filter(skill => !wasManaged(skill)), shown.filter(skill => !skill.managed).length)),
+        section('Shared', shown.filter(wasManaged), shown.filter(skill => skill.managed).length),
+        section('Not shared', shown.filter(skill => !wasManaged(skill)), shown.filter(skill => !skill.managed).length)),
       legend()));
 }

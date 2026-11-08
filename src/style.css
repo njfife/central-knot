@@ -497,3 +497,7 @@ ul { list-style: none; }
 .bulk .legend-cell.cell-mixed { background: linear-gradient(135deg, var(--cell-on-strong) 0 50%, transparent 50%); color: var(--ink); }
 :root { --switch-on-neutral: #27272a; --switch-knob-on: #ffffff; --cell-line: #c4c4cc; --cell-on-strong: rgb(5 150 105 / 35%); }
 @media (prefers-color-scheme: dark) { :root { --switch-on-neutral: #e4e4e7; --switch-knob-on: #0a0a0a; --cell-line: rgb(255 255 255 / 20%); --cell-on: rgb(52 211 153 / 20%); --cell-wait: rgb(96 165 250 / 24%); --cell-warn: rgb(251 191 36 / 20%); --cell-on-strong: rgb(52 211 153 / 40%); } }
+
+.section-toggle { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: inherit; font: inherit; padding: 2px 4px 2px 0; border-radius: 4px; cursor: pointer; }
+.section-toggle:hover { color: var(--ink); background: var(--hover); }
+.ov-section-picked { color: var(--ink-soft); margin-left: 4px; }

@@ -31,6 +31,21 @@ export const sample: SampleSkill[] = [
 
 export const designMode = new URLSearchParams(location.search).has('design');
 
+/** --design-preview=large adds generated skills, to see the page with hundreds of them. */
+if (new URLSearchParams(location.search).get('design') === 'large') {
+  const words = ['api', 'audit', 'brief', 'build', 'cache', 'check', 'commit', 'data', 'debug', 'deploy', 'diff', 'docs', 'draft', 'email', 'fix', 'format', 'graph', 'infra', 'lint', 'log', 'merge', 'notes', 'plan', 'query', 'refactor', 'release', 'report', 'review', 'schema', 'search', 'spec', 'sql', 'test', 'trace', 'triage', 'ui', 'write'];
+  for (let index = 0; sample.length < 300; index++) {
+    const key = `${words[index % words.length]}-${words[(index * 7 + 3) % words.length]}-${index}`;
+    const pattern = index % 10;
+    const id = `g${index}`;
+    sample.push({
+      key, description: `Generated sample skill ${index}.`,
+      copies: pattern < 4 ? { 'claude-cli': id, 'copilot-cli': id } : pattern < 6 ? { 'claude-cli': id } : pattern < 8 ? { 'copilot-cli': id } : pattern === 8 ? { 'claude-cli': id, 'copilot-cli': `${id}b` } : { 'claude-cli': id, 'copilot-cli': id },
+      managed: pattern < 3 || pattern === 9, off: [],
+    });
+  }
+}
+
 /** What one cell of the table shows. */
 export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot';
 export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';

@@ -1,5 +1,5 @@
 [
-  { "name": "3-pending-changes-dark", "actions": ["[data-key='grill-me'] .switch", "[data-key='tdd'] [data-tool='copilot-cli'] .cell-button", "[data-key='release-notes'] [data-tool='copilot-cli'] .cell-button"] },
-  { "name": "4-bulk-select-dark", "actions": ["#discard", "[data-key='triage'] .select-box", "[data-key='standup'] .select-box", "[data-key='code-review'] .select-box"], "reset": ["#bulk-clear"] },
-  { "name": "5-needs-attention-filter-dark", "actions": ["button.chip:nth-of-type(4)"] }
+  { "name": "3-share-all-dark", "actions": ["#share-all"], "reset": ["#discard"] },
+  { "name": "4-range-select-dark", "actions": ["[data-key='grill-me'] .select-box"], "shiftActions": ["[data-key='triage'] .select-box"], "reset": ["#bulk-clear"] },
+  { "name": "5-in-one-tool-filter-dark", "actions": ["button.chip:nth-of-type(4)"] }
 ]

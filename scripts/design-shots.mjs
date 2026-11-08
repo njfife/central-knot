@@ -14,7 +14,8 @@ mkdirSync(join(scratch, 'home')); mkdirSync(out, { recursive: true });
 const env = { HOME: join(scratch, 'home'), PATH: '/usr/bin:/bin', TMPDIR: scratch };
 for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
 const port = 9600 + Math.floor(Math.random() * 300);
-const child = spawn(command, [...(electron ? [root] : []), '--design-preview', `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+const large = process.argv.includes('--large');
+const child = spawn(command, [...(electron ? [root] : []), large ? '--design-preview=large' : '--design-preview', `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
 let target;
 for (let i = 0; i < 150 && !target; i++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(t => t.type === 'page'); } catch {} }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -35,6 +36,7 @@ await theme('dark');
 const steps = JSON.parse(readFileSync(join(import.meta.dirname, 'design-steps.json'), 'utf8'));
 for (const step of steps) {
   for (const action of step.actions) await click(action);
+  for (const action of step.shiftActions ?? []) { await run(`document.querySelector(${JSON.stringify(action)}).dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))`); await settle(); }
   await shot(step.name);
   for (const action of step.reset ?? []) await click(action);
 }
