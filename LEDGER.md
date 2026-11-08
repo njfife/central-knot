@@ -290,3 +290,17 @@ A fresh tester confirmed fixes 1 and 10, found 9 partly fixed, found 9 not fixed
 - Delete everywhere asks for a confirming second click.
 
 **Validation.** 114 unit tests (10 new). Mac e2e 337/337 with 8 crash rounds, now also checking through the app that a pending change can't revive a skill the background deleted. Linux unit 114/114 and e2e 107/107. Nathan's real record is unchanged.
+
+## Real-home trial on the Mac, November 8, 2026
+
+Nathan opened the Mac's real home for testing, real skills included. Before the trial, a backup was taken: `~/ck-real-backup-20261108-163144.tgz` (569 entries: `.claude/skills`, `.copilot/skills`, `.codex/skills`, `.agents/skills`, `.central-knot`), with Central Knot not running. The engine ran on the real home with the app's own identity and settings (build `com.centralknot.firstlook`), on a disposable skill `ck-trial`:
+- **Catch-up:** nothing to do.
+- **Manage:** copied into the real `~/.copilot/skills` and `~/.codex/skills`.
+- **Edit in Copilot:** spread to Claude Code and Codex.
+- **Competing edits in Claude Code and Codex:** Claude Code won by the fixed order, notice "unproved".
+- **Deleted in Codex:** held during the settle window, then spread.
+- **Restore, then Delete everywhere:** back in all three, then gone.
+- **Quiet pass:** no writes.
+- **Everything else unchanged:** 559 entries (Nathan's skills, the `.agents` links, the `.agents` folder) are byte-identical, mtimes included.
+
+**Exercised Real, listing only:** a second disposable skill managed from Claude Code was listed by real Codex (`skills/list`: `~/.codex/skills/ck-trial-load`) and real Copilot CLI (`copilot skill list`). Delete everywhere then removed it. Session turns still need sign-ins.
