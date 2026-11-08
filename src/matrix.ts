@@ -118,7 +118,7 @@ function resolve(key: string, choice: Resolution | undefined) {
 function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
-    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen })) as Change[];
+    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: committedOf(key).managed })) as Change[];
     void applyManage(changes, () => view.draft.clear());
     return;
   }
@@ -244,7 +244,10 @@ function details(skill: SampleSkill, closable = true) {
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
       h('div.details-tool-body', {}, cell(skill, tool, true), h('span', {}, toolLine(skill, tool)))))),
     differs ? compareChoices(skill) : null,
-    closable ? h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })) : null);
+    h('div.compare-foot', {},
+      // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
+      !designMode && committedOf(skill.key).managed ? smallAction('Delete everywhere', `delete-${skill.key}`, () => void deleteEverywhereKey(skill.key), '.text-danger') : null,
+      closable ? smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); }) : null));
 }
 
 /** The decision for differing copies. */
@@ -495,8 +498,9 @@ function syncNotice(notice: SyncNotice) {
     edit: ['check', 'tone-success', `${notice.item}: ${who(notice.winner)}'s edit now in ${list(notice.losers)}.`, smallAction('Undo', `notice-undo-${notice.history}`, () => void restoreEvent(notice.history))],
     conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit won over ${list(notice.losers)}'s.${order}`, smallAction('Undo', `notice-undo-${notice.history}`, () => void restoreEvent(notice.history))],
     deleted: ['circle-minus', 'tone-warning', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, smallAction('Restore', `notice-restore-${notice.history}`, () => void restoreEvent(notice.history))],
-    'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit was kept over its deletion in ${list(notice.losers)}.${order}`, smallAction('Delete everywhere', `notice-delete-${notice.key}`, () => void deleteEverywhereKey(notice.key))],
-  } as Record<SyncNotice['kind'], [IconName, string, string, HTMLElement]>)[notice.kind];
+    'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit was kept over its deletion in ${list(notice.losers)}.${order}`, notice.orderProved ? null : smallAction('Delete everywhere', `notice-delete-${notice.key}`, () => void deleteEverywhereKey(notice.key))],
+    reset: ['triangle-alert', 'tone-warning', `${who(notice.winner)}'s skills folder lost every managed skill at once, so Central Knot put them back instead of deleting them everywhere. To delete one, use Delete everywhere in its details.`, null],
+  } as Record<SyncNotice['kind'], [IconName, string, string, HTMLElement | null]>)[notice.kind];
   return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), h('span', {}, text), action);
 }
 

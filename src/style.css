@@ -664,3 +664,5 @@ ul { list-style: none; }
 .sync-switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .sync-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--ink-faint); }
 .sync-dot.on { background: var(--success, #3fb950); }
+.text-action.text-danger { color: var(--danger, #f85149); }
+.compare-foot { display: flex; justify-content: flex-end; gap: 8px; }

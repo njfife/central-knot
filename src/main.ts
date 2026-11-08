@@ -107,15 +107,14 @@ function background() {
   const work = queue.then(async () => {
     if (!current) return;
     const result = await pass();
+    // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
+    if (result?.settling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
     if (!result || (!result.harnessWrites && !result.notices?.length)) return;
     pendingResults.push(...result.results);
     pendingNotices.push(...(result.notices ?? []));
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
   });
   queue = work.catch(() => undefined);
-  // A deletion waits out its settle window: look again just after it, so it finishes without a click.
-  clearTimeout(followUp);
-  followUp = setTimeout(background, 2_500);
 }
 
 const nudge = () => { clearTimeout(soon); soon = setTimeout(background, DEBOUNCE_MS); };
@@ -251,7 +250,7 @@ app.whenReady().then(async () => {
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
-    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash }));
+    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   handle('plugins:view', async () => (current ? pluginsView() : null));
   handle('plugins:add', async source => {
     if (typeof source !== 'string' || !source.trim() || source.length > 2000) throw new Error('Invalid marketplace.');

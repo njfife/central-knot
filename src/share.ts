@@ -25,7 +25,7 @@ export interface ShareContext {
   allowActualWrites?: boolean;
   overrides?: Partial<Record<HarnessId, string>>;
   /** Test seam: throws at a named step, standing in for a crash. */
-  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace') => void;
+  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
   /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */

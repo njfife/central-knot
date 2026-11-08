@@ -247,3 +247,26 @@ A managed skill's record hash is its baseline. Each pass (opening a home, Read a
 - a Code tab or Copilot app session check (AT-68).
 
 **Validation.** 92 unit tests (3 new). Mac e2e 336/336 with 8 crash rounds, including, through the real app: an edit on disk spreading with no click, the page hearing of it, Sync off noting but not spreading, the pending display, and Sync now. Linux e2e 103/103, so watching works there too. Nathan's real-home record is unchanged.
+
+## Two-way break-it round, November 8, 2026
+
+An independent tester filed 13 defects against checkpoints 1 and 2. Fixed, each with a regression test:
+1. **Case-only rename** (`Foo` → `foo`) deleted the skill everywhere. A recorded copy found under another spelling in the same folder, or with the same key in the same tool folder, is now the same copy.
+2. **A deletion removed a different, never-synced copy** of the same name. Only recorded copies, or ones identical to the synced content, are removed; a different one stays, with a note.
+3. **A read-only copy** (`.agents`, a linked folder) was recorded and later "won" back, reverting edits. Read-only copies outside the record are reported, never recorded or followed, and only copies holding the new content stay on record.
+4. **A changed `CLAUDE_CONFIG_DIR`, `COPILOT_HOME` or `CODEX_HOME`** read as every skill deleted. Recorded copies outside a tool's current folders are let go.
+5. **A skills folder reset to empty** deleted everything everywhere. A tool losing every managed skill at once (two or more) is now treated as a reset: they are put back, with a notice. Deleting is done with Delete everywhere, now also in each skill's details.
+6. **Restore and Undo gaps:**
+   - Restore refuses to overwrite a new skill with the old name.
+   - Undo can't run twice.
+   - Restore brings back the newest content a deletion removed, not the older baseline.
+   - A Restore can itself be undone.
+7. **Runaway background passes:** a follow-up ran every 2.5 s forever, and a failing write added about 50 History events a minute. Follow-ups now run only while a deletion is settling. A write that fails drops that copy from the record, so it is tried once, never repeated, and never reverts the others.
+8. **Unreadable History was overwritten.** It is now moved aside as `history.unreadable-<time>.json`.
+9. **A stale Apply all revived a deleted skill.** Changes now carry whether the page showed the skill managed, and are refused if that changed since.
+10. **An edit kept over a deletion recreated a copy deleted moments ago.** Nothing is decided while any copy is still settling.
+11. Turning a tool off and on while its deletion is settling brings the copy back. Left as is: turning a tool off is explicit, and its copies stop being tracked.
+12. **Notices named the wrong tools.** A conflict names only the tools that competed, an edit names only the tools actually updated, and Delete everywhere is offered only when the order was not proved.
+13. **A crash mid-replace** later read as a deletion. The copy is marked pending before the replace, so the next pass finishes it.
+
+**Validation.** 104 unit tests (12 new). Mac e2e 412/412 with 8 crash rounds, smoke pass. Linux unit 104/104 and e2e 103/103. Nathan's real record is unchanged. A fresh re-check follows.

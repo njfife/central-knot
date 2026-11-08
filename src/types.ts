@@ -140,16 +140,18 @@ export interface Change {
   use?: HarnessId | 'separate';
   /** The content ID of the chosen copy as the person saw it. A copy changed since is not used. */
   useHash?: string;
+  /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
+  seenManaged?: boolean;
 }
 
-export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[] }
+export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /** What sync did on its own: an edit spread, competing edits resolved, or a deletion spread or overruled. */
 export interface SyncNotice {
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
-  /** The tool whose edit or deletion won. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'reset';
+  /** The tool whose edit or deletion won; for a reset, the tool whose folder lost everything. */
   winner: HarnessId;
   /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */
   losers: HarnessId[];
