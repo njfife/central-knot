@@ -109,6 +109,10 @@ export interface ToolCopy {
   modified: string;
   /** First line of the skill's body, to tell differing copies apart. */
   summary: string;
+  /** False for a copy reached through a link or in a folder other tools share: Central Knot never writes there. */
+  writable: boolean;
+  /** Folder name as found, with its case. */
+  folder: string;
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */
@@ -117,6 +121,8 @@ export interface SkillFacts {
   name: string;
   description: string;
   copies: Partial<Record<HarnessId, ToolCopy>>;
+  /** Further copies a tool also reads, such as Copilot's in ~/.agents/skills. */
+  extra: (ToolCopy & { tool: HarnessId })[];
   managed: boolean;
   off: HarnessId[];
   /** Why a tool that lacks the skill could not load a copy. */

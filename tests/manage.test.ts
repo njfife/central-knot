@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -226,5 +226,67 @@ test('An interrupted copy leaves nothing half-written, and the next pass complet
     const next = await applyChanges(ctx(box), []);
     assert.equal(next.harnessWrites, 1);
     assert.equal(await exists(join(box.home, COPILOT, 'solo/SKILL.md')), true);
+  } finally { await box.cleanup(); }
+});
+
+test('A different copy Copilot reads in the shared .agents folder is shown, never written, and reported', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'dup', text('dup', 'A'));
+    await skill(box.home, COPILOT, 'dup', text('dup', 'A'));
+    const shared = await skill(box.home, '.agents/skills', 'dup', text('dup', 'B'));
+    const view = await facts(box, 'dup');
+    assert.equal(view.extra.length, 1);
+    assert.equal(view.extra[0].writable, false);
+    const result = await applyChanges(ctx(box), [{ ...manage('dup'), use: 'claude-cli' }]);
+    assert.equal(await readFile(join(shared, 'SKILL.md'), 'utf8'), text('dup', 'B'), 'the shared folder is never changed');
+    assert.ok(result.results.some(entry => /folder other tools share/.test(entry.message)), JSON.stringify(result.results));
+  } finally { await box.cleanup(); }
+});
+
+test('Choosing a copy never writes through a link, and leaves what it points to alone', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'lk', text('lk', 'Claude'));
+    const real = await skill(box.base, 'dotfiles', 'lk', text('lk', 'Dotfiles'));
+    await mkdir(join(real, 'sub')); await chmod(join(real, 'sub'), 0o500); await chmod(real, 0o555);
+    await mkdir(join(box.home, COPILOT), { recursive: true });
+    await symlink(real, join(box.home, COPILOT, 'lk'));
+    const result = await applyChanges(ctx(box), [{ ...manage('lk'), use: 'claude-cli' }]);
+    assert.equal(result.harnessWrites, 0, JSON.stringify(result));
+    assert.equal((await lstat(join(box.home, COPILOT, 'lk'))).isSymbolicLink(), true);
+    assert.equal(await readlink(join(box.home, COPILOT, 'lk')), real);
+    assert.equal((await stat(real)).mode & 0o777, 0o555);
+    assert.equal((await stat(join(real, 'sub'))).mode & 0o777, 0o500);
+    assert.equal(await readFile(join(real, 'SKILL.md'), 'utf8'), text('lk', 'Dotfiles'));
+  } finally { await box.cleanup(); }
+});
+
+test('A chosen copy that disappears before Apply all stops that skill, writing nothing', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, COPILOT, 'clash', text('clash', 'Copilot'));
+    const result = await applyChanges(ctx(box), [{ ...manage('clash'), use: 'claude-cli' }]);
+    assert.equal(result.harnessWrites, 0);
+    assert.match(result.results[0].message, /you chose in Claude Code is gone/);
+    assert.equal(await exists(join(box.home, CLAUDE, 'clash')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy the tool itself refuses counts as one it cannot load', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, COPILOT, 'cafe', text('café'));
+    assert.match((await facts(box, 'cafe')).cannot['copilot-cli'] ?? '', /will not load/);
+  } finally { await box.cleanup(); }
+});
+
+test('A managed skill whose only copy is in a tool turned off is left alone', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'solo');
+    const result = await applyChanges(ctx(box), [manage('solo', ['claude-cli'])]);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
   } finally { await box.cleanup(); }
 });

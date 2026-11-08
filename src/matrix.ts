@@ -15,8 +15,10 @@ const ago = (iso: string) => {
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
-  key: facts.key, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate,
-  copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
+  key: facts.key, name: facts.name, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate,
+  // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
+  copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
+  extra: facts.extra.map(extra => ({ tool: extra.tool, directory: extra.directory, summary: extra.summary, writable: extra.writable, same: extra.hash === facts.copies[extra.tool]?.hash })),
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description }])),
 });
@@ -49,7 +51,7 @@ const view = {
 
 // A click elsewhere or Escape closes a tool menu.
 document.addEventListener('click', () => { if (view.toolMenu) { view.toolMenu = undefined; rerender(); } });
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { view.toolMenu = undefined; rerender(); document.getElementById('tool-menu-button')?.focus(); } });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { const tool = view.toolMenu; view.toolMenu = undefined; rerender(); document.getElementById(`tool-${tool}`)?.focus(); } });
 
 const committedOf = (key: string) => committedList().find(skill => skill.key === key)!;
 
@@ -59,6 +61,7 @@ function effective(skill: SampleSkill): SampleSkill {
   if (!draft) return skill;
   const next: SampleSkill = { ...skill, managed: draft.managed, off: draft.off };
   if (draft.resolve === 'separate') next.separate = true;
+  else if (draft.managed) next.separate = false;
   else if (draft.resolve) {
     const id = skill.copies[draft.resolve]!;
     next.copies = Object.fromEntries(Object.keys(skill.copies).map(tool => [tool, id]));
@@ -76,13 +79,16 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
   announce(view.draft.size ? `${view.draft.size} ${view.draft.size === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.');
 }
 
+// Turning a skill on undoes "keep both"; turning it off drops a chosen copy. The page then shows what Apply all will do.
+const keepResolve = (managed: boolean, resolve?: Resolution) => (managed ? (resolve === 'separate' ? undefined : resolve) : undefined);
+
 function setManaged(keys: string[], managed: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => ({ managed, off: skill.off, resolve: draft?.resolve }));
+  for (const key of keys) edit(key, (skill, draft) => ({ managed, off: skill.off, resolve: keepResolve(managed, draft?.resolve) }));
   rerender();
 }
 
 function setTool(keys: string[], tool: Tool, on: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => ({ managed: on ? true : skill.managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve: draft?.resolve }));
+  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], resolve: keepResolve(managed, draft?.resolve) }; });
   rerender();
 }
 
@@ -126,8 +132,8 @@ export function brandMark(tool: Tool, size = 16): Element {
   return holder.content.firstElementChild as SVGElement;
 }
 
-function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false) {
-  return h('button.switch', { type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
     h('span.switch-knob'));
 }
 
@@ -177,7 +183,7 @@ function cell(skill: SampleSkill, tool: Tool) {
   const action = state === 'cannot' ? '' : differs ? 'Compare the copies' : on ? `Stop syncing to ${names[tool]}` : `Sync to ${names[tool]}`;
   const text = skill.cannot?.[tool] ?? `${names[tool]}: ${look.label}${pending ? ' (not applied yet)' : ''}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
-    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
+    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${view.comparing === skill.key ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'ring-strong' : '') : null));
 }
@@ -188,6 +194,8 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
   const was = cellOf(base, tool);
   const version = skill.versions?.[tool];
   if (skill.cannot?.[tool]) return skill.cannot[tool]!;
+  const chosen = view.draft.get(skill.key)?.resolve;
+  if (chosen && chosen !== 'separate' && base.copies[tool] !== undefined) return chosen === tool ? 'Its copy will be used by every tool when you Apply all.' : `Its copy will be replaced with ${names[chosen]}'s when you Apply all. The replaced copy is kept in Central Knot's store.`;
   if (state === 'synced') return was === 'synced' ? 'Synced. Same copy as the other tool.' : 'Will be synced when you Apply all. It already has the same copy, so nothing needs copying.';
   if (state === 'will-sync') return was === 'will-sync' ? 'Set to sync, but it has no copy yet. Central Knot writes one when you Apply all.' : 'You turned syncing on. Central Knot writes a copy when you Apply all.';
   if (state === 'differs' || state === 'present-differs') return `Has a different copy${version ? ` (${version.lines}, ${version.changed})` : ''}. Choose which copy both tools use, below.`;
@@ -206,6 +214,9 @@ function details(skill: SampleSkill) {
     h('div.details-head', {},
       h('p.details-description', {}, skill.description),
       h('p.details-status', {}, status, draft ? h('span.details-pending', {}, ' Not applied yet.') : null)),
+    (skill.extra ?? []).length ? h('div.details-extra', {}, (skill.extra ?? []).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
+      `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
+      extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     h('div.details-tools', {}, toolList().map(tool => h('div.details-tool', {},
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
       h('div.details-tool-body', {}, cell(skill, tool), h('span', {}, toolLine(skill, tool)))))),
@@ -241,11 +252,11 @@ function row(skill: SampleSkill) {
       h('div.ov-name', { role: 'cell', title: skill.description },
         h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } },
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
-        h('span.ov-name-text', {}, skill.key),
+        h('span.ov-name-text', {}, skill.name ?? skill.key),
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', {}, decided === 'separate' ? 'Keeping both' : `Using ${names[decided]}`, smallAction('Undo', `undo-${skill.key}`, () => resolve(skill.key, undefined))) : null),
-      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.key}`, on => setManaged([skill.key], on), !!skill.held)),
+      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `switch-${skill.key}`)),
       toolList().map(tool => cell(skill, tool)),
       h('div.ov-fill')),
     view.comparing === skill.key ? details(skill) : null,
@@ -266,7 +277,7 @@ function legend() {
 /** Skills one tool has and the other lacks (or does not sync), ready to send across. */
 const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => list.filter(skill => {
   const now = effective(skill);
-  return now.copies[from] !== undefined && !now.cannot?.[to] && syncOf(now, toolList()) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
+  return now.copies[from] !== undefined && !now.held && !now.cannot?.[to] && !now.cannot?.[from] && syncOf(now, toolList()) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
 });
 const send = (from: Tool, to: Tool, list: SampleSkill[]) => {
   const keys = sendable(from, to, list).map(skill => skill.key);
@@ -299,7 +310,7 @@ function toolHead(tool: Tool, list: SampleSkill[]) {
   if (variant === 'b') {
     const open = view.toolMenu === tool;
     return h('div.ov-cell.ov-tool-head.tool-head-b', { role: 'columnheader' },
-      h('button.tool-head-button', { type: 'button', id: open ? 'tool-menu-button' : `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: add its skills to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
+      h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: `${names[tool]}: add its skills to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; rerender(); } },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
       open ? toolMenu(tool, list) : null);
   }
@@ -366,12 +377,13 @@ function notices() {
   if (manage.gate.state === 'needs-resume') bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
   const applied = state.applied;
   // Skills that cannot go somewhere, or whose copies differ, already show that in their row; the band is for failures.
-  const problems = applied ? applied.results.filter(result => result.outcome === 'failed') : [];
+  const problems = applied ? applied.results.filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/^Copies differ\./.test(result.message))) : [];
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
   else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
-  const caught = manage.caughtUp.filter(result => result.outcome === 'written').length;
-  if (caught && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, `Caught up: ${caught} ${caught === 1 ? 'copy' : 'copies'} written for managed skills.`)));
+  const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written').map(result => result.item))];
+  if (caughtNames.length && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
+    h('span.band-text', {}, `Caught up: copied ${caughtNames.slice(0, 4).join(', ')}${caughtNames.length > 4 ? ` and ${caughtNames.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`)));
   return bands.length ? h('div.bands', {}, bands) : null;
 }
 

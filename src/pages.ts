@@ -276,7 +276,7 @@ function toolCard(snapshot: Snapshot, preview: Preview) {
         section('Folders', h('dl.facts', {},
           ...fact('Config folder', path(snapshot.root)),
           ...[...roots].flatMap(([root, label]) => fact(label, path(root))),
-          ...(disclosed ? fact('Start writes to', path(disclosed.writesTo)) : [])))),
+          ...(disclosed ? fact('New copies go to', path(disclosed.writesTo)) : [])))),
       h('div.tool-column', {},
         section('What it has',
           snapshot.skills.length

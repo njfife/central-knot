@@ -104,8 +104,8 @@ function renderPanel() {
 function writeFact(preview: Preview): { glyph: IconName; text: string; tone: string } {
   if (preview.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Start is stopped', tone: 'tone-danger' };
   if (!preview.access.allowed) return { glyph: 'lock', text: 'Preview only, Start does not write here', tone: '' };
-  if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Start writes to your real folders', tone: 'tone-warning' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Start writes only to this copy' : 'Start writes only inside this folder', tone: '' };
+  if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Apply all writes to your real folders', tone: 'tone-warning' };
+  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Apply all writes only to this copy' : 'Apply all writes only inside this folder', tone: '' };
 }
 
 function renderStatus() {

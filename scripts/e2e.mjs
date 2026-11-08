@@ -83,6 +83,7 @@ function seedHome() {
   }
   writeFileSync(join(HOME, '.claude/unrelated.json'), '{ "keep":   "these bytes" }\n');
   skill(CLAUDE, `very-long-${'n'.repeat(150)}`);
+  skill(CLAUDE, 'MixedCase');
   const locked = skill(CLAUDE, 'read-only-inside');
   mkdirSync(join(locked, 'refs'));
   writeFileSync(join(locked, 'refs/a.md'), 'a');
@@ -225,6 +226,28 @@ async function practiceFlow() {
   same('unmanaged', await switchOn(a, 'standup'), false);
   same('unmanaging keeps both copies', [existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.copilot/skills/standup'))], [true, true]);
 
+  // Keep both, then turning it on: the switch and Apply all agree.
+  writeFileSync(join(practice, '.claude/skills/notes/SKILL.md'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8') + '\nLocal edit.\n');
+  await a.click('#header-refresh');
+  await a.click('#decide-notes');
+  await a.click('#separate-notes');
+  same('keep both leaves it off', await switchOn(a, 'notes'), false);
+  await a.click('#switch-notes');
+  check('turning it on drops keep both', !(await a.text('.ov-row[data-key="notes"]')).includes('Keeping both'), await a.text('.ov-row[data-key="notes"]'));
+  await a.click('#discard');
+  // Choosing a copy, then switching it off: the choice goes too.
+  await a.click('#decide-notes');
+  await a.click('#use-notes-claude-cli');
+  await a.click('#switch-notes');
+  check('switching off drops the chosen copy', !(await a.text('.ov-row[data-key="notes"]')).includes('Using'), await a.text('.ov-row[data-key="notes"]'));
+  await a.click('#discard');
+
+  // Focus stays on the control after a re-render.
+  await a.run(`document.querySelector('#switch-release-notes').focus()`);
+  await a.press(' ', 'Space');
+  same('focus stays on the switch', await a.run(`document.activeElement?.id`), 'switch-release-notes');
+  await a.click('#discard');
+
   // Keyboard and find.
   await a.press('/', 'Slash');
   same('slash focuses find', await a.run(`document.activeElement?.id`), 'find');
@@ -247,6 +270,7 @@ async function realHomeFlow() {
   await a.click('#nav-overview');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
+  check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
   check('malformed skill is no row', !rows.includes('bad-yaml'));
   same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);

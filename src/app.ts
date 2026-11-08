@@ -31,7 +31,12 @@ export const state = {
 
 let render = () => {};
 export const setRenderer = (next: () => void) => { render = next; };
-export const rerender = () => render();
+/** Re-renders and puts focus back on the control that had it, found by id. */
+export const rerender = () => {
+  const focused = document.activeElement?.id;
+  render();
+  if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus();
+};
 
 export function announce(text: string) { document.getElementById('announcement')!.textContent = text; }
 
@@ -78,7 +83,8 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   state.applied = result;
   if (!result.stopped) onDone();
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
-  announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
+  const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
+  announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
 });
 
 export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {

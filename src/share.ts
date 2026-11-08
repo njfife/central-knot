@@ -99,6 +99,10 @@ export const finishCopy = async (source: string, target: string) => chmod(target
 
 /** Removes a folder CK owns, even one with read-only folders inside. */
 export async function removeTree(path: string) {
+  // A link is removed as a link: nothing it points to is touched.
+  const top = await lstat(path).catch(() => undefined);
+  if (!top) return;
+  if (top.isSymbolicLink()) { await rm(path, { force: true }); return; }
   const openUp = async (directory: string) => {
     await chmod(directory, ((await lstat(directory)).mode & 0o777) | 0o700);
     for (const entry of await readdir(directory, { withFileTypes: true })) if (entry.isDirectory()) await openUp(join(directory, entry.name));

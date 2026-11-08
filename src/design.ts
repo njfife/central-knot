@@ -10,6 +10,10 @@ export const tools: Tool[] = threeTools ? ['claude-cli', 'copilot-cli', 'codex-c
 /** A copy's content id per tool (same id = same bytes), or absent. */
 export interface SampleSkill {
   key: string;
+  /** Shown name, with its case. */
+  name?: string;
+  /** Other copies a tool also reads, for the details. */
+  extra?: { tool: Tool; directory: string; summary: string; writable: boolean; same: boolean }[];
   description: string;
   copies: Partial<Record<Tool, string>>;
   managed: boolean;
@@ -82,7 +86,8 @@ export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   if (skill.separate) return has ? 'present' : 'absent';
   if (!skill.managed) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
   if (skill.off.includes(tool)) return has ? (ids.size > 1 ? 'present-differs' : 'present') : 'absent';
-  if (!has) return 'will-sync';
+  // Nothing can be copied here unless a tool it syncs to has a copy to start from.
+  if (!has) return Object.keys(skill.copies).some(other => !skill.off.includes(other) && !skill.cannot?.[other]) ? 'will-sync' : 'absent';
   return ids.size > 1 ? 'differs' : 'synced';
 }
 
