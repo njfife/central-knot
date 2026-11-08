@@ -1,11 +1,11 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
-import { applyManage, rerender, announce, shownPath, state } from './app.ts';
+import { applyManage, deleteEverywhereKey, rerender, announce, restoreEvent, shownPath, showPage, state } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts } from './types.ts';
+import type { Change, SkillFacts, SyncNotice } from './types.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
 const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
@@ -454,10 +454,17 @@ function notices() {
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
   else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
-  const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written');
+  // What sync did on its own (CON-02): each notice names the item, the winning action and where, says whether the order was proved,
+  // and offers its Undo, Restore or Delete everywhere right there.
+  const syncNotices = [...manage.notices, ...(applied?.notices ?? [])];
+  if (syncNotices.length) bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, syncNotices.slice(0, 6).map(syncNotice),
+    syncNotices.length > 6 ? h('p.sync-notice', {}, `and ${syncNotices.length - 6} more in `, smallAction('History', 'notices-history', () => showPage('history'))) : null)));
+  const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written' && result.outcome !== 'removed');
   if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
-  const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written').map(result => result.item))];
+  // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
+  const told = new Set(syncNotices.map(notice => notice.item));
+  const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
   if (caughtNames.length && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
     h('span.band-text', {}, `Caught up: copied ${caughtNames.slice(0, 4).join(', ')}${caughtNames.length > 4 ? ` and ${caughtNames.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`)));
   return bands.length ? h('div.bands', {}, bands) : null;
@@ -474,6 +481,19 @@ function forgetOtherHomes() {
     const stale = draft.resolve && draft.resolve !== 'separate' && skill?.hashes && skill.hashes[draft.resolve] !== draft.seen;
     if (!skill || stale) { view.draft.delete(key); if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`); }
   }
+}
+
+function syncNotice(notice: SyncNotice) {
+  const who = (tool: string) => names[tool] ?? tool;
+  const list = (tools: string[]) => tools.map(who).join(' and ');
+  const order = notice.orderProved ? '' : ' The order could not be proved, so the fixed tool order decided.';
+  const [glyph, tone, text, action] = ({
+    edit: ['check', 'tone-success', `${notice.item}: ${who(notice.winner)}'s edit now in ${list(notice.losers)}.`, smallAction('Undo', `notice-undo-${notice.history}`, () => void restoreEvent(notice.history))],
+    conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit won over ${list(notice.losers)}'s.${order}`, smallAction('Undo', `notice-undo-${notice.history}`, () => void restoreEvent(notice.history))],
+    deleted: ['circle-minus', 'tone-warning', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, smallAction('Restore', `notice-restore-${notice.history}`, () => void restoreEvent(notice.history))],
+    'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit was kept over its deletion in ${list(notice.losers)}.${order}`, smallAction('Delete everywhere', `notice-delete-${notice.key}`, () => void deleteEverywhereKey(notice.key))],
+  } as Record<SyncNotice['kind'], [IconName, string, string, HTMLElement]>)[notice.kind];
+  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), h('span', {}, text), action);
 }
 
 export function designOverview() {

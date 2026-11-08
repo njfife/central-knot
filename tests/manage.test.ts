@@ -80,19 +80,19 @@ test('A tool turned off gets no copy, and a copy already there stays', async () 
   } finally { await box.cleanup(); }
 });
 
-test('Catch-up: a managed copy that goes missing comes back with no changes; an unmanaged one does not', async () => {
+test('Catch-up: a tool newly turned on gets its copy; a deleted copy is a deletion, not something to bring back', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'kept');
     await skill(box.home, CLAUDE, 'dropped');
-    await applyChanges(ctx(box), [manage('kept'), manage('dropped')]);
-    await applyChanges(ctx(box), [{ key: 'dropped', managed: false, off: [] }]);
-    await rm(join(box.home, COPILOT, 'kept'), { recursive: true });
+    await applyChanges(ctx(box), [manage('kept', ['copilot-cli']), manage('dropped')]);
+    assert.equal(await exists(join(box.home, COPILOT, 'kept')), false, 'off for Copilot');
+    await applyChanges(ctx(box), [manage('kept')]);
+    assert.equal(await exists(join(box.home, COPILOT, 'kept/SKILL.md')), true, 'turning Copilot on catches up');
     await rm(join(box.home, COPILOT, 'dropped'), { recursive: true });
-    const caught = await applyChanges(ctx(box), []);
-    assert.equal(caught.harnessWrites, 1);
-    assert.equal(await exists(join(box.home, COPILOT, 'kept/SKILL.md')), true);
-    assert.equal(await exists(join(box.home, COPILOT, 'dropped')), false);
+    await applyChanges(ctx(box, { settleMs: 0 }), []);
+    assert.equal(await exists(join(box.home, COPILOT, 'dropped')), false, 'not brought back');
+    assert.equal(await exists(join(box.home, CLAUDE, 'dropped')), false, 'and the deletion spread');
   } finally { await box.cleanup(); }
 });
 
@@ -753,5 +753,154 @@ test('A skill in the shared .agents folder counts for both Copilot and Codex and
     const result = await applyChanges(context, [{ key: 'both', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(result.harnessWrites, 0);
     assert.equal(await readFile(join(box.home, '.agents/skills/both/SKILL.md'), 'utf8'), text('both', 'Shared.'));
+  } finally { await box.cleanup(); }
+});
+
+// ---------- Two-way sync (8b) ----------
+
+import { deleteEverywhere, readHistory, restoreFromHistory } from '../src/manage.ts';
+
+const fast = (box: Box, extra: Partial<ShareContext> = {}) => ctx(box, { settleMs: 0, ...extra });
+async function managedPair(box: Box, name = 'pair', body = 'Original.') {
+  await skill(box.home, CLAUDE, name, text(name, body));
+  await applyChanges(fast(box), [manage(name)]);
+  assert.equal(await readFile(join(box.home, COPILOT, name, 'SKILL.md'), 'utf8'), text(name, body));
+}
+
+test('An edit in one tool spreads to the others, and the old copy is kept in History', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited in Claude.'));
+    const result = await applyChanges(fast(box), []);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Edited in Claude.'));
+    assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'claude-cli', ['copilot-cli']]]);
+    const [event] = await readHistory(box.home);
+    assert.equal(event.kind, 'edit');
+    assert.ok(event.previous && await exists(join(storeDirectory(box.home), 'items/pair', event.previous)), 'the old version is in the store');
+    const before = await readFile(join(storeDirectory(box.home), 'history.json'), 'utf8');
+    assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0);
+    assert.equal(await readFile(join(storeDirectory(box.home), 'history.json'), 'utf8'), before, 'a quiet pass adds nothing to History');
+    assert.equal((await facts(box, 'pair')).copies['copilot-cli']!.hash, (await facts(box, 'pair')).copies['claude-cli']!.hash);
+  } finally { await box.cleanup(); }
+});
+
+test('Competing edits with unknown order: the fixed tool order decides, says so, and Undo applies the losing side', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Claude edit.'));
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Copilot edit.'));
+    const result = await applyChanges(fast(box), []);
+    assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner, notice.orderProved]), [['conflict', 'copilot-cli', false]]);
+    assert.equal(await readFile(join(box.home, CLAUDE, 'pair/SKILL.md'), 'utf8'), text('pair', 'Copilot edit.'));
+    const undo = await restoreFromHistory(fast(box), result.notices![0].history);
+    assert.equal(undo.stopped, undefined);
+    for (const root of [CLAUDE, COPILOT]) assert.equal(await readFile(join(box.home, root, 'pair/SKILL.md'), 'utf8'), text('pair', 'Claude edit.'), `${root} has the losing side back`);
+    assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0, 'and it is the new baseline');
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion spreads, is never undone by catch-up, and Restore brings it back everywhere', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
+    const result = await applyChanges(fast(box), []);
+    assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner]), [['deleted', 'claude-cli']]);
+    assert.equal(await exists(join(box.home, COPILOT, 'pair')), false);
+    assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0, 'nothing comes back');
+    const restored = await restoreFromHistory(fast(box), result.notices![0].history);
+    assert.equal(restored.stopped, undefined, JSON.stringify(restored));
+    for (const root of [CLAUDE, COPILOT]) assert.equal(await readFile(join(box.home, root, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
+    assert.equal((await facts(box, 'pair')).managed, true);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy missing for less than the settle window is neither deleted elsewhere nor recreated', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
+    const result = await applyChanges(ctx(box, { settleMs: 60_000 }), []);
+    assert.equal(result.harnessWrites, 0);
+    assert.equal(await exists(join(box.home, CLAUDE, 'pair')), false, 'not recreated');
+    assert.equal(await exists(join(box.home, COPILOT, 'pair')), true, 'not deleted yet');
+  } finally { await box.cleanup(); }
+});
+
+test('A whole skills folder going missing is an unreachable root, not a deletion', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await rm(join(box.home, COPILOT), { recursive: true });
+    await applyChanges(fast(box), []);
+    assert.equal(await exists(join(box.home, CLAUDE, 'pair/SKILL.md')), true, 'Claude keeps it');
+  } finally { await box.cleanup(); }
+});
+
+test('An edit racing a deletion with unknown order is kept, the deleted copy returns, and Delete everywhere removes it all', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Copilot kept editing.'));
+    const result = await applyChanges(fast(box), []);
+    assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner, notice.orderProved]), [['kept-edit', 'copilot-cli', false]]);
+    assert.equal(await readFile(join(box.home, CLAUDE, 'pair/SKILL.md'), 'utf8'), text('pair', 'Copilot kept editing.'));
+    const removed = await deleteEverywhere(fast(box), 'pair');
+    assert.equal(removed.harnessWrites, 2, JSON.stringify(removed));
+    assert.equal(await exists(join(box.home, CLAUDE, 'pair')) || await exists(join(box.home, COPILOT, 'pair')), false);
+    assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0, 'and it stays gone');
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion after an edit has spread removes the edited content everywhere', async () => {
+  const box = await sandbox();
+  try {
+    let now = 1000;
+    const clock = () => now;
+    await managedPair(box);
+    // Copilot's edit is seen at t=2000, while Claude's copy is still at the baseline at t=3000; Claude deletes after that.
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Old Copilot edit.'));
+    await writeFile(join(box.home, CLAUDE, '.hold'), 'x');
+    now = 2000; await applyChanges(fast(box, { now: clock, settleMs: 0 }), [{ key: 'pair', managed: true, off: [] }]);
+    // That pass spread the edit; to model an unresolved edit, edit Copilot again and observe it before Claude's deletion.
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Second Copilot edit.'));
+    now = 3000; const observed = await applyChanges(fast(box, { now: clock }), []);
+    assert.equal(observed.notices?.[0]?.kind, 'edit');
+    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
+    now = 4000; const result = await applyChanges(fast(box, { now: clock }), []);
+    assert.equal(result.notices?.[0]?.kind, 'deleted');
+    assert.equal(await exists(join(box.home, COPILOT, 'pair')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill turning up again after it was deleted everywhere is new and unmanaged, not a revival', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
+    await applyChanges(fast(box), []);
+    await skill(box.home, CLAUDE, 'pair', text('pair', 'Brand new.'));
+    assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0);
+    assert.equal((await facts(box, 'pair')).managed, false);
+    assert.equal(await exists(join(box.home, COPILOT, 'pair')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy removed while its tool was off is caught up when the tool is turned back on, never spread as a deletion', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await applyChanges(fast(box), [manage('pair', ['copilot-cli'])]);
+    await rm(join(box.home, COPILOT, 'pair'), { recursive: true });
+    await applyChanges(fast(box), [manage('pair')]);
+    assert.equal(await exists(join(box.home, COPILOT, 'pair/SKILL.md')), true, 'caught up');
+    assert.equal(await exists(join(box.home, CLAUDE, 'pair/SKILL.md')), true, 'not deleted');
+    await applyChanges(fast(box), [{ key: 'pair', managed: false, off: [] }]);
+    await rm(join(box.home, COPILOT, 'pair'), { recursive: true });
+    await applyChanges(fast(box), [manage('pair')]);
+    assert.equal(await exists(join(box.home, CLAUDE, 'pair/SKILL.md')), true, 'a copy removed while unmanaged is no deletion either');
   } finally { await box.cleanup(); }
 });

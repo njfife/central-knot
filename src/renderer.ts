@@ -5,10 +5,11 @@ import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
+import { historyPage } from './historypage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', plugins: 'Plugins', tools: 'Tools' };
+const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', plugins: 'Plugins', history: 'History', tools: 'Tools' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */
@@ -44,6 +45,7 @@ function renderSidebar() {
     navRow('overview', 'Overview', 'layout-grid'),
     navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
     navRow('plugins', 'Plugins', 'puzzle'),
+    navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
   );
   region('homes').replaceChildren(
@@ -67,7 +69,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.remove('has-item');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'plugins' ? pluginsPage() : toolsPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : toolsPage());
 }
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {

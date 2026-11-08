@@ -1,10 +1,10 @@
-import type { ApplyResult, Change, DesktopApi, HarnessId, HomeMode, HomeView, PluginActionResult, PluginsView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, HarnessId, HistoryEvent, HomeMode, HomeView, PluginActionResult, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'plugins' | 'tools';
+export type Page = 'overview' | 'skills' | 'plugins' | 'history' | 'tools';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -13,6 +13,8 @@ export const state = {
   /** The skill shown in the Skills detail. */
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
+  /** What sync did on its own, newest last, read when the History page opens. */
+  history: undefined as HistoryEvent[] | undefined,
   /** Marketplaces and what each tool has installed, read when the Plugins page opens. */
   plugins: undefined as PluginsView | undefined,
   /** What the last plugin action did, or why a marketplace could not be added. */
@@ -92,6 +94,7 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
 
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') { state.pluginResult = undefined; void loadPlugins(); }
+  if (page === 'history') void loadHistory();
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -153,4 +156,32 @@ export const uninstallPlugin = (marketplace: string, plugin: string, tool: Harne
   if (result.view) state.plugins = result.view;
   state.pluginResult = result;
   announce(result.stopped ?? result.reports.map(report => report.message).join(' '));
+});
+
+// ---------- History ----------
+
+export const loadHistory = () => busy('Reading History…', async () => {
+  state.history = await api().history();
+  announce('');
+});
+
+/** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
+export const restoreEvent = (eventId: string) => busy('Restoring…', async () => {
+  const home = state.home!;
+  const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.history = await api().history();
+  state.applied = result;
+  announce(result.stopped ?? `Restored in ${plural(result.results.filter(entry => entry.outcome === 'written').length, 'tool')}.`);
+});
+
+/** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
+export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…', async () => {
+  const home = state.home!;
+  const result = await api().deleteEverywhere(key, home.manage.gate.state === 'needs-resume', home.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.applied = result;
+  announce(result.stopped ?? `Deleted from ${plural(result.harnessWrites, 'tool')}. Restore it from History.`);
 });

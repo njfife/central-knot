@@ -7,7 +7,7 @@ import { discover } from './discovery.ts';
 import { harnesses, harnessIds } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, manageView } from './manage.ts';
+import { applyChanges, deleteEverywhere, manageView, readHistory, restoreFromHistory } from './manage.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
@@ -59,11 +59,12 @@ function context(): ShareContext {
 async function view(): Promise<HomeView> {
   const shared = context();
   // Managed skills catch up on their own: each read brings missing copies back. Only where writing is allowed and the record is ours.
-  const caughtUp = (await writeAccess(shared)).allowed && (await syncGate(shared)).state === 'ready' ? (await applyChanges(shared, [])).results : [];
+  const pass = (await writeAccess(shared)).allowed && (await syncGate(shared)).state === 'ready' ? await applyChanges(shared, []) : undefined;
+  const caughtUp = pass?.results ?? [];
   const snapshots = await read();
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots,
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message)))),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), pass?.notices ?? []),
   };
 }
 
@@ -222,6 +223,13 @@ app.whenReady().then(async () => {
     const report = await uninstall(await pluginContext(), marketplace, plugin, tool as HarnessId);
     return { reports: [report], view: await pluginsView() };
   });
+  handle('history:list', async () => (current ? readHistory(current.home) : []));
+  handle('history:restore', async (eventId, resume, home) => (home === current?.home && typeof eventId === 'string'
+    ? restoreFromHistory(context(), eventId, resume === true)
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+  handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
+    ? deleteEverywhere(context(), key, resume === true)
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));

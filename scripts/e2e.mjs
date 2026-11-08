@@ -194,6 +194,33 @@ async function practiceFlow() {
   same('copy bytes match', tree(join(practice, '.copilot/skills/release-notes')), tree(join(practice, '.claude/skills/release-notes')));
   same('Codex is a column and gets its copies too', [await a.exists('#tool-codex-cli'), existsSync(join(practice, '.codex/skills/notes/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
+
+  // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
+  const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
+  const standupBefore = readFileSync(standupPath('claude'), 'utf8');
+  writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited in Claude Code.\n'));
+  await a.click('#header-refresh');
+  same('an edit spreads to every tool on the next read', [readFileSync(standupPath('copilot'), 'utf8'), readFileSync(standupPath('codex'), 'utf8')].map(text => text.includes('Edited in Claude Code.')), [true, true]);
+  check('and says so, with Undo', (await a.text('.sync-notices') ?? '').includes("standup: Claude Code's edit now in"), await a.text('.bands'));
+  check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
+  await a.shot('practice-edit-spread');
+  await a.run(`document.querySelector('.sync-notice[data-kind="edit"] button').click()`);
+  await a.settle();
+  same('Undo puts the old version back everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
+  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
+  await a.click('#header-refresh');
+  check('a fresh deletion waits for the settle window: nothing deleted or recreated yet', existsSync(join(practice, '.claude/skills/release-notes')) && !existsSync(join(practice, '.copilot/skills/release-notes')));
+  await wait(2200);
+  await a.click('#header-refresh');
+  same('then the deletion spreads', [existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.codex/skills/release-notes'))], [false, false]);
+  check('with a notice offering Restore', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI'), await a.text('.bands'));
+  await a.click('#nav-history');
+  check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
+  await a.shot('practice-history');
+  await a.run(`document.querySelector('.history-row[data-kind="deleted"] button').click()`);
+  await a.settle();
+  same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
+  await a.click('#nav-overview');
   same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
   same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);
   same('managed after Apply all', await switchOn(a, 'release-notes'), true);
@@ -220,12 +247,6 @@ async function practiceFlow() {
   check('the replaced copy is kept in the store', readdirSync(join(practice, '.central-knot/items/review')).some(revision => readFileSync(join(practice, '.central-knot/items/review', revision, 'SKILL.md'), 'utf8') === reviewClaude));
   check('no longer flagged', !(await a.exists('#decide-review')));
 
-  // Catch-up: a managed copy deleted on disk comes back on Read again.
-  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
-  await a.click('#header-refresh');
-  check('Read again brings a managed copy back', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')));
-  check('it says so', (await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
-
   // Stop all for Copilot: copies stay, syncing stops.
   await a.click('#tool-copilot-cli');
   check('the tool menu opens', await a.exists('#menu-stop-copilot-cli'));
@@ -236,6 +257,7 @@ async function practiceFlow() {
   rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
   await a.click('#header-refresh');
   same('and stops bringing them back', existsSync(join(practice, '.copilot/skills/release-notes')), false);
+  check('and a deletion in a tool that no longer syncs stays there', existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')));
 
   // Add all from Claude Code to Copilot turns it back on.
   await a.click('#tool-claude-cli');
@@ -249,7 +271,10 @@ async function practiceFlow() {
   same('unmanaged', await switchOn(a, 'standup'), false);
   same('unmanaging keeps both copies', [existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.copilot/skills/standup'))], [true, true]);
 
-  // Keep both, then turning it on: the switch and Apply all agree.
+  // Keep both, then turning it on: the switch and Apply all agree. An unmanaged skill's local edit is a difference to decide;
+  // a managed one's would simply spread.
+  await a.click(`.ov-row[data-key="notes"] .switch`);
+  await applyAll(a);
   writeFileSync(join(practice, '.claude/skills/notes/SKILL.md'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8') + '\nLocal edit.\n');
   await a.click('#header-refresh');
   await a.click('#decide-notes');
@@ -257,7 +282,8 @@ async function practiceFlow() {
   same('keep both leaves it off', await switchOn(a, 'notes'), false);
   await a.click('#switch-notes');
   check('turning it on drops keep both', !(await a.text('.ov-row[data-key="notes"]')).includes('Keeping both'), await a.text('.ov-row[data-key="notes"]'));
-  same('and since it was already managed, nothing is left to apply', await a.exists('#discard'), false);
+  same('and turning it on is a pending change', await a.exists('#discard'), true);
+  await a.click('#discard');
   // Choosing a copy, then switching it off: the choice goes too.
   await a.click('#decide-notes');
   await a.click('#use-notes-claude-cli');

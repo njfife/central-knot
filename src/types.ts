@@ -61,6 +61,9 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
+  history(): Promise<HistoryEvent[]>;
+  restore(eventId: string, resume: boolean, home: string): Promise<ApplyResult>;
+  deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   plugins(): Promise<PluginsView | null>;
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView }>;
   refreshMarketplace(source: string): Promise<PluginsView | null>;
@@ -116,6 +119,8 @@ export interface ManageView {
   /** Where each tool's new copies go, and which other tools read that folder too. */
   writes: Partial<Record<HarnessId, { to: string; alsoReadBy: string[]; /** Why Central Knot does not write there, if it does not. */ blocked?: string }>>;
   skills: SkillFacts[];
+  /** What sync did on its own during the read that produced this view. */
+  notices: SyncNotice[];
   access: WriteAccess;
   gate: SyncGate;
   /** What the automatic catch-up just did, if anything. */
@@ -132,7 +137,39 @@ export interface Change {
   useHash?: string;
 }
 
-export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number }
+export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[] }
+
+/** What sync did on its own: an edit spread, competing edits resolved, or a deletion spread or overruled. */
+export interface SyncNotice {
+  key: string;
+  item: string;
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit';
+  /** The tool whose edit or deletion won. */
+  winner: HarnessId;
+  /** Tools whose differing copies gave way, or still hold the item after a deletion lost. */
+  losers: HarnessId[];
+  /** False when the order could not be proved and the fixed tool order decided (CON-04, D-04). */
+  orderProved: boolean;
+  /** The History event to Undo or Restore from. */
+  history: string;
+}
+
+/** One entry in History: what changed, which content won, and what is kept to Undo or Restore it. */
+export interface HistoryEvent {
+  id: string;
+  at: string;
+  key: string;
+  item: string;
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored';
+  winner?: { tool: HarnessId; hash: string };
+  /** Content that gave way, kept in Central Knot's store. */
+  losers: { tool: HarnessId; hash: string }[];
+  /** The synced content before this event, to put back on Undo. */
+  previous?: string;
+  orderProved: boolean;
+  /** Set once undone or restored, naming the event that did it. */
+  undoneBy?: string;
+}
 
 // ---------- Marketplaces and plugins ----------
 export type AccessResult =

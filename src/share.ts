@@ -26,10 +26,14 @@ export interface ShareContext {
   overrides?: Partial<Record<HarnessId, string>>;
   /** Test seam: throws at a named step, standing in for a crash. */
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace') => void;
+  /** The clock for observation intervals (CON-04); tests pass their own. */
+  now?: () => number;
+  /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
+  settleMs?: number;
 }
 
 export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; status: 'pending' | 'written' }
-export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string } }
+export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string } }
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
@@ -161,6 +165,7 @@ function validItems(items: unknown): boolean {
     && typeof item.startId === 'string' && typeof item.observedAt === 'string'
     && (item.off === undefined || (Array.isArray(item.off) && item.off.every(knownTool)))
     && (item.separate === undefined || typeof item.separate === 'boolean')
+    && (item.deleted === undefined || (typeof item.deleted === 'object' && item.deleted !== null && typeof item.deleted.at === 'string' && knownTool(item.deleted.tool) && typeof item.deleted.hash === 'string'))
     && (item.use === undefined || (typeof item.use === 'object' && item.use !== null && knownTool(item.use.tool) && typeof item.use.hash === 'string'))
     && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy === 'object' && copy !== null
       && typeof copy.directory === 'string' && isAbsolute(copy.directory) && typeof copy.hash === 'string' && knownTool(copy.harness)
@@ -183,7 +188,7 @@ export async function readRecord(home: string): Promise<{ record?: SyncRecord; p
   } catch { return { problem: 'The sync record is damaged.' }; }
 }
 
-async function writeDurably(path: string, text: string) {
+export async function writeDurably(path: string, text: string) {
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
   const handle = await open(temporary, 'wx', 0o600);

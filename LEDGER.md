@@ -212,3 +212,22 @@ Nathan saw "32 to add" from Copilot CLI to Claude Code, when most were identical
 - The button says "Manage N" when nothing gets copied, borrowed from C.
 
 **Validation.** 80 unit tests. Mac e2e 395/395 with 8 crash rounds, smoke pass. Linux e2e 86/86. Nathan's own real-home state (`talk-like-a-dork`, managed at 13:24) is unchanged.
+
+## Two-way skills, checkpoint 1: spreading and resolving, November 8, 2026
+
+A managed skill's record hash is its baseline. Each pass (opening a home, Read again, Apply all) now works like this:
+- **An edit in one tool spreads** to every tool the skill syncs to. The replaced copies go to Central Knot's store.
+- **Competing edits:** the newest the evidence proves wins (CON-01, CON-04). Each copy keeps an observation interval while the app runs: when it was last read at the baseline, and when a change there was first read. A revision is proved older when the other location was still read at the baseline after that change was seen. Otherwise the fixed tool order decides (Copilot, then Claude Code, then Codex, then path; D-04), and the notice says so.
+- **Deletion (DEL-01, DEL-02):** a recorded copy missing from a reachable skills folder counts as deleted once it stays missing past a 2-second settle window. Until then nothing is deleted or recreated. A whole skills folder going missing counts as unreachable, not as a deletion. A deletion spreads and leaves a deletion record, so a copy turning up later is new and unmanaged, never a revival (D-37).
+- **A deletion racing an edit:** with order unknown, the edit is kept and the deleted copy returns, with **Delete everywhere** on offer. With order proved, the newest wins.
+- **Tracking:** copies are tracked only while their tool syncs the skill. A copy removed while the tool is off, or while the skill is unmanaged, is caught up later, never spread as a deletion. The e2e caught this; it would otherwise have deleted the skill everywhere.
+- **History** (`.central-knot/history.json`, last 1,000 events) records each spread, resolution and deletion with its kept content. **Undo** applies the losing side as a new revision; **Restore** returns a deleted skill to every tool it syncs to (CON-02, DEL-03). A pass with nothing to do writes no history.
+- **The page:** a notice band names each item, the winning action and its tool, and whether the order was proved, with Undo, Restore or Delete everywhere right there. A new History page lists every event.
+
+**Not yet** (checkpoint 2 and later):
+- background watching and polling, the Sync on/off switch and Sync now (SYN-03, SYN-04);
+- the tray indicator when the window is closed (D-36);
+- 30-day retention expiry (STO-04);
+- rename and case-only rename.
+
+**Validation.** 89 unit tests (10 new). Mac e2e 403/403 with 8 crash rounds, including, through the real app: an edit spreading and Undo, the settle window, a deletion spreading, History, and Restore. Smoke pass. Linux e2e 94/94. Nathan's real-home record is unchanged.
