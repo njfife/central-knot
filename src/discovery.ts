@@ -130,6 +130,8 @@ export async function discover(options: {
     for (const binary of options.binaries ?? []) {
       const probe = await probeVersion(binary, options.timeoutMs);
       if (probe.state === 'missing') continue;
+      // An app's bundled CLI never counts as a CLI install (CD §3): it shows the desktop app is there, and says so.
+      if (binary.includes('/ChatGPT.app/')) probe.detail = 'ChatGPT desktop’s own Codex; no Codex CLI found. Version only; no session started.';
       snapshot.probe = probe;
       snapshot.detection = probe.state === 'restricted' ? snapshot.detection : probe.state === 'ok' ? 'Installed' : 'Version unknown';
       break;
