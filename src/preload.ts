@@ -13,7 +13,7 @@ const api: DesktopApi = {
   setSync: on => ipcRenderer.invoke('sync:set', on),
   syncNow: home => ipcRenderer.invoke('sync:now', home),
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
-  restore: (eventId, resume, home) => ipcRenderer.invoke('history:restore', eventId, resume, home),
+  restore: (eventId, resume, home, choice) => ipcRenderer.invoke('history:restore', eventId, resume, home, choice),
   deleteEverywhere: (key, resume, home) => ipcRenderer.invoke('manage:delete-everywhere', key, resume, home),
   plugins: () => ipcRenderer.invoke('plugins:view'),
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),

@@ -70,7 +70,8 @@ export interface DesktopApi {
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
-  restore(eventId: string, resume: boolean, home: string): Promise<ApplyResult>;
+  /** `choice`: which overwritten edit to put back, for an event with several. */
+  restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   plugins(): Promise<PluginsView | null>;
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView }>;

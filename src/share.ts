@@ -10,6 +10,8 @@ const STAGE_PREFIX = '.ck-stage-';
 const STAGE_NAME = /^\.ck-stage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Finder drops these into any folder it opens; they are no change to a skill. */
 const NOISE = new Set(['.DS_Store']);
+/** Editor leftovers while a file is open (Vim swap and test files, Emacs locks and autosaves, backups): never content, never a link to refuse. */
+const editorNoise = (name: string) => /^\..*\.sw[a-p]$/.test(name) || /^\.#/.test(name) || /^#.*#$/.test(name) || /~$/.test(name) || name === '4913';
 
 /** A build's identity, and where this build remembers which record it owns. */
 export interface ShareContext {
@@ -25,7 +27,7 @@ export interface ShareContext {
   allowActualWrites?: boolean;
   overrides?: Partial<Record<HarnessId, string>>;
   /** Test seam: throws at a named step, standing in for a crash. */
-  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace') => void;
+  fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
   /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
@@ -73,7 +75,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
   let held: string | undefined;
   async function visit(current: string) {
     for (const entry of await readdir(current, { withFileTypes: true })) {
-      if ((entry.name === '.git' && !options.includeGit) || (NOISE.has(entry.name) && entry.isFile())) continue;
+      if ((entry.name === '.git' && !options.includeGit) || (NOISE.has(entry.name) && entry.isFile()) || editorNoise(entry.name)) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }

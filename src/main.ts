@@ -441,13 +441,13 @@ app.whenReady().then(async () => {
     return { reports: [report], view: await pluginsView() };
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
-  handle('history:restore', async (eventId, resume, home) => (home === current?.home && typeof eventId === 'string'
+  handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
       const tools = (await manageView(context())).tools;
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
-      return restoreFromHistory(context(), eventId, resume === true);
+      return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
     })()
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'

@@ -169,3 +169,95 @@ test('Every skills folder made again empty puts the skill back from the store', 
   assert.equal((await b.state()).state, 'shared');
   assert.deepEqual(await b.copies(), ['BASE', 'BASE', 'BASE']);
 }));
+
+// ---------- From the Opus fourth check (09db120) ----------
+
+test('Use this copy with one destination read-only still records the replaced copies, with Undo, and does not retry forever', () => box(async b => {
+  await b.write(1, 'COPILOT VERSION');
+  await b.write(2, 'CODEX VERSION');
+  await b.write(0, 'CLAUDE VERSION');
+  await chmod(b.path(2), 0o555);
+  await chmod(join(b.home, roots[2]), 0o555);
+  const result = await applyChanges(b.context, [{ key: name, managed: true, off: [], use: 'copilot-cli' }]);
+  assert.ok(result.results.some(entry => entry.harness === 'codex-cli' && entry.outcome === 'failed'), JSON.stringify(result.results));
+  assert.equal(await b.read(0), 'COPILOT VERSION');
+  const chosen = (await readHistory(b.home)).find(entry => entry.kind === 'chosen');
+  assert.ok(chosen?.losers.some(loser => loser.tool === 'claude-cli'), 'History names the replaced Claude copy');
+  assert.equal((await b.state()).use, undefined, 'the choice is finished, not retried every pass');
+  await b.write(0, 'ANOTHER SKILL', 'ck-other');
+  await applyChanges(b.context, [{ key: 'ck-other', managed: true, off: [] }]);
+  assert.ok((await b.stored()).includes('CLAUDE VERSION'), 'still kept after another skill writes History');
+}));
+
+test('A SKILL.md that cannot be read (permissions) holds the skill instead of deleting it elsewhere', () => box(async b => {
+  await chmod(join(b.path(0), 'SKILL.md'), 0o000);
+  await b.pass();
+  b.tick(2500);
+  await b.pass();
+  await chmod(join(b.path(0), 'SKILL.md'), 0o644);
+  assert.deepEqual(await b.copies(), ['BASE', 'BASE', 'BASE']);
+  assert.equal((await b.state()).state, 'shared');
+}));
+
+test('An edit saved just as a deletion spreads is kept, not removed', () => box(async b => {
+  await rm(b.path(0), { recursive: true });
+  await b.pass();
+  b.tick(2500);
+  let injected = false;
+  await applyChanges({ ...b.context, fault: step => { if (step === 'before-remove' && !injected) { injected = true; writeFileSync(join(b.path(1), 'SKILL.md'), body('SAVED JUST NOW')); } } }, []);
+  assert.ok(injected);
+  assert.equal(await b.read(1), 'SAVED JUST NOW');
+}));
+
+test('A held skill never keeps a folder "reset": a later deletion there still spreads', () => box(async b => {
+  await b.write(0, 'OTHER', 'ck-other');
+  await applyChanges(b.context, [{ key: 'ck-other', managed: true, off: [] }]);
+  await b.pass();
+  // ck-probe becomes held in Claude (a link inside), then Claude's skills folder is made again with the same contents.
+  const claude = join(b.home, roots[0]);
+  await rename(claude, `${claude}-old`);
+  await mkdir(claude);
+  await b.write(0, 'BASE');
+  await b.write(0, 'OTHER', 'ck-other');
+  execFileSync('ln', ['-s', '/tmp', join(b.path(0), 'link')]);
+  await b.pass();
+  await b.pass();
+  await rm(join(claude, 'ck-other'), { recursive: true });
+  await b.pass();
+  b.tick(2500);
+  await b.pass();
+  assert.equal(await readFile(join(b.home, roots[1], 'ck-other', 'SKILL.md'), 'utf8').catch(() => null), null, 'the deletion spread instead of being put back');
+}));
+
+test('Each competing edit that lost can be put back from History', () => box(async b => {
+  await b.write(1, 'COPILOT EDIT');
+  await b.write(2, 'CODEX EDIT');
+  await b.write(0, 'CLAUDE EDIT');
+  await b.pass();
+  const conflict = (await readHistory(b.home)).find(entry => entry.kind === 'conflict')!;
+  assert.ok(conflict);
+  const { restorableChoices, restoreFromHistory } = await import('../src/manage.ts');
+  const options = restorableChoices(conflict);
+  assert.equal(options.length, 2, JSON.stringify(conflict));
+  const last = options[1];
+  await restoreFromHistory(b.context, conflict.id, false, last.hash);
+  const expected = (await b.copies())[0];
+  assert.deepEqual(await b.copies(), [expected, expected, expected]);
+  assert.ok(['CLAUDE EDIT', 'CODEX EDIT'].includes(expected!), expected!);
+}));
+
+test('Editor swap and lock files are not edits', () => box(async b => {
+  await writeFile(join(b.path(0), '.SKILL.md.swp'), 'vim swap');
+  await writeFile(join(b.path(0), 'SKILL.md~'), 'backup');
+  const result = await b.pass();
+  assert.equal(result.harnessWrites, 0, JSON.stringify(result.results));
+}));
+
+test('An unfinished deletion stops when the skill is put back by hand in another tool', () => box(async b => {
+  await failedDeletion(b);
+  await chmod(join(b.home, roots[1]), 0o755);
+  await b.write(0, 'BASE');
+  await b.pass();
+  assert.equal(await b.read(1), 'BASE', 'the kept identical copy is not removed');
+  assert.equal(await b.read(0), 'BASE');
+}));

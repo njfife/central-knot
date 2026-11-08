@@ -670,3 +670,4 @@ ul { list-style: none; }
 .text-action.text-danger { color: var(--danger, #f85149); }
 .compare-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .details-note { margin-left: 0; }
+.history-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }

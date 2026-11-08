@@ -22,7 +22,23 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 
 /** Skills, MCP servers and agents share History; each row says which it is. */
 const kindOf = (key: string) => (key.startsWith('mcp:') ? 'MCP server' : key.startsWith('agent:') ? 'Agent' : 'Skill');
+/** The overwritten edits a skill conflict or kept edit can put back, one per content (mirrors restorableChoices in manage.ts). */
+function choices(event: HistoryEvent) {
+  if (event.key.includes(':') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
+  const seen = new Set<string>();
+  return event.losers.filter(loser => loser.hash && loser.hash !== event.previous && loser.hash !== event.winner?.hash && !seen.has(loser.hash) && seen.add(loser.hash));
+}
+
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+/** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */
+function actions(event: HistoryEvent, action?: string) {
+  const options = choices(event);
+  if (options.length > 1 || (event.kind === 'kept-edit' && options.length)) {
+    return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}'s`, name: `Use ${who(option.tool)}'s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
+  }
+  return action ? button({ variant: 'outline', size: 'small', label: action, name: `${action} ${event.item}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) }) : h('span');
+}
 
 export function historyPage() {
   const events = state.history;
@@ -33,8 +49,6 @@ export function historyPage() {
     return h('li.history-row', { 'data-kind': event.kind },
       h('span.history-when', {}, when(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', {}, event.item), h('span', {}, about.text)),
-      event.undoneBy ? h('span.history-done', {}, 'Undone') : about.action
-        ? button({ variant: 'outline', size: 'small', label: about.action, name: `${about.action} ${event.item}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) })
-        : h('span'));
+      event.undoneBy ? h('span.history-done', {}, 'Undone') : actions(event, about.action));
   }))));
 }

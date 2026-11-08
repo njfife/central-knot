@@ -175,9 +175,9 @@ export const loadHistory = () => busy('Reading History…', async () => {
 });
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
-export const restoreEvent = (eventId: string) => busy('Restoring…', async () => {
+export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
-  const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home);
+  const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
   const view = await api().refresh();
   if (view) state.home = view;
   state.history = await api().history();

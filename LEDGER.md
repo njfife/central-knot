@@ -420,3 +420,19 @@ Astra: "not safe yet", with 8 reproduced cases. Computer use: 8 of 9 steps passe
 - **Computer use, step 6.** With Sync off, a watcher event makes the page read again quietly, so an edit shows as waiting. The e2e now checks this without clicking Read again.
 
 **Validation.** 152 unit tests. Linux e2e 121/121.
+
+## Two-way: the Opus fourth check (on 09db120), November 8, 2026
+
+Opus: "not safe yet". It ran on throwaway homes and on the Mac's real home with `ck-test-` skills, and left the real home byte-identical apart from its History and record entries. b66f9ce already fixed problems 1 ("Use this copy" handled per copy, with History and Undo), 2 (a copy that can't be read holds the skill) and 3a (replace checks first). This round fixes the rest:
+
+- **3b. A removal checks first.** `removeChecked` moves the copy aside and checks it holds what the pass decided on. An edit saved just then is put back and kept. This applies to deletion spreading, Delete everywhere and retries.
+- **4. A held skill no longer keeps a folder "reset" forever.** Its copies in a folder made again are let go (adopted or put back once it is handled), so the folder's new identity is always saved.
+- **5. Restore for each overwritten edit.** `restorableChoices` covers a kept-edit's overwritten edit and every loser of a conflict. History shows one "Use X's" button per edit, and `restoreFromHistory` takes the choice.
+- **6. Missing times don't outlive a skipped pass.** A held or out-of-scope skill clears its copies' missing times, so the settle is never skipped later.
+- **7. A copy moved into `~/.agents/skills`** is no longer followed, with a message to move it back. Only copies Central Knot can write are adopted.
+- **8. Smaller fixes:**
+  - a retry stops once the skill is put back by hand in another tool;
+  - the retry for a skill deleted in the same pass waits for the next pass;
+  - editor leftovers (`.*.swp`, `.#*` locks, `#*#`, `*~`, `4913`) are not content and not links.
+
+**Validation.** 159 unit tests; the 7 new ones cover these findings, and 5 of them fail on b66f9ce. Linux e2e 121/121.
