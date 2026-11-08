@@ -270,3 +270,23 @@ An independent tester filed 13 defects against checkpoints 1 and 2. Fixed, each 
 13. **A crash mid-replace** later read as a deletion. The copy is marked pending before the replace, so the next pass finishes it.
 
 **Validation.** 104 unit tests (12 new). Mac e2e 412/412 with 8 crash rounds, smoke pass. Linux unit 104/104 and e2e 103/103. Nathan's real record is unchanged. A fresh re-check follows.
+
+## Two-way re-check round, November 8, 2026
+
+A fresh tester confirmed fixes 1 and 10, found 9 partly fixed, found 9 not fixed in practice, and filed 13 problems. The model changed:
+- **Per-copy content.** Each recorded copy now remembers the content last seen or written there. A copy that differs from that was **edited**. One that still matches it but not the synced content is only **behind**: it catches up from the synced content (from the store if no tool holds it) and never wins as an edit. An unrecorded copy holding an earlier revision of the skill (a folder switched back, a copy that once failed) is adopted as behind, not treated as a collision. This fixes the stuck syncing after a failed write or a switched-back `*_HOME`, the linked skill whose source edits never spread, and copies wrongly called "never synced".
+- **Resets by folder identity.** Each skills folder's identity (inode and creation time) is recorded after every pass. A folder deleted and made again, even while the app was closed, is a reset: its copies are put back, with a notice. Skills deleted inside the same folder are real deletions, even the last two. This replaces the "lost every managed skill at once" count. On filesystems with no creation time that reuse an inode, a reset done in place falls back to ordinary deletion semantics.
+
+**Also fixed:**
+- A crash during Undo or Restore: copies are marked pending first, so it is never read as a deletion.
+- A stale Apply all in the app: a draft remembers whether the skill was managed when the change was first made. The engine refuses it if that no longer holds, and the page drops the draft when a background change touches the skill.
+- Delete everywhere removes only the skill's own copies, and Restore prefers an unspread edit over behind copies.
+- Removing the shared `.agents` folder is unreachable, not a deletion; reachability is checked on each copy's own folder.
+- Restoring an old deletion is refused when the name is managed again with other content.
+- History rows for a Restore have Undo.
+- With Sync off, Apply all holds a skill with a pending edit or deletion instead of carrying it along.
+- History of the wrong shape is moved aside.
+- **Retention (STO-04):** History events older than 30 days are dropped, and store revisions no record, copy or retained event points at are removed.
+- Delete everywhere asks for a confirming second click.
+
+**Validation.** 114 unit tests (10 new). Mac e2e 337/337 with 8 crash rounds, now also checking through the app that a pending change can't revive a skill the background deleted. Linux unit 114/114 and e2e 107/107. Nathan's real record is unchanged.

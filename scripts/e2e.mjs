@@ -244,6 +244,20 @@ async function practiceFlow() {
   check('Sync now spreads it once', readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
   await a.click('#sync-switch');
   same('Sync turns back on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
+  // A pending change on the page never brings back a skill the background just deleted.
+  await a.click('#cell-standup-codex-cli');
+  check('a change is pending', await a.exists('#discard'));
+  rmSync(join(practice, '.claude/skills/standup'), { recursive: true });
+  let spread = false;
+  for (let tries = 0; tries < 60 && !spread; tries++) { await wait(250); spread = !existsSync(join(practice, '.copilot/skills/standup')); }
+  check('the deletion spreads in the background', spread);
+  await wait(1000);
+  same('and the pending change is gone, so Apply all cannot revive it', [await a.exists('#apply'), existsSync(join(practice, '.claude/skills/standup'))], [false, false]);
+  await a.click('#nav-history');
+  await a.run(`document.querySelector('.history-row[data-kind="deleted"] button').click()`);
+  await a.settle();
+  check('Restore brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
+  await a.click('#nav-overview');
   await a.click('#nav-overview');
   same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
   same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);

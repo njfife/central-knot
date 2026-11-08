@@ -1,7 +1,7 @@
 // Managing skills across tools: what each tool has, and applying the person's choices.
 // A managed skill keeps one copy in every tool it syncs to. An unmanaged skill is left alone.
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readFile, realpath, rename, stat } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
@@ -137,10 +137,11 @@ const sameDir = (first: string, second: string) => (process.platform === 'linux'
 /** The folders a tool reads skills from that a recorded copy may sit in. */
 const ownRoots = (context: ShareContext, tool: HarnessId) => [rootOf(context, tool), join(context.home, '.agents/skills')];
 
-/** A deletion is inferred only from a reachable root (DEL-01): the tool's skills folder exists and can be listed. */
-async function reachable(context: ShareContext, tool: HarnessId): Promise<boolean> {
-  try { return (await stat(rootOf(context, tool))).isDirectory(); } catch { return false; }
+/** A deletion is inferred only from a reachable folder (DEL-01): the folder the copy sat in still exists. */
+async function folderExists(path: string): Promise<boolean> {
+  try { return (await stat(path)).isDirectory(); } catch { return false; }
 }
+
 
 const historyPath = (home: string) => join(storeDirectory(home), 'history.json');
 
@@ -149,10 +150,30 @@ export async function readHistory(home: string): Promise<HistoryEvent[]> {
   try { const parsed = JSON.parse(await readFile(historyPath(home), 'utf8')); return Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
 }
 
-async function saveHistory(home: string, events: HistoryEvent[]) {
-  // History that cannot be read is moved aside, never overwritten: it may be recoverable by hand.
-  try { JSON.parse(await readFile(historyPath(home), 'utf8')); }
-  catch (error) { if (errorCode(error) !== 'ENOENT') await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined); }
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Store revisions no record, copy or retained History event points at any more are removed (STO-04). Never a current revision. */
+async function pruneStore(context: ShareContext, record: SyncRecord, events: HistoryEvent[]) {
+  const keep = new Map<string, Set<string>>();
+  const hold = (key: string, hash?: string) => { if (!hash) return; let set = keep.get(key); if (!set) { set = new Set(); keep.set(key, set); } set.add(hash); };
+  for (const [key, item] of Object.entries(record.items)) { hold(key, item.hash); hold(key, item.deleted?.hash); hold(key, item.use?.hash); for (const copy of item.copies) hold(key, copy.hash); }
+  for (const entry of events) { hold(entry.key, entry.winner?.hash); hold(entry.key, entry.previous); for (const loser of entry.losers) hold(entry.key, loser.hash); }
+  for (const key of Object.keys(record.items)) {
+    const folder = join(storeDirectory(context.home), 'items', storeFolder(key));
+    let revisions: string[];
+    try { revisions = await readdir(folder); } catch { continue; }
+    for (const revision of revisions) if (/^[0-9a-f]{64}$/.test(revision) && !keep.get(key)?.has(revision)) await removeTree(join(folder, revision)).catch(() => undefined);
+  }
+}
+
+async function saveHistory(home: string, events: HistoryEvent[], now = Date.now()) {
+  // History that cannot be read, or is not History, is moved aside, never overwritten: it may be recoverable by hand.
+  let sound = true;
+  try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
+  if (!sound) await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined);
+  // Retention (STO-04): events older than 30 days leave History; deletion records stay in sync.json, so nothing stale revives.
+  const cutoff = now - RETENTION_MS;
+  events = events.filter(entry => Date.parse(entry.at) >= cutoff);
   await writeDurably(historyPath(home), `${JSON.stringify({ events: events.slice(-1000) }, null, 2)}\n`);
 }
 
@@ -296,16 +317,18 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
 
   let writes = 0;
   let settling = false;
-  // A tool whose skills folder lost every managed skill at once (two or more) was reset or reinstalled: put them back, never delete them everywhere.
-  const wiped = new Set<HarnessId>();
-  if (!options.observeOnly) for (const tool of tools) {
-    const mine = [...gathered].flatMap(([key2, entry2]) => {
-      const item2 = record!.items[key2];
-      if (item2?.state !== 'shared' || item2.off?.includes(tool)) return [];
-      return item2.copies.filter(copy => copy.harness === tool && copy.status === 'written').map(copy => entry2.locations.some(location => sameDir(location.copy.directory, copy.directory)));
-    });
-    if (mine.length >= 2 && mine.every(present => !present) && await reachable(context, tool)) wiped.add(tool);
+  // A skills folder that was deleted and made again since the last pass (a reset or reinstall, even with the app closed) has a new
+  // identity: its missing copies are put back, never read as deletions. Skills deleted inside the same folder are real deletions.
+  const resetRoots = new Set<string>();
+  const roots = [...new Set([...tools.map(tool => rootOf(context, tool)), join(context.home, '.agents/skills')])];
+  const identities = new Map<string, { ino: number; birth: number }>();
+  for (const root of roots) {
+    try { const info = await stat(root); if (info.isDirectory()) identities.set(root, { ino: info.ino, birth: Math.round(info.birthtimeMs) }); } catch { /* unreachable */ }
+    const before = record.roots?.[root];
+    const now = identities.get(root);
+    if (before && now && (before.ino !== now.ino || before.birth !== now.birth)) resetRoots.add(root);
   }
+  const putBack = new Set<HarnessId>();
   const notices: SyncNotice[] = [];
   const events: HistoryEvent[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made = { id: randomUUID(), at: new Date(clock(context)).toISOString(), ...fields }; events.push(made); return made.id; };
@@ -332,7 +355,16 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         ?? entry.locations.find(location => location.tool === copy.harness && sameDir(dirname(location.copy.directory), dirname(copy.directory)) && !item.copies.some(other => sameDir(other.directory, location.copy.directory)));
       if (found) copy.directory = found.copy.directory;
     }
-    const recorded = new Set(item.copies.filter(copy => copy.status === 'written').map(copy => copy.directory));
+    // An unrecorded copy holding the synced content, or an earlier revision of this skill from the store (a folder switched back,
+    // a copy that once failed to update), is this skill's copy, just behind: adopt it rather than call it a collision.
+    if (item.hash) for (const location of locations) {
+      if (item.copies.some(copy => copy.directory === location.copy.directory)) continue;
+      if (location.copy.hash === item.hash || await exists(storedRevision(context, key, location.copy.hash))) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: location.copy.hash, created: false, status: 'written' });
+    }
+    // Each recorded copy remembers the content last seen or written there: a copy that differs from that was edited; one that
+    // still matches it but not the synced content is only behind, and is caught up, never treated as an edit.
+    const recordedHash = new Map(item.copies.filter(copy => copy.status === 'written').map(copy => [copy.directory, copy.hash]));
+    const recorded = new Set(recordedHash.keys());
     // Once synced, a read-only copy outside the record (a link, or the shared .agents folder) is reported, never followed: it could not take the edit, so it must not win later.
     const active = item.hash ? locations.filter(location => recorded.has(location.copy.directory) || location.copy.writable) : locations;
     for (const location of locations.filter(candidate => !active.includes(candidate) && candidate.copy.hash !== item.hash)) {
@@ -347,26 +379,28 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         if (!recorded.has(location.copy.directory)) continue;
         const seen = mark(location.copy.directory);
         delete seen.missingSince;
-        if (location.copy.hash === baseline) { seen.verifiedAt = now; delete seen.changed; delete seen.firstSeen; }
+        if (location.copy.hash === recordedHash.get(location.copy.directory)) { seen.verifiedAt = now; delete seen.changed; delete seen.firstSeen; }
         else if (seen.changed !== location.copy.hash) { seen.changed = location.copy.hash; seen.firstSeen = now; }
       }
       // A recorded copy missing from a reachable folder is a deletion once it stays missing past the settle window (DEL-01).
-      // A tool that lost every managed skill at once was reset, not edited: its copies are put back instead (see `wiped`).
+      // A folder that was deleted and made again (a reset or reinstall, even while the app was closed) is no deletion: its copies are put back.
       const deletions: { tool: HarnessId; directory: string }[] = [];
       let waiting = false;
       for (const copy of item.copies) {
         if (copy.status !== 'written' || !syncing.includes(copy.harness) || entry.locations.some(location => location.copy.directory === copy.directory)) continue;
-        if (wiped.has(copy.harness) || !(await reachable(context, copy.harness))) continue;
+        if (resetRoots.has(dirname(copy.directory)) || !(await folderExists(dirname(copy.directory)))) continue;
         const seen = mark(copy.directory);
         seen.missingSince ??= now;
         if (now - seen.missingSince >= (context.settleMs ?? 2000)) deletions.push({ tool: copy.harness, directory: copy.directory }); else waiting = true;
       }
-      if (wiped.size) item.copies = item.copies.filter(copy => !wiped.has(copy.harness) || entry.locations.some(location => location.copy.directory === copy.directory));
+      if (resetRoots.size) item.copies = item.copies.filter(copy => !resetRoots.has(dirname(copy.directory)) || entry.locations.some(location => location.copy.directory === copy.directory));
       // Never act on a copy that may have just gone: wait until every missing copy has settled, then decide once.
       if (waiting) { settling = true; continue; }
       // Sync off: the evidence above is kept, so order can be proved later; nothing is written now.
       if (options.observeOnly) continue;
-      const changed = active.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== baseline);
+      const changed = active.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== recordedHash.get(location.copy.directory));
+      // With Sync off, Apply all writes only what it shows: a pending edit or deletion of this skill waits for Sync.
+      if (options.only && (changed.length || deletions.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for Sync. Turn Sync on or use Sync now.` }); continue; }
       if (deletions.length) {
         const deletedSeen = Math.min(...deletions.map(gone => evidence.get(gone.directory)!.missingSince!));
         const deletedVerified = Math.max(...deletions.map(gone => evidence.get(gone.directory)?.verifiedAt ?? -Infinity));
@@ -385,7 +419,11 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
             const late = await rootProblem(context, location.tool);
             if (late) { results.push({ item: name, harness: location.tool, outcome: 'held', message: late }); continue; }
             // Content that only existed here goes to the store first, so the deletion can be undone (CON-02).
-            if (location.copy.hash !== baseline) { await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory)); lost.push({ tool: location.tool, hash: location.copy.hash }); }
+            if (location.copy.hash !== baseline) {
+              await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
+              // Only an edit is content the deletion took; a behind copy is an older revision already kept.
+              if (location.copy.hash !== recordedHash.get(location.copy.directory)) lost.push({ tool: location.tool, hash: location.copy.hash });
+            }
             await removeTree(location.copy.directory);
             writes++;
             removed.push(location.tool);
@@ -451,6 +489,28 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           losers.push({ tool: location.tool, hash: location.copy.hash });
           results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
         }
+      } else if (hashes.size > 1 && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))) {
+        // Copies that are only behind (a write that failed, a folder switched back) catch up to the synced content, quietly.
+        const holder = active.find(location => location.copy.hash === item.hash);
+        source = holder?.copy ?? { ...active[0].copy, directory: storedRevision(context, key, item.hash), hash: item.hash };
+        sourceTool = holder?.tool ?? active[0].tool;
+        for (const location of active) {
+          if (location.copy.hash === item.hash) { inSync.add(location.copy.directory); continue; }
+          const late = await rootProblem(context, location.tool);
+          const refusal = late ?? (location.copy.writable ? undefined : `${harnesses[location.tool].name} reads an older copy at ${location.copy.directory}, which Central Knot does not change.`);
+          if (refusal) { results.push({ item: name, harness: location.tool, outcome: 'held', message: refusal }); continue; }
+          const known = item.copies.find(copy => copy.directory === location.copy.directory);
+          if (known) { known.status = 'pending'; await save(); }
+          try { await replaceCopy(context, key, source.directory, location.copy.directory); }
+          catch (error) {
+            if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+            results.push({ item: name, harness: location.tool, outcome: 'failed', message: `Could not update ${harnesses[location.tool].name}'s copy. ${plainError(error)}` });
+            continue;
+          }
+          writes++;
+          inSync.add(location.copy.directory);
+          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Caught up. ${harnesses[location.tool].nextStep}` });
+        }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
         source = entry.facts.copies[chosen]!;
@@ -475,10 +535,13 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       await importRevision(context, key, source.directory, tree);
       item.hash = tree.hash;
       // Only copies holding the new content stay on record. One that could not be updated is let go, so it can never win back as an "edit".
-      item.copies = item.copies.filter(copy => !active.some(location => location.copy.directory === copy.directory) || inSync.has(copy.directory));
-      for (const copy of item.copies) if (inSync.has(copy.directory)) { copy.status = 'written'; copy.hash = tree.hash; }
+      // Every copy stays on record with the content it holds now: updated ones with the new content, ones that could not be updated
+      // with their old content, so they are behind (caught up later), never mistaken for an edit.
       for (const location of active) {
-        if (inSync.has(location.copy.directory) && !item.copies.some(known => known.directory === location.copy.directory)) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: tree.hash, created: false, status: 'written' });
+        const now = inSync.has(location.copy.directory) ? tree.hash : location.copy.hash;
+        const known = item.copies.find(copy => copy.directory === location.copy.directory);
+        if (known) { known.status = 'written'; known.hash = now; }
+        else if (inSync.has(location.copy.directory)) item.copies.push({ harness: location.tool, directory: location.copy.directory, hash: now, created: false, status: 'written' });
       }
       // What sync did on its own goes to History once, after it happened (CON-02).
       if (story && (replaced.length || story.deleted.length)) {
@@ -504,6 +567,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         context.fault?.('after-rename');
         (intent as { status: string }).status = 'written';
         writes++;
+        if (resetRoots.has(dirname(directory))) putBack.add(tool);
         results.push({ item: name, harness: tool, outcome: 'written', message: harnesses[tool].nextStep });
       }
     } catch (error) {
@@ -516,9 +580,17 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (copy.status !== 'pending') continue;
     if (await exists(copy.directory)) copy.status = 'written'; else item.copies = item.copies.filter(other => other !== copy);
   }
-  for (const tool of wiped) notices.push({ key: '', item: '', kind: 'reset', winner: tool, losers: [], orderProved: true, history: '' });
+  for (const tool of putBack) notices.push({ key: '', item: '', kind: 'reset', winner: tool, losers: [], orderProved: true, history: '' });
+  // Identities as they stand after this pass, so a folder this pass created is not a "reset" next time.
+  if (!options.observeOnly) {
+    record.roots = { ...record.roots };
+    for (const root of roots) { try { const info = await stat(root); if (info.isDirectory()) record.roots[root] = { ino: info.ino, birth: Math.round(info.birthtimeMs) }; } catch { /* unreachable */ } }
+  }
   await save();
-  if (events.length) await saveHistory(context.home, [...await readHistory(context.home), ...events]);
+  if (events.length) {
+    await saveHistory(context.home, [...await readHistory(context.home), ...events], clock(context));
+    await pruneStore(context, record, await readHistory(context.home));
+  }
   return { results, harnessWrites: writes, notices, settling };
 }
 
@@ -565,12 +637,17 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const snapshots = await context.read();
     const tools = presentTools(snapshots);
     const entry = (await gather(context, snapshots, record)).get(past.key);
+    // A skill deleted earlier whose name is managed again with other content: restoring the old one would replace the new one.
+    if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], harnessWrites: 0 };
     // A skill deleted earlier whose name is now taken by a different skill: never overwrite the new one.
     if (item.state !== 'shared') {
       const taken = Object.entries(entry?.facts.copies ?? {}).find(([, copy]) => copy && copy.hash !== tree.hash);
       if (taken) return { stopped: `A different “${item.name}” is in ${harnesses[taken[0] as HarnessId].name} now. Rename or remove it, then restore.`, results: [], harnessWrites: 0 };
     }
     const before = item.state === 'shared' ? item.hash : undefined;
+    // The intent is on record first: a crash part-way leaves unfinished copies, never what reads as a deletion.
+    for (const copy of item.copies) copy.status = 'pending';
+    await saveRecord(context.home, record);
     const results: DestinationResult[] = [];
     const replaced: { tool: HarnessId; hash: string }[] = [];
     const copies: RecordItem['copies'] = [];
@@ -601,7 +678,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     await saveRecord(context.home, record);
     const id = randomUUID();
     past.undoneBy = id;
-    await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: replaced[0]?.tool ?? 'claude-cli', hash: tree.hash }, losers: replaced, orderProved: true, previous: before }]);
+    await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: replaced[0]?.tool ?? 'claude-cli', hash: tree.hash }, losers: replaced, orderProved: true, previous: before }], clock(context));
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
@@ -622,14 +699,18 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     const results: DestinationResult[] = [];
     const lost: { tool: HarnessId; hash: string }[] = [];
     let writes = 0;
+    const own = new Map(item.copies.map(copy => [copy.directory, copy.hash]));
     for (const location of entry.locations.filter(candidate => !item.off?.includes(candidate.tool))) {
+      // Only the skill's own copies: recorded ones, or one identical to its synced content. A different copy that was never synced stays.
+      if (!own.has(location.copy.directory) && location.copy.hash !== item.hash) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} has a different “${item.name}” that was never synced. It stays.` }); continue; }
       if (!location.copy.writable) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: `${harnesses[location.tool].name} reads a copy at ${location.copy.directory}, which Central Knot does not change. Remove it yourself.` }); continue; }
       const late = await rootProblem(context, location.tool);
       if (late) { results.push({ item: item.name, harness: location.tool, outcome: 'held', message: late }); continue; }
       await importRevision(context, key, location.copy.directory, await readTree(location.copy.directory));
       await removeTree(location.copy.directory);
       writes++;
-      lost.push({ tool: location.tool, hash: location.copy.hash });
+      // An edit not yet spread is the newest content: Restore prefers it. A copy only behind is an older revision, already kept.
+      if (location.copy.hash === item.hash || location.copy.hash !== own.get(location.copy.directory)) lost.push({ tool: location.tool, hash: location.copy.hash });
       results.push({ item: item.name, harness: location.tool, outcome: 'removed', message: 'Deleted. Restore it from History.' });
     }
     const hash = item.hash || lost[0]?.hash || '';
@@ -637,7 +718,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     item.state = 'dont-share';
     item.deleted = { at: new Date(clock(context)).toISOString(), tool: lost[0]?.tool ?? 'claude-cli', hash };
     await saveRecord(context.home, record);
-    await saveHistory(context.home, [...await readHistory(context.home), { id: randomUUID(), at: new Date(clock(context)).toISOString(), key, item: item.name, kind: 'deleted', losers: lost, orderProved: true, previous: hash }]);
+    await saveHistory(context.home, [...await readHistory(context.home), { id: randomUUID(), at: new Date(clock(context)).toISOString(), key, item: item.name, kind: 'deleted', losers: lost, orderProved: true, previous: hash }], clock(context));
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;

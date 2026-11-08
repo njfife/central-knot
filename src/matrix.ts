@@ -39,7 +39,7 @@ const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
 type Resolution = Tool | 'separate';
 /** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
-interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string }
+interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string; /** Whether the skill was managed when this change was first made: a change made against an older state is dropped, never applied. */ seenManaged?: boolean }
 
 const view = {
   committed: sample.map(skill => ({ ...skill })),
@@ -56,6 +56,8 @@ const view = {
   addReasons: new Set<string>(),
   /** What the Skills page list is narrowed to. */
   listFind: '',
+  /** The skill whose Delete everywhere is waiting for its confirming click. */
+  confirmDelete: undefined as string | undefined,
 };
 
 // A click elsewhere or Escape closes a tool menu.
@@ -83,7 +85,8 @@ const rows = () => committedList().map(effective);
 
 function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft) {
   const base = committedOf(key);
-  const next = change(effective(base), view.draft.get(key));
+  const before = view.draft.get(key);
+  const next = { ...change(effective(base), before), seenManaged: before?.seenManaged ?? base.managed };
   const same = !next.resolve && next.managed === base.managed && [...next.off].sort().join() === [...base.off].sort().join();
   if (same) view.draft.delete(key); else view.draft.set(key, next);
   announce(view.draft.size ? `${view.draft.size} ${view.draft.size === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.');
@@ -118,7 +121,7 @@ function resolve(key: string, choice: Resolution | undefined) {
 function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
-    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: committedOf(key).managed })) as Change[];
+    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged })) as Change[];
     void applyManage(changes, () => view.draft.clear());
     return;
   }
@@ -246,7 +249,11 @@ function details(skill: SampleSkill, closable = true) {
     differs ? compareChoices(skill) : null,
     h('div.compare-foot', {},
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
-      !designMode && committedOf(skill.key).managed ? smallAction('Delete everywhere', `delete-${skill.key}`, () => void deleteEverywhereKey(skill.key), '.text-danger') : null,
+      !designMode && committedOf(skill.key).managed
+        ? view.confirmDelete === skill.key
+          ? smallAction(`Delete ${skill.name ?? skill.key} from every tool`, `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; void deleteEverywhereKey(skill.key); }, '.text-danger')
+          : smallAction('Delete everywhere', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger')
+        : null,
       closable ? smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); }) : null));
 }
 
@@ -486,7 +493,13 @@ function forgetOtherHomes() {
   for (const [key, draft] of [...view.draft]) {
     const skill = byKey.get(key);
     const stale = draft.resolve && draft.resolve !== 'separate' && skill?.hashes && skill.hashes[draft.resolve] !== draft.seen;
-    if (!skill || stale) { view.draft.delete(key); if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`); }
+    // A background change to this skill (deleted, or managed state changed elsewhere) drops the change made against the old state.
+    const moved = skill && !designMode && draft.seenManaged !== undefined && draft.seenManaged !== skill.managed;
+    if (!skill || stale || moved) {
+      view.draft.delete(key);
+      if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`);
+      else if (moved) announce(`${skill!.name ?? key} changed since you edited it, so your change to it was dropped.`);
+    }
   }
 }
 
