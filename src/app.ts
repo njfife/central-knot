@@ -1,10 +1,10 @@
-import type { ApplyResult, Change, DesktopApi, HomeMode, HomeView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, HarnessId, HomeMode, HomeView, PluginActionResult, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'tools';
+export type Page = 'overview' | 'skills' | 'plugins' | 'tools';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -13,6 +13,12 @@ export const state = {
   /** The skill shown in the Skills detail. */
   item: undefined as string | undefined,
   busy: undefined as string | undefined,
+  /** Marketplaces and what each tool has installed, read when the Plugins page opens. */
+  plugins: undefined as PluginsView | undefined,
+  /** What the last plugin action did, or why a marketplace could not be added. */
+  pluginResult: undefined as (PluginActionResult & { problem?: string }) | undefined,
+  /** The plugin whose details are open, as marketplace source and plugin name. */
+  pluginOpen: undefined as string | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The window chooses the sidebar shape until the person uses the toggle. */
@@ -53,6 +59,9 @@ function accept(view: HomeView) {
   state.home = view;
   state.applied = undefined;
   state.item = undefined;
+  state.plugins = undefined;
+  state.pluginResult = undefined;
+  if (state.page === 'plugins') void loadPlugins();
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
@@ -82,6 +91,7 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
 });
 
 export function showPage(page: Page) {
+  if (page === 'plugins' && state.page !== 'plugins') { state.pluginResult = undefined; void loadPlugins(); }
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -100,3 +110,47 @@ export const shownPath = (path: string) => {
   if (!home || home.mode === 'custom' || (path !== home.home && !path.startsWith(`${home.home}/`))) return path;
   return `${home.mode === 'actual' ? '~' : '…'}${path.slice(home.home.length)}`;
 };
+
+// ---------- Plugins ----------
+
+export const loadPlugins = () => busy('Reading marketplaces…', async () => {
+  state.plugins = (await api().plugins()) ?? undefined;
+  announce('');
+});
+
+export const addMarketplace = (source: string) => busy('Reading the marketplace…', async () => {
+  const result = await api().addMarketplace(source);
+  if (result.view) state.plugins = result.view;
+  state.pluginResult = result.problem ? { reports: [], problem: result.problem } : undefined;
+  announce(result.problem ?? 'Marketplace added. Nothing was installed.');
+});
+
+export const refreshMarketplace = (source: string) => busy('Refreshing the marketplace…', async () => {
+  state.plugins = (await api().refreshMarketplace(source)) ?? state.plugins;
+  state.pluginResult = undefined;
+  announce('Marketplace read again. Nothing was installed.');
+});
+
+export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
+  state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
+  state.pluginResult = undefined;
+  announce('Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.');
+});
+
+export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
+
+const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+
+export const installPlugin = (source: string, plugin: string, tools: HarnessId[]) => busy(`Installing ${plugin}…`, async () => {
+  const result = await api().installPlugin(source, plugin, tools, state.home!.home);
+  if (result.view) state.plugins = result.view;
+  state.pluginResult = result;
+  announce(result.stopped ?? result.reports.map(report => `${names[report.tool]}: ${report.message}`).join(' '));
+});
+
+export const uninstallPlugin = (marketplace: string, plugin: string, tool: HarnessId) => busy(`Uninstalling ${plugin} from ${names[tool]}…`, async () => {
+  const result = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home);
+  if (result.view) state.plugins = result.view;
+  state.pluginResult = result;
+  announce(result.stopped ?? result.reports.map(report => report.message).join(' '));
+});

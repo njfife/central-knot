@@ -61,7 +61,16 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
+  plugins(): Promise<PluginsView | null>;
+  addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView }>;
+  refreshMarketplace(source: string): Promise<PluginsView | null>;
+  forgetMarketplace(source: string): Promise<PluginsView | null>;
+  pickMarketplaceFolder(): Promise<string | null>;
+  installPlugin(source: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  uninstallPlugin(marketplace: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
 }
+
+export interface PluginActionResult { stopped?: string; reports: ActionReport[]; view?: PluginsView }
 
 // ---------- Managing skills across tools ----------
 
@@ -124,3 +133,60 @@ export interface Change {
 }
 
 export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number }
+
+// ---------- Marketplaces and plugins ----------
+export type AccessResult =
+  | { state: 'ok' }
+  | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
+
+export interface Components { skills: number; commands: number; agents: number; hooks: boolean; mcp: number; mcpRootVariable: boolean; bin: boolean }
+
+export interface CatalogPlugin {
+  name: string;
+  description: string;
+  version?: string;
+  /** The plugin's folder, when it sits inside the marketplace itself. Elsewhere its components are not known before install. */
+  folder?: string;
+  components?: Components;
+  /** Why Copilot CLI would refuse the whole marketplace because of this entry (MKT-06). */
+  copilotRefuses?: string;
+}
+
+export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string }
+
+export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string };
+
+/** One component's outcome on one tool (capability data, Appendix D). */
+export interface Outcome { component: string; result: 'works' | 'limited' | 'ignored' | 'fails' | 'unknown'; text: string }
+
+export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
+
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[] }
+
+/** A catalog plugin with what each tool would get from it. */
+export interface PluginView extends CatalogPlugin { outcomes: Partial<Record<HarnessId, Outcome[]>> }
+
+export interface MarketplaceView {
+  source: string;
+  /** Where it is known from: added in Central Knot, or already added in a tool. */
+  origins: ('central-knot' | HarnessId)[];
+  name: string;
+  kind: 'folder' | 'git';
+  fetchedAt?: string;
+  /** Why the catalog could not be read just now; a last fetched copy may still show. */
+  problem?: string;
+  /** Showing the last fetched copy, because the source could not be reached. */
+  stale?: boolean;
+  plugins: PluginView[];
+  states: Record<string, Partial<Record<HarnessId, InstallState>>>;
+}
+
+export interface PluginsView {
+  home: string;
+  tools: HarnessId[];
+  /** Tools whose own CLI was found, so their plugin commands can run. */
+  clis: Partial<Record<HarnessId, boolean>>;
+  canWrite: boolean;
+  reason?: string;
+  marketplaces: MarketplaceView[];
+}

@@ -5,5 +5,12 @@ const api: DesktopApi = {
   selectHome: mode => ipcRenderer.invoke('discovery:select', mode),
   refresh: () => ipcRenderer.invoke('discovery:refresh'),
   apply: (changes, resume, home) => ipcRenderer.invoke('manage:apply', changes, resume, home),
+  plugins: () => ipcRenderer.invoke('plugins:view'),
+  addMarketplace: source => ipcRenderer.invoke('plugins:add', source),
+  refreshMarketplace: source => ipcRenderer.invoke('plugins:refresh', source),
+  forgetMarketplace: source => ipcRenderer.invoke('plugins:forget', source),
+  pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),
+  installPlugin: (source, plugin, tools, home) => ipcRenderer.invoke('plugins:install', source, plugin, tools, home),
+  uninstallPlugin: (marketplace, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', marketplace, plugin, tool, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

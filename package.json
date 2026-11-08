@@ -14,7 +14,8 @@
     "test": "tsc --noEmit && node --test tests/*.test.ts",
     "package:mac": "npm run build && node scripts/package-mac.mjs",
     "smoke:mac": "npm run build && electron . --smoke-test",
-    "e2e": "node scripts/e2e.mjs"
+    "e2e": "node scripts/e2e.mjs",
+    "test:harness": "node --test tests/harness/*.harness.ts"
   },
   "dependencies": {
     "yaml": "2.9.1"

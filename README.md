@@ -1,6 +1,6 @@
 # Central Knot
 
-A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI**, **GitHub Copilot CLI** and **Codex** (the CLI, and the ChatGPT desktop app, which reads the same `~/.codex`). It holds plan slices 1a, 1b's first checkpoint and 8a, with the managed Overview Nathan chose on November 8, 2026. The interface follows `docs/ui-reference.md`.
+A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI**, **GitHub Copilot CLI** and **Codex** (the CLI, and the ChatGPT desktop app, which reads the same `~/.codex`). It holds plan slices 1a, 1b's first checkpoint and 8a, with the managed Overview Nathan chose on November 8, 2026. The interface follows `docs/ui-reference.md`. A **Plugins** page adds marketplaces (Git URL, `owner/repo` or folder), shows each plugin's components and what each tool gets from them, and installs or uninstalls through each CLI's own plugin commands, confirmed by reading that tool's own record. `npm run test:harness` runs those installs with the real CLIs in disposable homes.
 
 ## Run
 

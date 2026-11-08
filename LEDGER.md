@@ -176,3 +176,23 @@ Disposable `HOME` (and `CODEX_HOME`, which must already exist or Codex refuses t
 | After uninstall | Marketplace declaration stays | Stays | Stays |
 
 `scripts/git-http-fixture.mjs` serves bare repositories over smart HTTP on localhost (read-only), so tests can exercise the git route on all three with no GitHub, keys or credentials.
+
+## CLI plugins slice (3a, 3b, 3c and Codex's route), November 8, 2026
+
+**Built.** `src/plugins.ts` and a Plugins page.
+- **Catalogs.** A Git marketplace is first checked with `git ls-remote`, with prompts off and a timeout (MKT-05: sign-in, no access, unknown SSH host, passphrase, network, Git missing, or the error as it is). It is then read from a fresh shallow clone with hooks off and no submodules, so nothing from it runs. A folder is read directly. The last fetched copy stays browsable, dated, when the source can't be reached (MKT-04).
+- **Browse.** Marketplaces come from Central Knot's own list plus those each tool already has, with no setup. Each plugin shows its components and, per tool, the Appendix D outcome (for example Codex: agents ignored, root-variable MCP won't start). A plugin outside the marketplace folder is not read, so its components show as known only after install.
+- **Copilot (MKT-06).** An npm, pip, archive or SCP-style plugin source makes Copilot refuse the whole marketplace, so Copilot is unavailable for it with that reason and nothing is added.
+- **Install and Uninstall** run each CLI's own commands with a timeout, against the home on screen and only where writing is allowed. Installed means files at the path the tool records (PLG-03); a record without files is Not known yet. A different marketplace with the same name in a tool is never replaced (D-16). Prior and new bytes of every file the native command changed are kept per build and named in the report (FIL-03). Uninstall leaves the marketplace added, and the report says so. "Remove from list" forgets a marketplace in Central Knot only.
+- **Codex.** Only a real Codex CLI is used; ChatGPT desktop's bundled copy never counts (CD §3), so a desktop-only person sees "Not known yet".
+
+**Validation.**
+- 74 unit tests (10 new), including the Git route through the localhost smart-HTTP fixture.
+- `npm run test:harness` on the Mac with real Claude Code 2.1.311, Copilot CLI 1.0.107 and Codex 0.142.3: install from a Git marketplace, confirmed by each record, prior bytes kept, a repeat runs nothing, then uninstall; and Copilot's live folder case. 4/4.
+- Mac e2e 309/309 with 8 crash rounds: adding a folder marketplace, per-tool cells, details, a refused install reported with the tool's exit code and never claimed, and Remove from list. Smoke pass; real home untouched.
+- Linux: unit 74/74, e2e 79/79.
+
+**Not yet.**
+- A session pass: the marker plugin used in a new Claude Code, Copilot and Codex session needs sign-ins, so it is Nathan's try.
+- Private-source (V-16) tries against his real Git hosts.
+- Update and Disable controls belong to later slices.

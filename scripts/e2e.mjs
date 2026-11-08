@@ -299,6 +299,26 @@ async function practiceFlow() {
   same('find filters', await rowKeys(a), ['standup']);
   await a.press('Escape');
   same('Escape clears find', (await rowKeys(a)).length, 4);
+  // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.
+  const market = join(scratch, 'market');
+  mkdirSync(join(market, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-test-market', owner: { name: 'e2e' }, plugins: [{ name: 'ck-marker', source: './plugins/ck-marker', version: '1.0.0', description: 'Marker' }] }));
+  skill(join(market, 'plugins/ck-marker/skills'), 'ck-marker-skill');
+  await a.click('#nav-plugins');
+  check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; })()`);
+  await a.click('#add-marketplace');
+  check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added here'), await a.text('#plugins-scroll'));
+  same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
+  await a.click('#popen-0-ck-marker');
+  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Work, as plugin:skill'), await a.text('.plugin-details'));
+  await a.click('#pinstall-0-ck-marker');
+  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
+  await a.shot('practice-plugins');
+  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  await a.click('#forget-0');
+  check('Remove from list forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  await a.click('#nav-overview');
   same('no page errors, practice', a.pageErrors, []);
   await a.quit();
 }

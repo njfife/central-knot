@@ -599,3 +599,28 @@ ul { list-style: none; }
 .held-pill { flex: none; white-space: nowrap; }
 .version-blocked { opacity: 0.75; cursor: not-allowed; }
 .version-why { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-soft); }
+
+/* Plugins page */
+.market { margin: 0 0 28px; }
+.market-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 4px 0 10px; }
+.market-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.market-origin { font-size: 11.5px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); white-space: nowrap; }
+.market-source { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 200px; }
+.market-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.market-when { font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.market-empty { color: var(--ink-soft); font-size: 13px; }
+.market-add { flex: 1 1 360px; max-width: 560px; }
+.plugin-version { font-size: 11.5px; color: var(--ink-faint); flex: none; }
+.plugin-actions { display: flex; align-items: center; justify-content: flex-start; min-width: 132px; padding-left: 12px; }
+.plugin-table .ov-row { grid-template-columns: var(--ov-columns-plugins, minmax(200px, 360px) repeat(var(--tool-count, 2), 120px) 150px 1fr); }
+.plugin-add .plugin-add-glyph { opacity: 0; }
+.plugin-add:hover .plugin-add-glyph, .plugin-add:focus-visible .plugin-add-glyph { opacity: 0.8; }
+.plugin-outcomes { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
+.plugin-outcomes li { display: flex; gap: 6px; align-items: flex-start; }
+.plugin-report { align-items: flex-start; }
+.plugin-report-lines p { margin: 0 0 4px; display: flex; gap: 6px; align-items: flex-start; }
+.plugin-report-files { margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); }
+.plugins-page .ov-name { padding-left: 16px; }
+.plugins-page .market-head { padding: 12px 16px 10px; }
+.plugins-page .market > .band, .plugins-page .market-empty { margin-left: 16px; margin-right: 16px; }
+.plugins-page .plugin-table { max-width: 980px; }
