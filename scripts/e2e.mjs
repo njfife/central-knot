@@ -220,6 +220,30 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="deleted"] button').click()`);
   await a.settle();
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
+
+  // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
+  await a.click('#nav-overview');
+  writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
+  let watched = false;
+  for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readFileSync(standupPath('claude'), 'utf8').includes('watched'); }
+  check('a change on disk spreads on its own', watched);
+  await wait(800);
+  check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup: Copilot CLI's edit"), await a.text('.bands'));
+  // Sync off: edits are noted, not spread; the page shows them pending; Sync now spreads once; Apply all still works.
+  await a.click('#sync-switch');
+  same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
+  writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited with Sync off.\n'));
+  await wait(3000);
+  await a.click('#header-refresh');
+  check('with Sync off nothing spreads', !readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
+  same('the edit shows as pending, not as a choice', [await cellState(a, 'standup', 'claude-cli'), await a.exists('#decide-standup')], ['will-sync', false]);
+  check('and a banner says Sync is off', (await a.text('.bands') ?? '').includes('Sync is off'));
+  check('Apply all does not claim it', !(await a.exists('#apply')), await a.text('.toolbar-end'));
+  await a.shot('practice-sync-off');
+  await a.click('#sync-now');
+  check('Sync now spreads it once', readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
+  await a.click('#sync-switch');
+  same('Sync turns back on', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'true');
   await a.click('#nav-overview');
   same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
   same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);

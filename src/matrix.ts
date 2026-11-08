@@ -1,7 +1,7 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
-import { applyManage, deleteEverywhereKey, rerender, announce, restoreEvent, shownPath, showPage, state } from './app.ts';
+import { applyManage, deleteEverywhereKey, rerender, announce, restoreEvent, shownPath, showPage, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
@@ -16,7 +16,7 @@ const ago = (iso: string) => {
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
-  key: facts.key, name: facts.name, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate,
+  key: facts.key, name: facts.name, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
@@ -168,7 +168,8 @@ function filterBar() {
     chip('all', 'All'), chip('managed', 'Managed'), chip('unmanaged', 'Unmanaged'), attention ? chip('attention', 'Copies differ', attention) : null);
 }
 
-const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync')).length;
+// Edits waiting for Sync are not Apply all's to write: the Sync-off banner offers Sync now for them.
+const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync')).length;
 const manageable = () => committedList().filter(skill => !skill.held).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
 
 const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
@@ -210,6 +211,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
 }
 
 const toolLine = (skill: SampleSkill, tool: Tool): string => {
+  if (skill.edited?.length && skill.managed) return skill.edited.includes(tool) ? 'Edited here. It spreads to the other tools when Sync is on.' : `Gets the edit from ${skill.edited.map(entry => names[entry]).join(' and ')} when Sync is on.`;
   const base = committedOf(skill.key);
   const state = cellOf(skill, tool);
   const was = cellOf(base, tool);
@@ -445,6 +447,8 @@ function notices() {
   if (designMode || !state.home) return null;
   const manage = state.home.manage;
   const bands: HTMLElement[] = [];
+  if (!state.home.syncOn) bands.push(h('div.band', { role: 'status' }, icon('circle-minus', 14, 'tone-warning'), h('span.band-text', {}, 'Sync is off. Edits and deletions are noted and spread when you turn it back on; Apply all still writes what it shows.'),
+    smallAction('Sync now', 'sync-now', () => void syncNow())));
   if (!manage.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, manage.access.reason)));
   if (manage.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
   if (manage.gate.state === 'needs-resume') bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));

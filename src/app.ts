@@ -185,3 +185,25 @@ export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…
   state.applied = result;
   announce(result.stopped ?? `Deleted from ${plural(result.harnessWrites, 'tool')}. Restore it from History.`);
 });
+
+// ---------- Sync switch and background changes ----------
+
+export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turning Sync off…', async () => {
+  const view = await api().setSync(on);
+  if (view) state.home = view;
+  announce(on ? 'Sync is on. Changes spread on their own.' : 'Sync is off. Changes are noted and spread when you turn it back on.');
+});
+
+export const syncNow = () => busy('Syncing…', async () => {
+  const view = await api().syncNow(state.home!.home);
+  if (view) state.home = view;
+  announce('Synced once. Sync stays off.');
+});
+
+/** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
+let refreshing = false;
+api().onSyncChanged(async () => {
+  if (state.busy || refreshing || !state.home) return;
+  refreshing = true;
+  try { const view = await api().refresh(); if (view) { state.home = view; rerender(); } } finally { refreshing = false; }
+});

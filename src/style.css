@@ -658,3 +658,9 @@ ul { list-style: none; }
 .history-what { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .history-what strong { font-weight: 600; }
 .history-done { font-size: 12px; color: var(--ink-faint); }
+
+.sync-switch { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
+.sync-switch:hover { background: var(--hover); }
+.sync-switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.sync-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--ink-faint); }
+.sync-dot.on { background: var(--success, #3fb950); }

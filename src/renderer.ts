@@ -1,6 +1,6 @@
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, rerender, selectItem, setRenderer, showPage, state, type Page } from './app.ts';
+import { loadHome, readAgain, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { overviewPage, skillsPage, toolsPage } from './pages.ts';
@@ -86,6 +86,9 @@ function renderStatus() {
       ? h('span.status-item.status-home', { title: state.home.home }, icon('eye', 14), h('span', {}, 'Reading ', h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
+    state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), disabled: !!state.busy,
+      title: state.home.syncOn ? 'Sync is on: changes spread on their own. Click to turn it off.' : 'Sync is off: changes are noted and spread when it is on. Click to turn it on.',
+      onclick: () => void setSync(!state.home!.syncOn) }, h(`span.sync-dot${state.home.syncOn ? '.on' : ''}`), h('span', {}, state.home.syncOn ? 'Sync on' : 'Sync off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
 }

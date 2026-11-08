@@ -27,6 +27,8 @@ export interface SampleSkill {
   held?: string;
   /** For each tool's copy, what stops every tool from using it, by the tool concerned. */
   blocks?: Partial<Record<Tool, { tool: Tool; reason: string }[]>>;
+  /** Tools whose copy was edited since the last sync and waits to spread. */
+  edited?: Tool[];
   /** Each tool's main copy's content ID, to tie a choice to what was seen. */
   hashes?: Partial<Record<Tool, string>>;
   /** Where each copy lives, for the details. */
@@ -95,7 +97,8 @@ export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   if (skill.off.includes(tool)) return has ? 'present' : 'absent';
   // Nothing can be copied here unless a tool it syncs to has a copy to start from.
   if (!has) return comparedTools(skill).length ? 'will-sync' : 'absent';
-  return copiesDiffer(skill) ? 'differs' : 'synced';
+  // An edit waiting to spread is pending, not a choice to make.
+  return copiesDiffer(skill) ? (skill.edited?.length ? 'will-sync' : 'differs') : 'synced';
 }
 
 export function syncOf(skill: SampleSkill, toolList: Tool[] = tools): Sync {

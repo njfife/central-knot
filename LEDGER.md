@@ -231,3 +231,19 @@ A managed skill's record hash is its baseline. Each pass (opening a home, Read a
 - rename and case-only rename.
 
 **Validation.** 89 unit tests (10 new). Mac e2e 403/403 with 8 crash rounds, including, through the real app: an edit spreading and Undo, the settle window, a deletion spreading, History, and Restore. Smoke pass. Linux e2e 94/94. Nathan's real-home record is unchanged.
+
+## Two-way skills, checkpoint 2: watching, polling and the Sync switch, November 8, 2026
+
+- **Watching (SYN-04).** While the app is open, the main process watches each tool's skills folders (recursive `fs.watch`) and the shared `.agents/skills`, and also polls every 20 s (T-08: at most 30 s). An event only prompts a pass, after a 1.5 s debounce. A follow-up pass runs just after the settle window, so a deletion finishes without a click. Background passes go through the same queue as the page's requests. Their notices are held until the page next reads, and the page refreshes quietly when one changed something. Watchers and timers stop on quit.
+- **Sync switch (SYN-03),** in the status bar, saved per build:
+  - **Off:** passes only observe, keeping the ordering evidence and writing nothing. A banner says so and offers **Sync now** for one full pass. Edits waiting to spread show as pending blue, not as "Copies differ", and the Apply bar does not claim them.
+  - **Explicit actions still run:** with Sync off, Apply all writes exactly the skills it shows, and nothing else rides along.
+- **Proved order now happens in practice.** An edit observed while the other copy was still unchanged is the older one, and a later edit elsewhere wins with "order proved", even when the tie-break would have picked the other.
+
+**Not yet:**
+- a tray or menu-bar indicator for resolutions while the window is closed (D-36); the app quits with its window today, so nothing runs closed;
+- 30-day retention expiry (STO-04);
+- rename and case-only rename;
+- a Code tab or Copilot app session check (AT-68).
+
+**Validation.** 92 unit tests (3 new). Mac e2e 336/336 with 8 crash rounds, including, through the real app: an edit on disk spreading with no click, the page hearing of it, Sync off noting but not spreading, the pending display, and Sync now. Linux e2e 103/103, so watching works there too. Nathan's real-home record is unchanged.

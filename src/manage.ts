@@ -185,6 +185,14 @@ export async function manageView(context: ShareContext, caughtUp: DestinationRes
   const snapshots = await context.read();
   const { record } = await readRecord(context.home);
   const gathered = await gather(context, snapshots, record);
+  // Edits waiting to spread (Sync off, or a pass still settling): the page shows them as pending, not as a choice to make.
+  for (const [key, entry] of gathered) {
+    const item = record?.items[key];
+    if (item?.state !== 'shared' || !item.hash) continue;
+    const recorded = new Set(item.copies.filter(copy => copy.status === 'written').map(copy => copy.directory));
+    const edited = entry.locations.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== item.hash).map(location => location.tool);
+    if (edited.length) entry.facts.edited = [...new Set(edited)];
+  }
   const skills = [...gathered.values()].map(entry => entry.facts).sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')));
   const tools = presentTools(snapshots);
   const writes = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, { to: rootOf(context, tool), alsoReadBy: harnesses[tool].otherReaders, blocked: await rootProblem(context, tool) }] as const)));
@@ -214,14 +222,20 @@ async function replaceCopy(context: ShareContext, key: string, source: string, t
  * Records the person's choices, then brings every managed skill into line: a copy goes to each tool it syncs to and lacks,
  * and for differing copies the chosen copy replaces the others. No changes means a catch-up pass.
  */
-export async function applyChanges(context: ShareContext, changes: Change[], resume = false): Promise<ApplyResult> {
-  try { return await runApply(context, changes, resume); }
+/**
+ * `observeOnly` (Sync off, SYN-03): read and keep the ordering evidence, write nothing. `only`: write only these skills, so an
+ * explicit Apply all with Sync off does exactly what it shows and no background spreading rides along.
+ */
+export interface PassOptions { observeOnly?: boolean; only?: Set<string> }
+
+export async function applyChanges(context: ShareContext, changes: Change[], resume = false, options: PassOptions = {}): Promise<ApplyResult> {
+  try { return await runApply(context, changes, resume, options); }
   catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
     return { stopped: `That could not finish. ${plainError(error)} Read again to see where things stand.`, results: [], harnessWrites: 0 }; }
 }
 
-async function runApply(context: ShareContext, changes: Change[], resume: boolean): Promise<ApplyResult> {
+async function runApply(context: ShareContext, changes: Change[], resume: boolean, options: PassOptions): Promise<ApplyResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], harnessWrites: 0 };
   const gate = await syncGate(context);
@@ -229,6 +243,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (gate.state === 'needs-resume' && !resume) return { stopped: gate.reason, results: [], harnessWrites: 0 };
   let record = (await readRecord(context.home)).record;
   if (!record && !changes.length) return { results: [], harnessWrites: 0 };
+  if (options.observeOnly && !record) return { results: [], harnessWrites: 0 };
 
   const snapshots = await context.read();
   const tools = presentTools(snapshots);
@@ -262,7 +277,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     record.items[change.key] = item;
   }
   await save();
-  await clearStaleStages(context, tools.map(tool => writeRoot(harnesses[tool], context.home, context.overrides?.[tool])));
+  if (!options.observeOnly) await clearStaleStages(context, tools.map(tool => writeRoot(harnesses[tool], context.home, context.overrides?.[tool])));
 
   let writes = 0;
   const notices: SyncNotice[] = [];
@@ -271,6 +286,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   for (const [key, entry] of gathered) {
     const item = record.items[key];
     if (item?.state !== 'shared') continue;
+    if (options.only && !options.only.has(key)) continue;
     const name = entry.facts.name;
     if (entry.facts.held) { results.push({ item: name, outcome: 'held', message: entry.facts.held }); continue; }
     const syncing = tools.filter(tool => !item.off?.includes(tool));
@@ -306,6 +322,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       }
       // Never recreate a copy that may have just been deleted: wait for the settle window first.
       if (settling && !deletions.length) continue;
+      // Sync off: the evidence above is kept, so order can be proved later; nothing is written now.
+      if (options.observeOnly) continue;
       const changed = locations.filter(location => recorded.has(location.copy.directory) && location.copy.hash !== baseline);
       if (deletions.length) {
         const deletedSeen = Math.min(...deletions.map(entry2 => evidence.get(entry2.directory)!.missingSince!));
@@ -356,6 +374,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         continue;
       }
     }
+    if (options.observeOnly) continue;
     if (!locations.length) { results.push({ item: name, outcome: 'held', message: 'No tool it syncs to has a copy to start from.' }); continue; }
     const hashes = new Set(locations.map(location => location.copy.hash));
     try {

@@ -55,13 +55,16 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
   history(): Promise<HistoryEvent[]>;
+  setSync(on: boolean): Promise<HomeView | null>;
+  syncNow(home: string): Promise<HomeView | null>;
+  onSyncChanged(callback: () => void): void;
   restore(eventId: string, resume: boolean, home: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   plugins(): Promise<PluginsView | null>;
@@ -107,6 +110,8 @@ export interface SkillFacts {
   held?: string;
   /** The person chose to keep differing copies as they are. */
   separate?: boolean;
+  /** Tools whose copy of this managed skill was edited since the last sync and has not spread yet. */
+  edited?: HarnessId[];
   /**
    * For each tool's copy, what stops Apply all from making every tool use it: a differing copy Central Knot does not change,
    * or a tool that cannot load it. Each names the tool it concerns, so a tool turned off no longer counts.

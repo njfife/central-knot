@@ -1,10 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from 'electron';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
-import { harnesses, harnessIds } from './harnesses.ts';
+import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, manageView, readHistory, restoreFromHistory } from './manage.ts';
@@ -56,16 +56,87 @@ function context(): ShareContext {
 }
 
 
-async function view(): Promise<HomeView> {
+// ---------- Sync switch, watching and polling (SYN-03, SYN-04) ----------
+
+const syncSettingsPath = () => join(app.getPath('userData'), 'sync-settings.json');
+let syncOn = true;
+async function loadSyncSetting() {
+  try { syncOn = JSON.parse(await readFile(syncSettingsPath(), 'utf8')).syncOn !== false; } catch { syncOn = true; }
+}
+async function saveSyncSetting(on: boolean) {
+  syncOn = on;
+  await mkdir(app.getPath('userData'), { recursive: true });
+  await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
+}
+
+/** What background passes did since the page last read, so no notice is lost between reads. */
+let pendingResults: ApplyResult['results'] = [];
+let pendingNotices: NonNullable<ApplyResult['notices']> = [];
+
+/** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
+async function pass(explicit = false): Promise<ApplyResult | undefined> {
   const shared = context();
-  // Managed skills catch up on their own: each read brings missing copies back. Only where writing is allowed and the record is ours.
-  const pass = (await writeAccess(shared)).allowed && (await syncGate(shared)).state === 'ready' ? await applyChanges(shared, []) : undefined;
-  const caughtUp = pass?.results ?? [];
+  if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return undefined;
+  return applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
+}
+
+async function view(explicit = false): Promise<HomeView> {
+  const shared = context();
+  const result = await pass(explicit);
+  const caughtUp = [...pendingResults, ...(result?.results ?? [])];
+  const notices = [...pendingNotices, ...(result?.notices ?? [])];
+  pendingResults = [];
+  pendingNotices = [];
   const snapshots = await read();
   return {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots,
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), pass?.notices ?? []),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
   };
+}
+
+/** Background passes run through the same queue as the page's requests, one at a time, and tell the page when something changed. */
+const POLL_MS = 20_000;
+const DEBOUNCE_MS = 1_500;
+let watchers: FSWatcher[] = [];
+let poller: NodeJS.Timeout | undefined;
+let soon: NodeJS.Timeout | undefined;
+let followUp: NodeJS.Timeout | undefined;
+
+function background() {
+  if (!current || smoke) return;
+  const work = queue.then(async () => {
+    if (!current) return;
+    const result = await pass();
+    if (!result || (!result.harnessWrites && !result.notices?.length)) return;
+    pendingResults.push(...result.results);
+    pendingNotices.push(...(result.notices ?? []));
+    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+  });
+  queue = work.catch(() => undefined);
+  // A deletion waits out its settle window: look again just after it, so it finishes without a click.
+  clearTimeout(followUp);
+  followUp = setTimeout(background, 2_500);
+}
+
+const nudge = () => { clearTimeout(soon); soon = setTimeout(background, DEBOUNCE_MS); };
+
+function stopWatching() {
+  for (const watcher of watchers) watcher.close();
+  watchers = [];
+  clearInterval(poller); clearTimeout(soon); clearTimeout(followUp);
+  poller = undefined;
+}
+
+/** Watches each tool's skills folders (an event only prompts a read, CON-04), with polling as the fallback (T-08: at most 30 s). */
+async function startWatching() {
+  stopWatching();
+  if (!current || smoke) return;
+  const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
+  roots.add(join(current.home, '.agents/skills'));
+  for (const root of roots) {
+    try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }
+  }
+  poller = setInterval(background, POLL_MS);
 }
 
 // ---------- Marketplaces and plugins ----------
@@ -143,7 +214,7 @@ async function selectHome(mode: HomeMode): Promise<HomeView | null> {
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;
   current = next;
-  try { return await view(); } catch (error) { current = previous; throw error; }
+  try { const shown = await view(); void startWatching(); return shown; } catch (error) { current = previous; throw error; }
 }
 
 const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is HarnessId => harnessIds.includes(id as HarnessId)) : []);
@@ -163,6 +234,7 @@ if (!smoke && !app.requestSingleInstanceLock()) app.quit();
 app.on('second-instance', () => { if (window) { if (window.isMinimized()) window.restore(); window.focus(); } });
 
 app.whenReady().then(async () => {
+  await loadSyncSetting();
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 860, minHeight: 560, show: !smoke,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',
@@ -230,8 +302,11 @@ app.whenReady().then(async () => {
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+  handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });
+  handle('sync:now', async home => (home === current?.home ? view(true) : null));
+  // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   handle('manage:apply', async (list, resume, home) => (home === current?.home
-    ? applyChanges(context(), changes(list), resume === true)
+    ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   await window.loadFile(join(__dirname, 'index.html'), process.argv.some(arg => arg.startsWith('--design-preview')) ? { query: { design: process.argv.find(arg => arg.startsWith('--design-preview'))!.split('=')[1] ?? 'b3' } } : undefined);
   if (smoke) {
@@ -257,5 +332,5 @@ app.whenReady().then(async () => {
   }
 }).catch(() => { console.error('Central Knot could not open.'); app.exit(1); });
 
-app.on('window-all-closed', () => app.quit());
-app.on('will-quit', () => { if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });
+app.on('window-all-closed', () => { stopWatching(); app.quit(); });
+app.on('will-quit', () => { stopWatching(); if (practiceHome) rmSync(practiceHome, { recursive: true, force: true }); });

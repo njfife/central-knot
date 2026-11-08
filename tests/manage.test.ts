@@ -904,3 +904,49 @@ test('A copy removed while its tool was off is caught up when the tool is turned
     assert.equal(await exists(join(box.home, CLAUDE, 'pair/SKILL.md')), true, 'a copy removed while unmanaged is no deletion either');
   } finally { await box.cleanup(); }
 });
+
+// ---------- Sync off: observing, proved order, scoped Apply all (SYN-03, CON-04) ----------
+
+test('Sync off: a pass only observes, the page shows the edit as pending, and turning Sync on spreads it', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited while off.'));
+    const observed = await applyChanges(fast(box), [], false, { observeOnly: true });
+    assert.equal(observed.harnessWrites, 0);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Original.'));
+    assert.deepEqual((await facts(box, 'pair')).edited, ['claude-cli']);
+    await applyChanges(fast(box), []);
+    assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Edited while off.'));
+    assert.equal((await facts(box, 'pair')).edited, undefined);
+  } finally { await box.cleanup(); }
+});
+
+test('Proved order beats the tie-break: an edit seen while the other copy was still unchanged is the older one', async () => {
+  const box = await sandbox();
+  try {
+    let now = 1000;
+    const timed = (extra: Partial<ShareContext> = {}) => fast(box, { now: () => now, ...extra });
+    await managedPair(box);
+    // Copilot edits first and is seen at t=2000 while Claude is still at the baseline; Claude edits later.
+    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Copilot, earlier.'));
+    now = 2000; await applyChanges(timed(), [], false, { observeOnly: true });
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Claude, later.'));
+    now = 3000; const result = await applyChanges(timed(), []);
+    assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner, notice.orderProved]), [['conflict', 'claude-cli', true]], 'the tie-break alone would have picked Copilot');
+    assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Claude, later.'));
+  } finally { await box.cleanup(); }
+});
+
+test('With Sync off, Apply all writes only the skills it shows', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box, 'old');
+    await writeFile(join(box.home, CLAUDE, 'old/SKILL.md'), text('old', 'Pending edit.'));
+    await skill(box.home, CLAUDE, 'fresh');
+    const result = await applyChanges(fast(box), [manage('fresh')], false, { only: new Set(['fresh']) });
+    assert.equal(await exists(join(box.home, COPILOT, 'fresh/SKILL.md')), true, 'what Apply all shows is written');
+    assert.equal(await readFile(join(box.home, COPILOT, 'old/SKILL.md'), 'utf8'), text('old', 'Original.'), 'the pending edit waits for Sync');
+    assert.equal(result.notices?.length ?? 0, 0);
+  } finally { await box.cleanup(); }
+});
