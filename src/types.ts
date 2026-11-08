@@ -88,7 +88,7 @@ export interface ActionResult {
   preview: Preview;
 }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; preview: Preview }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; preview: Preview; manage: ManageView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -96,4 +96,52 @@ export interface DesktopApi {
   preview(selected: HarnessId[], dontShare: string[]): Promise<Preview>;
   start(selected: HarnessId[], dontShare: string[], resume: boolean, home: string): Promise<ActionResult>;
   undo(selected: HarnessId[], only: string | undefined, home: string): Promise<ActionResult>;
+  apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
 }
+
+// ---------- Managing skills across tools ----------
+
+export interface ToolCopy {
+  hash: string;
+  directory: string;
+  rootLabel: string;
+  lines: number;
+  modified: string;
+  /** First line of the skill's body, to tell differing copies apart. */
+  summary: string;
+}
+
+/** What is true now for one skill, across every tool. The page derives its marks from this. */
+export interface SkillFacts {
+  key: string;
+  name: string;
+  description: string;
+  copies: Partial<Record<HarnessId, ToolCopy>>;
+  managed: boolean;
+  off: HarnessId[];
+  /** Why a tool that lacks the skill could not load a copy. */
+  cannot: Partial<Record<HarnessId, string>>;
+  /** Why the skill cannot be managed at all, such as a link inside it. */
+  held?: string;
+  /** The person chose to keep differing copies as they are. */
+  separate?: boolean;
+}
+
+export interface ManageView {
+  tools: HarnessId[];
+  skills: SkillFacts[];
+  access: WriteAccess;
+  gate: SyncGate;
+  /** What the automatic catch-up just did, if anything. */
+  caughtUp: DestinationResult[];
+}
+
+export interface Change {
+  key: string;
+  managed: boolean;
+  off: HarnessId[];
+  /** For differing copies: the tool whose copy every tool should use, or keep both. */
+  use?: HarnessId | 'separate';
+}
+
+export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number }

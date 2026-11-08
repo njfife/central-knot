@@ -1,14 +1,37 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
-import { rerender, announce } from './app.ts';
+import { applyManage, rerender, announce, shownPath, state } from './app.ts';
 import { button, h, hiddenText, icon } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
-import { applied, cellOf, sample, syncOf, tools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
+import { applied, cellOf, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
+import type { Change, SkillFacts } from './types.ts';
 
 const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
-const other = (tool: Tool) => tools.find(entry => entry !== tool)!;
-const others = (tool: Tool) => tools.filter(entry => entry !== tool);
+const ago = (iso: string) => {
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+  return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
+};
+
+/** The real home's facts in the shape the page works with. */
+const fromFacts = (facts: SkillFacts): SampleSkill => ({
+  key: facts.key, description: facts.description, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate,
+  copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
+  paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
+  versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description }])),
+});
+
+let factsCache: { from: unknown; list: SampleSkill[] } | undefined;
+function committedList(): SampleSkill[] {
+  if (designMode) return view.committed;
+  const manage = state.home?.manage;
+  if (!manage) return [];
+  if (factsCache?.from !== manage) factsCache = { from: manage, list: manage.skills.map(fromFacts) };
+  return factsCache.list;
+}
+const toolList = (): Tool[] => (designMode ? sampleTools : state.home?.manage.tools ?? []);
+const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
+const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
 type Resolution = Tool | 'separate';
 interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution }
@@ -28,7 +51,7 @@ const view = {
 document.addEventListener('click', () => { if (view.toolMenu) { view.toolMenu = undefined; rerender(); } });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { view.toolMenu = undefined; rerender(); document.getElementById('tool-menu-button')?.focus(); } });
 
-const committedOf = (key: string) => view.committed.find(skill => skill.key === key)!;
+const committedOf = (key: string) => committedList().find(skill => skill.key === key)!;
 
 /** A skill as it will be after Apply all. */
 function effective(skill: SampleSkill): SampleSkill {
@@ -43,7 +66,7 @@ function effective(skill: SampleSkill): SampleSkill {
   return next;
 }
 
-const rows = () => view.committed.map(effective);
+const rows = () => committedList().map(effective);
 
 function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft) {
   const base = committedOf(key);
@@ -71,6 +94,11 @@ function resolve(key: string, choice: Resolution | undefined) {
 
 function applyAll() {
   const count = view.draft.size;
+  if (!designMode) {
+    const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve })) as Change[];
+    void applyManage(changes, () => view.draft.clear());
+    return;
+  }
   view.committed = view.committed.map(skill => applied(effective(skill)));
   view.draft.clear();
   announce(`${count} ${count === 1 ? 'change' : 'changes'} applied.`);
@@ -98,8 +126,8 @@ export function brandMark(tool: Tool, size = 16): Element {
   return holder.content.firstElementChild as SVGElement;
 }
 
-function toggle(on: boolean, label: string, onchange: (on: boolean) => void) {
-  return h('button.switch', { type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false) {
+  return h('button.switch', { type: 'button', role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
     h('span.switch-knob'));
 }
 
@@ -109,27 +137,30 @@ const smallAction = (label: string, id: string, onclick: () => void, extra = '')
 // ---------- Parts every option shares ----------
 
 function filterBar() {
-  const list = view.committed;
-  const attention = list.filter(skill => syncOf(effective(skill)) === 'attention').length;
+  const list = committedList();
+  const attention = list.filter(skill => syncOf(effective(skill), toolList()) === 'attention').length;
   const chip = (id: Filter, label: string, warn?: number) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn ? '.chip-warn' : ''}`, { type: 'button', 'aria-pressed': String(view.filter === id), onclick: () => { view.filter = id; rerender(); } },
     label, warn ? h('span.chip-count', {}, String(warn)) : null);
   return h('div.chips', { role: 'group', 'aria-label': 'Show' },
     chip('all', 'All'), chip('managed', 'Managed'), chip('unmanaged', 'Unmanaged'), attention ? chip('attention', 'Copies differ', attention) : null);
 }
 
-const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => tools.some(tool => cellOf(skill, tool) === 'will-sync')).length;
-const manageable = () => view.committed.filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill)) !== 'attention');
+const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync')).length;
+const manageable = () => committedList().filter(skill => !skill.held).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
+
+const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
+const resumeNeeded = () => !designMode && state.home?.manage.gate.state === 'needs-resume';
 
 function changeBar() {
   const count = view.draft.size;
-  const waiting = pendingSyncs(view.committed);
+  const waiting = pendingSyncs(committedList());
   const ready = manageable();
   const manageAll = variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: 'Manage all', name: `Manage all ${ready.length} unmanaged skills`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   if (count) return h('div.apply', {}, manageAll,
     h('span.apply-count.apply-quiet', {}, `${count} ${count === 1 ? 'change' : 'changes'}`),
     button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded.'); rerender(); } }),
-    button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'apply', onclick: applyAll }));
-  if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'apply', onclick: applyAll }));
+    button({ variant: 'primary', size: 'small', label: resumeNeeded() ? 'Resume and apply all' : 'Apply all', id: 'apply', disabled: !canWrite(), onclick: applyAll }));
+  if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'apply', disabled: !canWrite(), onclick: applyAll }));
   if (manageAll) return h('div.apply', {}, manageAll);
   return h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
 }
@@ -146,7 +177,7 @@ function cell(skill: SampleSkill, tool: Tool) {
   const action = state === 'cannot' ? '' : differs ? 'Compare the copies' : on ? `Stop syncing to ${names[tool]}` : `Sync to ${names[tool]}`;
   const text = skill.cannot?.[tool] ?? `${names[tool]}: ${look.label}${pending ? ' (not applied yet)' : ''}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
-    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot', 'data-state': state,
+    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}`, { type: 'button', title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'ring-strong' : '') : null));
 }
@@ -167,16 +198,16 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
 /** Everything about one skill, opened in place under its row. Differing copies add the choice of which one to use. */
 function details(skill: SampleSkill) {
   const draft = view.draft.get(skill.key);
-  const differs = tools.some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
-  const status = skill.separate ? 'Unmanaged. Both copies are kept as they are.' : skill.managed
-    ? `Managed. Syncing to ${tools.filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]).join(' and ') || 'no tool'}.`
+  const differs = toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
+  const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Both copies are kept as they are.' : skill.managed
+    ? `Managed. Syncing to ${toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]).join(' and ') || 'no tool'}.`
     : 'Unmanaged. Central Knot leaves every copy alone.';
   return h(`div.compare.details${differs ? '.details-differs' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
     h('div.details-head', {},
       h('p.details-description', {}, skill.description),
       h('p.details-status', {}, status, draft ? h('span.details-pending', {}, ' Not applied yet.') : null)),
-    h('div.details-tools', {}, tools.map(tool => h('div.details-tool', {},
-      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', {}, `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}`)),
+    h('div.details-tools', {}, toolList().map(tool => h('div.details-tool', {},
+      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
       h('div.details-tool-body', {}, cell(skill, tool), h('span', {}, toolLine(skill, tool)))))),
     differs ? compareChoices(skill) : null,
     h('div.compare-foot', {}, smallAction('Close', `close-${skill.key}`, () => { view.comparing = undefined; rerender(); })));
@@ -195,7 +226,7 @@ function compareChoices(skill: SampleSkill) {
   };
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The two copies of ${skill.key} differ. Which one should both tools use?`),
-    h('div.compare-choices', {}, tools.map(choice),
+    h('div.compare-choices', {}, toolList().map(choice),
       h('button.version.version-quiet', { type: 'button', id: `separate-${skill.key}`, onclick: () => resolve(skill.key, 'separate') },
         h('span.version-head', {}, h('strong', {}, 'Keep both as they are')),
         h('span.version-effect', {}, 'Each tool keeps its own copy; Central Knot leaves this skill unmanaged'))));
@@ -203,7 +234,7 @@ function compareChoices(skill: SampleSkill) {
 
 function row(skill: SampleSkill) {
   const draft = view.draft.get(skill.key);
-  const attention = syncOf(skill) === 'attention';
+  const attention = syncOf(skill, toolList()) === 'attention';
   const decided = draft?.resolve;
   return [
     h(`div.ov-row${draft ? '.changed' : ''}${skill.managed ? '' : '.unmanaged'}${view.comparing === skill.key ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(view.comparing === skill.key), onclick: () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } },
@@ -211,10 +242,11 @@ function row(skill: SampleSkill) {
         h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } },
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.key),
+        skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', {}, decided === 'separate' ? 'Keeping both' : `Using ${names[decided]}`, smallAction('Undo', `undo-${skill.key}`, () => resolve(skill.key, undefined))) : null),
-      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.key}`, on => setManaged([skill.key], on))),
-      tools.map(tool => cell(skill, tool)),
+      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.key}`, on => setManaged([skill.key], on), !!skill.held)),
+      toolList().map(tool => cell(skill, tool)),
       h('div.ov-fill')),
     view.comparing === skill.key ? details(skill) : null,
   ];
@@ -234,7 +266,7 @@ function legend() {
 /** Skills one tool has and the other lacks (or does not sync), ready to send across. */
 const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => list.filter(skill => {
   const now = effective(skill);
-  return now.copies[from] !== undefined && !now.cannot?.[to] && syncOf(now) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
+  return now.copies[from] !== undefined && !now.cannot?.[to] && syncOf(now, toolList()) !== 'attention' && !now.separate && !(now.managed && !now.off.includes(to) && now.copies[to] !== undefined) && !(now.managed && !now.off.includes(to));
 });
 const send = (from: Tool, to: Tool, list: SampleSkill[]) => {
   const keys = sendable(from, to, list).map(skill => skill.key);
@@ -290,14 +322,14 @@ function directionBand(list: SampleSkill[]) {
 
 /** Option C: whatever the filter or search shows is the set the actions apply to. */
 function shownStrip(shown: SampleSkill[]) {
-  const unmanaged = shown.filter(skill => !skill.managed && !skill.separate && syncOf(skill) !== 'attention');
+  const unmanaged = shown.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention');
   const managed = shown.filter(skill => skill.managed);
   return h('div.shown-strip', {},
     h('strong', {}, view.find || view.filter !== 'all' ? `${shown.length} shown` : `All ${shown.length}`),
     button({ variant: 'outline', size: 'small', label: unmanaged.length ? `Manage ${unmanaged.length}` : 'Manage', id: 'shown-manage', disabled: !unmanaged.length, onclick: () => setManaged(unmanaged.map(skill => skill.key), true) }),
     button({ variant: 'ghost', size: 'small', label: managed.length ? `Unmanage ${managed.length}` : 'Unmanage', id: 'shown-unmanage', disabled: !managed.length, onclick: () => setManaged(managed.map(skill => skill.key), false) }),
     h('span.bulk-divider', { 'aria-hidden': 'true' }),
-    tools.map(tool => {
+    toolList().map(tool => {
       const count = sendable(other(tool), tool, shown).length;
       return button({ variant: 'ghost', size: 'small', label: count ? `Use ${count} in ${names[tool]}` : `All in ${names[tool]}`, id: `shown-${tool}`, disabled: !count, onclick: () => send(other(tool), tool, shown) });
     }));
@@ -307,7 +339,7 @@ function section(label: string, list: SampleSkill[], after: number) {
   if (!list.length) return null;
   const sorted = [...list].sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')));
   const managing = label === 'Unmanaged';
-  const target = managing ? sorted.filter(skill => !skill.managed && !skill.separate && syncOf(skill) !== 'attention') : sorted.filter(skill => skill.managed);
+  const target = managing ? sorted.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention') : sorted.filter(skill => skill.managed);
   return h('div', { role: 'rowgroup' },
     h('div.ov-section', { role: 'row' },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
@@ -316,22 +348,44 @@ function section(label: string, list: SampleSkill[], after: number) {
     sorted.flatMap(row));
 }
 
+let draftHome: string | undefined;
+
+/** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
+function notices() {
+  if (designMode || !state.home) return null;
+  const manage = state.home.manage;
+  const bands: HTMLElement[] = [];
+  if (!manage.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, manage.access.reason)));
+  if (manage.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
+  if (manage.gate.state === 'needs-resume') bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
+  const applied = state.applied;
+  const problems = applied ? applied.results.filter(result => result.outcome === 'failed' || result.outcome === 'held') : [];
+  if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
+  else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
+  const caught = manage.caughtUp.filter(result => result.outcome === 'written').length;
+  if (caught && !applied) bands.push(h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, `Caught up: ${caught} ${caught === 1 ? 'copy' : 'copies'} written for managed skills.`)));
+  return bands.length ? h('div.bands', {}, bands) : null;
+}
+
 export function designOverview() {
+  if (!designMode && state.home?.home !== draftHome) { view.draft.clear(); view.comparing = undefined; draftHome = state.home?.home; }
   const all = rows();
   const needle = view.find.trim().toLowerCase();
-  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill) === 'attention'))
+  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill, toolList()) === 'attention'))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
   const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
     oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
+    notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
-      h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync', style: `--tool-count: ${tools.length}` },
+      h('div.ov', { role: 'table', 'aria-label': 'Skills and where they sync', style: `--tool-count: ${toolList().length}` },
         h('div.ov-row.ov-head', { role: 'row' },
           h('div.ov-name', { role: 'columnheader' }, 'Skill'),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
-          tools.map(tool => toolHead(tool, shown)),
+          toolList().map(tool => toolHead(tool, shown)),
           h('div.ov-fill')),
         section('Managed', shown.filter(skill => committedOf(skill.key).managed), shown.filter(skill => skill.managed).length),
         section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length)),

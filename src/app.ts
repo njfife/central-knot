@@ -1,4 +1,4 @@
-import type { ActionResult, DesktopApi, DestinationResult, HarnessId, HomeMode, HomeView, Preview } from './types.ts';
+import type { ActionResult, ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, HomeMode, HomeView, Preview } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -23,6 +23,8 @@ export const state = {
   /** Disclosures the person opened or closed, surviving re-renders. */
   disclosures: {} as Record<string, boolean>,
   busy: undefined as string | undefined,
+  /** What the last Apply all did, shown until the next action or read. */
+  applied: undefined as ApplyResult | undefined,
   /** The window chooses the sidebar shape until the person uses the toggle. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -62,9 +64,22 @@ function accept(view: HomeView) {
   state.dontShare = [];
   state.results = [];
   state.stopped = undefined;
+  state.applied = undefined;
   state.item = undefined;
   if (state.panel === 'item') state.panel = undefined;
 }
+
+/** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
+export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
+  const home = state.home!;
+  const result = await api().apply(changes, home.manage.gate.state === 'needs-resume', home.home);
+  const view = await api().refresh();
+  if (view) { state.home = view; state.preview = view.preview; state.overview = view.preview; }
+  state.applied = result;
+  if (!result.stopped) onDone();
+  const failed = result.results.filter(entry => entry.outcome === 'failed').length;
+  announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
+});
 
 export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {
   const view = await api().selectHome(mode);
@@ -76,6 +91,7 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
   if (!view) return;
   state.home = view;
   state.overview = view.preview;
+  state.applied = undefined;
   state.results = [];
   state.stopped = undefined;
   state.preview = await api().preview(state.selected, state.dontShare);

@@ -107,35 +107,14 @@ function skeletonRows() {
 }
 
 export function overviewPage() {
-  if (designMode) return designOverview();
   const { home, preview } = state;
+  if (designMode) return designOverview();
   if (!home || !preview) {
-    if (state.busy) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, skeletonRows()));
+    if (state.busy) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
     return h('div.page', {}, emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome('fixture') })));
   }
-  const rows = buildRows(home, state.overview ?? preview);
-  const tools = toolIds(home);
-  const region = h('div.scroll.matrix', { id: 'matrix-scroll' }, matrixBody(rows, tools));
-  const count = h('span.result-count', {}, countText(rows.filter(row => matches(row, state.find)).length, rows.length));
-  const refreshList = () => {
-    region.replaceChildren(matrixBody(rows, tools));
-    count.textContent = countText(rows.filter(row => matches(row, state.find)).length, rows.length);
-  };
-  // Every skill Share would start managing, including ones already identical that need no copy.
-  const toCopy = preview.items.filter(item => ['copy', 'identical', 'already-shared'].includes(item.state) && !['Written', 'With limits'].includes(item.status)).length;
-  const sharing = state.panel === 'share';
-  return h('div.page', {},
-    noticeBand(home, preview),
-    h('div.toolbar', {},
-      findField('Find', refreshList),
-      h('div.toolbar-end', {}, count,
-        button({
-          variant: sharing ? 'secondary' : 'primary', size: 'small', id: 'share-open', label: toCopy ? `Share ${toCopy}` : 'Share',
-          name: toCopy ? `Share ${toCopy} ${toCopy === 1 ? 'skill' : 'skills'}` : 'Share',
-          attrs: { 'aria-expanded': String(sharing) },
-          onclick: () => (sharing ? closePanel() : openPanel('share')),
-        }))),
-    region);
+  if (!home.manage.skills.length) return h('div.page', {}, emptyState('wand-sparkles', 'No skills here yet', 'Neither tool has a user-wide skill in this home. Choose another home at the bottom left, or read this one again.', button({ icon: 'refresh-cw', label: 'Read again', id: 'empty-read-again', onclick: () => void readAgain() })));
+  return designOverview();
 }
 
 // ---------- Item detail ----------

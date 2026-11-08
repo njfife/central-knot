@@ -6,8 +6,9 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { harnesses, harnessIds } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
-import { buildPreview, start, undo, type ShareContext } from './share.ts';
-import type { ActionResult, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import { buildPreview, start, syncGate, undo, writeAccess, type ShareContext } from './share.ts';
+import { applyChanges, manageView } from './manage.ts';
+import type { ActionResult, ApplyResult, Change, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
@@ -56,9 +57,16 @@ function context(): ShareContext {
 const present = (snapshot: Snapshot) => snapshot.detection !== 'Not found' || snapshot.skills.length > 0;
 
 async function view(): Promise<HomeView> {
+  const shared = context();
+  // Managed skills catch up on their own: each read brings missing copies back. Only where writing is allowed and the record is ours.
+  const caughtUp = (await writeAccess(shared)).allowed && (await syncGate(shared)).state === 'ready' ? (await applyChanges(shared, [])).results : [];
   const snapshots = await read();
   const selected = snapshots.filter(present).map(snapshot => snapshot.harness);
-  return { mode: current!.mode, label: current!.label, home: current!.home, snapshots, preview: await buildPreview(context(), selected, []) };
+  return {
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots,
+    preview: await buildPreview(shared, selected, []),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'failed')),
+  };
 }
 
 async function selectHome(mode: HomeMode): Promise<HomeView | null> {
@@ -110,6 +118,12 @@ app.whenReady().then(async () => {
   // Writes act only on the home the window says it is showing.
   const notShown = async (selected: unknown): Promise<ActionResult> => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0, preview: await buildPreview(context(), ids(selected), []) });
   handle('share:start', async (selected, dontShare, resume, home) => (home === current?.home ? start(context(), ids(selected), strings(dontShare), resume === true) : notShown(selected)));
+  const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
+    typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
+    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use))).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use }));
+  handle('manage:apply', async (list, resume, home) => (home === current?.home
+    ? applyChanges(context(), changes(list), resume === true)
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('share:undo', async (selected, only, home) => (home === current?.home ? undo(context(), ids(selected), typeof only === 'string' ? only : undefined) : notShown(selected)));
   await window.loadFile(join(__dirname, 'index.html'), process.argv.some(arg => arg.startsWith('--design-preview')) ? { query: { design: process.argv.find(arg => arg.startsWith('--design-preview'))!.split('=')[1] ?? 'b3' } } : undefined);
   if (smoke) {
@@ -119,13 +133,13 @@ app.whenReady().then(async () => {
         const check = async () => {
           if (document.body.dataset.ready === 'true') {
             const preview = await window.centralKnot.preview(['claude-cli', 'copilot-cli'], []);
-            resolveResult({ rows: document.querySelectorAll('.mx-cell[data-tool="claude-cli"][data-present="true"]').length, home: document.querySelector('#home-label').textContent, plan: preview.items.map(item => item.key + ':' + item.state).join(','), allowed: preview.access.allowed });
+            resolveResult({ rows: document.querySelectorAll('.ov-row[data-key]').length, home: document.querySelector('#home-label').textContent, plan: preview.items.map(item => item.key + ':' + item.state).join(','), allowed: preview.access.allowed });
           } else if (Date.now() > deadline) rejectResult(new Error('Renderer did not become ready'));
           else setTimeout(check, 30);
         }; check();
       })`);
       const plan = 'notes:identical,release-notes:copy,review:collision,standup:copy';
-      if (result.rows !== 3 || result.home !== 'Practice copy' || result.plan !== plan || !result.allowed) throw new Error('Unexpected fixture render.');
+      if (result.rows !== 4 || result.home !== 'Practice copy' || result.plan !== plan || !result.allowed) throw new Error('Unexpected fixture render.');
       console.log(JSON.stringify({ smoke: 'pass', ...result }));
       app.exit(0);
     } catch {

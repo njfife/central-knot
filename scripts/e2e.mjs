@@ -144,67 +144,93 @@ async function launch(userData = join(scratch, 'data')) {
 }
 
 // ---------- Flows ----------
+const rowKeys = a => a.all('.ov-row[data-key]', 'e.dataset.key');
+const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] [data-tool=${JSON.stringify(tool)}] .cell-button')?.dataset.state ?? null`);
+const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
+const applyAll = async a => { await a.click('#apply'); await a.settle(); };
+
 async function practiceFlow() {
   const a = await launch();
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
-  same('practice shows both tools', [await a.all('.mx-cell[data-tool="claude-cli"][data-present="true"]').then(r => r.length), await a.all('.mx-cell[data-tool="copilot-cli"][data-present="true"]').then(r => r.length)], [3, 3]);
-  same('rows and order', await a.all('.mx-item', 'e.dataset.key'), ['notes', 'release-notes', 'review', 'standup']);
-  same('statuses', await a.all('.mx-item .status-word'), ['Not shared', 'Not shared', 'Needs a decision', 'Not shared']);
-  same('Share counts every skill it would manage', (await a.text('#share-open')).trim(), 'Share 3');
+  same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
+  same('nothing is managed at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
+  same('cells say what each tool has', [await cellState(a, 'release-notes', 'claude-cli'), await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'review', 'copilot-cli')], ['present', 'absent', 'present-differs']);
+  check('copies differ is flagged', await a.exists('#decide-review'));
   await a.shot('practice-overview');
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  check('practice home is not the disposable real home', practice !== HOME && existsSync(practice), practice);
+  const reviewClaude = readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8');
+  const reviewCopilot = readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8');
 
+  // Manage all, then Discard: nothing changes.
+  await a.click('#manage-all');
+  same('Manage all queues the three it can', await Promise.all(['notes', 'release-notes', 'standup', 'review'].map(key => switchOn(a, key))), [true, true, true, false]);
+  check('nothing written before Apply all', !existsSync(join(practice, '.copilot/skills/release-notes')));
+  await a.click('#discard');
+  same('Discard clears every change', await switchOn(a, 'notes'), false);
+
+  // Manage all, Apply all.
+  await a.click('#manage-all');
+  await a.shot('practice-pending');
+  await applyAll(a);
+  same('copies written both ways', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md'))], [true, true]);
+  same('copy bytes match', tree(join(practice, '.copilot/skills/release-notes')), tree(join(practice, '.claude/skills/release-notes')));
+  same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
+  same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);
+  same('managed after Apply all', await switchOn(a, 'release-notes'), true);
+  await a.shot('practice-applied');
+
+  // Details open under a row.
+  await a.click('#open-release-notes');
+  check('details explain each tool', (await a.text('.details')).includes('Synced'), await a.text('.details'));
+  await a.click('#close-release-notes');
+
+  // Choose which copy to use.
+  await a.click('#decide-review');
+  check('the choice opens', await a.exists('#use-review-copilot-cli'));
+  await a.shot('practice-compare');
+  await a.click('#use-review-copilot-cli');
+  check('the choice waits for Apply all', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
+  await applyAll(a);
+  same('the chosen copy is used in both tools', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), reviewCopilot);
+  check('the replaced copy is kept in the store', readdirSync(join(practice, '.central-knot/items/review')).some(revision => readFileSync(join(practice, '.central-knot/items/review', revision, 'SKILL.md'), 'utf8') === reviewClaude));
+  check('no longer flagged', !(await a.exists('#decide-review')));
+
+  // Catch-up: a managed copy deleted on disk comes back on Read again.
+  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
+  await a.click('#header-refresh');
+  check('Read again brings a managed copy back', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')));
+  check('it says so', (await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
+
+  // Stop all for Copilot: copies stay, syncing stops.
+  await a.click('#tool-copilot-cli');
+  check('the tool menu opens', await a.exists('#stop-all-copilot-cli'));
+  await a.shot('practice-tool-menu');
+  await a.click('#stop-all-copilot-cli');
+  await applyAll(a);
+  same('Stop all keeps the copies', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), true);
+  rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
+  await a.click('#header-refresh');
+  same('and stops bringing them back', existsSync(join(practice, '.copilot/skills/release-notes')), false);
+
+  // Add all from Claude Code to Copilot turns it back on.
+  await a.click('#tool-claude-cli');
+  await a.click('#use-all-claude-cli-in-copilot-cli');
+  await applyAll(a);
+  same('Add all copies again', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), true);
+
+  // Unmanage keeps copies.
+  await a.click(`.ov-row[data-key="standup"] .switch`);
+  await applyAll(a);
+  same('unmanaged', await switchOn(a, 'standup'), false);
+  same('unmanaging keeps both copies', [existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.copilot/skills/standup'))], [true, true]);
+
+  // Keyboard and find.
   await a.press('/', 'Slash');
   same('slash focuses find', await a.run(`document.activeElement?.id`), 'find');
   await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'stand'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.settle();
-  same('find filters', await a.all('.mx-item', 'e.dataset.key'), ['standup']);
-  await a.run(`(() => { const i = document.querySelector('#find'); i.value = 'nothing-like-this'; i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.settle();
-  same('find empty state', await a.all('.mx-item'), []);
-  await a.click('#clear-find-action');
-  same('clearing find restores rows', (await a.all('.mx-item')).length, 4);
-
-  await a.click('#row-review');
-  check('row opens detail with both locations', (await a.text('#panel-body')).includes('.claude/skills/review') && (await a.text('#panel-body')).includes('.copilot/skills/review'));
-  check('detail shows original contents', (await a.text('#panel-body')).includes('Read the supplied changes.'));
-  await a.press('Escape');
-  check('Esc closes the panel', !(await a.exists('#panel-title')) || await a.run(`document.querySelector('#panel').hidden`));
-
-  await a.click('#nav-skills');
-  same('skills list', (await a.all('button[id^="list-"]')).length, 4);
-  await a.click('#list-standup');
-  check('skills detail', (await a.text('#detail-scroll')).includes('three-line standup'));
-  await a.click('#nav-tools');
-  same('tool cards', (await a.text('#tools-scroll')).includes('Claude Code CLI') && (await a.text('#tools-scroll')).includes('GitHub Copilot CLI'), true);
-  await a.shot('practice-tools');
-  await a.click('#nav-overview');
-
-  const practice = await a.run(`document.querySelector('.status-home').title`);
-  check('practice home is not the disposable real home', practice !== HOME && existsSync(practice), practice);
-  await a.click('#share-open');
-  same('practice plan', await a.plan(), { review: 'collision', 'release-notes': 'copy', standup: 'copy', notes: 'identical' });
-  check('collision shows its diff', (await a.text('#diff-text-review') ?? (await a.click('#diff-review-toggle').catch(() => {}), await a.text('#panel-body'))).includes('Read the supplied changes.') );
-  await a.shot('practice-share');
-  const reviewBefore = [tree(join(practice, '.claude/skills/review')), tree(join(practice, '.copilot/skills/review'))];
-  await a.click('#exclude-standup');
-  same('Don’t share replans', (await a.plan()).standup, 'dont-share');
-  await a.click('#exclude-standup');
-  same('clearing Don’t share replans', (await a.plan()).standup, 'copy');
-  await a.click('#start');
-  same('Start copies both ways', [existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.claude/skills/standup/SKILL.md'))], [true, true]);
-  same('copy bytes match', tree(join(practice, '.copilot/skills/release-notes')), tree(join(practice, '.claude/skills/release-notes')));
-  same('collision untouched', [tree(join(practice, '.claude/skills/review')), tree(join(practice, '.copilot/skills/review'))], reviewBefore);
-  same('results', (await a.all('.result', 'e.dataset.outcome')).sort(), ['held', 'written', 'written']);
-  await a.shot('practice-after-start');
-  await a.click('#start');
-  check('repeat copies nothing', /Nothing was copied|Nothing needed copying/.test(await a.text('#announcement')), await a.text('#announcement'));
-  await a.click('#undo-all');
-  same('Undo removes only its copies', [existsSync(join(practice, '.copilot/skills/release-notes')), existsSync(join(practice, '.claude/skills/standup')), existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.copilot/skills/standup'))], [false, false, true, true]);
-  await a.expand();
-  same('undone skills stay Don’t share', (await a.plan()).standup, 'dont-share');
-  same('a skill Undo did not copy stays shared', (await a.plan()).notes, 'identical');
-  await a.click('#start');
-  same('Start after Undo does not recopy', existsSync(join(practice, '.copilot/skills/release-notes')), false);
+  same('find filters', await rowKeys(a), ['standup']);
   same('no page errors, practice', a.pageErrors, []);
   await a.quit();
 }
@@ -219,122 +245,70 @@ async function realHomeFlow() {
   const tools = await a.text('#tools-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107'), tools.slice(0, 300));
   await a.click('#nav-overview');
-  const rows = await a.all('.mx-item', 'e.dataset.key');
-  for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot']) check(`row for ${name}`, rows.includes(name), rows);
+  const rows = await rowKeys(a);
+  for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('malformed skill is no row', !rows.includes('bad-yaml'));
-  check('read problem is reported', (await a.text('.band') ?? '').includes('read problem'), await a.text('.band'));
-  await a.shot('real-overview');
+  same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
+  same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
+  check('a skill with a link inside is held', await a.exists('.ov-row[data-key="has-link"] .held-pill'));
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
-  await a.click(`[id="row-very-long-${'n'.repeat(150)}"]`);
-  await a.shot('narrow-long-name');
-  const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth, close: document.querySelector('#panel-close')?.getBoundingClientRect().right ?? document.querySelector('#panel-back')?.getBoundingClientRect().right })`);
-  check('a very long name stays on screen at 960', fits.page <= fits.window && fits.close <= fits.window, fits);
-  await a.press('Escape');
+  await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
+  const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);
+  check('a very long name stays on screen at 960', fits.page <= fits.window, fits);
   await a.send('Emulation.clearDeviceMetricsOverride');
-  await a.settle();
-  await a.click('#share-open');
-  await a.expand();
-  const plan = await a.plan();
-  same('real-shaped plan', [plan.rich, plan['名前-skill'], plan.scoped, plan.plain, plan['.dot-skill'], plan.clash, plan.twin, plan['from-copilot'], plan['has-link'], plan.linked, plan['read-only-inside'], plan['unreadable-file']],
-    ['copy', 'held', 'copy', 'held', 'held', 'collision', 'identical', 'copy', 'held', 'already-shared', 'copy', 'held']);
-  check('a refused name says why', (await a.text('.plan-card[data-key="名前-skill"]')).includes('will not load it'));
-  check('an unreadable skill is held, with the reason', (await a.text('.plan-card[data-key="unreadable-file"]')).includes('could not be read'));
-  // Only what the window shows may be written.
-  const wrongHome = await a.run(`window.centralKnot.start(['claude-cli','copilot-cli'], [], false, '/somewhere/else').then(r => [r.harnessWrites, r.stopped])`);
-  check('a Start for another home is refused', wrongHome[0] === 0 && /not the one open/.test(wrongHome[1]), wrongHome);
-  // Overview does not depend on the panel's ticks.
-  const statusesBefore = await a.all('.mx-item', "e.dataset.key + ':' + e.querySelector('.status-word').textContent");
-  await a.run(`document.querySelector('#tick-copilot-cli').click()`);
-  await a.settle();
-  same('Overview ignores unticked tools', await a.all('.mx-item', "e.dataset.key + ':' + e.querySelector('.status-word').textContent"), statusesBefore);
-  await a.run(`document.querySelector('#tick-copilot-cli').click()`);
-  await a.settle();
-  await a.expand();
-  check('known limit named', (await a.text('.plan-card[data-key="scoped"]')).includes('paths'));
-  await a.shot('real-share');
+  await a.click(`[id="close-very-long-${'n'.repeat(150)}"]`);
+  await a.shot('real-overview');
   if (!canWriteRealHome) {
-    same('real home is preview only here', await a.run(`document.querySelector('#start').disabled`), true);
-    const refused = await a.run(`window.centralKnot.start(['claude-cli','copilot-cli'], [], false, document.querySelector('.status-home').title).then(r => [r.harnessWrites, r.stopped])`);
-    same('main process refuses too', refused[0], 0);
-    check('with a reason', /Preview only/.test(refused[1]), refused);
+    same('Apply all is off here', await a.run(`(() => { document.querySelector('#manage-all').click(); return document.querySelector('#apply').disabled; })()`), true);
+    const refused = await a.run(`window.centralKnot.apply([{ key: 'rich', managed: true, off: [] }], false, document.querySelector('.status-home').title)`);
+    same('main process refuses too', refused.harnessWrites, 0);
+    check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
     await a.quit();
     return;
   }
-  await a.click('#exclude-private-one');
-  await a.click('#start');
+  const wrongHome = await a.run(`window.centralKnot.apply([{ key: 'rich', managed: true, off: [] }], false, '/somewhere/else')`);
+  check('an apply for another home is refused', wrongHome.harnessWrites === 0 && /not the one open/.test(wrongHome.stopped ?? ''), wrongHome);
+  await a.click('#manage-all');
+  await a.click(`.ov-row[data-key="private-one"] .switch`);
+  await applyAll(a);
   same('bytes and modes copied, .git left out', tree(join(COPILOT, 'rich')), before.rich);
-  same('source .git untouched', readFileSync(join(CLAUDE, 'rich/.git/HEAD'), 'utf8'), 'ref: refs/heads/main\n');
   same('exec bit kept', statSync(join(COPILOT, 'rich/scripts/run.sh')).mode & 0o777, 0o755);
-  check('a name Copilot refuses is not copied', !existsSync(join(COPILOT, '名前-skill')));
+  check('Copilot-only skill reached Claude', existsSync(join(CLAUDE, 'from-copilot/SKILL.md')));
+  check('the one switched back off was not copied', !existsSync(join(COPILOT, 'private-one')));
+  check('refused name not copied', !existsSync(join(COPILOT, '名前-skill')));
+  check('held skill not copied', !existsSync(join(COPILOT, 'has-link')));
   check('a skill with a read-only folder copied', existsSync(join(COPILOT, 'read-only-inside/refs/a.md')));
   check('an unreadable skill not copied', !existsSync(join(COPILOT, 'unreadable-file')));
-  check('the announcement does not hide problems', /written to disk/.test(await a.text('#announcement')), await a.text('#announcement'));
-  check('Copilot-only skill reached Claude', existsSync(join(CLAUDE, 'from-copilot/SKILL.md')));
-  check('Don’t share held', !existsSync(join(COPILOT, 'private-one')));
-  check('no-frontmatter skipped', !existsSync(join(COPILOT, 'plain')));
-  check('dot-folder skipped', !existsSync(join(COPILOT, '.dot-skill')));
-  check('held skill with a link not copied', !existsSync(join(COPILOT, 'has-link')));
-  same('collision untouched', readFileSync(join(COPILOT, 'clash/SKILL.md'), 'utf8'), text('clash', 'Copilot version.'));
+  same('differing copies untouched', readFileSync(join(COPILOT, 'clash/SKILL.md'), 'utf8'), text('clash', 'Copilot version.'));
   same('link stays a link', lstatSync(join(CLAUDE, 'linked')).isSymbolicLink(), true);
-  same('nothing was staged in a loaded folder', [...readdirSync(COPILOT), ...readdirSync(CLAUDE)].filter(name => name.startsWith('.ck-')), []);
+  same('nothing staged in a loaded folder', [...readdirSync(COPILOT), ...readdirSync(CLAUDE)].filter(name => name.startsWith('.ck-')), []);
   same('unrelated bytes unchanged', readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8'), before.unrelated);
-  check('sync record written', JSON.parse(readFileSync(join(HOME, '.central-knot/sync.json'), 'utf8')).formatVersion === 1);
-  await a.expand();
-  same('row with a named loss says so', (await a.all('.plan-card[data-key="scoped"] .plan-reason')).join('').includes('Copilot CLI ignores'), true);
-  await a.shot('real-after-start');
-  writeFileSync(join(COPILOT, 'rich/SKILL.md'), text('rich', 'Edited by hand.'));
-  await a.click('#header-refresh');
-  await a.expand();
-  same('later edit is held', (await a.plan()).rich, 'held');
-  await a.click('#start');
-  same('held edit is not overwritten', readFileSync(join(COPILOT, 'rich/SKILL.md'), 'utf8'), text('rich', 'Edited by hand.'));
-  await a.expand();
-  await a.click('[id="undo-read-only-inside"]');
-  check('per-item Undo removes a copy with a read-only folder', !existsSync(join(COPILOT, 'read-only-inside')));
-  check('its source stays', existsSync(join(CLAUDE, 'read-only-inside/refs/a.md')));
-  check('another copy stays', existsSync(join(CLAUDE, 'from-copilot')));
-  same('nothing parked behind', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
-  // Undo never removes the only real folder, even once the destination is a link to its source.
-  const realFolder = tree(join(CLAUDE, 'scoped'));
-  rmSync(join(COPILOT, 'scoped'), { recursive: true });
-  symlinkSync(join(CLAUDE, 'scoped'), join(COPILOT, 'scoped'));
-  await a.click('#header-refresh');
-  await a.expand();
-  await a.run(`window.centralKnot.undo(['claude-cli', 'copilot-cli'], 'scoped', document.querySelector('.status-home').title)`);
-  same('the only real folder survives Undo', tree(join(CLAUDE, 'scoped')), realFolder);
-  unlinkSync(join(COPILOT, 'scoped'));
+  check('the problems are reported', (await a.text('.bands') ?? '').length > 0, await a.text('.bands'));
+  await a.shot('real-applied');
   same('no page errors, real home', a.pageErrors, []);
   await a.quit();
 
-  // A restart keeps the record, and each stop holds.
   const record = join(HOME, '.central-knot/sync.json');
   const good = readFileSync(record, 'utf8');
+  writeFileSync(record, '{ damaged');
   let b = await launch();
   await b.click('#home-actual');
-  await b.click('#share-open');
-  same('restart: still ready', await b.text('#start'), 'Start');
-  await b.quit();
-  writeFileSync(record, '{ damaged');
-  b = await launch();
-  await b.click('#home-actual');
-  await b.click('#share-open');
-  same('damaged record stops Start', await b.run(`document.querySelector('#start').disabled`), true);
-  check('no Undo while stopped', !(await b.exists('#undo-all')) && !(await b.exists('[id^="undo-"]')));
-  check('with the reason', (await b.text('#panel-body')).includes('damaged'));
-  await b.shot('real-stopped');
+  check('damaged record is shown', (await b.text('.bands') ?? '').includes('damaged'), await b.text('.bands'));
+  await b.click(`.ov-row[data-key="private-one"] .switch`);
+  same('damaged record keeps Apply all off', await b.run(`document.querySelector('#apply')?.disabled ?? true`), true);
   await b.quit();
   writeFileSync(record, good);
   b = await launch(join(scratch, 'other-data'));
   await b.click('#home-actual');
-  await b.click('#share-open');
-  same('lost settings ask to resume', await b.text('#start'), 'Resume and Start');
-  await b.click('#start');
+  await b.click(`.ov-row[data-key="private-one"] .switch`);
+  same('lost settings ask to resume', (await b.text('#apply')).trim(), 'Resume and apply all');
+  await applyAll(b);
   same('resuming keeps the record', JSON.parse(readFileSync(record, 'utf8')).generation, JSON.parse(good).generation);
+  check('and applies', existsSync(join(COPILOT, 'private-one/SKILL.md')));
   same('no page errors, stops', b.pageErrors, []);
   await b.quit();
 }
-
 
 /** Force-kills the app part-way through real copies, then checks nothing half-written is visible to a tool. */
 async function crashFlow() {
@@ -349,15 +323,13 @@ async function crashFlow() {
   }
   let interrupted = 0;
   for (let round = 0; round < crashRounds; round++) {
-    const data = join(scratch, 'crash-data');
-    const a = await launch(data);
+    const a = await launch(join(scratch, 'crash-data'));
     await a.click('#home-actual');
-    await a.click('#share-open');
-    if (await a.exists('#start') && !(await a.run(`document.querySelector('#start').disabled`))) {
-      await a.run(`document.querySelector('#start').click()`);
-      await wait(30 + round * 90 + randomInt(40));
-    }
-    const remaining = readdirSync(COPILOT).length;
+    if (round === 0) {
+      await a.click('#manage-all');
+      await a.run(`document.querySelector('#apply').click()`);
+    } else await a.run(`document.querySelector('#header-refresh').click()`);
+    await wait(30 + round * 90 + randomInt(40));
     await a.crash();
     if (readdirSync(COPILOT).length < 40) interrupted++;
     for (const name of readdirSync(COPILOT)) {
@@ -366,24 +338,17 @@ async function crashFlow() {
     }
     const record = join(HOME, '.central-knot/sync.json');
     if (existsSync(record)) { try { JSON.parse(readFileSync(record, 'utf8')); passes++; } catch { check(`round ${round}: record stays valid`, false); } }
-    void remaining;
   }
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
-  await a.click('#share-open');
-  if (!(await a.run(`document.querySelector('#start').disabled`))) await a.click('#start');
-  same('after crashes a final Start completes', readdirSync(COPILOT).sort().length, 40);
+  same('after crashes, opening again completes every copy', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')).length, 40);
   for (const name of Object.keys(expected)) same(`final ${name} bytes`, tree(join(COPILOT, name)), expected[name]);
   same('stale stages are cleared', readdirSync(join(HOME, '.copilot')).filter(name => name.startsWith('.ck-')), []);
-  await a.click('#undo-all');
-  same('Undo still removes copies a crash interrupted', readdirSync(COPILOT).filter(name => name.startsWith('bulk-')), []);
   same('no page errors, crashes', a.pageErrors, []);
   await a.quit();
   console.log(`crash rounds: ${crashRounds}, interrupted a copy in ${interrupted}`);
   check('at least one round really interrupted copying', interrupted > 0, interrupted);
 }
-
-const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
 const started = Date.now();

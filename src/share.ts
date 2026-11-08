@@ -29,18 +29,18 @@ export interface ShareContext {
   fault?: (step: 'before-rename' | 'after-rename') => void;
 }
 
-interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; status: 'pending' | 'written' }
-interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[] }
-interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
+export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; status: 'pending' | 'written' }
+export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean }
+export interface SyncRecord { formatVersion: number; generation: string; owner: string; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
 export function itemKey(folder: string): string { return folder.normalize('NFC').toLowerCase(); }
 
-const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
+export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');
 
-function plainError(error: unknown): string {
+export function plainError(error: unknown): string {
   const code = errorCode(error);
   if (code === 'EACCES' || code === 'EPERM') return 'Permission was denied.';
   if (code === 'ENOSPC') return 'The disk is full.';
@@ -85,7 +85,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
 }
 
 /** Byte-exact copy with modes, without nested .git (SKL-01). The top folder keeps its write bit: a read-only folder cannot be moved into place. */
-async function copyTree(source: string, target: string, tree: Tree) {
+export async function copyTree(source: string, target: string, tree: Tree) {
   await mkdir(target);
   for (const name of [...tree.directories].sort()) await mkdir(join(target, name));
   for (const [name, file] of tree.files) {
@@ -95,10 +95,10 @@ async function copyTree(source: string, target: string, tree: Tree) {
   for (const name of [...tree.directories].sort().reverse()) await chmod(join(target, name), (await stat(join(source, name))).mode & 0o777);
 }
 
-const finishCopy = async (source: string, target: string) => chmod(target, (await stat(source)).mode & 0o777);
+export const finishCopy = async (source: string, target: string) => chmod(target, (await stat(source)).mode & 0o777);
 
 /** Removes a folder CK owns, even one with read-only folders inside. */
-async function removeTree(path: string) {
+export async function removeTree(path: string) {
   const openUp = async (directory: string) => {
     await chmod(directory, ((await lstat(directory)).mode & 0o777) | 0o700);
     for (const entry of await readdir(directory, { withFileTypes: true })) if (entry.isDirectory()) await openUp(join(directory, entry.name));
@@ -157,7 +157,7 @@ const copilotLosses: Record<string, string> = {
   'disable-model-invocation: true': 'Copilot CLI hides it from the model, and `/name` failed in print mode.',
 };
 
-function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
+export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
   if (harness === 'copilot-cli') {
     if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
     if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
@@ -178,7 +178,7 @@ function validItems(items: unknown): boolean {
     && Array.isArray(item.copies) && item.copies.every((copy: Partial<RecordCopy>) => typeof copy?.directory === 'string' && typeof copy.hash === 'string'));
 }
 
-async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
+export async function readRecord(home: string): Promise<{ record?: SyncRecord; problem?: string }> {
   let text: string;
   try { text = await readFile(recordPath(home), 'utf8'); }
   catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: 'The sync record could not be read.' }; }
@@ -200,13 +200,13 @@ async function writeDurably(path: string, text: string) {
   try { await handle.writeFile(text); await handle.sync(); } finally { await handle.close(); }
   await rename(temporary, path);
 }
-const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
+export const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
 type Settings = { homes?: Record<string, { generation: string }> };
 async function readSettings(path: string): Promise<Settings> {
   try { return JSON.parse(await readFile(path, 'utf8')) as Settings; } catch { return {}; }
 }
-async function remember(context: ShareContext, generation: string) {
+export async function remember(context: ShareContext, generation: string) {
   const settings = await readSettings(context.settingsPath);
   settings.homes = { ...settings.homes, [context.home]: { generation } };
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
@@ -353,13 +353,13 @@ async function planItem(context: ShareContext, key: string, group: { harness: Ha
 // ---------- Start ----------
 
 /** Readable when the name allows it; a name too long or too odd for every disk gets a short safe form. */
-function storeFolder(key: string): string {
+export function storeFolder(key: string): string {
   if (/^[a-z0-9._-]{1,100}$/.test(key) && !/^\.+$/.test(key)) return key;
   const readable = key.replace(/[^a-z0-9._-]+/g, '-').replace(/^[.-]+/, '').slice(0, 40);
   return `${readable || 'skill'}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
 }
 
-async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
+export async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
   const target = join(storeDirectory(context.home), 'items', storeFolder(key), tree.hash);
   try { if ((await readTree(target)).hash === tree.hash) return; await removeTree(target); }
   catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
@@ -371,7 +371,7 @@ async function importRevision(context: ShareContext, key: string, source: string
 }
 
 /** Beside the skills folder, on the same volume. A folder inside it would load as a skill: Claude Code lists dot-folders too. */
-async function stagingFolder(context: ShareContext, root: string): Promise<string> {
+export async function stagingFolder(context: ShareContext, root: string): Promise<string> {
   await mkdir(root, { recursive: true });
   const beside = dirname(await realpath(root));
   try { await access(beside, constants.W_OK); return beside; }
@@ -383,7 +383,7 @@ async function stagingFolder(context: ShareContext, root: string): Promise<strin
 }
 
 /** Best effort: a leftover that cannot be cleared holds up nothing. Only names CK itself generates are touched. */
-async function clearStaleStages(context: ShareContext, roots: string[]) {
+export async function clearStaleStages(context: ShareContext, roots: string[]) {
   const folders = [join(storeDirectory(context.home), 'staging')];
   for (const root of new Set(roots)) folders.push(await realpath(root).then(dirname, () => realpath(dirname(root))).catch(() => ''));
   for (const folder of new Set(folders)) {
@@ -394,7 +394,7 @@ async function clearStaleStages(context: ShareContext, roots: string[]) {
 }
 
 /** Stage beside the target's folder, verify, then rename into place (FIL-01). */
-async function placeCopy(context: ShareContext, source: string, target: PlanTarget, tree: Tree) {
+export async function placeCopy(context: ShareContext, source: string, target: PlanTarget, tree: Tree) {
   const stage = join(await stagingFolder(context, dirname(target.directory)), `${STAGE_PREFIX}${randomUUID()}`);
   try {
     await copyTree(source, stage, tree);
@@ -512,7 +512,7 @@ export async function undo(context: ShareContext, selected: HarnessId[], only?: 
   catch (error) { return action(context, selected, [], [], 0, `Undo could not finish. ${plainError(error)} Read again to see where things stand.`); }
 }
 
-async function exists(path: string): Promise<boolean> {
+export async function exists(path: string): Promise<boolean> {
   try { await lstat(path); return true; } catch { return false; }
 }
 

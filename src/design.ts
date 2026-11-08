@@ -17,6 +17,10 @@ export interface SampleSkill {
   cannot?: Partial<Record<Tool, string>>;
   /** Copies that differ, left as separate skills on purpose. */
   separate?: boolean;
+  /** Why this skill cannot be managed at all. */
+  held?: string;
+  /** Where each copy lives, for the details. */
+  paths?: Partial<Record<Tool, string>>;
   /** For the compare view: one line per copy that differs. */
   versions?: Partial<Record<Tool, { lines: string; changed: string; text: string }>>;
 }
@@ -82,8 +86,8 @@ export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   return ids.size > 1 ? 'differs' : 'synced';
 }
 
-export function syncOf(skill: SampleSkill): Sync {
-  const cells = tools.map(tool => cellOf(skill, tool));
+export function syncOf(skill: SampleSkill, toolList: Tool[] = tools): Sync {
+  const cells = toolList.map(tool => cellOf(skill, tool));
   if (cells.includes('differs') || cells.includes('present-differs')) return 'attention';
   if (!skill.managed) return 'none';
   if (cells.includes('will-sync')) return 'pending';
