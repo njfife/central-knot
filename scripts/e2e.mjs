@@ -234,19 +234,19 @@ async function practiceFlow() {
   same('keep both leaves it off', await switchOn(a, 'notes'), false);
   await a.click('#switch-notes');
   check('turning it on drops keep both', !(await a.text('.ov-row[data-key="notes"]')).includes('Keeping both'), await a.text('.ov-row[data-key="notes"]'));
-  await a.click('#discard');
+  same('and since it was already managed, nothing is left to apply', await a.exists('#discard'), false);
   // Choosing a copy, then switching it off: the choice goes too.
   await a.click('#decide-notes');
   await a.click('#use-notes-claude-cli');
   await a.click('#switch-notes');
   check('switching off drops the chosen copy', !(await a.text('.ov-row[data-key="notes"]')).includes('Using'), await a.text('.ov-row[data-key="notes"]'));
-  await a.click('#discard');
+  if (await a.exists('#discard')) await a.click('#discard');
 
   // Focus stays on the control after a re-render.
   await a.run(`document.querySelector('#switch-release-notes').focus()`);
   await a.press(' ', 'Space');
   same('focus stays on the switch', await a.run(`document.activeElement?.id`), 'switch-release-notes');
-  await a.click('#discard');
+  if (await a.exists('#discard')) await a.click('#discard');
 
   // Keyboard and find.
   await a.press('/', 'Slash');
