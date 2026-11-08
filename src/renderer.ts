@@ -1,3 +1,4 @@
+import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { closePanel, loadHome, readAgain, rerender, selectItem, setRenderer, showPage, state, type Page } from './app.ts';
 import { button, h, icon, middle } from './dom.ts';
@@ -50,7 +51,7 @@ function renderSidebar() {
   const rows = state.home && state.preview ? buildRows(state.home, state.overview ?? state.preview) : [];
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
-    navRow('skills', 'Skills', 'wand-sparkles', state.home ? rows.length : undefined),
+    navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home ? rows.length : undefined),
     navRow('tools', 'Tools', 'boxes'),
   );
   region('homes').replaceChildren(

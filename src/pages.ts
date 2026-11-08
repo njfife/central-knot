@@ -2,6 +2,8 @@ import { announce, closePanel, disclosureOpen, loadHome, openPanel, readAgain, r
 import { button, emptyState, h, hiddenText, icon, middle, pathText, section } from './dom.ts';
 import { buildRows, copiesIn, fullToolName, lookOf, matches, plural, skillCount, toolMonogram, toolName, type Row } from './model.ts';
 import type { HarnessId, HomeView, Preview, Snapshot } from './types.ts';
+import { designMode } from './design.ts';
+import { designOverview } from './matrix.ts';
 
 export const toolIds = (home: HomeView) => home.snapshots.map(snapshot => snapshot.harness);
 
@@ -105,6 +107,7 @@ function skeletonRows() {
 }
 
 export function overviewPage() {
+  if (designMode) return designOverview();
   const { home, preview } = state;
   if (!home || !preview) {
     if (state.busy) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, skeletonRows()));

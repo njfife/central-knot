@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
   const notShown = async (selected: unknown): Promise<ActionResult> => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0, preview: await buildPreview(context(), ids(selected), []) });
   handle('share:start', async (selected, dontShare, resume, home) => (home === current?.home ? start(context(), ids(selected), strings(dontShare), resume === true) : notShown(selected)));
   handle('share:undo', async (selected, only, home) => (home === current?.home ? undo(context(), ids(selected), typeof only === 'string' ? only : undefined) : notShown(selected)));
-  await window.loadFile(join(__dirname, 'index.html'));
+  await window.loadFile(join(__dirname, 'index.html'), process.argv.includes('--design-preview') ? { query: { design: '1' } } : undefined);
   if (smoke) {
     try {
       const result = await window.webContents.executeJavaScript(`new Promise((resolveResult, rejectResult) => {

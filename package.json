@@ -5,7 +5,9 @@
   "description": "Sees and shares user-wide Claude Code and Copilot CLI skills",
   "type": "module",
   "main": "dist/main.cjs",
-  "engines": { "node": ">=24.9.0" },
+  "engines": {
+    "node": ">=24.9.0"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "npm run build && electron .",
@@ -14,7 +16,9 @@
     "smoke:mac": "npm run build && electron . --smoke-test",
     "e2e": "node scripts/e2e.mjs"
   },
-  "dependencies": { "yaml": "2.9.1" },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
   "devDependencies": {
     "@electron/packager": "20.3.0",
     "@fontsource-variable/inter": "5.3.0",
@@ -23,6 +27,7 @@
     "electron": "45.2.3",
     "esbuild": "0.28.2",
     "lucide-static": "1.70.0",
+    "simple-icons": "16.37.0",
     "typescript": "7.0.2"
   }
 }
