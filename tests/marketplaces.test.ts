@@ -132,7 +132,7 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     await box.markets.add(root);
     assert.match(await box.markets.readme(root) ?? '', /Our tools/);
     const detail = await box.markets.detail(root, 'pdf');
-    assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim(), detail?.installed], [['pdf'], 'Reads PDFs.', {}]);
+    assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim()], [['pdf'], 'Reads PDFs.']);
     // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own parts.
     const copy = join(box.home, '.claude/plugins/cache/team/pdf/0.9.0');
     await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./old'] }));

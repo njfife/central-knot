@@ -505,8 +505,8 @@ async function practiceFlow() {
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
   check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Claude Code (1.9.0) differs from the marketplace’s copy'), await a.text('#pfile-0-skills-triage'));
   await a.click('#pfile-0-skills-triage');
-  same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent.trim().split("\\n").pop()]'),
-    [['SKILL.md · Marketplace (2.0.0)', 'Follow the steps.'], ['SKILL.md · Claude Code (1.9.0)', 'The old steps.']]);
+  same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent]'),
+    [['SKILL.md · Marketplace (2.0.0)', readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8')], ['SKILL.md · Claude Code (1.9.0)', '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n']]);
   // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
   writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
   await a.click('#nav-skills');
