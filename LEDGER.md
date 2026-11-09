@@ -511,3 +511,17 @@ Closing the window kept the app running, and a background edit reached Codex (st
 4. **Quoted frontmatter keys** (`"name":`) are found and replaced, never duplicated.
 
 The Mac real home was not used, because a Central Knot app was running there (a computer-use session).
+
+## Sixth check, Astra (on 15c8652), November 9, 2026
+
+"Not yet", with 6 confirmed cases and 1 suspected; skills had no blocker. All are fixed, and the reproductions are kept in `tests/sixth-check-astra.test.ts` (6 tests, one with a real process exit).
+
+- **Codex MCP subtables** (`env_http_headers`, tool settings) are kept whole as that tool's own and written back as they were. `[mcp_servers.x.http_headers]` as a table now reads as headers (S1).
+- **A destination's own MCP settings** come from the file as reread just before writing, never from an older read, so `enabled = false` saved meanwhile stays (S2).
+- **Apply all with Sync off no longer records agents folder identities**, so a reset is still seen by the next full pass (S3).
+- **Crash recovery** (`recoverParked`): a file moved aside by an interrupted write or removal is put back before anything is read, in agents folders and MCP settings folders, so it is never read as deleted (S4).
+- **A malformed MCP entry** (`"docs": null`) is held, never read as absent. A non-object `mcpServers` makes the whole file unreadable (S5).
+- **MCP Restore records what it wrote**, never a later read (S6).
+- **Background failures are shown:** failed MCP and agents passes, and copies they could not write, reach the page's band, de-duplicated (suspected item 7).
+
+**Validation.** 206 unit tests. Linux e2e 121/121.

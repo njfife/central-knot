@@ -194,11 +194,18 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
   const result = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (syncOn || explicit) {
-    const mcp = await applyMcp(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+    // A background MCP or agents pass that fails, or a copy it could not write, is told on the page, never dropped.
+    const failed = (what: string) => (error: unknown) => { const message = `${what} could not finish: ${error instanceof Error ? error.message : String(error)}`; if (!pendingResults.some(known => known.message === message)) pendingResults.push({ item: what, outcome: 'failed', message }); return undefined; };
+    const mcp = await applyMcp(shared, (await manageView(shared)).tools, []).catch(failed('MCP sync'));
     pendingMcpNotices.push(...(mcp?.notices ?? []));
     // Agents follow the same switch and rules (D-32).
-    const agents = await applyAgents(shared, (await manageView(shared)).tools, []).catch(() => undefined);
+    const agents = await applyAgents(shared, (await manageView(shared)).tools, []).catch(failed('Agents sync'));
     pendingMcpNotices.push(...(agents?.notices ?? []));
+    for (const result of [...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')) {
+      if (!pendingResults.some(known => known.item === result.item && known.harness === result.harness && known.message === result.message)) pendingResults.push(result);
+    }
+    const stoppedWhy = mcp?.stopped ?? agents?.stopped;
+    if (stoppedWhy && !pendingResults.some(known => known.message === stoppedWhy)) pendingResults.push({ item: mcp?.stopped ? 'MCP sync' : 'Agents sync', outcome: 'failed', message: stoppedWhy });
     mcpChanged = !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length);
     otherSettling = !!(mcp?.settling || agents?.settling);
   }

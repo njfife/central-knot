@@ -234,6 +234,26 @@ export async function writeFileChecked(path: string, text: string, expected: str
   }
 }
 
+/**
+ * Finishes what a crash interrupted in a folder Central Knot writes single files into: a file moved aside (`.name.ck-*.old`) whose
+ * place is still empty goes back, so it is never read as deleted; one whose replacement is in place, and stray temporary files,
+ * go. Moved-aside content was already kept in the store before it was moved.
+ */
+export async function recoverParked(folder: string) {
+  let names: string[];
+  try { names = await readdir(folder); } catch { return; }
+  for (const name of names) {
+    const parked = /^\.(.+)\.ck-[0-9a-f-]{36}\.old$/.exec(name);
+    if (parked) {
+      const home = join(folder, parked[1]);
+      try { await link(join(folder, name), home); } catch (error) { if (errorCode(error) !== 'EEXIST') continue; }
+      await unlink(join(folder, name)).catch(() => undefined);
+      continue;
+    }
+    if (/^\..+\.ck-[0-9a-f-]{36}\.tmp$/.test(name)) await unlink(join(folder, name)).catch(() => undefined);
+  }
+}
+
 /** Removes a tool's file only if it still holds `expected`: moved aside and checked there, so an edit saved meanwhile is put back. */
 export async function removeFileChecked(path: string, expected: string) {
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);

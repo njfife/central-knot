@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { harnesses } from './harnesses.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, errorCode, readRecord, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 
@@ -269,6 +269,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   if (gate.state !== 'ready') await remember(context, owner.generation);
 
   const present = tools.filter(tool => agentTools.includes(tool));
+  // A write or removal a crash interrupted is finished first, so a file moved aside is never read as deleted.
+  for (const tool of present) await recoverParked(folder(context, tool));
   const { byKey, folders, unreadable, duplicates } = await gatherAgents(context, present);
   const record = await readAgentRecord(context.home);
   const results: DestinationResult[] = [];
@@ -462,7 +464,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     if (!item || named(left.key, left.hash)) continue;
     event({ key: `agent:${left.key}`, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
   }
-  record.roots = { ...record.roots, ...identities };
+  // Folder identities are kept only by a full pass: Apply all with Sync off skips agents, so a reset must still be seen next time.
+  if (!options.only) record.roots = { ...record.roots, ...identities };
   await saveAgentRecord(context.home, record);
   await appendHistory(context, events);
   // History names it now: the hold is dropped. A crash between leaves the hold, never content no one can restore.
@@ -498,6 +501,7 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   if (past.kind === 'deleted' && item.state === 'shared' && item.hash !== hash) return { stopped: `“${item.name}” is managed again with other content. Restoring the old one would replace it; delete or rename the new one first.`, results: [], writes: 0 };
   if (past.kind !== 'deleted' && item.state !== 'shared') return { stopped: `${item.name} was deleted since. Restore the deletion instead.`, results: [], writes: 0 };
   const present = tools.filter(tool => agentTools.includes(tool));
+  for (const tool of present) await recoverParked(folder(context, tool));
   const { byKey, unreadable, duplicates } = await gatherAgents(context, present);
   const slot = byKey.get(key) ?? {};
   const stopped = new Set(item.copies.filter(copy => copy.stopped).map(copy => copy.tool));
