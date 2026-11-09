@@ -64,7 +64,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
     h('div.ov-name.plugin-row-name', { role: 'cell' },
       h('button.plugin-row-open', { type: 'button', id: `popen-${marketIndex}-${plugin.name}`, 'aria-label': `Open ${pluginTitle(plugin)}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
         // The category pill is left out while that category is the filter: every row would say the same.
-        h('span.plugin-row-title', {}, pluginTitle(plugin)), plugin.version ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, plugin.version) : null,
+        h('span.plugin-row-title', { title: pluginTitle(plugin) }, pluginTitle(plugin)), plugin.version ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, plugin.version) : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
       holds || others.length ? h('span.plugin-row-holds', {}, holds, holds && others.length ? ' · ' : null, others.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12),

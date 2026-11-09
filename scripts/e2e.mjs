@@ -502,8 +502,9 @@ async function practiceFlow() {
   check('a row shows the version offered, and a tool that has another', /2\.0\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) && (await a.text('[data-plugin="issue-tracker"] .plugin-version-differs')).includes('Claude Code has 1.9.0'), await a.text('[data-plugin="issue-tracker"]'));
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
-  check('the plugin page says which version Claude Code has', (await a.text('.plugin-panel')).includes('Installed · 1.9.0, marketplace has 2.0.0'), await a.text('.plugin-panel'));
+  check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
   await a.click('#pfile-0-skills-triage');
+  check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Differs in Claude Code'), await a.text('#pfile-0-skills-triage'));
   same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent.trim().split("\\n").pop()]'),
     [['Marketplace · 2.0.0', 'Follow the steps.'], ['Claude Code · 1.9.0', 'The old steps.']]);
   await a.click('#plugin-back');

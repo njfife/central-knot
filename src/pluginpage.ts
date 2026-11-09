@@ -35,10 +35,10 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
     h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
 }
 
-/** "Installed · 1.2.0"; when the tool has another version than the marketplace offers, says so in the warning tone. */
+/** "Installed · 1.2.0". When the tool has another version than the marketplace offers, a second line says which. */
 function installedLine(version: string | undefined, offered: string | undefined) {
-  if (!versionDiffers(version, offered)) return version ? `Installed · ${version}` : 'Installed';
-  return h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Installed · ${version}, marketplace has ${offered}`);
+  const line = version ? `Installed · ${version}` : 'Installed';
+  return versionDiffers(version, offered) ? [line, h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Marketplace has ${offered}`)] : line;
 }
 
 /**
@@ -98,33 +98,45 @@ function markClamped(): void {
   }
 }
 
+/** One copy of a part's file: who holds it (the marketplace or a tool), at which version, and its text. */
+interface FileCopy { who: string; version?: string; text: string; marketplace: boolean }
 /** A skill, command or agent as listed: its name, what it says it does, and its file in each copy that has one. */
-interface FilePart { name: string; description: string; copies: { who: string; text: string }[] }
+interface FilePart { name: string; description: string; copies: FileCopy[] }
 type FileKind = 'skills' | 'commands' | 'agents';
 
-/**
- * One kind of part across the marketplace's copy and each tool's installed copy, by name. Each copy is named with its
- * version ("Marketplace · 1.2.0", "Claude Code · 1.1.0"), so a file that changed between versions shows each text.
- */
+/** One kind of part across the marketplace's copy and each tool's installed copy, by name, each copy with its version. */
 function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | undefined): FilePart[] {
-  const named = (who: string, version?: string) => (version ? `${who} · ${version}` : who);
-  const sources = [{ who: named('Marketplace', offered), parts: detail[kind] },
-    ...Object.entries(detail.installed ?? {}).map(([tool, copy]) => ({ who: named(names[tool as HarnessId], copy.version), parts: copy[kind] }))];
+  const sources = [{ who: 'Marketplace', version: offered, marketplace: true, parts: detail[kind] },
+    ...Object.entries(detail.installed ?? {}).map(([tool, copy]) => ({ who: names[tool as HarnessId], version: copy.version, marketplace: false, parts: copy[kind] }))];
   const byName = new Map<string, FilePart>();
-  for (const { who, parts } of sources) {
+  for (const { parts, ...holder } of sources) {
     for (const part of parts) {
       if (!byName.has(part.name)) byName.set(part.name, { name: part.name, description: part.description, copies: [] });
-      if (part.text !== undefined) byName.get(part.name)!.copies.push({ who, text: part.text });
+      if (part.text !== undefined) byName.get(part.name)!.copies.push({ ...holder, text: part.text });
     }
   }
   return [...byName.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
+/** Who holds one text, by version: "Marketplace and Codex · 1.2.0", or "Claude Code · 1.1.0, Codex · 1.0.0". */
+function holdersLine(holders: FileCopy[]): string {
+  const byVersion = new Map<string, string[]>();
+  for (const holder of holders) byVersion.set(holder.version ?? '', [...(byVersion.get(holder.version ?? '') ?? []), holder.who]);
+  return [...byVersion].map(([version, who]) => `${andList(who)}${version ? ` · ${version}` : ''}`).join(', ');
+}
+
+/** The tools whose copy of a part's file differs from the marketplace's (none when the marketplace's isn't known). */
+function differsIn(part: FilePart): string[] {
+  const offered = part.copies.find(copy => copy.marketplace);
+  return offered ? part.copies.filter(copy => !copy.marketplace && copy.text !== offered.text).map(copy => copy.who) : [];
+}
+
 const fileNames: Record<FileKind, string> = { skills: 'SKILL.md', commands: 'command file', agents: 'agent file' };
 
 /**
- * One group of skills, commands or agents. Each name opens its file as written, the same view the Skills page gives a
- * standalone skill; a description stays at two lines, since the file holds it whole. `id` prefixes each part's ids.
+ * One group of skills, commands or agents. A row opens its file as written, in the view the Skills page gives a
+ * standalone SKILL.md, each text named by who holds it; a closed row says which tools have a different text. A
+ * description stays at two lines, since the file holds it whole. `id` prefixes each part's ids.
  */
 function fileGroup(owner: string, id: string, title: string, kind: FileKind, parts: FilePart[]) {
   if (!parts.length) return null;
@@ -132,13 +144,16 @@ function fileGroup(owner: string, id: string, title: string, kind: FileKind, par
     const key = `${owner}\u0000${kind}\u0000${part.name}`;
     const open = market.opened.has(key);
     const file = `${part.name} ${fileNames[kind]}`;
-    const name = part.copies.length
-      ? h('button.plugin-file-toggle', { type: 'button', id: `${id}-${kind}-${part.name}`, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${file}`,
-        onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } }, icon(open ? 'chevron-down' : 'chevron-right', 12), h('code.plugin-name', {}, part.name))
-      : h('code.plugin-name', {}, part.name);
-    return h('li', {}, name,
-      h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', {}, part.description) : null),
-      open ? h('div.plugin-file', {}, fileText(`${id}-${kind}-${part.name}-text`, file, part.copies)) : null);
+    const differs = differsIn(part);
+    const body = h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', {}, part.description) : null,
+      differs.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Differs in ${andList(differs)}`) : null);
+    if (!part.copies.length) return h('li', {}, h('code.plugin-name', {}, part.name), body);
+    return h(`li${open ? '.open' : ''}`, {},
+      h('button.plugin-file-toggle', { type: 'button', id: `${id}-${kind}-${part.name}`, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${file}`,
+        onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } },
+        h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)), body),
+      open ? h('div.plugin-file', {}, fileText(`${id}-${kind}-${part.name}-text`, file, part.copies, holdersLine,
+        { named: true, warn: holders => differs.length > 0 && !holders.some(holder => holder.marketplace) })) : null);
   })));
 }
 
@@ -171,7 +186,8 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   const title = pluginTitle(plugin);
   // The catalog's version, else the one its plugin.json gives once read (a plugin kept in another repository).
   const offered = plugin.version ?? detail?.version;
-  const facts: (string | HTMLElement)[] = [offered && `Version ${offered}`, plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
+  const facts: (string | HTMLElement)[] = [plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
+  if (offered) facts.unshift(h('span.plugin-meta-version', {}, `Version ${offered}`));
   if (plugin.homepage) facts.push(button({ variant: 'link', size: 'micro', label: 'Website', id: 'plugin-homepage', onclick: () => openLink(plugin.homepage!) }));
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents].map(({ name, description }) => ({ name, description })) : [];

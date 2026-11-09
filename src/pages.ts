@@ -140,7 +140,7 @@ function fileCard(key: string, { tool, skill }: Found, index: number) {
 
 /** One block per distinct content, named by the copies that hold it. */
 const contents = (key: string, copies: Found[]) =>
-  fileText(`content-${key}`, 'Skill contents', copies.map(({ tool, skill }) => ({ who: `${toolName(tool)} (${skill.rootLabel})`, text: skill.content })));
+  fileText(`content-${key}`, 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
 
 export function skillsPage() {
   const home = state.home;
