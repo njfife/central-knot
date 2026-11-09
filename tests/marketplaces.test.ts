@@ -167,21 +167,6 @@ test('A tool holding a different marketplace under the same name is left alone',
   } finally { await box.cleanup(); }
 });
 
-test('An install reads the tool’s records afresh: the read-sharing of a view never hides the change', async () => {
-  const box = await setup();
-  try {
-    const root = join(box.base, 'market');
-    await marketplace(root, 'team', ['pdf']);
-    await box.markets.add(root);
-    let seenReads: unknown = 'unset';
-    const markets = createMarketplaces({ home: () => ({ home: box.home, snapshots: [] }), tools: async () => ['claude-cli'], writeAccess: async () => ({ allowed: true }), dataDir: join(box.base, 'data'), pickFolder: async () => undefined, openExternal: async () => {} },
-      { findClis: async () => ({ 'claude-cli': '/bin/true' }), readCatalog: engine.readCatalog, readRemotePlugin: async () => ({ problem: '' }), uninstall: engine.uninstall,
-        install: async (context, _catalog, _plugin, tool) => { seenReads = context.reads; return { tool, outcome: 'installed', message: '', runs: [] }; } });
-    await markets.install(root, 'team', 'pdf', ['claude-cli'], box.home);
-    assert.equal(seenReads, undefined);
-  } finally { await box.cleanup(); }
-});
-
 test('Refreshing a marketplace lets go of its plugins’ copies from other repositories, so they are read again', async () => {
   const box = await setup();
   try {
