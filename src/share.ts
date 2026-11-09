@@ -323,7 +323,7 @@ export async function remember(context: ShareContext, generation: string) {
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
+export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {

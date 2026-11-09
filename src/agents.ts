@@ -13,7 +13,7 @@ import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { mkdir } from 'node:fs/promises';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 
@@ -156,12 +156,26 @@ interface AgentRecordItem { name: string; state: 'shared' | 'dont-share'; off: H
 /** `roots`: each tool's agents folder identity at the last pass, so a folder made again between passes reads as a reset. */
 interface AgentRecord { formatVersion: number; items: Record<string, AgentRecordItem>; roots?: Partial<Record<HarnessId, { ino: number; birth: number }>> }
 const recordPath = (home: string) => join(storeDirectory(home), 'agents.json');
-async function readAgentRecord(home: string): Promise<AgentRecord> {
+const AGENTS_FORMAT_VERSION = 2;
+const validAgentItems = (items: unknown) => !!items && typeof items === 'object' && !Array.isArray(items)
+  && Object.values(items as Record<string, Partial<AgentRecordItem> | null>).every(item => !!item && typeof item === 'object' && typeof item.state === 'string' && Array.isArray(item.off) && Array.isArray(item.copies));
+/** Missing, or version 1 (before agents were rewritten), is a first run. Unreadable, damaged or newer stops every write, as sync.json does; the file is never touched. */
+async function inspectAgentRecord(home: string): Promise<{ record?: AgentRecord; problem?: string }> {
+  let text: string;
+  try { text = await readFile(recordPath(home), 'utf8'); }
+  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The agents record could not be read. ${NOTHING_CHANGED}` }; }
+  const damaged = { problem: `The agents record is damaged. ${NOTHING_CHANGED}` };
   try {
-    const parsed = JSON.parse(await readFile(recordPath(home), 'utf8'));
-    if (parsed && typeof parsed.items === 'object' && parsed.formatVersion === 2) return parsed;
-  } catch { /* first time */ }
-  return { formatVersion: 2, items: {} };
+    const record = JSON.parse(text) as AgentRecord | null;
+    const version = record?.formatVersion;
+    if (!Number.isInteger(version) || version! < 1) return damaged;
+    if (version! > AGENTS_FORMAT_VERSION) return { problem: `The agents record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
+    if (!validAgentItems(record!.items)) return damaged;
+    return version === AGENTS_FORMAT_VERSION ? { record: record! } : {};
+  } catch { return damaged; }
+}
+async function readAgentRecord(home: string): Promise<AgentRecord> {
+  return (await inspectAgentRecord(home)).record ?? { formatVersion: AGENTS_FORMAT_VERSION, items: {} };
 }
 const saveAgentRecord = (home: string, record: AgentRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
@@ -233,7 +247,8 @@ function fieldText(value: unknown): string {
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => agentTools.includes(tool));
   const { byKey, problems, unreadable, duplicates } = await gatherAgents(context, present);
-  const record = await readAgentRecord(context.home);
+  const { record = { formatVersion: AGENTS_FORMAT_VERSION, items: {} }, problem } = await inspectAgentRecord(context.home);
+  if (problem) problems.unshift(problem);
   const servers: SkillFacts[] = [];
   for (const [key, slot] of [...byKey].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[key];
@@ -258,7 +273,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
     servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
   }
-  return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };
+  return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 
 // ---------- Apply ----------
@@ -275,6 +290,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const recordProblem = (await inspectAgentRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
   if (!owner) { owner = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, owner); }
@@ -578,6 +595,8 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const recordProblem = (await inspectAgentRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedAgent(context, tools, history, past);

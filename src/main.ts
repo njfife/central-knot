@@ -244,8 +244,9 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
     for (const result of [...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')) {
       if (!pendingResults.some(known => known.item === result.item && known.harness === result.harness && known.message === result.message)) pendingResults.push(result);
     }
-    const stoppedWhy = mcp?.stopped ?? agents?.stopped;
-    if (stoppedWhy && !pendingResults.some(known => known.message === stoppedWhy)) pendingResults.push({ item: mcp?.stopped ? 'MCP sync' : 'Agents sync', outcome: 'failed', message: stoppedWhy });
+    for (const [item, stoppedWhy] of [['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const) {
+      if (stoppedWhy && !pendingResults.some(known => known.message === stoppedWhy)) pendingResults.push({ item, outcome: 'failed', message: stoppedWhy });
+    }
     mcpChanged = !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length);
     otherSettling = !!(mcp?.settling || agents?.settling);
   }

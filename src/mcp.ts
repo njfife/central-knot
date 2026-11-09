@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
@@ -234,9 +234,25 @@ async function kept(context: ShareContext, name: string, hash: string): Promise<
 // ---------- Record ----------
 
 const recordPath = (home: string) => join(storeDirectory(home), 'mcp.json');
+const MCP_FORMAT_VERSION = 1;
+const validMcpItems = (items: unknown) => !!items && typeof items === 'object' && !Array.isArray(items)
+  && Object.values(items as Record<string, Partial<McpRecordItem> | null>).every(item => !!item && typeof item === 'object' && typeof item.state === 'string' && Array.isArray(item.off) && Array.isArray(item.copies));
+/** Missing is a first run. Unreadable, damaged or newer stops every write, as sync.json does; the file is never touched. */
+async function inspectMcpRecord(home: string): Promise<{ record?: McpRecord; problem?: string }> {
+  let text: string;
+  try { text = await readFile(recordPath(home), 'utf8'); }
+  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The MCP record could not be read. ${NOTHING_CHANGED}` }; }
+  const damaged = { problem: `The MCP record is damaged. ${NOTHING_CHANGED}` };
+  try {
+    const record = JSON.parse(text) as McpRecord | null;
+    const version = record?.formatVersion;
+    if (!Number.isInteger(version) || version! < 1) return damaged;
+    if (version! > MCP_FORMAT_VERSION) return { problem: `The MCP record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
+    return validMcpItems(record?.items) ? { record: record! } : damaged;
+  } catch { return damaged; }
+}
 async function readMcpRecord(home: string): Promise<McpRecord> {
-  try { const parsed = JSON.parse(await readFile(recordPath(home), 'utf8')); if (parsed && typeof parsed.items === 'object') return parsed; } catch { /* first time */ }
-  return { formatVersion: 1, items: {} };
+  return (await inspectMcpRecord(home)).record ?? { formatVersion: MCP_FORMAT_VERSION, items: {} };
 }
 const saveMcpRecord = (home: string, record: McpRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
@@ -277,7 +293,8 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
 export async function mcpView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => mcpTools.includes(tool));
   const { byName, problems } = await gatherAll(context, present);
-  const record = await readMcpRecord(context.home);
+  const { record = { formatVersion: MCP_FORMAT_VERSION, items: {} }, problem } = await inspectMcpRecord(context.home);
+  if (problem) problems.unshift(problem);
   const servers: SkillFacts[] = [];
   const claudePending: string[] = [];
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
@@ -293,7 +310,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
   }
-  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
+  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 
 // ---------- Apply ----------
@@ -307,6 +324,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const recordProblem = (await inspectMcpRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   // The sync record is the one place ownership lives: make it now if this is the first thing Central Knot manages.
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
@@ -565,7 +584,8 @@ function restorable(past: HistoryEvent): string | undefined {
 export async function undoClaudeWrite(context: ShareContext, written: ClaudeWrite[]): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
-  const record = await readMcpRecord(context.home);
+  const { record = { formatVersion: MCP_FORMAT_VERSION, items: {} }, problem } = await inspectMcpRecord(context.home);
+  if (problem) return { stopped: problem, results: [], writes: 0 };
   const entries = (await readTool(context, 'claude-cli')).entries;
   for (const write of written) {
     const entry = entries.find(candidate => candidate.name === write.name);
@@ -625,6 +645,8 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const recordProblem = (await inspectMcpRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
