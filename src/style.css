@@ -319,7 +319,7 @@ ul { list-style: none; }
 .tool-title { flex: none; font-size: 14px; line-height: 20px; font-weight: 600; }
 .tool-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 24px; }
 .tool-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-@container (min-width: 704px) { .tool-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@container (min-width: 704px) { .tool-body { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
 .link-row { margin-left: -8px; }
 .plain-list { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1368,7 +1368,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-facts dd { min-width: 0; }
 /* A commit reads as one line of text that wraps where it must: id, subject, then when, never pinned apart. */
 .repo-commit, .repo-latest { display: inline; min-width: 0; overflow-wrap: anywhere; word-spacing: 4px; }
-.repo-commit > *, .repo-latest > * { word-spacing: normal; }
+.repo-commit > *, .repo-latest > :not(.repo-commit) { word-spacing: normal; }
 .repo-latest > .repo-new { margin-left: 8px; }
 .repo-sha { white-space: nowrap; }
 .repo-subject { overflow-wrap: anywhere; }
@@ -1395,14 +1395,15 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-stuck-count { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--warning); text-transform: none; letter-spacing: 0; }
 .repo-stale { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-stale > svg { flex: none; align-self: flex-start; margin-top: 2px; }
-.repo-state:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+/* The state line takes focus only so a keyboard user keeps their place; it isn't a control, so it doesn't look like one. */
+.repo-state:focus, .repo-state:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--focus); }
 .repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
 .repo-change-added { color: var(--success); }
 .repo-change-removed { color: var(--danger); }
 .repo-change-held { color: var(--ink-soft); }
 .repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-field-below .mono { font-size: 11.5px; white-space: nowrap; }
-.band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; border-color: currentColor; color: inherit; flex: none; }
+.band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; flex: none; color: var(--ink); }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
 .repo-aside { max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
@@ -1411,7 +1412,9 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 /* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
 .repo-page .band-done .tone-faint { color: inherit; }
 /* Wide windows: the intro lines up with the form and "What goes where" below it. */
-@container (min-width: 960px) { .repo-page > .scroll > .empty { align-items: flex-start; text-align: left; } .repo-page > .scroll > .empty .empty-body { max-width: 72ch; } }
+/* The intro lines up with the form at every width, as the connected page does. */
+.repo-page > .scroll > .empty { align-items: flex-start; text-align: left; }
+.repo-page > .scroll > .empty .empty-body { max-width: 72ch; }
 /* The question and its buttons sit together at the right, under Disconnect…. */
 .band.repo-confirm { justify-content: flex-end; }
 .band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }

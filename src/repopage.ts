@@ -1,7 +1,7 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { busy, rerender, showPage, state } from './app.ts';
+import { announce, busy, rerender, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
@@ -61,6 +61,11 @@ export async function loadRepo(check = false): Promise<void> {
   if (turn !== loads) return;
   repo.view = view;
   repo.checking = false;
+  // What the check found, in the status bar, so it never disagrees with the page.
+  if (view?.connected && state.page === 'repo') {
+    const { pull: toPull, push: toPush } = waitingCounts(view);
+    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
+  }
   rerender();
 }
 
@@ -72,6 +77,8 @@ async function settle(result: RepoResult, done: string, note?: string) {
   const home = await api().refresh();
   if (home) state.home = home;
   if (!result.stopped) state.outcome = { page: 'repo', text: done, note };
+  // The status bar's "…ing" ends with the action: said quietly, since the band above already shows it.
+  announce(result.stopped ?? done, true);
 }
 
 const connect = () => busy('Connecting to the repo…', async () => {
@@ -82,7 +89,7 @@ const connect = () => busy('Connecting to the repo…', async () => {
   if (!result.stopped) { repo.draftUrl = ''; repo.draftBranch = ''; }
 });
 
-const pull = () => void pullNow().then(() => keepFocus('repo-pull'));
+const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard) keepFocus('repo-pull'); });
 const pullNow = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
   const count = result.pulled ?? 0;
@@ -93,13 +100,13 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   const claudeWaits = result.waitsForClaude ?? [];
   const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.';
   const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
-    claudeWaits.length ? `Claude Code gets ${andList(claudeWaits)} once it’s closed and you click Write to Claude Code.` : ''].filter(Boolean);
+    claudeWaits.length ? `To add ${andList(claudeWaits)} to Claude Code, close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
   // One wording for the promise, always with History one click away.
   await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : 'any of them'} in History.` : undefined);
   if (claudeWaits.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
-const push = () => void pushNow().then(() => keepFocus('repo-push'));
+const push = (byKeyboard: boolean) => void pushNow().then(() => { if (byKeyboard) keepFocus('repo-push'); });
 const pushNow = () => busy('Pushing to the repo…', async () => {
   const result = await api().pushRepo(state.home!.home);
   await settle(result, result.pushed ? `Pushed as ${result.pushed.id.slice(0, 7)} “${result.pushed.subject}”.` : 'Pushed.');
@@ -120,7 +127,7 @@ const disconnect = () => busy('Disconnecting…', async () => {
   // The address stays in the form, so connecting again is one click.
   const last = repo.view?.connected ? { url: repo.view.url, branch: repo.view.branch } : undefined;
   const result = await api().disconnectRepo(state.home!.home);
-  if (last && !result.stopped) { repo.draftUrl = last.url; repo.draftBranch = last.branch; }
+  if (last && !result.stopped) repo.draftUrl = last.url;
   await settle(result, 'Disconnected. Your tools and the repo are as they were.');
 });
 
@@ -189,7 +196,7 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
     : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts]
     : !incoming && !outgoing && stuck ? [part('triangle-alert', 'tone-warning', `Up to date, except ${plural(stuck, 'item')} that can’t move`)]
     : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
-    : counts;
+    : [...counts, stuck ? h('span.repo-state-part.tone-muted', {}, `${stuck} can’t move`) : null];
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
   return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
 }
@@ -208,7 +215,8 @@ function pullButton(view: Extract<RepoView, { connected: true }>, pullable: numb
     variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', id: 'repo-pull', disabled: moving || !view.latest,
     label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull',
     attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' },
-    onclick: () => void pull(),
+    // A keyboard press (no pointer: detail 0) keeps its place on the page when the button goes away.
+    onclick: (event: MouseEvent) => pull(event.detail === 0),
   });
 }
 
@@ -220,7 +228,7 @@ function pushButton(view: Extract<RepoView, { connected: true }>, pushable: numb
     variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', id: 'repo-push', disabled: moving || !!view.pushBlocked,
     label: pushable ? `Push ${pushable}` : 'Push',
     attrs: describedBy ? { 'aria-describedby': describedBy } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` },
-    onclick: () => void push(),
+    onclick: (event: MouseEvent) => push(event.detail === 0),
   });
 }
 
@@ -294,7 +302,8 @@ function connectForm(allowed: boolean) {
   const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: Node) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
     h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
-      oninput: (event: Event) => { set((event.target as HTMLInputElement).value); refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
+      // Typing a new address or branch answers the last failure: its band goes.
+      oninput: (event: Event) => { set((event.target as HTMLInputElement).value); if (repo.problem) { repo.problem = undefined; rerender(); } refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
   const sshHint = h('span', {}, 'The address you’d give git clone. SSH works too: ', h('span.mono', {}, 'git@gitlab.com:you/agent-config.git'));
   return h('div.repo-connect', {},
