@@ -17,13 +17,13 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
-import { agentHash, agentText, agentTools, agentsView, applyAgents, fileFor, fromMarkdown, keepAgentVersion, keyOf, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agents.ts';
+import { agentHash, agentText, agentTools, agentsView, applyAgents, fileFor, fromMarkdown, keepAgentVersion, keyOf, readAgentRecord, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpView, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { gitEnv, runGit, whyGitFailed } from './plugins.ts';
-import { copyTree, errorCode, itemKey, sha256 as sha, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { copyTree, errorCode, itemKey, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
 
 /** The base instruction set (feedback/base-instructions): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -280,6 +280,29 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   }
 }
 
+/** Said of an item sync still manages but no tool here shows right now (unreadable, or its folder away). */
+const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is away). If it was deleted, Push sends that once sync has recorded it.';
+
+/**
+ * Items sync still records as Managed that weren't written: not found by discovery (a SKILL.md that won't parse, a folder away) or
+ * with no copy that could be read. Never offered as removed: absence is only a deletion once sync has recorded one.
+ */
+async function holdUnseen(context: ShareContext, dir: string, unsent: Unsent) {
+  const written = async (path: string) => stat(join(dir, path)).then(() => true, () => false);
+  for (const [key, item] of Object.entries((await readRecord(context.home)).record?.items ?? {})) {
+    if (item.state === 'shared' && !item.deleted && !unsent.has(key)) {
+      const folder = item.copies[0]?.directory.split(/[\\/]/).pop() ?? item.name;
+      if (!(await written(`skills/${folder}`))) unsendable(unsent, key, 'skill', item.name, UNSEEN);
+    }
+  }
+  for (const [name, item] of Object.entries((await readMcpRecord(context.home)).items)) {
+    if (item.state === 'shared' && !item.deleted && !unsent.has(serverKey(name)) && !(await written(`mcp/${toFile(name)}.json`))) unsendable(unsent, serverKey(name), 'mcp', name, UNSEEN);
+  }
+  for (const [key, item] of Object.entries((await readAgentRecord(context.home)).items)) {
+    if (item.state === 'shared' && !item.deleted && !unsent.has(`agent:${key}`) && !(await written(`agents/${toFile(item.name)}.md`))) unsendable(unsent, `agent:${key}`, 'agent', item.name, UNSEEN);
+  }
+}
+
 /**
  * Writes the Managed set here into the clone's working tree (Central Knot's own copy; no tool reads it), replacing what the layout
  * holds there, and returns the managed items that can't go in the repo.
@@ -290,6 +313,7 @@ async function writeManaged(context: ShareContext, dir: string, baseId: string |
   await writeSkills(dir, view.skills, unsent);
   await writeServers(context, dir, view.tools, unsent);
   await writeAgents(context, dir, view.tools, unsent, baseId);
+  await holdUnseen(context, dir, unsent);
   if (base) {
     await rm(join(dir, 'instructions', 'base.md'), { force: true });
     const text = await base.read();
@@ -550,6 +574,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const writer = agentTools.filter(tool => view.tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool) && (item ? true : !!facts?.copies[tool]));
   if (!writer) return [notIn(change.name, 'No tool here takes agents.')];
   const existing = (await readAgents(context, writer)).entries.find(entry => entry.key === key);
+  let settingsKept: string | undefined;
   const text = item && await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
   if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
@@ -561,6 +586,13 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
       if (existing?.text !== next) {
         // What this tool had is kept first, so Undo can put it back.
         if (existing) await keepAgentVersion(context, existing);
+        // Only Claude Code's own settings changed (model, tools): sync's versions don't tell those apart, so the earlier file is also
+        // kept whole under its own bytes, where nothing later writes over it, and the result says where.
+        if (existing && existing.hash === agentHash(agent)) {
+          const keptAt = join(storeDirectory(context.home), 'items', 'agent-settings', encodeURIComponent(key), `${sha(existing.text)}.md`);
+          await writeDurably(keptAt, existing.text);
+          settingsKept = keptAt;
+        }
         await mkdir(dirname(file), { recursive: true });
         await writeFileChecked(file, next, existing?.text);
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
@@ -575,6 +607,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const changes: Change[] = agent ? [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }] : [];
   const done = await applyAgents(context, tools, changes, { only: only(key), settleMs: 0 });
   if (done.stopped) return [notIn(change.name, done.stopped)];
+  if (settingsKept) done.results.push({ item: change.name, harness: writer, outcome: 'written', message: `Only its Claude Code settings changed; the earlier file is kept at ${settingsKept}.` });
   return !agent || (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) ? done.results : [...done.results, notManaged(change, writer)];
 }
 
@@ -625,6 +658,9 @@ async function readyToMove(context: ShareContext, base: BaseInstructions | undef
   if (!access.allowed) return { refused: await refusal(context, access.reason, base) };
   const found = await openClone(context);
   if (!found) return { refused: await refusal(context, 'No repo is connected.', base) };
+  // Pull writes a tool's copy before sync runs, so sync's own gate (another build syncing, a record to resume) is asked first.
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { refused: await refusal(context, gate.reason, base) };
   const problem = await check(context);
   if (problem) return { refused: await refusal(context, problem, base) };
   const state = (await readState(context.home))!;

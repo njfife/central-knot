@@ -156,7 +156,7 @@ interface AgentRecordItem { name: string; state: 'shared' | 'dont-share'; off: H
 /** `roots`: each tool's agents folder identity at the last pass, so a folder made again between passes reads as a reset. */
 interface AgentRecord { formatVersion: number; items: Record<string, AgentRecordItem>; roots?: Partial<Record<HarnessId, { ino: number; birth: number }>> }
 const recordPath = (home: string) => join(storeDirectory(home), 'agents.json');
-async function readAgentRecord(home: string): Promise<AgentRecord> {
+export async function readAgentRecord(home: string): Promise<AgentRecord> {
   try {
     const parsed = JSON.parse(await readFile(recordPath(home), 'utf8'));
     if (parsed && typeof parsed.items === 'object' && parsed.formatVersion === 2) return parsed;

@@ -164,6 +164,10 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
     const pulled = (await readHistory(first.home)).find(event => event.key === 'solo' && event.via === 'repo')!;
     assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /Before/);
+    // A SKILL.md that stops parsing hides the skill from every tool's listing: that is never offered as a removal.
+    await writeFile(join(first.home, '.claude/skills/solo/SKILL.md'), '---\nname: solo\ndescription: Has: a colon\n---\n');
+    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['solo', true]]);
+    await writeFile(join(first.home, '.claude/skills/solo/SKILL.md'), skillText('solo', 'Before.'));
     // A commit that touches nothing in the layout still has to be pulled before a push; Pull then just moves to it.
     await writeFile(join(author, 'README.md'), 'Notes.\n');
     git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'readme'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
