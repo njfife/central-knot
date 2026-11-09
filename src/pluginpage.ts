@@ -118,11 +118,11 @@ function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | und
   return [...byName.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** Who holds one text, by version: "Marketplace and Codex (1.2.0)", "Claude Code (1.1.0) and Codex (1.0.0)". */
+/** Who holds one text, each version after the last holder that has it: "Marketplace and Codex (1.2.0)", "Marketplace, Codex (1.2.0) and Claude Code (1.1.0)". */
 function holdersLine(holders: FileCopy[]): string {
   const byVersion = new Map<string, string[]>();
   for (const holder of holders) byVersion.set(holder.version ?? '', [...(byVersion.get(holder.version ?? '') ?? []), holder.who]);
-  return andList([...byVersion].map(([version, who]) => `${andList(who)}${version ? ` (${version})` : ''}`));
+  return andList([...byVersion].flatMap(([version, who]) => who.map((name, at) => (version && at === who.length - 1 ? `${name} (${version})` : name))));
 }
 
 /** The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's isn't known). */
@@ -135,7 +135,7 @@ const fileNames: Record<FileKind, string> = { skills: 'SKILL.md', commands: 'com
 
 /**
  * One group of skills, commands or agents. A row opens its file as written, in the view the Skills page gives a
- * standalone SKILL.md, each text named by who holds it; a closed row says which tools have different text. A
+ * standalone SKILL.md, each text named by who holds it; a closed row says which tools' copies differ from the marketplace's. A
  * description stays at two lines, since the file holds it whole. `id` prefixes each part's ids.
  */
 function fileGroup(owner: string, id: string, title: string, kind: FileKind, parts: FilePart[]) {
@@ -146,7 +146,7 @@ function fileGroup(owner: string, id: string, title: string, kind: FileKind, par
     const file = `${part.name} ${fileNames[kind]}`;
     const differs = differsIn(part);
     const body = h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null,
-      differs.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12), `${holdersLine(differs)} ${differs.length > 1 ? 'have' : 'has'} different text`) : null);
+      differs.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12), `${holdersLine(differs)} ${differs.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy`) : null);
     if (!part.copies.length) return h('li', {}, h('code.plugin-name', {}, part.name), body);
     return h(`li${open ? '.open' : ''}`, {},
       h('button.plugin-file-toggle', { type: 'button', id: `${id}-${kind}-${part.name}`, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${file}`,
@@ -189,7 +189,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   // The catalog's version, else the one its plugin.json gives once read (a plugin kept in another repository).
   const offered = plugin.version ?? detail?.version;
   const facts: (string | HTMLElement)[] = [plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
-  if (offered) facts.unshift(h('span.plugin-meta-version', {}, `Version ${offered}`));
+  if (offered) facts.unshift(h('span.plugin-meta-version', { title: 'The version the marketplace offers' }, `Version ${offered}`));
   if (plugin.homepage) facts.push(button({ variant: 'link', size: 'micro', label: 'Website', id: 'plugin-homepage', onclick: () => openLink(plugin.homepage!) }));
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents].map(({ name, description }) => ({ name, description })) : [];

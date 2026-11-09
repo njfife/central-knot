@@ -11,7 +11,7 @@ import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, t
 import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, otherVersions, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
@@ -51,6 +51,13 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
     h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), addBox(false));
 }
 
+/** Tools on another version, grouped by that version: Claude Code and Codex have 1.9.0. */
+function versionGroups(others: { tool: HarnessId; version: string }[]): { version: string; tools: HarnessId[] }[] {
+  const groups = new Map<string, HarnessId[]>();
+  for (const { tool, version } of others) groups.set(version, [...(groups.get(version) ?? []), tool]);
+  return [...groups].map(([version, tools]) => ({ version, tools }));
+}
+
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
 function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
@@ -68,9 +75,10 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
       holds ? h('span.plugin-row-holds', {}, holds) : null,
-      // On its own line under what it holds; each tool stays with its version, and between tools the line may wrap.
+      // On its own line under what it holds.
       others.length ? h('span.plugin-row-holds.plugin-version-differs', {}, icon('circle-alert', 12),
-        others.map(({ tool, version }, at) => h('span.nowrap', {}, `${names[tool]} has ${version}${at < others.length - 1 ? ',' : ''}`))) : null),
+        // Wraps between words like any text; a version never parts from the word before it.
+        h('span', {}, versionGroups(others).map(({ version, tools }) => `${andList(tools.map(tool => names[tool]))} ${tools.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', '))) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
