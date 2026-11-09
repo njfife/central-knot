@@ -24,7 +24,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 const kindOf = (key: string) => (key.startsWith('mcp:') ? 'MCP server' : key.startsWith('agent:') ? 'Agent' : 'Skill');
 /** The overwritten edits a skill conflict or kept edit can put back, one per content (mirrors restorableChoices in manage.ts). */
 function choices(event: HistoryEvent) {
-  if (event.key.includes(':') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
+  if (event.key.startsWith('mcp:') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
   const seen = new Set<string>();
   return event.losers.filter(loser => loser.hash && loser.hash !== event.previous && loser.hash !== event.winner?.hash && !seen.has(loser.hash) && seen.add(loser.hash));
 }

@@ -138,7 +138,7 @@ export function setJsonMember(text: string, path: string[], value: unknown): str
 export type TomlValue = string | number | boolean | TomlValue[] | { [key: string]: TomlValue };
 
 /** One `key = value` line in a table, with its raw text so unknown keys can be written back exactly. */
-export interface TomlEntry { key: string; value: TomlValue; raw: string }
+export interface TomlEntry { key: string; value: TomlValue; raw: string; /** Where the entry's line starts and its line ends, in the document. */ start: number; end: number }
 export interface TomlTable { header: string; path: string[]; entries: TomlEntry[]; start: number; end: number }
 
 function parseKey(text: string, at: number): { key: string; next: number } {
@@ -287,7 +287,7 @@ export function readTomlTables(text: string): TomlTable[] {
     const item = parseTomlValue(text, equals + 1);
     const lineEnd = text.indexOf('\n', item.next);
     const end = lineEnd < 0 ? text.length : lineEnd + 1;
-    current.entries.push({ key: keys.join('.'), value: item.value, raw: text.slice(lineStart, end) });
+    current.entries.push({ key: keys.join('.'), value: item.value, raw: text.slice(lineStart, end), start: lineStart, end });
     at = end;
   }
   current.end = text.length;
@@ -298,7 +298,8 @@ const bareKey = (key: string) => (/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stri
 
 /** TOML text for a value: strings as basic strings, arrays and plain objects inline. */
 export function tomlValue(value: TomlValue): string {
-  if (typeof value === 'string') return JSON.stringify(value);
+  // TOML basic strings forbid DEL, which JSON leaves as is.
+  if (typeof value === 'string') return JSON.stringify(value).replace(/\x7f/g, '\\u007f');
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) return `[${value.map(tomlValue).join(', ')}]`;
   return `{ ${Object.entries(value).map(([key, item]) => `${bareKey(key)} = ${tomlValue(item)}`).join(', ')} }`;

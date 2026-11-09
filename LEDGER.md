@@ -436,3 +436,37 @@ Opus: "not safe yet". It ran on throwaway homes and on the Mac's real home with 
   - editor leftovers (`.*.swp`, `.#*` locks, `#*#`, `*~`, `4913`) are not content and not links.
 
 **Validation.** 159 unit tests; the 7 new ones cover these findings, and 5 of them fail on b66f9ce. Linux e2e 121/121.
+
+## Agents and background: Opus and Astra checks (on e805d21), November 9, 2026
+
+Both said "not yet". Opus confirmed 7 problems, Astra 11, overlapping. The agents engine was rewritten on the skills engine's safety rules. Both judges' reproductions now pass and are kept as `tests/agents-opus-check.test.ts` (4) and `tests/agents-astra-check.test.ts` (12).
+
+- **Kept versions keep every tool's whole file.** They are stored per tool under the content ID (`items/agents/<key>/<hash>/<tool>.txt`), and Restore puts back each tool's own file, fields and tables included (Opus 1, Astra 2).
+- **Unreadable is not absent.** A file that can't be read as an agent, or an agents folder that can't be listed, holds the agent: no deletion and no overwrite. A new file is created exclusively, so nothing there is ever replaced (Astra 1).
+- **Checked writes and removals.** A write rereads the file and refuses if it changed. A removal moves the file aside and checks it, putting back an edit saved meanwhile.
+- **Deletions follow DEL-01 and DEL-02:**
+  - only recorded copies are removed; a different, never-synced copy stays (Astra 5);
+  - a tool whose folder is away gets a `removing` entry and is deleted when it returns with the same bytes (Opus 4);
+  - a folder that comes back empty puts the copy back;
+  - a moved config root lets old copies go, never deletes (Astra 6).
+- **One-way copies (D-26):**
+  - any change to the whole file, own fields included, stops them (Astra 11);
+  - stopped copies are kept on record, so Restore and Undo never write them and never take them for another agent (Opus 2 and 3, Astra 3).
+- **Restore:**
+  - it respects the sync gate (Astra 7);
+  - it never overwrites an agent managed again with other content (Astra 4);
+  - it can choose any overwritten edit.
+- **History:** "Use this copy" is a `chosen` event, and an edit racing a deletion is a `kept-edit` event with a notice (Astra 10). The origin stays the same tool unless it is chosen, so one-way never flips by itself (Opus's design note).
+- **Formats:**
+  - TOML keys are replaced at their own positions, never by searching text (Opus 5, Astra 8);
+  - frontmatter edits change only the `name` and `description` lines, keeping every other line as written (Opus 6);
+  - DEL is escaped in TOML strings (Opus 7).
+- **Names that differ only by case** are one agent across tools, and a clash needs a choice.
+- **Sync off:** Apply all and Write now write only what they show, for MCP and agents too (Astra 9).
+- **Smaller fixes:**
+  - MCP Restore respects the sync gate;
+  - MCP and agent deletions get the 2.5 s follow-up pass;
+  - the menu bar dot shows when the window is gone;
+  - Start at sign-in is registered once, at first launch, and a later "off" in Login Items is respected (the menu reads the system's state).
+
+**Validation.** 179 unit tests. Linux e2e 121/121.

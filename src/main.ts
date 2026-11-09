@@ -91,6 +91,16 @@ const canStartAtSignIn = () => app.isPackaged && !smoke && (process.platform !==
 function applySignIn() {
   if (canStartAtSignIn()) app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: ['--hidden'] });
 }
+/**
+ * On by default (PLT-03): registered at the first launch of an installed app, then left alone. Turning it off in System Settings'
+ * Login Items is respected; the menu shows the system's current answer.
+ */
+async function firstSignIn() {
+  if (!canStartAtSignIn() || appSettings.startAtSignIn !== undefined) return;
+  await saveAppSettings({ startAtSignIn: true });
+  applySignIn();
+}
+const startsAtSignIn = () => canStartAtSignIn() && app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
 const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
 
 let tray: Tray | undefined;
@@ -113,7 +123,7 @@ function trayMenu() {
     { label: 'Sync', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync now', enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
-    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: canStartAtSignIn() && appSettings.startAtSignIn !== false, enabled: canStartAtSignIn(),
+    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
     { type: 'separator' },
     { label: 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
@@ -149,6 +159,8 @@ let lastStopped: string | undefined;
 /** What MCP sync did on its own since the page last read, and whether the last pass changed anything. */
 let pendingMcpNotices: NonNullable<ApplyResult['notices']> = [];
 let mcpChanged = false;
+/** An MCP or agent deletion is inside its settle window: the background looks again shortly, as for skills. */
+let otherSettling = false;
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
 async function pass(explicit = false): Promise<ApplyResult | undefined> {
@@ -163,6 +175,7 @@ async function pass(explicit = false): Promise<ApplyResult | undefined> {
     const agents = await applyAgents(shared, (await manageView(shared)).tools, []).catch(() => undefined);
     pendingMcpNotices.push(...(agents?.notices ?? []));
     mcpChanged = !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length);
+    otherSettling = !!(mcp?.settling || agents?.settling);
   }
   return result;
 }
@@ -207,7 +220,7 @@ function background() {
     // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
     if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-    if (result?.settling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
+    if (result?.settling || otherSettling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
     if (result?.stopped && result.stopped !== lastStopped) {
       lastStopped = result.stopped;
       pendingResults.push({ item: 'Sync', outcome: 'failed', message: result.stopped });
@@ -218,7 +231,8 @@ function background() {
     pendingResults.push(...result.results);
     pendingNotices.push(...(result.notices ?? []));
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
-    if (!window.isDestroyed() && (!window.isVisible() || !window.isFocused())) { unseen = true; refreshTray(); }
+    // Nobody saw it: the window is closed, gone or behind other windows (D-36).
+    if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
   });
   queue = work.catch(() => undefined);
 }
@@ -383,7 +397,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { 
 app.whenReady().then(async () => {
   await loadSyncSetting();
   await loadAppSettings();
-  applySignIn();
+  await firstSignIn();
   makeTray();
   createWindow(!smoke && !startedHidden());
   handle('discovery:select', async mode => {
@@ -446,7 +460,7 @@ app.whenReady().then(async () => {
       const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
       const tools = (await manageView(context())).tools;
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
-      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
     })()
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
@@ -458,13 +472,13 @@ app.whenReady().then(async () => {
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, home) => (home === current?.home
-    ? applyMcp(context(), (await manageView(context())).tools, changes(list))
+    ? applyMcp(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('agents:apply', async (list, home) => (home === current?.home
-    ? applyAgents(context(), (await manageView(context())).tools, changes(list))
+    ? applyAgents(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
-    ? applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string') })
+    ? applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), only: new Set(names.filter((name): name is string => typeof name === 'string')) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })

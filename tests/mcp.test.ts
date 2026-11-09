@@ -132,3 +132,15 @@ test('MCP History: an edit that spread and a deletion are kept, and Undo or Rest
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'));
   } finally { await box.cleanup(); }
 });
+
+test('With Sync off, Apply all for one server writes only that server; an unrelated edit waits', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { one: { type: 'local', command: 'one', tools: ['*'] }, two: { type: 'local', command: 'two', tools: ['*'] } } }));
+    await applyMcp(box.context, tools, [{ key: 'one', managed: true, off: ['claude-cli'] }, { key: 'two', managed: true, off: ['claude-cli'] }]);
+    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
+    await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "two"', 'command = "two-edited"'));
+    await applyMcp(box.context, tools, [{ key: 'one', managed: false, off: [] }], { only: new Set(['one']) });
+    assert.equal((await copilotOf(box.home)).two.command, 'two', 'the unrelated edit did not spread');
+  } finally { await box.cleanup(); }
+});

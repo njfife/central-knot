@@ -217,7 +217,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
  */
-export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number } = {}): Promise<McpResult> {
+export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -236,6 +236,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const notices: SyncNotice[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), ...fields }; events.push(made); return made.id; };
   let writes = 0;
+  let settling = false;
   // Servers whose copy the person chose in this Apply all: the chosen copy replaces the others.
   const chosenNow = new Set<string>();
   const unreadable = new Set(present.filter(tool => problems.some(problem => problem.startsWith(mcpFile(context, tool)))));
@@ -252,7 +253,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   }
   const now = options.now ?? Date.now();
   for (const [name, item] of Object.entries(record.items)) {
-    if (item.state !== 'shared') continue;
+    // With Sync off, Apply all writes exactly the servers it shows (SYN-03).
+    if (item.state !== 'shared' || (options.only && !options.only.has(name))) continue;
     const slot = byName.get(name) ?? {};
     const syncing = present.filter(tool => !item.off.includes(tool) && !unreadable.has(tool));
     const entries = syncing.map(tool => slot[tool]).filter((entry): entry is McpEntry => !!entry);
@@ -264,7 +266,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     for (const copy of missing) missingSince[copy.tool] ??= now;
     for (const tool of Object.keys(missingSince) as HarnessId[]) if (!missing.some(copy => copy.tool === tool)) delete missingSince[tool];
     if (missing.length) {
-      if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) continue;
+      if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }
       const edited = entries.filter(entry => recorded.has(entry.tool) && recorded.get(entry.tool) !== entry.hash);
       if (!edited.length) {
         const removed: HarnessId[] = [];
@@ -324,7 +326,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   }
   await saveMcpRecord(context.home, record);
   await appendHistory(context, events);
-  return { results, writes, notices };
+  return { results, writes, notices, settling };
 }
 
 /** The version an MCP event's Undo or Restore puts back. */
@@ -341,6 +343,9 @@ function restorable(past: HistoryEvent): string | undefined {
 export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
+  // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
   const name = past?.key.replace(/^mcp:/, '');

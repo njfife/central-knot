@@ -115,8 +115,11 @@ test('Deleting a two-way copy deletes everywhere after it settles; Restore bring
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    // The whole Codex agents folder goes away: nothing is deleted anywhere, and Codex's copy is put back.
+    // The whole Codex agents folder goes away: nothing is deleted anywhere; once it is back, Codex's copy is put back.
     await rm(join(box.home, '.codex/agents'), { recursive: true });
+    assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0);
+    assert.match(await read(box.home, '.claude/agents/reviewer.md'), /Be brief/);
+    await mkdir(join(box.home, '.codex/agents'));
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 1);
     assert.match(await read(box.home, '.claude/agents/reviewer.md'), /Be brief/);
     assert.match(await read(box.home, '.codex/agents/reviewer.toml'), /Be brief/, 'put back');
@@ -147,5 +150,39 @@ test('Agents nobody managed are never written, and unreadable files are reported
     assert.equal(view.problems.length, 2);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
     assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
+  } finally { await box.cleanup(); }
+});
+
+test('Frontmatter lines other than name and description stay exactly as written', () => {
+  const existing = '---\n# mine\nname: reviewer\ndescription: Old\ntools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, TodoWrite, NotebookEdit, Task\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nOld prompt.\n';
+  const text = agentText('claude-cli', { name: 'reviewer', description: 'A description long enough that a YAML writer with a line width would want to fold it onto more than one line, which must not happen here', prompt: 'New prompt.\n' }, existing);
+  assert.ok(text.includes('tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, TodoWrite, NotebookEdit, Task\nhooks: {PreToolUse: [{matcher: Bash}]}\n'), text);
+  assert.ok(text.startsWith('---\n# mine\nname: reviewer\ndescription: A description long enough'), text);
+  assert.equal(text.split('\n').filter(line => line.startsWith('description:')).length, 1);
+  assert.ok(text.endsWith('---\n\nNew prompt.\n'), text);
+});
+
+test('Names that differ only by case are one agent across tools, and a clash needs a choice', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/Reviewer.md'), claudeAgent());
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\nname: reviewer\ndescription: Copilot one\n---\n\nOther.\n');
+    const view = await agentsView(box.context, tools);
+    assert.equal(view.servers.length, 1);
+    const held = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(held.writes, 0);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Other\./);
+  } finally { await box.cleanup(); }
+});
+
+test('With Sync off, Apply all for one agent never spreads another agent’s edit', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await writeFile(join(box.home, '.claude/agents/other.md'), '---\nname: other\ndescription: Other\n---\n\nOther.\n');
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }, { key: 'other', managed: true, off: [] }]);
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited with Sync off.\n'));
+    await applyAgents(box.context, tools, [{ key: 'other', managed: false, off: [] }], { only: new Set(['other']) });
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/, 'not spread');
   } finally { await box.cleanup(); }
 });

@@ -259,4 +259,4 @@ export interface McpView {
   notices: SyncNotice[];
 }
 
-export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[] }
+export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean }
