@@ -333,3 +333,13 @@ test('A deletion first seen before an agent was unmanaged still waits the settle
     assert.equal(pass.settling, true);
   } finally { await box.cleanup(); }
 });
+
+test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
+  const box = await sandbox();
+  try {
+    await rm(join(box.home, '.copilot/agents'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/);
+  } finally { await box.cleanup(); }
+});
