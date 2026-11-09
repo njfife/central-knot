@@ -25,3 +25,6 @@ export function toolsPhrase(touched: string[], inHome: string[]): string {
   const everyOne = tools.length > 2 && tools.length === inHome.length && inHome.every(tool => tools.includes(tool));
   return everyOne ? `all ${tools.length} tools` : andList(tools.map(toolName));
 }
+
+/** The same, starting a label or a sentence: "All 3 tools", "Claude Code and Codex". */
+export const capitalToolsPhrase = (touched: string[], inHome: string[]): string => toolsPhrase(touched, inHome).replace(/^./, first => first.toUpperCase());

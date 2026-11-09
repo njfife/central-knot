@@ -81,6 +81,8 @@ export interface DesktopApi {
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
   /** Turns Start at sign-in on or off, as the menus do. */
   setStartAtSignIn(on: boolean): Promise<AppPreferences>;
+  /** A preference changed, from a menu or the page: Settings reads them again. */
+  onSettingsChanged(callback: () => void): void;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
@@ -106,7 +108,6 @@ export interface DesktopApi {
   plugins(fresh?: boolean): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
-  refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;

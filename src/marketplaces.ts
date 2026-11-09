@@ -141,8 +141,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
-  /** Every marketplace: added here, or already added in a tool. `fresh`: one source, or every Git source, fetched again. */
-  async function view(fresh?: string | true): Promise<PluginsView> {
+  /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
+  async function view(fresh = false): Promise<PluginsView> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
     const tools = toolIds(await host.tools());
     const writing = await host.writeAccess();
@@ -156,7 +156,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const tool of tools) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
-    marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh === true || (fresh !== undefined && engine.sameSource(fresh, source))))));
+    marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh))));
     const snapshots = host.home()?.snapshots ?? [];
     const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly };
@@ -208,9 +208,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { view: shown, source: shown.marketplaces.find(entry => engine.sameSource(entry.source, stored))?.source ?? stored };
   }
 
-  /** Fetches one marketplace again; its plugins kept in other repositories are read again too. */
-  const refresh = (source: string): Promise<PluginsView> => view(source);
-
   /** Takes a marketplace off Central Knot's own list. Tools that added it keep it, and nothing is uninstalled. */
   async function forget(source: string): Promise<PluginsView> {
     await saveAdded((await added()).filter(item => !engine.sameSource(item, source)));
@@ -255,7 +252,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) };
   }
 
-  return { view, detail, readme, add, refresh, forget, install, uninstall };
+  return { view, detail, readme, add, forget, install, uninstall };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -270,13 +267,12 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
 export function registerMarketplaces({ handle, handleRead }: { handle: Handle; handleRead: Handle }, host: MarketplaceHost): void {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
-  handle('plugins:view', async fresh => (open() ? markets.view(fresh === true ? true : undefined) : null));
+  handle('plugins:view', async fresh => (open() ? markets.view(fresh === true) : null));
   handleRead('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
   handleRead('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
   handleRead('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
-  handle('plugins:refresh', async source => (open() && isText(source) ? markets.refresh(source) : null));
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.

@@ -11,12 +11,11 @@ const api = () => window.centralKnot;
 
 export type MarketTab = 'plugins' | 'about';
 /** What the page is doing, so it can say so; set by each action, cleared when it ends. */
-export type MarketActivity = 'reading' | 'adding' | 'refreshing' | 'removing' | 'applying' | 'undoing';
+export type MarketActivity = 'reading' | 'adding' | 'removing' | 'applying' | 'undoing';
 /** Each activity's short label (the app's busy line) and what the page's band says while it runs. */
 export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }> = {
   reading: { label: 'Reading marketplaces…', band: 'Reading marketplaces… Nothing is installed by this.' },
   adding: { label: 'Reading the marketplace…', band: 'Reading the marketplace… Nothing is installed by this.' },
-  refreshing: { label: 'Refreshing the marketplace…', band: 'Refreshing the marketplace… Nothing is installed by this.' },
   removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
   applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
@@ -166,15 +165,6 @@ function dropReads(source: string): void {
   market.readmes.delete(source);
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
 }
-
-export const refreshMarketplace = (source: string) => act('refreshing', async () => {
-  const view = await api().refreshMarketplace(source);
-  dropReads(source);
-  showView(view);
-  const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
-  app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
-  announce(app.outcome.text, true);
-});
 
 export const forgetMarketplace = (source: string) => act('removing', async () => {
   const gone = market.view?.marketplaces.find(entry => entry.source === source);

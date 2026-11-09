@@ -55,7 +55,7 @@
   --scrollbar: 0px;
   /* A padded scroll area's right padding: 16px from its edge, the scrollbar's width given back (renderer.ts sets --scrollbar). */
   --row-hover: color-mix(in oklab, var(--accent) 7%, var(--hover));
-  --row-stripe: color-mix(in oklab, var(--ink) 3%, transparent);
+  --row-stripe: color-mix(in oklab, var(--ink) 5.5%, transparent);
   --pad-end: max(0px, calc(16px - var(--scrollbar)));
   --sidebar-width: 208px;
   --rail-width: 56px;
@@ -74,6 +74,7 @@
     --ink-soft: #a3a3a3;
     --ink-faint: #6b6b6b;
     --hover: rgb(255 255 255 / 6%);
+    --row-stripe: rgb(255 255 255 / 3.5%);
     --press: rgb(255 255 255 / 10%);
     --current: rgb(255 255 255 / 8%);
     --selected-row: rgb(255 255 255 / 11%);
@@ -161,6 +162,9 @@ ul { list-style: none; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-count { font-size: 11px; line-height: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .nav-count:empty, .nav-count-zero { opacity: 0.45; }
+/* A page for a kind no tool here can hold: still there, quieter. */
+.nav-dim:not([aria-current]) { color: var(--ink-faint); }
+.nav-dim:not([aria-current]) .icon { opacity: 0.6; }
 .nav-unseen { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 6px; flex: none; }
 .nav-divider { height: 1px; margin: 6px 8px; background: var(--line); flex: none; }
 #homes { flex: none; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
@@ -197,6 +201,12 @@ ul { list-style: none; }
 .status-home { flex: none; }
 .status-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #announcement { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A narrow status bar showing a message gives it room: the write fact keeps its icon, its words move to its tooltip. The
+   message itself keeps its whole text in its tooltip too (app.ts announce). */
+#status { container: status / inline-size; }
+@container status (width < 1100px) {
+  #status-facts:has(~ #announcement:not(:empty):not(.visually-hidden):not([data-quiet="true"])) .status-clip { display: none; }
+}
 #announcement[data-quiet="true"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 #status-end { flex: none; margin-left: auto; }
 #status-version { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 2px; }
@@ -280,6 +290,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .bar-short .count-short { display: inline; }
 .bar-short .toolbar-end { padding-left: 8px; }
 .bar-short .chip { padding: 0 8px; }
+.chip-icon { display: none; }
+.bar-icons .chip-shrinks .chip-label { display: none; }
+.bar-icons .chip-shrinks .chip-icon { display: block; color: var(--warning); }
+.bar-icons .find { min-width: 88px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
 .bar-wrap .toolbar-end { border-left: 0; }
 
@@ -353,16 +367,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @container style(--narrow: 1) {
   .decided-undo-text { display: none; }
   .decided-undo-icon { display: block; }
-  .ov .ov-row { grid-template-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
+  .ov-row { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
   .ov-name-about, .decided-uses, .decided-what { display: none; }
   .decided-short { display: inline; }
 }
 
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
 .ov-row:not(.ov-head) { cursor: pointer; }
-.ov-row:not(.ov-head):hover, .history-row:hover { background: var(--row-hover); }
-/* A wide table stripes every other row, so the eye can follow a row from its name across to its tools. */
-@container table (width >= 1400px) { [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open) { background: var(--row-stripe); } }
+.ov-row:not(.ov-head):hover, .ov-row:not(.ov-head):has(:focus-visible), .history-row:hover { background: var(--row-hover); }
+/* A wide table stripes every other row, so the eye can follow a row from its name across to its tools; the plugin table too. */
+.plugin-table { container: table / inline-size; }
+@container table (width >= 1000px) {
+  :is([role="rowgroup"], .plugin-table) > .ov-row:not(.ov-head):nth-child(even of .ov-row:not(.ov-head)):not(:hover):not(.open):not(:has(:focus-visible)) { background: var(--row-stripe); }
+}
 .ov-row.open { background: var(--chrome); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
@@ -375,13 +392,21 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 16px; overflow: hidden; }
 .ov-name-text { flex: 0 1 auto; min-width: 3em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unmanaged .ov-name-text { font-weight: 400; }
-.ov-name-about { flex: 1 1 0; min-width: 5em; color: var(--ink-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The description keeps room for a few letters, so the dot before it never stands alone; the tag gives way first. */
+.ov-name-about { flex: 1 1 0; min-width: 8em; color: var(--ink-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
+/*
+ * A row's name cell gives way in order. It wraps onto lines below its 40px, out of sight: the description goes first
+ * (it needs room for a few words), then the one-way tag, whole. The name and its state pills (.ov-name-main) are the
+ * first line, so only when they alone are too wide does the name shorten; the pills never do.
+ */
+.ov-name-fit { flex-wrap: wrap; align-content: flex-start; height: 40px; padding-left: 36px; position: relative; }
+.ov-name-fit .row-open { position: absolute; left: 10px; margin: 0; top: 11px; }
+.ov-name-main { flex: 0 1 auto; min-width: 0; height: 40px; display: flex; align-items: center; gap: 8px; }
+.ov-name-fit > .row-tag, .ov-name-fit > .ov-name-about { line-height: 40px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover { background: var(--press); }
 .row-open-spacer { display: inline-block; width: 18px; margin-left: -6px; flex: none; }
-.row-tag { flex: 0 1 auto; min-width: 0; font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-tag { flex: none; font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
 .held-pill { flex: none; white-space: nowrap; font-size: 11.5px; color: var(--ink-soft); border: 1px solid var(--control-line); border-radius: 999px; padding: 1px 7px; }
 .decided { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px 1px 7px; white-space: nowrap; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-soft); }
 .decided-uses { color: var(--ink-faint); }
@@ -432,8 +457,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }
-.legend-item { display: inline-flex; align-items: center; gap: 6px; }
-.legend-lead { margin-left: 6px; font-size: 12px; color: var(--ink-faint); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend-lead { font-size: 12px; color: var(--ink-faint); }
+/* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
+.legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
 .legend-plain { border: 1px solid var(--control-line); border-radius: 5px; background: transparent; }
 .legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); background: var(--accent); }
 .legend-switch > .switch-knob { top: 1px; left: auto; right: 1px; width: 8px; height: 8px; box-shadow: none; }
@@ -497,13 +524,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .dock-title h2 { font-size: 14px; line-height: 20px; font-weight: 600; }
 .dock-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .dock-scroll { padding: 12px var(--pad-end) 16px 16px; }
-.dock .details { margin: 0; padding: 0; background: none; box-shadow: none; }
 /* The dock is narrow: each tool's name sits above what it says, instead of beside it. */
 .dock .details-tool-head:not(.details-mcp *) { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 
 /* ---------- A row's details, opened under it ---------- */
 .details { position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; background: var(--chrome); box-shadow: inset 3px 0 0 var(--control-line), inset 0 -1px 0 var(--line); }
 .details-differs { box-shadow: inset 3px 0 0 var(--warning), inset 0 -1px 0 var(--line); }
+/* In the dock and the Files view the details are the panel's whole content: no band of their own (matrix.ts details). */
+.details-bare { margin: 0; padding: 0; background: none; box-shadow: none; }
 .details-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
 .details-close:hover { background: var(--hover); color: var(--ink); }
 .details-head { display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
@@ -594,7 +622,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll > * { flex: none; min-width: 0; max-width: 100%; }
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
-.detail-scroll > .details { margin: 4px 0 0; padding: 4px 0 8px; box-shadow: none; background: none; }
 /* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
@@ -658,13 +685,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cards-scroll { container: cards / inline-size; display: flex; flex-direction: column; gap: 16px; padding: 12px var(--pad-end) 16px 16px; }
 .cards-scroll > * { flex: none; }
 /*
- * Cards fill each row and match its height. The columns come from the width (each card at least about 470px) and the count
- * (dom.ts cardGrid), so four go 2×2 or four across, three go three across, and a row's last card stretches to fill it.
+ * Cards in equal columns, each row's cards matching its height. The columns come from the width and the count (dom.ts
+ * cardGrid): two from 960px, three cards three across from 1300px, four 2×2 and then four across from 2400px. An odd last
+ * card keeps one column's width at the left, so it has the same inner layout as the cards above it.
  */
-.card-grid { --cols: 1; display: flex; flex-wrap: wrap; gap: 16px; }
-.card-grid > .card { flex: 1 1 calc((100% - (var(--cols) - 1) * 16px) / var(--cols)); min-width: 0; }
+.card-grid { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; }
 @container cards (width >= 960px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
-@container cards (width >= 1800px) { .card-grid[data-count="3"] { --cols: 3; } }
+@container cards (width >= 1300px) { .card-grid[data-count="3"] { --cols: 3; } }
 @container cards (width >= 2400px) { .card-grid[data-count="4"] { --cols: 4; } }
 .tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -770,25 +797,25 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { height: auto; padding-top: 0; padding-bottom: 0; line-height: inherit; }
 .market-main { padding: 18px max(0px, calc(var(--market-gutter) - var(--scrollbar))) 32px var(--market-gutter); }
-.market-page-title { display: flex; align-items: center; gap: 12px; }
+.market-page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
 .market-page-title h2, .plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
-.market-page-actions { margin-left: auto; display: flex; gap: 4px; }
+.market-page-title .market-page-meta { flex: 0 1 auto; min-width: 0; margin: 0; }
+.market-page-actions { margin-left: auto; display: flex; gap: 4px; align-self: center; }
 .market-page-about, .plugin-about { margin: 6px 0 0; max-width: var(--measure); font-size: 13.5px; color: var(--ink); }
 .market-page-meta, .plugin-meta { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 0 0; font-size: 12px; color: var(--ink-faint); }
 .market-page-meta .btn, .plugin-meta .btn { height: auto; min-height: 0; padding: 0; font-size: 12px; }
 .meta-dot { margin: 0 6px; color: var(--ink-faint); }
-.market-tabs { display: flex; gap: 2px; margin: 16px 0 12px; border-bottom: 1px solid var(--line); }
+.market-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
+.market-tablist { display: flex; gap: 2px; align-self: flex-end; }
 .market-tab { all: unset; padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
 .market-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .market-item:focus-visible, .market-tab:focus-visible, .market-chip:focus-visible, .market-example:focus-visible, .crumb-link:focus-visible, .plugin-row-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
 /* The toolbar over the marketplace pane: where you are at the left; at the right, what is chosen or just happened. */
-.plugins-toolbar { gap: 12px; }
+.plugins-toolbar { gap: 12px; padding-left: var(--market-gutter); padding-right: var(--market-gutter); }
 .market-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.plugins-toolbar { padding-left: var(--market-gutter); padding-right: var(--market-gutter); }
-.plugins-toolbar.toolbar-quiet { border-bottom-color: transparent; background: transparent; }
 .toolbar-spacer { flex: 1 1 auto; }
-/* The marketplace's find box and category chips, above its plugin table; chips wrap rather than scroll sideways. */
-.market-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
+/* The marketplace's find box and category chips, on the tab row at its right; chips wrap rather than scroll sideways. */
+.market-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 6px auto; min-width: 0; }
 .market-filter .market-find { flex: none; width: 220px; height: 26px; }
 .market-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 /* A result that doesn't fit beside where you are takes its own line (fitBars). */
@@ -833,16 +860,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)) auto; align-items: center; gap: 8px 24px; }
-.plugin-tool-rows > .btn { justify-self: end; }
-@container plugin (width < 720px) {
-  .plugin-tool-rows { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
-  .plugin-tool-rows > .btn { justify-self: start; }
-}
+.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
+.plugin-tool-rows > .btn { margin-left: auto; }
 /* From 1400px of page, what it holds and how each tool takes it sit beside the README; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 @container plugin (width >= 1400px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
-.plugin-tool { display: flex; align-items: center; gap: 10px; }
+.plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { font-size: 11.5px; color: var(--ink-soft); }
@@ -881,6 +904,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .market-add-head { display: none; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
+  /* Less height around the table, and two-line rows (what it holds beside its name), so several plugins show. */
+  .market-main { padding-top: 12px; }
+  .market-tabs { margin: 8px 0 6px; }
+  .market-tab { padding: 5px 10px; }
+  .plugin-table .ov-head .ov-tool-head { flex-direction: row; gap: 6px; }
+  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 10px; padding: 7px 12px 7px 0; }
+  .plugin-row-about { order: 1; flex-basis: 100%; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */

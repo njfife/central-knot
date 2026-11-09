@@ -86,6 +86,15 @@ async function saveSyncSetting(on: boolean) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
   refreshTray();
+  preferencesChanged();
+}
+
+/**
+ * Tells the page that a preference changed, wherever it was changed (the app menu, the menu bar menu or the page), so an
+ * open Settings page reads them again instead of showing, and then resending, an old value.
+ */
+function preferencesChanged() {
+  if (window && !window.isDestroyed()) window.webContents.send('settings:changed');
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
@@ -141,6 +150,7 @@ async function setStartAtSignIn(on: boolean) {
   await saveAppSettings({ startAtSignIn: on });
   applySignIn();
   refreshTray();
+  preferencesChanged();
 }
 const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
 
@@ -235,7 +245,8 @@ let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = []
 let lastStopped: string | undefined;
 
 interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
-interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
+/** `tools`: the tools in the home as this pass found them, when it read them (with Sync on). */
+interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult; tools?: HarnessId[] }
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
 async function pass(explicit = false): Promise<PassResult> {
@@ -250,7 +261,7 @@ async function pass(explicit = false): Promise<PassResult> {
   const mcp = await applyMcp(shared, tools, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
   const agents = await applyAgents(shared, tools, []).catch(crashed('Agents sync'));
-  return { skills, mcpAndAgents: {
+  return { skills, tools, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
@@ -306,8 +317,10 @@ async function backgroundPass() {
   if (!current) return;
   const fromEvent = touched;
   touched = false;
-  const { skills, mcpAndAgents } = await pass();
+  const { skills, mcpAndAgents, tools } = await pass();
   keepMcpAndAgents(mcpAndAgents);
+  // A tool that appeared or went away changes every page's columns, even when the pass wrote nothing: the page reads again.
+  if (tools && tools.join() !== presentTools(latestSnapshots).join() && !window.isDestroyed()) window.webContents.send('sync:changed');
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
   if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.

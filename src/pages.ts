@@ -34,7 +34,7 @@ function addHint(holders: HarnessId[], noun: string) {
   const here = homeToolNames();
   return here.length ? `${andList(here)} can’t hold ${noun}. Choose another home at the bottom left.` : 'No tools were found in this home. Choose another home at the bottom left.';
 }
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint(state.home?.manage.tools ?? [], 'skills')}`, id);
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint(homeTools(), 'skills')}`, id);
 
 /**
  * The Overview's first sentence: what Central Knot keeps the same, between this home's tools only (`tools`, ids).
@@ -223,7 +223,7 @@ const count = (list: { copies: Record<string, unknown> }[] | undefined, tool: Ha
 /** What a tool's card says it has, one link per kind it can hold: its skills, then MCP servers and agents if it holds them. */
 function holdings(snapshot: Snapshot, home: HomeView, holdsMcp: boolean, holdsAgents: boolean): (Node | string)[] {
   const link = (count: number, noun: string, page: Page) => count
-    ? button({ variant: 'link', size: 'micro', label: plural(count, noun), id: `tool-${page === 'skills' ? 'overview' : page}-${snapshot.harness}`, onclick: () => showPage(page) })
+    ? button({ variant: 'link', size: 'micro', label: plural(count, noun), id: `tool-${page}-${snapshot.harness}`, onclick: () => showPage(page) })
     : h('span.link-quiet', {}, plural(0, noun));
   const skills = snapshot.skills.length || snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? link(skillCount(snapshot), 'skill', 'skills') : h('span', {}, discoveryLine(snapshot));
   const parts = [skills, holdsMcp ? link(count(home.mcp.servers, snapshot.harness), 'MCP server', 'mcp') : null, holdsAgents ? link(count(home.agents.servers, snapshot.harness), 'agent', 'agents') : null];
@@ -246,8 +246,10 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
       h('div.tool-column', {},
         // Outside This Mac's home no app is checked (the note above says so), so the card shows only folders.
         home.mode === 'actual' && section('Detection', h('dl.facts', {},
-          ...fact('Status', snapshot.detection),
-          ...fact('Version', snapshot.probe.version ?? snapshot.probe.detail),
+          // Found but its version couldn't be read: one line, with the probe's own words as its tooltip.
+          ...(snapshot.detection === 'Version unknown'
+            ? fact('Status', h('span', { title: snapshot.probe.detail }, 'Installed · version unknown'))
+            : [...fact('Status', snapshot.detection), ...fact('Version', snapshot.probe.version ?? snapshot.probe.detail)]),
           ...(snapshot.probe.detail.startsWith('ChatGPT desktop') ? fact('Found as', 'ChatGPT desktop’s own Codex; no Codex CLI found') : []))),
         section('Files and folders', h('dl.facts', {},
           ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
@@ -265,14 +267,14 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
 }
 
 /** On This Mac's home, the tools that were looked for and not found: said once, as information, never as a card to act on. */
-function notFoundLine(home: HomeView) {
-  if (home.mode !== 'actual' || !absentTools(home.snapshots).length) return null;
-  return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'), notFoundText(home));
+function notFoundLine(home: HomeView, absent: HarnessId[]) {
+  if (home.mode !== 'actual' || !absent.length) return null;
+  return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'), notFoundText(absent));
 }
 
 /** The sentence naming the tools This Mac's home looked for and didn't find. */
-function notFoundText(home: HomeView) {
-  const missing = absentTools(home.snapshots).map(toolName);
+function notFoundText(absent: HarnessId[]) {
+  const missing = absent.map(toolName);
   return `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`;
 }
 
@@ -281,10 +283,11 @@ export function toolsPage() {
   if (!home) return h('div.page');
   const done = outcomeBand();
   const present = home.snapshots.filter(isPresent);
+  const absent = absentTools(home.snapshots);
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    present.length ? [cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home)]
+    present.length ? [cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home, absent)]
       : emptyState('boxes', home.mode === 'actual' ? `No tools found on ${thisMachine}` : 'No tool folders here',
-        home.mode === 'actual' ? notFoundText(home) : `No tool folders were found in ${home.label}. Choose another home at the bottom left.`)));
+        home.mode === 'actual' ? notFoundText(absent) : `No tool folders were found in ${home.label}. Choose another home at the bottom left.`)));
 }

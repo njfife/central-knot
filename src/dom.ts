@@ -45,10 +45,12 @@ export function button(options: ButtonOptions): HTMLElement {
   const { variant = 'outline', size = 'default', label, name } = options;
   const iconSize = size === 'default' ? 16 : 14;
   const collapses = !!(options.collapse && options.icon && label);
-  // A collapsible button keeps its tooltip text aside (data-tip); fitBars shows it only while the label is hidden.
+  // A collapsible button keeps its tooltip text aside (data-tip); fitBars shows it only while the label is hidden. The
+  // tooltip then stands in for the label, so it starts with it unless its name already says it.
+  const tip = !collapses ? undefined : name && !name.toLowerCase().includes(label!.toLowerCase()) ? `${label}: ${name}` : name ?? label;
   return h(`button.btn.${variant}.${size}${label ? '' : '.square'}${collapses ? '.collapsible' : ''}`, {
     type: 'button', id: options.id, disabled: options.disabled, onclick: options.onclick,
-    'aria-label': name, title: label ? undefined : name, 'data-tip': collapses ? name ?? label : undefined, ...options.attrs,
+    'aria-label': name, title: label ? undefined : name, 'data-tip': tip, ...options.attrs,
   }, options.icon && icon(options.icon, iconSize), label && h('span.btn-label', {}, label));
 }
 
@@ -106,6 +108,8 @@ let stopFitting = () => {};
 export function fitInView(popover: HTMLElement): HTMLElement {
   requestAnimationFrame(() => {
     stopFitting();
+    // Closed before the first frame: nothing to fit, and nothing is left watching.
+    if (!popover.isConnected) return;
     const frame = popover.closest<HTMLElement>('.scroll'), anchor = popover.parentElement;
     if (!frame || !anchor) return;
     const fit = () => {
@@ -123,6 +127,8 @@ export function fitInView(popover: HTMLElement): HTMLElement {
     const watcher = new ResizeObserver(fit);
     const stop = () => { watcher.disconnect(); frame.removeEventListener('scroll', fit); if (stopFitting === stop) stopFitting = () => {}; };
     watcher.observe(frame);
+    // Watching the popover too: when a draw removes it, the observer reports it at once, and fit() stops.
+    watcher.observe(popover);
     frame.addEventListener('scroll', fit, { passive: true });
     stopFitting = stop;
   });
@@ -167,7 +173,7 @@ export function fitBars(): void {
 
 /**
  * Cards side by side: the grid knows how many it holds (data-count), so style.css chooses the columns from the count and
- * the width, and no card is left alone in a mostly empty row.
+ * the width; an odd last card keeps one column's width.
  */
 export const cardGrid = (cards: Node[]): HTMLElement => h('div.card-grid', { 'data-count': String(cards.length) }, cards);
 

@@ -1,11 +1,12 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { homeTools, loadHome, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
+import { pluginTools } from './presence.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import type { HomeMode, ManageView } from './types.ts';
@@ -30,12 +31,16 @@ function applyLayout(): { rail: boolean; wide: boolean } {
   return { rail, wide };
 }
 
-function navRow(page: Page, label: string, glyph: IconName, count?: number) {
+/**
+ * A page's row. `none` says why no tool in this home can hold what the page shows: the row is dimmed, with no count, and
+ * still opens the page, which says the same.
+ */
+function navRow(page: Page, label: string, glyph: IconName, count?: number, none?: string) {
   const current = state.page === page;
-  return h('button.nav-row', {
-    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
+  return h(`button.nav-row${none ? '.nav-dim' : ''}`, {
+    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: none ? `${label}: ${none}` : label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true' }, String(count)),
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && !none && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true' }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
@@ -62,14 +67,21 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: mode === 'custom' && current ? 'click to choose another' : 'a backup or another account' }[mode])));
 }
 
+/** Why no tool in this home can hold a kind, or undefined when one can (or no home is read yet). */
+function noneHold(tools: string[] | undefined, what: string): string | undefined {
+  if (!state.home || designMode || tools?.length) return undefined;
+  return homeTools().length ? `no tool in this home holds ${what}` : 'no tool was found in this home';
+}
+
 function renderSidebar() {
+  const home = state.home;
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
-    navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
-    navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
-    navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
-    navRow('instructions', 'Instructions', 'pencil-line'),
-    navRow('plugins', 'Plugins', 'puzzle'),
+    navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length, noneHold(homeTools(), 'skills')),
+    navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : home?.mcp.servers.length, noneHold(home?.mcp.tools, 'MCP servers')),
+    navRow('agents', 'Agents', 'bot', designMode ? undefined : home?.agents?.servers.length, noneHold(home?.agents?.tools, 'agents')),
+    navRow('instructions', 'Instructions', 'pencil-line', undefined, noneHold(homeTools(), 'instructions')),
+    navRow('plugins', 'Plugins', 'puzzle', undefined, noneHold(homeTools().filter(tool => (pluginTools as string[]).includes(tool)), 'plugins')),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),

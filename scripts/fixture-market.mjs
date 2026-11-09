@@ -42,7 +42,7 @@ export function writeMarket(root, name = 'team-tools') {
     '',
     'Questions go to [the team page](https://example.com/team).',
   ].join('\n'));
-  skill(root, 'plugins/document-tools/skills', 'pdf-reader', 'Reads PDF files and pulls out text and tables.');
+  skill(root, 'plugins/document-tools/skills', 'pdf-reader', 'Reads PDF files and pulls out their text and tables, keeping headings and lists, so a long report can be searched or quoted.');
   skill(root, 'plugins/document-tools/skills', 'spreadsheet', 'Cleans up spreadsheets: headers, types and totals.');
   file(root, 'plugins/document-tools/README.md', '# document-tools\n\nTwo skills for everyday documents.\n\n- **pdf-reader** pulls text and tables out of PDFs.\n- **spreadsheet** fixes headers and totals.\n');
   file(root, 'plugins/release-helper/commands/release-notes.md', '---\ndescription: Drafts release notes from the merged pull requests.\n---\n\nDraft the notes.\n');

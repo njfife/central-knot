@@ -126,7 +126,7 @@ export async function discover(options: {
   const snapshot: Snapshot = {
     harness: definition.id, harnessName: definition.name, surface: definition.surface,
     mode: options.mode, label: options.mode === 'actual' ? machineNames(process.platform === 'darwin').home : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
-    root, detection: 'Not found', probe: { state: 'not-run', detail: 'System probes run only when you select this Mac’s home.' },
+    root, detection: 'Not found', probe: { state: 'not-run', detail: `System probes run only when you select ${machineNames(process.platform === 'darwin').home}.` },
     discovery: 'missing', skills: [], issues: [],
   };
   if (!isAbsolute(root)) {

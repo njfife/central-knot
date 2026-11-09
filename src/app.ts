@@ -175,14 +175,17 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
+  let read = false;
   await busy('Reading skills, MCP servers and agents…', async () => {
     const view = await api().refresh();
     if (!view) return;
     state.home = view;
     state.applied = undefined;
     announce(readSummary(view));
+    read = true;
   });
-  await loadPageData(state.page, true);
+  // Only a new read goes on to the page's own data: after a failure its message stays, and the page keeps what it showed.
+  if (read) await loadPageData(state.page, true);
 }
 
 /**
@@ -279,7 +282,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
+  const label = past?.kind === 'deleted' ? `Delete again in ${everywhere}` : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
   if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
   if (!result.stopped && restored.length) flashRow(item);
@@ -446,6 +449,7 @@ api().onSyncChanged(async () => {
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
   // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
   try {
+    const toolsBefore = homeTools().join();
     const view = await api().refresh();
     if (view) {
       state.home = view; announce('');
@@ -459,6 +463,8 @@ api().onSyncChanged(async () => {
         state.outcome = undefined;
       }
       rerender();
+      // A tool appeared or went away: a page with its own data (Plugins' columns) reads it again for the new set.
+      if (homeTools().join() !== toolsBefore) void loadPageData(state.page);
     }
   } finally { refreshing = false; }
 });

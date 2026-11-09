@@ -15,6 +15,9 @@ export async function loadSettings(): Promise<void> {
   rerender();
 }
 
+// A switch changed in a menu (Start at sign-in, Automatic sync) reaches a Settings page that has read them: it reads again.
+window.centralKnot.onSettingsChanged(() => { if (current) void loadSettings(); });
+
 const appearances: { value: Appearance; label: string; glyph: IconName }[] = [
   { value: 'system', label: 'System', glyph: 'monitor' },
   { value: 'light', label: 'Light', glyph: 'sun' },

@@ -12,5 +12,9 @@ export const isPresent = (snapshot: Snapshot): boolean => snapshot.detection !==
 /** The tools in this home, in discovery order: the columns, boxes, menus and sentences every page draws from. */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
+/** The tools that install plugins: every tool but Pi, which has none. */
+export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
+export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+
 /** The tools looked for and not found here, in discovery order: only the Tools page names them, as information. */
 export const absentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);

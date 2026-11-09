@@ -1,7 +1,7 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
 // Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
-// sidebar as a rail and open, 1280×800, 1728×1117 and 2560×1440 in dark, and at 860×560 and 2560×1440 in light) and missing
+// sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
@@ -303,7 +303,7 @@ if (wanted('sizes')) {
     if (width === 860) { await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle'); }
   }
   await a.theme('light');
-  for (const [width, height] of [[860, 560], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
   await a.theme('dark'); await a.size(1280, 800);
 }
 

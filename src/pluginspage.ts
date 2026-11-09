@@ -9,7 +9,7 @@ import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
-import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, orList, toolName, toolNames as names } from './words.ts';
@@ -101,7 +101,6 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
-    filters(entry),
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') }))) : null,
     shown.length
@@ -126,18 +125,19 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(toolName);
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   const meta = dotted([entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : '', source].filter(Boolean) as (string | HTMLElement)[]);
+  // Compact, so the plugins themselves get the height: who made it and when beside the name, the filters on the tab row.
+  // The header's Refresh fetches every marketplace again, so the page has no Refresh of its own.
   return h('section.market-page', { 'aria-label': marketTitle(entry) },
     h('header.market-page-head', {},
-      h('div.market-page-title', {}, h('h2', {}, marketTitle(entry)),
-        h('div.market-page-actions', {},
-          button({ variant: 'ghost', size: 'small', icon: 'refresh-cw', label: 'Refresh', id: `refresh-${marketIndex}`, disabled: !!app.busy, onclick: () => void refreshMarketplace(entry.source) }),
-          entry.origins.includes('central-knot') ? remove : null)),
-      entry.description ? h('p.market-page-about', {}, entry.description) : null,
-      h('p.market-page-meta', {}, meta)),
+      h('div.market-page-title', {}, h('h2', {}, marketTitle(entry)), h('p.market-page-meta', {}, meta),
+        entry.origins.includes('central-knot') ? h('div.market-page-actions', {}, remove) : null),
+      entry.description ? h('p.market-page-about', {}, entry.description) : null),
     entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale && entry.fetchedAt ? ` Showing the copy from ${when(entry.fetchedAt)}.` : '')) : null,
-    h('div.market-tabs', { role: 'tablist' },
-      (['plugins', 'about'] as const).map(tab => h(`button.market-tab${market.nav.tab === tab ? '.selected' : ''}`, { type: 'button', role: 'tab', id: `market-tab-${tab}`, 'aria-selected': String(market.nav.tab === tab), onclick: () => browse({ tab }) },
-        tab === 'plugins' ? 'Plugins' : 'About'))),
+    h('div.market-tabs', {},
+      h('div.market-tablist', { role: 'tablist' },
+        (['plugins', 'about'] as const).map(tab => h(`button.market-tab${market.nav.tab === tab ? '.selected' : ''}`, { type: 'button', role: 'tab', id: `market-tab-${tab}`, 'aria-selected': String(market.nav.tab === tab), onclick: () => browse({ tab }) },
+          tab === 'plugins' ? 'Plugins' : 'About'))),
+      market.nav.tab === 'about' ? null : filters(entry)),
     market.nav.tab === 'about' ? aboutTab(entry) : pluginsTab(view, entry, marketIndex));
 }
 
@@ -155,9 +155,9 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     unknown ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     cannot ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
-    chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
-    chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
-    chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
+    chosen.size ? h('span.legend-group', {}, h('span.legend-lead', {}, 'On Apply all:'),
+      chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
+      chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null) : null);
 }
 
 /** The way back from the last run, as a button: "Undo", or "Undo the rest" after an Undo that didn't finish. */
@@ -221,9 +221,9 @@ function problemBand(lines: ResultLine[]) {
 const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined);
 
 /**
- * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height), always there once
- * a marketplace is listed, so the page never jumps: where the person is inside a plugin (← team-tools › document-tools)
- * at the left, toolbarRight at the right. With no marketplaces it spans the page and shows only when toolbarRight has something.
+ * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height): where the person is
+ * inside a plugin (← team-tools › document-tools) at the left, toolbarRight at the right. It shows only when it has one of
+ * them, so an empty strip never stands above the marketplace; with no marketplaces it spans the page.
  */
 function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
   const right = toolbarRight(lines);
@@ -234,8 +234,7 @@ function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : null;
-  // An empty toolbar keeps its height (nothing below moves) but loses its rule, so it reads as margin.
-  return h(`div.toolbar.plugins-toolbar.fit-bar${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
+  return left || right ? h('div.toolbar.plugins-toolbar.fit-bar', {}, left, h('span.toolbar-spacer'), right) : null;
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */

@@ -1,7 +1,7 @@
 // One plugin's page: what it is, where to install it, what it holds (read from its files), what each tool does with it,
 // and its README.
 import { rerender, state as app } from './app.ts';
-import { button, h, icon, withToolCount } from './dom.ts';
+import { button, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
@@ -50,7 +50,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     if (installed(entry, plugin.name, tool)) return 'Installed';
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
-    return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
+    return ['Plugin not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
   // Once no tool is missing it, the same button chooses its uninstall everywhere it can be uninstalled.
   const removals: PluginOp[] = removableTools(view, entry, plugin.name).map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
@@ -65,12 +65,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
-    // The tools share the panel's width evenly; the button for all of them closes the row, at its right edge.
-    withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
+    // The tools in a row from the left, a steady gap apart; the button for all of them at the row's right edge.
+    h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
-    }), allButton), view.tools.length));
+    }), allButton));
 }
 
 /**
@@ -91,6 +91,17 @@ function markClamped(): void {
   for (const what of document.querySelectorAll<HTMLElement>('.plugin-part-what:not(.expanded)')) {
     what.closest('li')?.classList.toggle('clamped', what.scrollHeight > what.clientHeight + 1);
   }
+}
+
+/**
+ * Marks the cut descriptions once the page is laid out, and again whenever the column they sit in changes width (a
+ * window resize, or the README moving beside them at 1400px), since that changes which are cut.
+ */
+const clampWatcher = new ResizeObserver(markClamped);
+function watchClamps(column: HTMLElement): HTMLElement {
+  clampWatcher.disconnect();
+  clampWatcher.observe(column);
+  return column;
 }
 
 const group = (owner: string, title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(`${owner}\u0000${title}`, parts.map(part => ({ name: part.name, text: part.description })))) : null;
@@ -123,7 +134,6 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
-  requestAnimationFrame(markClamped);
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title),
@@ -133,8 +143,8 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     installPanel(view, entry, plugin, marketIndex, components),
     // What it holds and how each tool takes it, beside the README on a wide page (style.css), one above the other otherwise.
     h('div.plugin-columns', {},
-      h('div.plugin-column', {},
+      watchClamps(h('div.plugin-column', {},
         contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
-        components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null),
+        components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null)),
       detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null));
 }

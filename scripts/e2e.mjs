@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync, utimesSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -146,6 +146,46 @@ async function launch(userData = join(scratch, 'data'), extra = []) {
   return app;
 }
 
+/**
+ * The main process's own debugger, for a development run launched with --inspect=port. A test uses it only to do what a
+ * person does outside the window (click an item in the menu bar menu), or to make one request fail.
+ */
+async function mainProcess(port) {
+  let target;
+  for (let attempt = 0; attempt < 100 && !target; attempt++) {
+    try { [target] = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { /* still starting */ }
+    if (!target) await wait(100);
+  }
+  if (!target) throw new Error('The main process did not open its debug port.');
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = fail; });
+  const pending = new Map();
+  let id = 0;
+  socket.onmessage = message => { const data = JSON.parse(message.data); pending.get(data.id)?.(data); pending.delete(data.id); };
+  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
+  const run = async expression => {
+    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text);
+    return reply.result.result.value;
+  };
+  const electron = `process.mainModule.require('electron')`;
+  return {
+    /** Clicks the checkbox item `label` in the live menu bar menu, where it now reads `checked`; returns how many it clicked. */
+    clickMenu: async (label, checked) => {
+      await send('HeapProfiler.collectGarbage');
+      const prototype = await send('Runtime.evaluate', { expression: `${electron}.Menu.prototype` });
+      const menus = await send('Runtime.queryObjects', { prototypeObjectId: prototype.result.result.objectId });
+      const clicked = await send('Runtime.callFunctionOn', { objectId: menus.result.objects.objectId, arguments: [{ value: label }, { value: checked }], returnByValue: true,
+        functionDeclaration: `function (label, checked) { const items = this.filter(menu => Array.isArray(menu.items)).flatMap(menu => menu.items).filter(item => item.label === label && item.checked === checked); for (const item of items) item.click({}, undefined, undefined); return items.length; }` });
+      return clicked.result.result.value;
+    },
+    /** Makes one request from the page fail until `restore` runs; the real handler stays aside meanwhile. */
+    failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
+    restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close: () => socket.close(),
+  };
+}
+
 // ---------- Flows ----------
 const rowKeys = a => a.all('.ov-row[data-key]', 'e.dataset.key');
 const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] [data-tool=${JSON.stringify(tool)}] .cell-button')?.dataset.state ?? null`);
@@ -217,7 +257,10 @@ async function fitsAtMinimum(a, where, again = async () => {}) {
 }
 
 async function practiceFlow() {
-  const a = await launch(undefined, ['--practice-copy']);
+  // A development run also opens the main process's debugger, for the menu bar menu and a failed Refresh.
+  const inspect = 9950 + randomInt(40);
+  const a = await launch(undefined, ['--practice-copy', ...(flag('--electron') ? [`--inspect=${inspect}`] : [])]);
+  const main = flag('--electron') ? await mainProcess(inspect) : undefined;
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
   await wait(1500);
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
@@ -633,10 +676,20 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 2; tries++) await wait(100);
   same('Refresh on Plugins drops a tool that went away', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 2);
+  // Its folder comes back with nothing to write: the background pass alone (no Refresh) finds the tool, and Plugins follows.
   renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
-  await a.click('#header-refresh');
-  for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
-  same('and brings it back when its folder returns', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  const nudged = join(practice, '.claude/skills', readdirSync(join(practice, '.claude/skills'))[0], 'SKILL.md');
+  utimesSync(nudged, new Date(), new Date());
+  for (let tries = 0; tries < 300 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
+  same('a background pass brings its column back on Plugins, with no Refresh', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
+  if (main) {
+    check('the refresh request is made to fail', await main.failRequest('discovery:refresh'));
+    await a.click('#header-refresh');
+    const said = await a.text('#announcement');
+    await main.restore('discovery:refresh');
+    check('a failed Refresh keeps its message, and Plugins what it showed', /could not finish/.test(said ?? '') && await a.exists('[data-plugin="document-tools"]'), said);
+  }
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
@@ -648,6 +701,17 @@ async function practiceFlow() {
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   check('and shows the plugin’s own README and skill descriptions', (await a.text('.plugin-page')).includes('Two skills for everyday documents') && (await a.text('.plugin-page')).includes('Reads PDF files'), await a.text('.plugin-page'));
+  // A description cut at two lines offers Show more; a width change with the page open, and no redraw, measures it again.
+  // Narrower than any window here, with the sidebar open, so the description is held to its two lines; then wide enough
+  // for it, still below the sidebar's and the dock's breakpoints, so nothing redraws the page.
+  const pdfCut = () => a.run(`(() => { const li = [...document.querySelectorAll('.plugin-parts li')].find(li => li.textContent.includes('pdf-reader')); const what = li?.querySelector('.plugin-part-what'); return [li?.classList.contains('clamped') ?? null, what?.clientWidth]; })()`);
+  await sizeTo(a, 720, 560); await a.click('#sidebar-toggle'); await wait(200);
+  const narrow = await pdfCut();
+  await sizeTo(a, 960, 560); await wait(200);
+  const wide = await pdfCut();
+  same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
+  if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
+  await a.click('#sidebar-toggle'); await fullSize(a);
   await a.click('#pinstall-0-document-tools');
   same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
   check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
@@ -704,6 +768,17 @@ async function practiceFlow() {
   await a.shot('settings-light');
   await a.click('#appearance-system');
   check('System can be chosen again', await a.exists('#appearance-system[aria-checked="true"]'));
+  // Automatic sync turned off from the menu bar menu while Settings is open: the page's switch follows, and its next click
+  // turns sync back on rather than sending the old value again.
+  if (main) {
+    const settingsSync = () => a.run(`document.querySelector('#settings-sync-switch').getAttribute('aria-checked')`);
+    const before = await settingsSync();
+    same('the menu bar menu has the Automatic sync item, checked', await main.clickMenu('Automatic sync', before === 'true'), 1);
+    for (let tries = 0; tries < 30 && (await settingsSync()) === before; tries++) await wait(100);
+    same('Settings follows a change made in the menu', await settingsSync(), before === 'true' ? 'false' : 'true');
+    await a.click('#settings-sync-switch');
+    same('and its own switch then turns it back', [await settingsSync(), await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`)], [before, before]);
+  }
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
@@ -716,6 +791,7 @@ async function practiceFlow() {
   let spreadClosed = false;
   for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Edited with no window.'); }
   check('an agent edit spreads in the background with no window', spreadClosed);
+  main?.close();
   await a.quit();
 }
 
@@ -740,7 +816,9 @@ async function realHomeFlow() {
   const tools = await a.text('#tools-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
   check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
-  await a.click('#nav-skills');
+  // A tool card's skill count opens Skills.
+  await a.click('#tool-skills-claude-cli');
+  same('a tool’s skill count opens the Skills page', await a.text('.page-title'), 'Skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
