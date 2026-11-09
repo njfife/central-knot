@@ -4,6 +4,7 @@
 export const icons = {
   'bot': '<path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" />',
   'clock': '<circle cx="12" cy="12" r="10" /> <path d="M12 6v6l4 2" />',
+  'circle-pause': '<circle cx="12" cy="12" r="10" /> <path d="M10 15V9" /> <path d="M14 15V9" />',
   'arrow-up-right': '<path d="M7 7h10v10" /> <path d="M7 17 17 7" />',
   'trash-2': '<path d="M3 6h18" /> <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /> <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />',
   'info': '<circle cx="12" cy="12" r="10" /> <path d="M12 16v-4" /> <path d="M12 8h.01" />',

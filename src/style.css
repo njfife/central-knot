@@ -1210,7 +1210,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .decided-uses { color: var(--ink-faint); }
 
 /* Round 15: the Find box keeps its width, so the filter tabs never move */
-.ov-page > .toolbar > .find { flex: none; width: 312px; }
+.ov-page > .toolbar > .find { flex: 0 1 312px; min-width: 180px; }
 .ov-section-after { margin-left: 6px; }
 
 .legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed var(--accent); background: color-mix(in oklab, var(--accent) 25%, transparent); }
@@ -1220,3 +1220,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .sync-notice > .notice-change { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; align-items: baseline; }
 .change-removed { text-decoration: line-through; color: var(--danger, #f85149); }
 .change-added { background: color-mix(in oklab, var(--success, #3fb950) 28%, transparent); border-radius: 2px; }
+
+.band-text.band-strong { color: var(--ink); }
+.notice-name { text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: var(--ink-faint); }
+.legend-lead { color: var(--ink-faint); font-size: 12px; margin-left: 6px; }

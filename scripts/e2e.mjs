@@ -381,13 +381,14 @@ async function practiceFlow() {
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
   // Undoing a copy choice puts Managed back as it was before the choice.
   const notesManaged = await switchOn(a, 'notes');
+  // On a row whose copies differ, the Managed switch opens the copy choice first and stays off until a copy is picked.
   await a.click('#switch-notes');
-  if (await a.exists('#decide-notes')) {
-    await a.click('#decide-notes');
+  if (await a.exists('#use-notes-claude-cli') || await a.exists('#decide-notes')) {
+    check('the switch on a differing row opens the choice instead of turning on', await a.exists('#use-notes-claude-cli') && await switchOn(a, 'notes') === notesManaged);
     await a.click('#use-notes-claude-cli');
     same('choosing a copy turns Managed on', await switchOn(a, 'notes'), true);
     await a.click('#undo-notes');
-    same('undoing the choice puts Managed back', await switchOn(a, 'notes'), !notesManaged);
+    same('undoing the choice puts Managed back', await switchOn(a, 'notes'), notesManaged);
   } else check('notes offers a copy choice here', false, await a.text('.ov-row[data-key="notes"]'));
   if (await a.exists('#discard')) await a.click('#discard');
   // Open details never repeat an id.
@@ -461,6 +462,10 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   check('the edited one-way copy stays and shows amber', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'));
   check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
+  // Keep my edit settles it: the box turns quiet and the warning count goes away; the box can still bring the source back.
+  check('the stopped copy has its own notice with both choices', await a.exists('#stopped-keep-code-reviewer-codex-cli') && await a.exists('#stopped-use-code-reviewer-codex-cli'));
+  await a.click('#stopped-keep-code-reviewer-codex-cli');
+  check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
   await a.click('#cell-code-reviewer-codex-cli');
   await applyAll(a);
   check('its amber box puts Claude Code’s copy back in Codex', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
