@@ -29,7 +29,7 @@ const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here ye
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
   if (state.busy) return reading();
-  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome('fixture') })));
+  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome(state.lastMode ?? 'fixture') })));
 }
 
 const remembered = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
@@ -94,7 +94,7 @@ export function overviewPage() {
         : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on and waiting: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.' : 'Automatic sync is on: an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
+        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing this window leaves Central Knot running in the background; once something is managed, it keeps syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all adds or replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
 

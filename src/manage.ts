@@ -339,7 +339,7 @@ export async function applyChanges(context: ShareContext, changes: Change[], res
   try { return await runApply(context, changes, resume, options); }
   catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-    return { stopped: `That could not finish. ${plainError(error)} Read again to see where things stand.`, results: [], harnessWrites: 0 }; }
+    return { stopped: `That could not finish. ${plainError(error)} Click Refresh to see where things stand.`, results: [], harnessWrites: 0 }; }
 }
 
 async function runApply(context: ShareContext, changes: Change[], resume: boolean, options: PassOptions): Promise<ApplyResult> {
@@ -955,7 +955,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-    return { stopped: `That could not finish. ${plainError(error)} Read again to see where things stand.`, results: [], harnessWrites: 0 };
+    return { stopped: `That could not finish. ${plainError(error)} Click Refresh to see where things stand.`, results: [], harnessWrites: 0 };
   }
 }
 
@@ -1052,6 +1052,6 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
     return { results, harnessWrites: writes };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
-    return { stopped: `That could not finish. ${plainError(error)} Read again to see where things stand.`, results: [], harnessWrites: 0 };
+    return { stopped: `That could not finish. ${plainError(error)} Click Refresh to see where things stand.`, results: [], harnessWrites: 0 };
   }
 }

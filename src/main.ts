@@ -132,12 +132,12 @@ function trayMenu() {
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}`, enabled: false },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync now', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
+    { label: 'Sync now (apply waiting changes once)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
     { type: 'separator' },
-    { label: 'Quit Central Knot (stops syncing)', click: () => { quitting = true; app.quit(); } },
+    { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
   ]);
 }
 function refreshTray() {
@@ -167,13 +167,13 @@ function appMenu() {
       { role: 'about' },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync now', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: 'Sync now (apply waiting changes once)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' },
-      { label: 'Quit Central Knot (stops syncing)', accelerator: 'Command+Q', click: () => { quitting = true; app.quit(); } },
+      { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', accelerator: 'Command+Q', click: () => { quitting = true; app.quit(); } },
     ] },
     { role: 'editMenu' },
     { role: 'windowMenu' },
@@ -396,7 +396,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   if (mode === 'custom') {
     let folder = remembered;
     if (!folder) {
-      const selection = await dialog.showOpenDialog(window, { title: 'Choose a home folder (one containing .claude, .copilot or .codex)', properties: ['openDirectory'] });
+      const selection = await dialog.showOpenDialog(window, { title: 'Choose a home folder', message: 'Choose a folder that contains .claude, .copilot or .codex.', buttonLabel: 'Open as home', properties: ['openDirectory', 'showHiddenFiles'] });
       if (selection.canceled) return null;
       folder = selection.filePaths[0];
     }
@@ -467,7 +467,7 @@ function createWindow(show: boolean) {
       void dialog.showMessageBox({
         type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
         message: syncing ? 'Central Knot keeps syncing in the background' : 'Central Knot is still running',
-        detail: syncing ? `Open it again from its ${icon} icon. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon, or quit there.`,
+        detail: syncing ? `Open it again from its ${icon} icon, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon or by opening Central Knot again; quit from that icon.`,
         ...(canStartAtSignIn() ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: startsAtSignIn() } : {}),
       }).then(({ response, checkboxChecked }) => {
         if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void saveAppSettings({ startAtSignIn: checkboxChecked }).then(() => { applySignIn(); refreshTray(); });

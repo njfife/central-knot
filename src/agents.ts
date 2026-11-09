@@ -223,6 +223,13 @@ const blocked = (key: string, unreadable: Map<string, HarnessId[]>, duplicates: 
 
 // ---------- View ----------
 
+/** A setting's value as one short line: lists joined, anything nested shown as compact JSON, long values cut. */
+function fieldText(value: unknown): string {
+  const text = Array.isArray(value) ? value.map(entry => (typeof entry === 'string' ? entry : JSON.stringify(entry))).join(', ') : typeof value === 'string' ? value : JSON.stringify(value);
+  const line = (text ?? '').replace(/\s+/g, ' ').trim();
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line || '(empty)';
+}
+
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => agentTools.includes(tool));
   const { byKey, problems, unreadable, duplicates } = await gatherAgents(context, present);
@@ -248,7 +255,8 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     }
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
-    servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped });
+    const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field}: ${fieldText(value)}`) : undefined;
+    servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
   }
   return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }

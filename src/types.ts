@@ -135,6 +135,8 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: for each tool that cannot hold every field, the With limits label naming what it lacks (TRN-01). */
   limits?: Partial<Record<HarnessId, string>>;
+  /** Agents: the source's own settings that stay in its tool, with their values as written ("tools: Read, Grep"). */
+  kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
   stopped?: HarnessId[];
 }

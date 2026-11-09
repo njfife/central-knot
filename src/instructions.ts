@@ -14,7 +14,7 @@ const versionsFolder = (home: string, tool: HarnessId) => join(storeDirectory(ho
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
 async function bind(tool: HarnessId, root: string): Promise<{ path: string; readers: string; notes: string[] }> {
   if (tool === 'claude-cli') {
-    return { path: join(root, 'CLAUDE.md'), readers: 'Claude Code reads this in every session, in the CLI and the Code tab. Cowork reads it too, with restrictions.', notes: [] };
+    return { path: join(root, 'CLAUDE.md'), readers: 'Claude Code reads this in every session, in the CLI and the Code tab.', notes: [] };
   }
   if (tool === 'codex-cli') {
     // A non-empty AGENTS.override.md wins over AGENTS.md: the editor binds the file Codex really reads.
@@ -35,7 +35,7 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
   }
   const notes: string[] = [];
   try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
-  notes.push('Whether the Copilot app reads this file is not known yet.');
+  notes.push('Not confirmed for the Copilot app.');
   return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
 }
 

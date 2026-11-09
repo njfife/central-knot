@@ -16,7 +16,7 @@ const ago = (iso: string) => {
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
-  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, limits: facts.limits, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, limits: facts.limits, kept: facts.kept, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
@@ -284,7 +284,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
   const chosen = view.draft.get(skill.key)?.resolve;
   if (chosen && chosen !== 'separate' && base.copies[tool] !== undefined) return chosen === tool ? 'Its copy will be used by every tool when you Apply all.' : `Its copy will be replaced with ${names[chosen]}’s when you Apply all. The replaced copy is kept in Central Knot's store.`;
   if (state === 'synced' && skill.limits?.[tool] && skill.managed) return `Receives from ${oneWaySource(skill) ? names[oneWaySource(skill)!] : 'the source'}: name, description and prompt only.`;
-  if (state === 'synced' && kind === 'agents' && skill.managed && Object.keys(skill.limits ?? {}).length) return `Source. Edit the agent here. Its ${limitedFields(skill).replace(' or ', ' and ')} settings stay in ${names[tool]}.`;
+  if (state === 'synced' && kind === 'agents' && skill.managed && Object.keys(skill.limits ?? {}).length) return skill.kept?.length ? `Edit the agent here. These settings stay in ${names[tool]}: ${skill.kept.join(' · ')}.` : `Edit the agent here. Its ${limitedFields(skill).replace(' or ', ' and ')} settings stay in ${names[tool]}.`;
   if (state === 'synced') return was === 'synced' ? `Synced. Same copy as the other ${toolList().length > 2 ? 'tools' : 'tool'}.` : 'Will be synced when you Apply all. It already has the same copy, so nothing needs copying.';
   if (state === 'will-sync') return was === 'will-sync' ? 'Set to sync, but it has no copy yet. Central Knot writes one when you Apply all.' : 'You turned syncing on. Central Knot writes a copy when you Apply all.';
   if (state === 'differs' || state === 'present-differs') {
@@ -364,7 +364,7 @@ function oneWayNote(skill: SampleSkill) {
   const source = oneWaySource(skill);
   if (!receiving.length || !source) return null;
   const fields = /setting for [^']+'s (.+?), so it gets/.exec(skill.limits![receiving[0]]!)?.[1] ?? 'some settings';
-  return h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-warning'),
+  return h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-muted'),
     `If you edit it in ${receiving.length === 1 ? names[receiving[0]] : andList(receiving.map(tool => names[tool])).replace(' and ', ' or ')}, that copy keeps your edit and stops updating; its box turns amber (Copies differ). To resume, click that box and choose ${names[source]}’s copy.`);
 }
 
@@ -694,7 +694,7 @@ export function outcomeBand(withAction = true): HTMLElement | null {
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
   return h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text),
-    !withAction ? null : outcome.act ? smallAction(outcome.act.label, outcome.act.id, outcome.act.run)
+    !withAction ? null : outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), outcome.undo.label.startsWith('Delete') ? '.text-danger' : undefined)
       : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
     h('button.band-dismiss', { type: 'button', id: 'outcome-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.outcome = undefined; rerender(); } }, icon('x', 12)));
@@ -707,9 +707,9 @@ function syncOffBand(): HTMLElement | null {
   const what = waiting.slice(0, 3).flatMap((skill, index) => [index ? ', ' : '', h('strong.item-name', {}, skill.name ?? skill.key), `, edited in ${andList((skill.edited ?? []).map(tool => names[tool]))}`]).concat(waiting.length > 3 ? [` and ${waiting.length - 3} more`] : []);
   // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
   if (!waiting.length && visibleNotices().length) return null;
-  return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, 'tone-warning'),
+  return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, waiting.length ? 'tone-warning' : 'tone-muted'),
     h('span.band-text', {}, ...(waiting.length ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.'] : ['Automatic sync is off. Edits and deletions in your tools will wait here.'])),
-    waiting.length ? (() => { const now = smallAction('Sync now', 'sync-now', () => void syncNow(), '.text-strong'); now.title = 'Copy the waiting change once; automatic sync stays off'; return now; })() : null,
+    waiting.length ? (() => { const now = smallAction('Sync once', 'sync-now', () => void syncNow(), '.text-strong'); now.title = 'Copy the waiting change once; automatic sync stays off'; return now; })() : null,
     (() => { const on = smallAction('Turn sync on', 'sync-turn-on', () => void setSync(true)); on.title = 'Copy waiting changes now and keep syncing from here on'; return on; })());
 }
 
@@ -722,9 +722,10 @@ function helpBand(): HTMLElement | null {
   const one = kind === 'mcp' ? 'an MCP server' : kind === 'agents' ? 'an agent' : 'a skill';
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {},
-      h('span', {}, `Turn on Managed to keep ${one} the same in the tools you include; click a tool’s box to include or leave it out. Nothing is written until Apply all; after that, edits and deletions sync on their own.`),
-      h('span', {}, ...(kind === 'agents' && list.some(skill => effective(skill).managed && Object.keys(skill.limits ?? {}).length) ? [h('span.tip-mark.tone-warning', {}, '↗'), ' copies only receive from their source ', h('span.tip-source', { 'aria-label': 'source mark' }), '. '] : kind === 'mcp' ? ['Claude Code needs one extra step: quit it, then click Write to Claude Code. '] : []),
-        'Turning Managed off keeps existing copies.')),
+      h('span', {}, `Turn on Managed to keep ${one} the same in every tool you include. Nothing is written until Apply all.`),
+      h('span.tone-muted', {}, ...(kind === 'agents' && list.some(skill => Object.keys(skill.limits ?? {}).length)
+        ? ['An agent tagged one-way sends only its name, description and prompt to the other tools ', h('span.tip-mark', {}, '↗'), '; edit it in its source tool ', h('span.tip-source', { 'aria-label': 'source mark' }), '.']
+        : ['Click a tool’s box to leave it out. Turning Managed off keeps existing copies.']))),
     h('button.band-dismiss', { type: 'button', id: 'help-dismiss', 'aria-label': 'Hide this tip', title: 'Hide this tip', onclick: () => { writeFlag(key); rerender(); } }, icon('x', 12)));
 }
 
@@ -852,7 +853,7 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const [glyph, tone, text, action] = ({
     edit: ['check', 'tone-success', `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
     conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit won over ${list(notice.losers)}’s.${order}`, undo(`Use ${list(notice.losers)}’s version of ${notice.item} instead, in every tool it syncs to`)],
-    deleted: ['trash-2', 'tone-muted', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, smallAction(`Restore ${scope}`, `notice-restore-${notice.history}`, () => void restoreEvent(notice.history))],
+    deleted: ['trash-2', 'tone-muted', `${notice.item} was deleted in ${who(notice.winner)}, so it was removed from ${list(notice.losers) || 'nowhere else'} too.`, button({ variant: 'outline', size: 'small', label: `Restore ${scope}`, id: `notice-restore-${notice.history}`, onclick: () => void restoreEvent(notice.history) })],
     'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit was kept over its deletion in ${list(notice.losers)}.${order}`, notice.orderProved || notice.key.includes(':') ? null : smallAction('Delete everywhere', `notice-delete-${notice.key}`, () => void deleteEverywhereKey(notice.key))],
     reset: ['triangle-alert', 'tone-warning', kind === 'mcp' ? `${who(notice.winner)}’s settings file lost every managed server at once, so Central Knot put them back instead of deleting them everywhere. To delete one, remove it in one tool while the others still have it.` : `${who(notice.winner)}’s skills folder lost every managed skill at once, so Central Knot put them back instead of deleting them everywhere. To delete one, use Delete everywhere in its details.`, null],
   } as Record<SyncNotice['kind'], [IconName, string, string, HTMLElement | null]>)[notice.kind];
@@ -868,13 +869,13 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const off = state.home && !state.home.syncOn && notice.kind !== 'reset';
   const history = !off && (notice.kind === 'deleted' || notice.kind === 'edit' || notice.kind === 'conflict') ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
   // MCP: an edit Claude Code still lacks is one band with its write step, in the waiting tone.
-  const waits = writeClaude ? ['. Claude Code still has the old copy: quit Claude Code, then click Write to Claude Code.'] : [];
   const quiet = off;
-  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
-    h('span', {}, ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`), ...waits,
-      ''),
-    writeClaude ? button({ variant: 'outline', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
-    action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : shownRow);
+  // Waiting for Claude Code: the sentence takes the full width, and the actions sit on their own line, Write first.
+  return h(`p.sync-notice${writeClaude ? '.notice-stacked' : ''}`, { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
+    h('span.notice-text', {}, ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy; quit it, then write it there.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
+    h('span.notice-actions', {},
+      writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
+      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : shownRow));
 }
 
 export function designOverview(which: Kind = 'skills') {

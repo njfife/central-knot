@@ -9,6 +9,8 @@ export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | '
 export const state = {
   home: undefined as HomeView | undefined,
   page: 'overview' as Page,
+  /** The home last asked for, so Try again retries that one. */
+  lastMode: undefined as HomeMode | undefined,
   find: '',
   /** The skill shown in the Skills detail. */
   item: undefined as string | undefined,
@@ -36,13 +38,13 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
+  outcome: undefined as { page: Page; text: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
-  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review' } | undefined,
+  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean } | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
@@ -81,7 +83,7 @@ async function busy(message: string, work: () => Promise<void>) {
   rerender();
   try { await work(); }
   catch {
-    announce(state.home ? `That could not finish. Still on ${state.home.label}. Read again to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
+    announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
   }
   state.busy = undefined;
   document.body.dataset.busy = 'false';
@@ -95,6 +97,7 @@ function accept(view: HomeView) {
   state.item = undefined;
   state.plugins = undefined;
   state.pluginResult = undefined;
+  state.instructionEdit = undefined;
   if (state.page === 'plugins') void loadPlugins();
 }
 
@@ -131,7 +134,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
   const addedNow = result.stopped || replacedSome ? [] : (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
   if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !addedNow.length, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : ''), item: singleName,
-    act: addedNow.length ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined };
+    act: addedNow.length ? addedUndo(addedNow) : undefined };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -143,10 +146,11 @@ const readSummary = (view: HomeView) => {
   return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. Nothing changed.`;
 };
 
-export const loadHome = (mode: HomeMode) => busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
+export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const view = await api().selectHome(mode);
-  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(/^Read /, 'Read ').replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
-});
+  const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
+  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: nothing ? `Opened ${view.label}. Nothing found here; nothing changed.` : `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
+}));
 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
 export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
@@ -171,7 +175,8 @@ export function showPage(page: Page) {
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
-  if (page === 'instructions') { state.instructionEdit = undefined; void loadInstructions(); }
+  // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
+  if (page === 'instructions') void loadInstructions();
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -324,17 +329,49 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); if (state.instructionEdit) state.instructionEdit.stage = 'edit'; return; }
   state.instructionEdit = undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `Saved ${name}${file.exists ? '' : ' (new file)'}. ${file.nextStep}${file.exists ? ' The previous version is under Earlier versions.' : ''}` : `${name} already said that; nothing was written.` };
+  // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
+  const saved = state.instructions?.find(entry => entry.tool === file.tool);
+  const before = file.exists && result.saved ? file.text : undefined;
+  state.outcome = { page: 'instructions', item: name, text: result.saved ? `Saved ${name}${file.exists ? '' : ' (new file)'}. ${file.nextStep}` : `${name} already said that; nothing was written.`,
+    act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
+
+/** Puts back the text a save replaced: a checked save against what was just written. */
+const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
+  const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
+  state.instructions = (await api().instructions()) ?? state.instructions;
+  const name = file.path.split(/[\\/]/).pop() ?? file.path;
+  if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
+  state.outcome = { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
+  announce(state.outcome.text, true);
+});
+
+/** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
+export function startInstructionEdit(file: InstructionFile) {
+  state.outcome = undefined;
+  state.instructionEdit = { tool: file.tool, text: file.text, hash: file.hash, stage: 'edit' };
+  rerender();
+  const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
+  area?.focus();
+  document.getElementById(`ins-actions-${file.tool}`)?.scrollIntoView({ block: 'nearest' });
+}
 
 /** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
 export const loadInstructionVersion = (file: InstructionFile, id: string) => busy('Reading the earlier version…', async () => {
   const text = await api().instructionVersion(file.tool, id);
   if (text === undefined) { announce('That version is no longer kept.'); return; }
-  state.instructionEdit = { tool: file.tool, text, hash: file.hash, stage: 'review' };
-  announce('Earlier version loaded. Review the change, then save to put it back.', true);
+  state.outcome = undefined;
+  state.instructionEdit = { tool: file.tool, text, hash: file.hash, stage: 'review', restoring: true };
+  announce('Review going back to the earlier version, then save to put it back.', true);
 });
+
+/** The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. */
+function addedUndo(addedNow: HistoryEvent[]) {
+  const copies = addedNow.reduce((sum, event) => sum + event.losers.length, 0);
+  const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;
+  return { label: `Undo: remove ${copies === 1 ? 'the new copy' : `${copies} new copies`}`, id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'copy' : 'copies'} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
+}
 
 /** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */
 export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async () => {
@@ -387,7 +424,8 @@ api().onSyncChanged(async () => {
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
-  try { const view = await api().refresh(); if (view) { state.home = view; announce(''); state.outcome = undefined; rerender(); } } finally { refreshing = false; }
+  // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
+  try { const view = await api().refresh(); if (view) { state.home = view; announce(''); if (!state.outcome?.act) state.outcome = undefined; rerender(); } } finally { refreshing = false; }
 });
 
 // ---------- MCP servers ----------
@@ -409,7 +447,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undoable = addedNow.length > 0 && !replacedAny;
-    state.outcome = { page: state.page, act: undoable ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
+    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -435,7 +473,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undo = addedNow.length && !replacedAny;
     state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${oneWay.length ? ` ${oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)}`).join('; ')}.` : ''}${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
-      act: undo ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined };
+      act: undo ? addedUndo(addedNow) : undefined };
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
