@@ -1,4 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
+import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { toolNames } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
@@ -49,7 +50,7 @@ function choices(event: HistoryEvent) {
 }
 
 /** Rows are grouped by day; each row shows its time, or "Just now". */
-const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'just now' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
+const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'just now' : clockTime(iso));
 const day = (iso: string) => {
   const date = new Date(iso);
   if (date.toDateString() === new Date().toDateString()) return 'Today';

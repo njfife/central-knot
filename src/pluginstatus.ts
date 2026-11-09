@@ -27,17 +27,38 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   return state.state === 'installed' ? undefined : blocked(view, entry, tool);
 }
 
+/**
+ * Why this plugin can't be uninstalled from this tool here, if it can't (only asked of an installed plugin): the tool
+ * holds another marketplace of this name, its CLI is missing, or writing isn't allowed in this home.
+ */
+export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  const state = stateOf(entry, plugin, tool);
+  if (state.state === 'held') return state.reason;
+  if (!view.canWrite) return 'Preview only: nothing can be installed or uninstalled in this home.';
+  return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
+}
+
+/** Tools this plugin can be uninstalled from here: installed there, nothing in the way. */
+export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
+  view.tools.filter(tool => installed(entry, plugin, tool) && !cantUninstall(view, entry, plugin, tool));
+
+/** A marketplace's name for headings and messages: the name it gives itself, or where it comes from until it is read. */
+export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourceLabel;
+
 /** Tools that can still take this plugin: available there and not installed yet. */
 export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
 
-const limitWords: Record<Outcome['result'], string> = { works: '', limited: 'limited', ignored: 'ignored', fails: 'won’t work', unknown: 'may not work' };
-/** The parts that won't fully work in a tool, by what happens: "MCP servers may not work", "Agents ignored +1". Empty when all work. */
+/**
+ * The parts that won't fully work in a tool, short, in the words "In each tool" uses up to its colon: "MCP servers may
+ * not start", "Agents are ignored +1". A limit with no colon says only "limited". Empty when all work.
+ */
 export function limitNote(limits: Outcome[]): string {
-  const first = limits.find(outcome => outcome.result !== 'works');
+  const notWorking = limits.filter(outcome => outcome.result !== 'works');
+  const first = notWorking[0];
   if (!first) return '';
-  const more = limits.filter(outcome => outcome.result !== 'works').length - 1;
-  return `${first.component} ${limitWords[first.result]}${more ? ` +${more}` : ''}`;
+  const effect = first.text.includes(':') ? first.text.slice(0, first.text.indexOf(':')) : 'limited';
+  return `${first.component} ${effect}${notWorking.length > 1 ? ` +${notWorking.length - 1}` : ''}`;
 }
 
 /** "3 skills · 1 MCP server", from a plugin's counts. */
@@ -45,6 +66,11 @@ export function summaryOf(parts: Components): string {
   return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),
     parts.hooks && 'hooks', parts.mcp && plural(parts.mcp, 'MCP server'), parts.bin && 'a bin/ folder'].filter(Boolean).join(' · ');
 }
+
+/** A find box is offered past this many plugins; with fewer, the list is short enough to scan. */
+export const FIND_FROM = 8;
+/** A marketplace's categories, sorted; chips are offered when there are two or more. */
+export const categoriesOf = (entry: MarketplaceView) => [...new Set(entry.plugins.map(plugin => plugin.category).filter((category): category is string => !!category))].sort();
 
 /** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
 export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));

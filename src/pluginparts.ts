@@ -5,7 +5,7 @@ import { h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import { cliMissing, stateOf, unavailable } from './pluginstatus.ts';
+import { cantUninstall, stateOf, unavailable } from './pluginstatus.ts';
 import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
@@ -39,14 +39,14 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 
   const why = unavailable(view, entry, plugin.name, tool);
   if (why) return box({ look: 'cell-cannot', state: 'cannot', title: `${name}: ${why}`, glyph: h('span.cannot-dash', { 'aria-hidden': 'true' }, '–'), disabled: true });
-  // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops it.
+  // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : 'Preview only: nothing can be installed or uninstalled in this home.';
   if (status.state === 'installed') {
     const text = `${name}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
-    const cantUninstall = preview || (view.clis[tool] ? '' : `${cliMissing(tool)}.`);
-    return box({ look: 'cell-synced.cell-on', state: 'installed', title: cantUninstall ? `${text}. Can’t uninstall here: ${cantUninstall}` : `${text}. Click to uninstall on Apply all.`,
-      glyph: icon('check', 16), action: 'remove', disabled: !!app.busy || !!cantUninstall });
+    const stuck = cantUninstall(view, entry, plugin.name, tool);
+    return box({ look: 'cell-synced.cell-on', state: 'installed', title: stuck ? `${text}. Can’t uninstall here: ${stuck}` : `${text}. Click to uninstall on Apply all.`,
+      glyph: icon('check', 16), action: 'remove', disabled: !!app.busy || !!stuck });
   }
   // Chosen differs from empty by shape, not only colour: a dashed check where the empty box has a plus.
   if (pending === 'install') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'install', title: `${name}: installed on Apply all. Click to leave it out.`, glyph: icon('check', 15), action: 'install' });

@@ -42,7 +42,7 @@ for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[]) {
       assert.ok(state.state === 'installed' && !state.live, JSON.stringify(state));
       const again = await install(context, catalog, 'ck-marker', tool);
       assert.equal(again.runs.length, 0, 'installing again runs nothing');
-      const removed = await uninstall(context, 'ck-test-market', 'ck-marker', tool);
+      const removed = await uninstall(context, 'ck-test-market', 'ck-marker', tool, catalog.source);
       assert.equal(removed.outcome, 'uninstalled', JSON.stringify(removed, null, 1));
       assert.equal((await installState(context, tool, 'ck-test-market', 'ck-marker')).state, 'not-installed');
     } finally { server.kill(); await rm(base, { recursive: true, force: true }); }
@@ -59,6 +59,6 @@ test('copilot-cli: a local folder marketplace is loaded live, and says so', { sk
     const report = await install(context, await parseCatalog(root, root, 'folder'), 'ck-marker', 'copilot-cli');
     assert.equal(report.outcome, 'installed', JSON.stringify(report, null, 1));
     assert.match(report.message, /loaded live/);
-    assert.equal((await uninstall(context, 'ck-test-market', 'ck-marker', 'copilot-cli')).outcome, 'uninstalled');
+    assert.equal((await uninstall(context, 'ck-test-market', 'ck-marker', 'copilot-cli', root)).outcome, 'uninstalled');
   } finally { await rm(base, { recursive: true, force: true }); }
 });

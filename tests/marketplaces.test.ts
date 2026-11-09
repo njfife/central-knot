@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -30,7 +30,7 @@ async function setup(options: { allowed?: boolean } = {}) {
     findClis: async () => ({ 'claude-cli': '/bin/true' }),
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
-    install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
+    install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
   };
   return { base, home, calls, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
@@ -78,6 +78,31 @@ test('Installs act only on the home on screen, and only where writing is allowed
     assert.deepEqual(result.reports[0]!.runs[0]!.changed, [{ path: '/p', before: null, after: null }], 'file bytes stay in the main process');
     const locked = await setup({ allowed: false });
     try { assert.equal((await locked.markets.install(root, 'pdf', ['claude-cli'], locked.home)).stopped, 'Preview only.'); } finally { await locked.cleanup(); }
+  } finally { await box.cleanup(); }
+});
+
+test('One tool’s error fails that tool only: the others’ reports stay, and later tools still run', async () => {
+  const box = await setup({ throwFor: 'copilot-cli' });
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
+    const result = await box.markets.install(root, 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], box.home);
+    assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
+    assert.match(result.reports[1]!.message, /disk full/);
+  } finally { await box.cleanup(); }
+});
+
+test('A Git marketplace that can’t be reached is not fetched again on every view', async () => {
+  const box = await setup();
+  try {
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ gone: { source: { source: 'git', url: 'https://127.0.0.1:1/gone.git' } } }));
+    const first = await box.markets.view();
+    assert.match(first.marketplaces[0]!.problem ?? '', /reach|access|Git/);
+    await box.markets.view();
+    assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 1, box.calls.join('\n'));
+    await box.markets.view('https://127.0.0.1:1/gone.git');
+    assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 2, 'Refresh tries again');
   } finally { await box.cleanup(); }
 });
 

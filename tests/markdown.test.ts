@@ -51,17 +51,26 @@ test('An opening title and lead that only repeat the page are left out', () => {
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Use');
 });
 
+test('A heading line of thousands of spaces is read at once, and closing #s are dropped only after a space', () => {
+  const started = Date.now();
+  parseMarkdown(`# a${' '.repeat(16_000)}b${' '.repeat(16_000)}#`);
+  assert.ok(Date.now() - started < 500, `took ${Date.now() - started} ms`);
+  const titles = parseMarkdown('## Title ##\n\n# C#\n\n#nospace').map(block => block.kind === 'heading' ? text(block.content) : block.kind);
+  assert.deepEqual(titles, ['Title', 'C#', 'paragraph']);
+});
+
 test('A list that only names parts already on the page is left out, with a heading it alone filled', () => {
-  const source = '## Skills\n\n- `pdf-reader`: reads PDFs\n- **sheet-tidy** — tidies sheets\n\n## Setup\n\n- Install it\n- pdf-readers are great\n\n## More\n\nIncludes:\n\n- pdf-reader\n- sheet-tidy\n';
+  const source = '## Skills\n\n- `pdf-reader`: reads PDFs\n- **sheet-tidy** — tidies sheets\n\n## Setup\n\n- Run pdf-reader on a file\n- Then sheet-tidy it\n\n## More\n\nIncludes:\n\n- pdf-reader\n- sheet-tidy\n';
   const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['pdf-reader', 'sheet-tidy'] });
   assert.deepEqual(blocks.map(block => block.kind), ['heading', 'list', 'heading', 'paragraph']);
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Setup');
 });
 
 test('Under a Skills heading, a skill’s own sub-section is left out; other sections stay', () => {
-  const source = '## What it does\n\nApps.\n\n## Skills\n\n### spark-app-template\n\nActivated when…\n\n- Tech stack\n- Design\n\n## Stack variations\n\nA table.\n';
-  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['spark-app-template'] });
-  assert.deepEqual(blocks.map(block => block.kind === 'heading' ? text(block.content) : block.kind), ['What it does', 'paragraph', 'Stack variations', 'paragraph']);
+  const source = '## What it does\n\nApps.\n\n## Skills\n\n### spark-app-template\n\nActivated when…\n\n- Tech stack\n- Design\n\n### pdf-reader\n\nUse it like this:\n\n```\npdf read x\n```\n\n## Stack variations\n\nA table.\n';
+  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['spark-app-template', 'pdf-reader'] });
+  // A part's prose repeats the page; its usage example (code) is kept with its heading.
+  assert.deepEqual(blocks.map(block => block.kind === 'heading' ? text(block.content) : block.kind), ['What it does', 'paragraph', 'Skills', 'pdf-reader', 'paragraph', 'code', 'Stack variations', 'paragraph']);
 });
 
 test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {

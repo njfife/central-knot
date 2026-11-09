@@ -4,7 +4,7 @@
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, h, icon, middle } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -804,12 +804,6 @@ function section(label: string, list: SampleSkill[], after: number) {
 }
 
 
-/** The column count goes through the style object: the page's security policy refuses inline style attributes. */
-function withToolCount(table: HTMLElement) {
-  table.style.setProperty('--tool-count', String(toolList().length));
-  return table;
-}
-
 /** What the last action did, where it was done, with History when there is something to undo. */
 export { brandMark };
 
@@ -1159,7 +1153,7 @@ export function designOverview(which: Kind = 'skills') {
         (managedDrawn = shown.some(skill => committedOf(skill.key).managed), null),
         section('Managed', shown.filter(skill => committedOf(skill.key).managed), shown.filter(skill => skill.managed).length),
         section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length),
-        ghostRows())),
+        ghostRows()), toolList().length),
       legend(all)));
 }
 

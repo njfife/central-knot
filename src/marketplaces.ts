@@ -36,7 +36,11 @@ export interface MarketplaceEngine {
   uninstall: typeof engine.uninstall;
 }
 
-/** A tool's own CLI, never an app's bundled copy (CD §3), searched as version probes are. */
+/**
+ * A tool's own CLI, never an app's bundled copy (CD §3), from the same candidate list version probes use. Searched in
+ * this computer's own home, not the home on screen: a Practice copy or backup has no CLIs of its own, and the CLIs found
+ * here are pointed at the home on screen when they run.
+ */
 async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   const found: Partial<Record<HarnessId, string>> = {};
   for (const tool of pluginTools) {
@@ -52,6 +56,8 @@ const realEngine: MarketplaceEngine = { findClis, readCatalog: engine.readCatalo
 const toolIds = (value: unknown): HarnessId[] => (Array.isArray(value) ? value.filter((id): id is HarnessId => pluginTools.includes(id as HarnessId)) : []);
 /** Reports go to the page without each run's file bytes (kept only for the record here); the page never reads them. */
 const lean = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
+/** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
+const RETRY_MS = 60_000;
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: Omit<PluginDetail, 'problem'> = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false };
 
@@ -72,8 +78,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: clis ? await use.findClis() : {}, overrides: open.overrides, reads: shareReads ? new Map() : undefined };
   };
 
-  /** Each Git catalog as known this session: its catalog, why the last fetch failed, and whether it shows an older copy. */
-  const fetched = new Map<string, { catalog?: Catalog; stale?: boolean; problem?: string }>();
+  /**
+   * Each Git catalog as known this session: its catalog, why the last fetch failed, and whether it shows an older copy.
+   * `at` is when a fetch failed with no copy to show, so an unreachable source is tried again only after RETRY_MS (or on
+   * Refresh), not on every redraw of the page.
+   */
+  const fetched = new Map<string, { catalog?: Catalog; stale?: boolean; problem?: string; at?: number }>();
   /** A catalog read again is the moment its plugins kept in other repositories are let go, so they are read again too. */
   const dropRemoteCopies = (ctx: PluginContext, catalog: Catalog) => Promise.all(catalog.plugins.map(item => (item.remote ? rm(remoteCopyFolder(ctx, item.remote), { recursive: true, force: true }) : undefined)));
   /**
@@ -89,11 +99,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       return { catalog, problem: catalog.problem };
     }
     const known = fetched.get(source);
-    if (known && !fresh) return known;
+    if (known && !fresh && (known.catalog || Date.now() - (known.at ?? 0) < RETRY_MS)) return known;
     const onDisk = fresh ? undefined : await cachedCatalog(ctx, source);
     const result = onDisk ? { catalog: onDisk } : await fetchFresh(ctx, source, fresh);
-    // Kept for the session only with a catalog to show; a source never read yet is tried again next time.
-    if (result.catalog) fetched.set(source, result);
+    fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
     return result;
   }
   /** Fetches a Git marketplace; on failure, the copy on disk (if any) is kept and marked stale. */
@@ -183,11 +192,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function add(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }> {
     const text = source.trim();
     if (text.startsWith('-')) return { problem: 'That isn’t a marketplace: owner/repo, a Git URL or a folder.' };
+    if (/^(\.\.?|~)([\\/]|$)/.test(text)) return { problem: 'Use the folder’s full path, or choose it with Folder…' };
     const catalog = await use.readCatalog(await context(), text);
     if (catalog.problem) return { problem: catalog.problem };
     const list = await added();
-    const stored = list.find(item => sameSource(item, text)) ?? text;
-    if (stored === text && !list.includes(text)) await saveAdded([...list, text]);
+    const listedAs = list.find(item => sameSource(item, text));
+    if (!listedAs) await saveAdded([...list, text]);
+    const stored = listedAs ?? text;
     // The read just made is the catalog: the view uses it instead of fetching again.
     if (!isFolder(stored)) fetched.set(stored, { catalog });
     const shown = await view();
@@ -218,8 +229,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const ctx = await context({ clis: true });
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
+    // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
-    for (const tool of tools) reports.push(await use.install(ctx, catalog, plugin, tool));
+    for (const tool of tools) {
+      try { reports.push(await use.install(ctx, catalog, plugin, tool)); }
+      catch (error) { reports.push(...failedFor([tool], `It stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)); }
+    }
     return { reports: lean(reports) };
   }
 

@@ -1,6 +1,6 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
-import { installed, unavailable } from './pluginstatus.ts';
+import { cantUninstall, installed, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -16,7 +16,14 @@ export interface PluginOp {
   action: PluginAction;
 }
 /** One line of a run's result: a plugin and what happened to it ("installed in Codex"), or one tool's failure. */
-export interface ResultLine { source: string; plugin: string; ok: boolean; text: string }
+export interface ResultLine {
+  source: string;
+  plugin: string;
+  ok: boolean;
+  text: string;
+  /** The same with three or more tools counted, not named ("installed in 3 tools"), for a narrow place. */
+  short: string;
+}
 /** What one op did, as its tool reported it. */
 export interface PluginDone extends PluginOp { report: ActionReport }
 
@@ -55,15 +62,16 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
 
 /**
  * Drops choices that no longer mean anything, so none is counted or run unseen: a plugin or marketplace no longer
- * listed, a tool that can't take it now (pluginstatus.unavailable: held, no CLI, refused), an install already in place,
- * and an uninstall of something no longer installed or whose CLI is gone.
+ * listed, an install the tool can't take now (pluginstatus.unavailable) or already has, and an uninstall of something
+ * no longer installed or that can't be uninstalled now (pluginstatus.cantUninstall).
  */
 export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   for (const [key, op] of draft) {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
     const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
-    const stale = !view || !entry || !listed || !!unavailable(view, entry, op.plugin, op.tool)
-      || (op.action === 'install' ? installed(entry, op.plugin, op.tool) : !installed(entry, op.plugin, op.tool) || !view.clis[op.tool]);
+    const stale = !view || !entry || !listed || (op.action === 'install'
+      ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
+      : !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool));
     if (stale) draft.delete(key);
   }
 }
@@ -107,23 +115,26 @@ export function describe(done: PluginDone[], undo = false): ResultLine[] {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const { plugin, source } = mine[0]!;
     const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
-    const phrase = (list: string[], text: string) => (list.length ? `${text} ${andList(list)}` : '');
-    const parts = [phrase(tools('installed', true), verbs.installed), phrase(tools('uninstalled', true), verbs.uninstalled), phrase(tools('installed', false), 'already in'), phrase(tools('uninstalled', false), 'wasn’t installed in')].filter(Boolean);
-    if (parts.length) lines.push({ source, plugin, ok: true, text: parts.join('; ') });
-    for (const entry of mine.filter(candidate => !succeeded(candidate.report))) lines.push({ source, plugin, ok: false, text: `${names[entry.tool]}: ${entry.report.message}` });
+    const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in']];
+    const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
+    if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
+    for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
+      const text = `${names[entry.tool]}: ${entry.report.message}`;
+      lines.push({ source, plugin, ok: false, text, short: text });
+    }
   }
   return lines;
 }
 
 /**
- * The successful lines as one sentence, in pieces: "document-tools: installed in Codex." or, for an Undo, "Undone:
+ * The successful lines as one sentence, in pieces (`short`: tools counted, for the toolbar): "document-tools: installed in Codex." or, for an Undo, "Undone:
  * document-tools removed from Codex." Each plugin is its own piece so the page can link it. Empty when nothing succeeded.
  */
-export function resultParts(lines: ResultLine[], undo: boolean): (string | { plugin: string; source: string })[] {
+export function resultParts(lines: ResultLine[], undo: boolean, { short = false } = {}): (string | { plugin: string; source: string })[] {
   const ok = lines.filter(line => line.ok);
   if (!ok.length) return [];
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
-  ok.forEach((line, at) => parts.push(...(at ? ['; '] : []), { plugin: line.plugin, source: line.source }, `${undo ? ' ' : ': '}${line.text}`));
+  ok.forEach((line, at) => parts.push(...(at ? ['; '] : []), { plugin: line.plugin, source: line.source }, `${undo ? ' ' : ': '}${short ? line.short : line.text}`));
   return [...parts, '.'];
 }
 /** resultParts as plain text, for the screen reader and the tooltip. */
@@ -134,6 +145,15 @@ export const resultSentence = (lines: ResultLine[], undo: boolean) => resultPart
  * found nothing left to do ("wasn't installed") is done, so "Undo the rest" never offers it again.
  */
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
+
+/** The last Apply all (or Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
+export interface LastRun { reports: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] }
+
+/** After a run: what ran leaves the draft (what wasn't reached stays chosen), and the run is recorded for the toolbar and its Undo. */
+export function recordRun(draft: PluginDraft, ops: PluginOp[], done: PluginDone[], undo: boolean, home: string): LastRun {
+  for (const entry of done) clear(draft, entry);
+  return { reports: done, undo, home, rest: undo ? notUndone(ops, done) : undefined };
+}
 
 /** The two calls a run needs, as the page's API gives them (tests pass their own). */
 export interface PlanApi {

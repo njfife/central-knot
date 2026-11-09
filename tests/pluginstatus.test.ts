@@ -22,7 +22,8 @@ test('A tool can take a plugin only when its CLI is there, it is not held or ref
 
 test('A tool’s limits are named in a few words', () => {
   assert.equal(limitNote([{ component: 'Skills', result: 'works', text: '' }]), '');
-  assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: '' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents ignored +1');
+  assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: 'are ignored: copied, never offered' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents are ignored +1');
+  assert.equal(limitNote([{ component: 'Commands', result: 'limited', text: 'are turned into skills when installed' }]), 'Commands limited');
 });
 
 test('A summary names only what a plugin holds', () => {

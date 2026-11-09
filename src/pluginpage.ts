@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, limitNote, missingTools, unavailable } from './pluginstatus.ts';
+import { installed, limitNote, missingTools, removableTools, unavailable } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -49,13 +49,13 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
   // Once no tool is missing it, the same button chooses its uninstall everywhere it can be uninstalled.
-  const removable = view.tools.filter(tool => installed(entry, plugin.name, tool) && view.clis[tool] && !unavailable(view, entry, plugin.name, tool));
-  const removals: PluginOp[] = removable.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
-  const [batch, verb] = ops.length ? [ops, 'Choose'] as const : [removals, 'Uninstall from'] as const;
-  const label = allQueued(market.draft, batch) ? 'Choose none' : batch.length > 1 ? `${verb} all ${batch.length}` : `${verb} ${names[batch[0]?.tool ?? 'claude-cli']}`;
-  const allButton = batch.length && view.canWrite
-    ? button({ variant: 'outline', size: 'small', label, id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } })
-    : null;
+  const removals: PluginOp[] = removableTools(view, entry, plugin.name).map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
+  const batch = ops.length ? ops : removals;
+  const allButton = batch.length && view.canWrite ? button({
+    variant: 'outline', size: 'small', id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
+    label: allQueued(market.draft, batch) ? 'Choose none' : `Choose ${batch.length > 1 ? `all ${batch.length}` : names[batch[0]!.tool]}${ops.length ? '' : ' to uninstall'}`,
+    onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
+  }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'), allButton),
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
@@ -65,10 +65,28 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     })));
 }
 
-/** One group of named parts, each description held to two lines; a click on it shows the whole of it. */
-const partList = (parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => h('li', {},
-  h('code.plugin-name', {}, part.name),
-  part.text ? h(`span.plugin-part-what${part.mono ? '.mono' : ''}`, { title: part.text, onclick: (event: Event) => (event.currentTarget as HTMLElement).classList.toggle('expanded') }, part.text) : null)));
+/** Descriptions opened with "Show more", by part name, so a redraw keeps them open. */
+const opened = new Set<string>();
+
+/**
+ * One group of named parts, each description held to two lines. Once laid out, a description that was cut gets a "Show
+ * more" button (see markClamped); one that fits has none.
+ */
+const partList = (parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => {
+  const open = opened.has(part.name);
+  const more = h('button.part-more', { type: 'button', onclick: () => { if (open) opened.delete(part.name); else opened.add(part.name); rerender(); } }, open ? 'Show less' : 'Show more');
+  return h(`li${open ? '.clamped' : ''}`, {},
+    h('code.plugin-name', {}, part.name),
+    part.text ? h('span.plugin-part-body', {}, h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text), more) : null);
+}));
+
+/** After layout: marks each part whose description was cut at two lines, which shows its "Show more". */
+function markClamped(): void {
+  for (const what of document.querySelectorAll<HTMLElement>('.plugin-part-what:not(.expanded)')) {
+    what.closest('li')?.classList.toggle('clamped', what.scrollHeight > what.clientHeight + 1);
+  }
+}
+
 const group = (title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(parts.map(part => ({ name: part.name, text: part.description })))) : null;
 
 /** The plugin's parts by name, with what each says it does. */
@@ -99,6 +117,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
+  requestAnimationFrame(markClamped);
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title),

@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { outcomes } from '../src/pluginoutcomes.ts';
-import { cachedCatalog, checkAccess, classify, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, classify, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -109,6 +109,8 @@ test('Each tool’s outcome per component follows the tested results', () => {
 
 test('One repository is recognised however it was typed', () => {
   assert.ok(sameSource('owner/repo', 'https://github.com/owner/repo.git'));
+  assert.ok(sameSource('https://github.com/Owner/Repo', 'owner/repo'), 'GitHub ignores case in paths');
+  assert.ok(!sameSource('https://git.example.com/Team/tools.git', 'https://git.example.com/team/tools.git'), 'another server may not');
   assert.ok(sameSource('git@github.com:Owner/Repo.git', 'ssh://git@github.com/owner/repo'));
   assert.ok(sameSource('https://gitlab.example.com/a/b/', 'https://gitlab.example.com/a/b.git'));
   assert.ok(!sameSource('owner/repo', 'owner/other'));
@@ -222,15 +224,14 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     git(['clone', '-q', '--bare', root, join(box.base, 'served/market.git')], box.base);
     const base = await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())));
     const url = `${base}/market.git`;
-    assert.deepEqual(await checkAccess(url), { state: 'ok' });
     const catalog = await readCatalog(box.context, url);
     assert.equal(catalog.problem, undefined);
     assert.equal(catalog.kind, 'git');
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
     assert.equal((await readdir(join(box.context.dataDir, 'catalogs'))).length, 1, 'one copy, no leftovers');
     server.kill();
-    const missing = await checkAccess(`${base}/market.git`);
-    assert.equal(missing.state, 'network');
+    // One clone, no separate access check: its failure is classified in words a person can act on.
+    assert.match((await readCatalog(box.context, url)).problem ?? '', /Can’t reach the marketplace/);
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the last fetched catalog stays browsable');
   } finally { server.kill(); await box.cleanup(); }
 });

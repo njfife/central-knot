@@ -14,7 +14,8 @@ export const record = (value: unknown): Record<string, unknown> | undefined => (
 /** "owner/repo" for a GitHub repository written as owner/repo or its https URL (with or without .git); else undefined. */
 export function githubRepo(source: string): string | undefined {
   const trimmed = source.trim();
-  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed)) return trimmed;
+  // "./market" and "../market" are relative folders, never a GitHub owner.
+  if (/^[\w.-]+\/[\w.-]+$/.test(trimmed) && !/^\.\.?\//.test(trimmed)) return trimmed;
   return /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(trimmed)?.[1];
 }
 

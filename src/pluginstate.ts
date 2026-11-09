@@ -2,8 +2,8 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { clear, describe, forSource, notUndone, pluginKey, prune, resultSentence, reverse, runPlan, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { matches } from './pluginstatus.ts';
+import { describe, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
 
@@ -23,11 +23,8 @@ export const market = {
   activity: undefined as MarketActivity | undefined,
   /** Changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
   draft: new Map() as PluginDraft,
-  /**
-   * The last Apply all (or Undo): each tool's report, whether it was an Undo, and in which home, so the toolbar can say
-   * what happened and offer the way back there only. An Undo keeps `rest`, the reversals that didn't succeed.
-   */
-  lastRun: undefined as { reports: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] } | undefined,
+  /** The last Apply all (or Undo), so the toolbar can say what happened and offer the way back, in that home only. */
+  lastRun: undefined as LastRun | undefined,
   /** The plugin and tools a command is running for, so their boxes show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
   /** Where the person is: the marketplace shown, its tab, an open plugin page, and the filter. */
@@ -77,13 +74,32 @@ function readShown(): void {
 }
 
 /**
- * Every action that gets a new view of the marketplaces ends here: the view replaces the old one (when there is one),
- * choices it made stale are dropped, and what the place on screen shows is read.
+ * Every action that gets a new view of the marketplaces ends here. The view replaces the old one; a missing view keeps
+ * the old one, unless `replace` (a full read that failed shows that nothing could be read). Then choices it made stale
+ * are dropped, where the person is is checked against it, and what the place on screen shows is read.
  */
-function showView(view?: PluginsView | null): void {
-  if (view) market.view = view;
+function showView(view: PluginsView | null | undefined, { replace = false } = {}): void {
+  if (view || replace) market.view = view ?? undefined;
   prune(market.draft, market.view);
+  settleNav();
   readShown();
+}
+
+/**
+ * Lets go of a place that no longer exists after a refresh: a plugin no longer listed, a category no longer there, or
+ * a find text once the list is short enough to have no find box (its filter would hide plugins with no way to clear it).
+ */
+function settleNav(): void {
+  const entry = current()?.entry;
+  if (!entry) return;
+  const { plugin, category, find } = market.nav;
+  const categories = categoriesOf(entry);
+  market.nav = {
+    ...market.nav,
+    plugin: plugin && entry.plugins.some(candidate => candidate.name === plugin) ? plugin : undefined,
+    category: category && categories.length > 1 && categories.includes(category) ? category : undefined,
+    find: entry.plugins.length > FIND_FROM ? find : '',
+  };
 }
 
 /** Moves within the page and reads what the new place shows. */
@@ -97,10 +113,12 @@ export function browse(patch: Partial<typeof market.nav>): void {
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
 export const loadPlugins = (fresh = false) => act('reading', 'Reading marketplaces…', async () => {
-  market.view = (await api().plugins(fresh)) ?? undefined;
+  const view = await api().plugins(fresh);
   market.problem = undefined;
+  // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
   if (fresh) { market.readmes.clear(); market.details.clear(); }
-  showView();
+  else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
+  showView(view, { replace: true });
   announce('');
   // With no marketplaces yet, the box to type one in is where the work starts.
   if (market.view && !market.view.marketplaces.length) requestAnimationFrame(() => document.getElementById('marketplace-source')?.focus());
@@ -123,7 +141,7 @@ export const addMarketplace = (source: string) => act('adding', 'Reading the mar
   market.addOpen = false;
   market.nav = { ...startNav(), source: added?.source };
   showView(result.view);
-  app.outcome = { page: 'plugins', item: added?.name || undefined, text: `${added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}` : 'Marketplace added'}. Nothing was installed.` };
+  app.outcome = { page: 'plugins', item: added?.name || undefined, text: `${added ? `${marketTitle(added)} added: ${plural(added.plugins.length, 'plugin')}` : 'Marketplace added'}. Nothing was installed.` };
   announce(app.outcome.text, true);
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 
@@ -138,12 +156,13 @@ export const refreshMarketplace = (source: string) => act('refreshing', 'Refresh
   dropReads(source);
   showView(view);
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
-  app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry?.name || 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
+  app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
   announce(app.outcome.text, true);
 });
 
 export const forgetMarketplace = (source: string) => act('removing', 'Removing from the list…', async () => {
-  const name = market.view?.marketplaces.find(entry => entry.source === source)?.name;
+  const gone = market.view?.marketplaces.find(entry => entry.source === source);
+  const name = gone ? marketTitle(gone) : undefined;
   const view = await api().forgetMarketplace(source);
   dropReads(source);
   if (market.nav.source === source) market.nav = startNav();
@@ -168,13 +187,21 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
   } finally {
     market.working = undefined;
-    for (const entry of result.done) clear(market.draft, entry);
-    market.lastRun = { reports: result.done, undo, home, rest: undo ? notUndone(ops, result.done) : undefined };
+    market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
   }
   announce(market.problem ?? (resultSentence(describe(result.done, undo), undo) || 'Nothing changed.'), true);
 });
+
+/**
+ * Closes the problem band: the stop reason and the failure lines go, and what succeeded stays, so the toolbar keeps its
+ * result line and Undo.
+ */
+export function dismissProblems(): void {
+  market.problem = undefined;
+  if (market.lastRun) market.lastRun = { ...market.lastRun, reports: market.lastRun.reports.filter(entry => succeeded(entry.report)) };
+}
 
 /** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {

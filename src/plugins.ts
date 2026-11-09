@@ -39,6 +39,9 @@ export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli
 
 // ---------- Sources and access ----------
 
+/** Git hosts whose repository paths ignore case (github.com/Owner/Repo is github.com/owner/repo). */
+const CASELESS_HOSTS = new Set(['github.com', 'gitlab.com', 'bitbucket.org']);
+
 /** One spelling for one repository, so the same marketplace is recognised however it was typed (MKT-07). */
 export function sameSource(first: string, second: string): boolean {
   const norm = (value: string) => {
@@ -51,7 +54,10 @@ export function sameSource(first: string, second: string): boolean {
     if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
     try {
       const url = new URL(text);
-      return `${url.hostname.toLowerCase()}${url.port ? `:${url.port}` : ''}/${url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '').toLowerCase()}`;
+      const host = url.hostname.toLowerCase();
+      const path = url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/, '');
+      // Only hosts known to ignore case in repository paths fold it; on any other server /Team/tools and /team/tools may be two repositories.
+      return `${host}${url.port ? `:${url.port}` : ''}/${CASELESS_HOSTS.has(host) ? path.toLowerCase() : path}`;
     } catch { return text; }
   };
   return norm(first) === norm(second);
@@ -75,14 +81,6 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
   });
 }
 
-/** MKT-05: failure is otherwise silent, so a Git source is checked with prompts off and a timeout, and each failure gets its class. */
-export async function checkAccess(source: string, timeoutMs = 20_000): Promise<AccessResult> {
-  if (isFolder(source)) return { state: 'ok' };
-  const result = await run('git', ['ls-remote', '--heads', '--', fetchUrl(source)], { env: gitEnv(), timeoutMs });
-  if (result.code === 0) return { state: 'ok' };
-  return classify(result.code, result.output);
-}
-
 /** Why a Git command failed, in words a person can act on. Only called for a failure, so it never says "ok". */
 export function classify(code: number | 'timeout' | 'missing', output: string): Exclude<AccessResult, { state: 'ok' }> {
   const text = output.toLowerCase();
@@ -99,11 +97,21 @@ export function classify(code: number | 'timeout' | 'missing', output: string): 
 
 const catalogFolder = (context: PluginContext, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
 
+/** Copies being made right now, by target folder: two reads of one repository at once share one clone instead of racing on its folder. */
+const copying = new Map<string, Promise<string | undefined>>();
+
 /**
- * A fresh shallow copy of a Git repository, with hooks and submodules off, swapped into `target` only once complete.
- * Returns a problem to show, or undefined when the copy is in place.
+ * A fresh shallow copy of a Git repository, with hooks, submodules and prompts off, swapped into `target` only once
+ * complete. Returns a problem to show (why Git failed, in words a person can act on: MKT-05), or undefined when the copy
+ * is in place. A copy of the same target already being made is shared, not started again.
  */
-async function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
+function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
+  const pending = copying.get(target) ?? cloneInto(context, url, target, ref, sha).finally(() => copying.delete(target));
+  copying.set(target, pending);
+  return pending;
+}
+
+async function cloneInto(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   const git = (args: string[]) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
@@ -126,8 +134,6 @@ async function shallowClone(context: PluginContext, url: string, target: string,
 /** Where a plugin kept in another repository is copied to, by its URL, branch and commit. */
 export const remoteCopyFolder = (context: PluginContext, remote: { url: string; ref?: string; sha?: string }) =>
   join(context.dataDir, 'remote', createHash('sha256').update(`${remote.url}\u0000${remote.ref ?? ''}\u0000${remote.sha ?? ''}`).digest('hex').slice(0, 24));
-/** Copies being made right now, so two pages opened together share one clone instead of racing on the same folder. */
-const copying = new Map<string, Promise<string | undefined>>();
 
 /**
  * A plugin kept in its own repository, read so its page can show what it holds: a shallow copy kept with Central Knot's
@@ -137,9 +143,7 @@ const copying = new Map<string, Promise<string | undefined>>();
 export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string; sha?: string }): Promise<{ folder: string; root: string } | { problem: string }> {
   const root = remoteCopyFolder(context, remote);
   if (!(await stat(root).then(() => true, () => false))) {
-    const pending = copying.get(root) ?? shallowClone(context, remote.url, root, remote.ref, remote.sha).finally(() => copying.delete(root));
-    copying.set(root, pending);
-    const problem = await pending;
+    const problem = await shallowClone(context, remote.url, root, remote.ref, remote.sha);
     if (problem) return { problem };
   }
   const folder = resolve(root, remote.path || '.');
@@ -151,8 +155,6 @@ export async function readCatalog(context: PluginContext, source: string): Promi
   const kind = isFolder(source) ? 'folder' : 'git';
   let root = source;
   if (kind === 'git') {
-    const access = await checkAccess(source, context.timeoutMs);
-    if (access.state !== 'ok') return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: access.message };
     const target = catalogFolder(context, source);
     const problem = await shallowClone(context, fetchUrl(source), target);
     if (problem) return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem };
@@ -242,10 +244,9 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
 }
 
 /** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
-export async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
+async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
   return componentsFrom(await pluginContents(folder, entry, root));
 }
-
 
 // ---------- What each tool has ----------
 
@@ -272,7 +273,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
 
 /** The marketplace a tool has under a name, as the source it was added from. */
-export async function registeredSource(context: PluginContext, tool: HarnessId, marketplace: string): Promise<string | undefined> {
+async function registeredSource(context: PluginContext, tool: HarnessId, marketplace: string): Promise<string | undefined> {
   return (await registeredMarketplaces(context, tool)).find(entry => entry.name === marketplace)?.source;
 }
 
@@ -391,9 +392,9 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
 }
 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
-export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source?: string): Promise<ActionReport> {
+export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source: string): Promise<ActionReport> {
   const name = toolNames[tool];
-  const held = source ? await heldBy(context, tool, marketplace, source) : undefined;
+  const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: `${name}’s “${marketplace}” is a different marketplace (${held}). Central Knot doesn’t change it.`, runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
@@ -431,6 +432,5 @@ const nextStepFor = (tool: HarnessId) => ({
   'claude-cli': 'Start a new Claude Code session, or run /reload-plugins, to use it.',
   'copilot-cli': 'Start a new Copilot CLI session to use it.',
   'codex-cli': 'Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
-  'pi-cli': 'Start a new Pi session to use it.',
-} as Record<HarnessId, string>)[tool];
+} as Partial<Record<HarnessId, string>>)[tool] ?? '';
 

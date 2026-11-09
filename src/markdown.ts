@@ -97,6 +97,22 @@ const cells = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').m
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 
 /** Markdown text as blocks. Headings keep their level; the builder decides how they look. */
+/**
+ * An ATX heading ("## Title ##"): its level and text, without the closing #s. Scanned by hand, not with one regular
+ * expression: a pattern with optional runs of spaces and #s backtracks for seconds on a long line of spaces.
+ */
+function headingOf(line: string): [string, string, string] | undefined {
+  const marks = /^#{1,6}/.exec(line)?.[0];
+  if (!marks || !/[ \t]/.test(line[marks.length] ?? '')) return undefined;
+  let end = line.length;
+  while (end > marks.length && /\s/.test(line[end - 1]!)) end--;
+  let close = end;
+  while (close > marks.length && line[close - 1] === '#') close--;
+  // A closing run of #s counts only after a space (or when it is all the line has): "C#" keeps its #.
+  if (close < end && (close === marks.length || /\s/.test(line[close - 1]!))) end = close;
+  return [line, marks, line.slice(marks.length, end).trim()];
+}
+
 export function parseMarkdown(source: string, depth = 0): Block[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
@@ -114,7 +130,7 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
       index++;
       continue;
     }
-    const heading = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    const heading = headingOf(line);
     if (heading) { flush(); blocks.push({ kind: 'heading', level: heading[1]!.length, content: parseInline(heading[2]!) }); index++; continue; }
     if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) { flush(); blocks.push({ kind: 'rule' }); index++; continue; }
     if (/^\s*>/.test(line)) {
@@ -175,20 +191,22 @@ export function repeats(first: string, second: string): boolean {
   return small.size >= 4 && [...small].filter(word => large.has(word)).length / small.size >= 0.6;
 }
 
-/** Whether `text` names `name` as a whole word or more ("pdf-reader:" yes, "pdf-readers" no), ignoring case. */
-const names = (text: string, name: string) => {
-  const at = text.toLowerCase().indexOf(name.toLowerCase());
-  const edge = (char: string | undefined) => !char || !/[\w-]/.test(char);
-  return at >= 0 && edge(text[at - 1]) && edge(text[at + name.length]);
+/** Whether `text` starts with `name` as a whole word, after any bullet marks or quotes ("`pdf-reader`: …" yes, "Run pdf-reader" no). */
+const leadsWith = (text: string, name: string) => {
+  const rest = text.replace(/^[^\w]+/, '');
+  return rest.toLowerCase().startsWith(name.toLowerCase()) && !/[\w-]/.test(rest[name.length] ?? '');
 };
+
+const isHeadingAtMost = (block: Block, level: number) => block.kind === 'heading' && block.level <= level;
 
 /** A README heading for a plugin's parts: "Skills", "Commands", "Agents", "Included skills"… */
 const PARTS_HEADING = /^(?:included |available |the )?(?:skills?|commands?|agents?|slash commands)$/i;
 
 /**
  * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and what only names the
- * parts in `skipListsOf` again. That is a list of two or more items that each name a part, and, under a heading such as
- * "Skills", a part's own sub-section (its heading is the part's name). A heading left with nothing under it goes too.
+ * parts in `skipListsOf` again. That is a list of two or more items that each start with a part's name ("pdf-reader:
+ * reads PDFs"), and, under a heading such as "Skills", a part's own sub-section (its heading is the part's name) unless
+ * it holds code or a table. A heading left with nothing under it goes too.
  */
 export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Block[] {
   let rest = blocks;
@@ -207,19 +225,19 @@ export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Blo
       if (PARTS_HEADING.test(title)) partsLevel = block.level;
       else if (partsLevel !== undefined && listed.some(name => same(title, name))) {
         let end = at + 1;
-        while (end < rest.length && !(rest[end]!.kind === 'heading' && (rest[end] as { level: number }).level <= block.level)) end++;
-        at = end - 1;
-        continue;
+        while (end < rest.length && !isHeadingAtMost(rest[end]!, block.level)) end++;
+        // Prose about the part repeats what the page lists; code or a table (usage examples, options) is kept.
+        if (!rest.slice(at + 1, end).some(inner => inner.kind === 'code' || inner.kind === 'table')) { at = end - 1; continue; }
       }
     }
-    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => names(plainText(item), name)))) continue;
+    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => leadsWith(plainText(item), name)))) continue;
     kept.push(block);
   }
   // From the end, so a heading emptied by one below it goes as well.
   for (let at = kept.length - 1; at >= 0; at--) {
     const block = kept[at]!;
     const next = kept[at + 1];
-    if (block.kind === 'heading' && (!next || (next.kind === 'heading' && next.level <= block.level))) kept.splice(at, 1);
+    if (block.kind === 'heading' && (!next || isHeadingAtMost(next, block.level))) kept.splice(at, 1);
   }
   return kept;
 }

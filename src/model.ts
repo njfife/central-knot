@@ -4,6 +4,8 @@ const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli'
 export { toolName } from './words.ts';
 export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;
+/** A clock time in the person's own format: "9:20 AM". */
+export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 
 /** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */

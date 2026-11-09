@@ -42,7 +42,7 @@ async function readInside(root: string, path: string, limit = READ_LIMIT): Promi
 const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
 const parseObject = (raw: string) => { try { return record(JSON.parse(raw)); } catch { return undefined; } };
 /** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
-export const jsonInside = async (root: string, path: string) => { const read = await readInside(root, path); return read?.whole ? parseObject(read.text) : undefined; };
+const jsonInside = async (root: string, path: string) => { const read = await readInside(root, path); return read?.whole ? parseObject(read.text) : undefined; };
 
 /** The marketplace.json in `root` as an object, or the problem that kept it from being read. */
 export async function readManifest(root: string): Promise<{ manifest: Record<string, unknown> } | { problem: string }> {
@@ -60,7 +60,6 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   const body = name ? await textInside(root, join(folder, name)) : undefined;
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
-
 
 /** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
 async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
@@ -145,7 +144,6 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
 export async function pluginDetail(folder: string, entry: Record<string, unknown>, root: string, withReadme = true): Promise<PluginDetail> {
   return { ...(await pluginContents(folder, entry, root)), readme: withReadme ? await readmeIn(folder, root) : undefined };
 }
-
 
 /** Where a plugin outside the marketplace lives: a Git URL to read it from (https only), a folder in it and a branch. */
 export function remoteOf(where: unknown): { url: string; path: string; ref?: string; sha?: string } | undefined {

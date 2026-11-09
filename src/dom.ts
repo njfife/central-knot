@@ -79,6 +79,12 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
+/** Sets a table's column count (--tool-count) through the style object: the page's security policy refuses inline style attributes. */
+export function withToolCount(table: HTMLElement, count: number): HTMLElement {
+  table.style.setProperty('--tool-count', String(count));
+  return table;
+}
+
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */
 export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dismiss', title = label, look = '' }: { id?: string; label?: string; title?: string; look?: string } = {}) =>
   h(`button.band-dismiss${look}`, { type: 'button', id, 'aria-label': label, title, onclick }, icon('x', 12));
