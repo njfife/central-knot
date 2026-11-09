@@ -435,7 +435,7 @@ async function practiceFlow() {
   skill(join(market, 'plugins/ck-marker/skills'), 'ck-marker-skill');
   await a.click('#nav-plugins');
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
-  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; })()`);
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added in Central Knot'), await a.text('#plugins-scroll'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);

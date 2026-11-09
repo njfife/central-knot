@@ -24,8 +24,8 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history?.find(other => other.undoneBy === event.id);
-      const what = undone ? ({ edit: `the edit made in ${who(undone.winner?.tool)}`, conflict: `${who(undone.winner?.tool)}'s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(undone.winner?.tool)}'s copy`, restored: 'an undo' } as const)[undone.kind] : 'a change';
-      return { glyph: 'undo-2', text: `You undid ${what}; the earlier version is back${event.losers.length ? ` in ${list([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : ''}.`, action: undone?.kind === 'deleted' ? 'Delete again' : 'Redo edit' };
+      const what = undone ? ({ edit: `${who(undone.winner?.tool)}’s edit`, conflict: `${who(undone.winner?.tool)}'s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(undone.winner?.tool)}'s copy`, restored: 'an undo' } as const)[undone.kind] : 'a change';
+      return { glyph: 'undo-2', text: `Undid ${what}; the earlier version is back${event.losers.length ? ` in ${list([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : ''}.`, action: undone?.kind === 'deleted' ? 'Delete again' : 'Redo edit' };
     }
   }
 }
@@ -60,9 +60,11 @@ function actions(event: HistoryEvent, action?: string) {
   }
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
-  const touched = [...new Set([...(event.winner ? [event.winner.tool] : []), ...event.losers.map(loser => loser.tool)])];
+  // A chosen copy replaced only the losers' copies, so undoing it touches only them.
+  const touched = [...new Set([...(event.winner && event.kind !== 'chosen' ? [event.winner.tool] : []), ...event.losers.map(loser => loser.tool)])];
   const scope = touched.length >= (state.home?.snapshots.length ?? 3) || !touched.length ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
-  const label = action === 'Undo' || action === 'Restore' || action === 'Delete again' ? `${action} ${scope}` : action;
+  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action;
+  const label = ['Undo', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'outline', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;
@@ -71,14 +73,14 @@ function actions(event: HistoryEvent, action?: string) {
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
-  if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'Changes sync makes on its own (an edit spread, a winner picked when two tools changed the same item, a deletion spread) and copies Apply all replaced appear here, with Undo or Restore.'));
+  if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'When automatic sync copies an edit or a deletion between tools, or Apply all replaces a copy, it appears here with Undo or Restore.'));
   const ordered = [...events].reverse();
   // The row's own button redoes; the band only confirms.
   const done = state.outcome?.page === 'history' ? h('div.bands.history-bands', {}, outcomeBand(false)) : null;
-  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'Changes automatic sync made, and copies Apply all replaced, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
-    return [heading, h('li.history-row', { 'data-kind': event.kind },
+    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', {}, event.item), h('span', {}, about.text)),
       event.undoneBy ? h('span.history-done', {}, 'Undone') : actions(event, about.action))];

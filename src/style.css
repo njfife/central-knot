@@ -835,3 +835,56 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ov-row { scroll-margin-top: 96px; }
 .list-head { padding-right: 23px; }
 .list-head-tool > * { width: 12px !important; height: 12px !important; font-size: 7px; }
+/* UI round 5 */
+/* One content width for table, legend, details, bands and toolbar. */
+.ov, .ov-page .ov, .legend, .ov-page .legend, .details { max-width: 900px; }
+.ov-page .bands > .band { padding-right: max(16px, calc(100% - 900px)); }
+.ov-page > .toolbar { padding-right: max(16px, calc(100% - 900px)); height: auto; min-height: 37px; flex-wrap: wrap; row-gap: 4px; }
+.ov-page .toolbar > .find { flex: 0 0 200px; min-width: 200px; max-width: 200px; }
+/* Pending: the dashed border and glyph say it; no extra ring. */
+.cell-pending-edit, .cell-pending-edit.cell-on, .legend-cell.cell-pending-edit { box-shadow: none; }
+.managed-pending .switch { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
+/* Plugins: hints as icon + text; details never widen the section. */
+.market-hint { display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: start; column-gap: 8px; }
+.market-hint > svg.icon:first-child { margin: 2px 0 0; }
+.market-hint > .hint-body { min-width: 0; }
+.plugins-page .market-fit { width: calc(360px + var(--tool-count, 3) * 120px + 32px); max-width: 100%; }
+.plugins-page .market-fit .plugin-details, .plugins-page .market-fit .plugin-table { max-width: 100%; width: auto; }
+.plugins-page .market-fit .market-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; row-gap: 2px; }
+.plugins-page .market-fit .market-source { grid-column: 1 / -1; grid-row: 2; }
+.cell-oneway-mark { width: 15px; height: 15px; top: -6px; right: -6px; }
+.cell-oneway-mark svg { width: 11px; height: 11px; }
+.plugin-card-state { margin-left: auto; font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
+.band-lines { display: flex; flex-direction: column; gap: 2px; }
+.tip-source { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--switch-on); vertical-align: 0; }
+.tip-mark { font-weight: 700; }
+.legend-plain { border: 1px solid var(--control-line); border-radius: 5px; background: transparent; }
+.band-why { color: var(--ink-faint); }
+.notice-age { color: var(--ink-faint); }
+.cards-scroll { max-width: 980px; }
+.home-label { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
+.home-sub { font-size: 11px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.title-tag:hover { background: var(--hover); }
+.home-row { height: 40px; }
+.history-row { grid-template-columns: 90px 1fr auto; }
+.history-list, .history-intro { max-width: 900px; }
+.history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
+.history-undone .history-what { color: var(--ink-faint); }
+.history-undone .history-what strong { color: var(--ink-soft); }
+@keyframes row-flash { from { background: var(--cell-on); } to { background: transparent; } }
+.ov-row.row-flash { animation: row-flash 2.5s ease-out; }
+.band .text-action, .band > .btn { flex: none; white-space: nowrap; }
+.compare-note { margin: -4px 0 8px; font-size: 12px; color: var(--ink-soft); }
+.version { justify-content: flex-start; }
+.version-cta { margin-top: auto; }
+.tool-menu { width: 400px; }
+.tool-menu-foot { margin: 8px 0 0; font-size: 11.5px; color: var(--ink-faint); }
+.detail-scroll .details { box-shadow: none; padding-left: 0; }
+.ov-row { scroll-margin-top: 128px; }
+.decided-undo span { text-decoration: underline; }
+.band.plugin-report { flex-direction: column; align-items: stretch; position: relative; padding-right: 40px; }
+.band.plugin-report > .band-dismiss { position: absolute; top: 6px; right: 12px; }
+.plugin-table .ov-row { grid-template-columns: minmax(200px, 360px) repeat(var(--tool-count, 2), 120px) max-content 1fr; }
+.plugin-table-noactions .ov-row { grid-template-columns: minmax(200px, 360px) repeat(var(--tool-count, 2), 120px) 0; }
+.plugin-outcome-card .details-tool-head { flex-wrap: wrap; row-gap: 2px; }
+.plugin-card-state { margin-left: 0; flex-basis: 100%; padding-left: 22px; white-space: nowrap; }

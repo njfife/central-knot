@@ -34,7 +34,7 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; item?: string; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
+  outcome: undefined as { page: Page; text: string; item?: string; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
   /** Sync notices the person has dismissed, by History event or item. */
@@ -126,7 +126,7 @@ const readSummary = (view: HomeView) => {
 
 export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {
   const view = await api().selectHome(mode);
-  if (view) { accept(view); state.outcome = { page: state.page, text: `Opened ${view.label}. ${readSummary(view).replace(/^Read /, 'Read ').replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
+  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(/^Read /, 'Read ').replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
@@ -146,7 +146,9 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') { state.pluginResult = undefined; void loadPlugins(); }
   // A new page starts clean: the last action's message and results belong to the page they happened on.
-  if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = undefined; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
+  const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
+  if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   state.page = page;
   state.find = '';
@@ -182,7 +184,7 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
   const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
   const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
-  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
+  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed. Installing needs each tool’s command-line tool; see below.` }; }
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
@@ -250,7 +252,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : 'Redo edit';
+  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit ${where.length >= (state.home?.snapshots.length ?? 3) ? 'in all tools' : `in ${andText(where)}`}`;
   if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
@@ -300,8 +302,9 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
     const managed = changes.filter(change => change.managed).length;
-    // The write band right below says what waits for Claude Code; the result says what was written.
-    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop future syncing, turn Managed off, then Apply all; copies already written stay.` };
+    // The write band right below says what waits for Claude Code; the result names what was written, and where.
+    const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
+    state.outcome = { page: state.page, item: copied.length === 1 ? copied[0] : undefined, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}. To stop future syncing, turn Managed off, then Apply all; copies already written stay.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -333,6 +336,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To stop syncing ${names.length === 1 ? 'it' : 'them'} to Claude Code, turn off its box, then Apply all.` };
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To stop syncing ${names.length === 1 ? 'it' : 'them'} to Claude Code, turn off ${names.length === 1 ? 'its' : 'their'} Claude Code box, then Apply all.` };
   announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code.`);
 });

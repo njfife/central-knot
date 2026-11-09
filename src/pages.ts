@@ -9,11 +9,14 @@ import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } f
 
 const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
 /** Nothing of this kind in this home: what was looked for, and somewhere useful to go next. */
+/** The preview-only reason without its own "Preview only:" prefix or final stop, to sit inside a sentence. */
+export const previewReason = (reason?: string) => (reason ?? 'nothing is written here').replace(/^Preview only:\s*/i, '').replace(/\.\s*$/, '');
+
 /** Bands an empty page still needs: what the last action did, and why nothing can be written here. */
 const emptyBands = () => {
   const done = outcomeBand();
   const access = state.home?.manage.access;
-  const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, `Preview only: ${access.reason ?? 'nothing is written here'}. You can look around; nothing is written.`)) : null;
+  const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, `Preview only: ${previewReason(access.reason)}. You can look around; nothing is written.`)) : null;
   return done || preview ? h('div.bands', {}, done, preview) : null;
 };
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
@@ -37,8 +40,8 @@ function practiceBanner() {
   return h('div.intro', { role: 'note' },
     h('div.intro-text', {},
       h('strong', {}, 'This is a practice copy.'),
-      h('span', {}, ' It holds sample skills, MCP servers and agents in a throwaway folder that is removed when you quit. Nothing here touches your real tools, so try anything. Switching to This Mac’s home only reads your tools; nothing is written there until you click Apply all.')),
-    button({ variant: 'outline', size: 'small', label: 'Use This Mac’s home', id: 'intro-use-real', onclick: () => void loadHome('actual') }),
+      h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
+    (() => { const real = button({ variant: 'outline', size: 'small', label: 'Use This Mac’s home', id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you click Apply all.'; return real; })(),
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { remember('ck-practice-banner-dismissed'); rerender(); } }));
 }
 
@@ -82,13 +85,12 @@ export function overviewPage() {
         kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.claudePending.length),
         kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []))),
       h('div.overview-more', {},
-        !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused: preview only. ${home.manage.access.reason ?? 'Nothing is written in this home.'}`)
+        !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
         : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
           ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), 'Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the menu bar icon and the Central Knot menu.'),
-        nothingManaged && h('p.overview-line', {}, icon('puzzle', 14, 'tone-muted'), 'Plugins are installed through each tool’s own CLI on the ', button({ variant: 'link', size: 'micro', label: 'Plugins page', id: 'overview-plugins', onclick: () => showPage('plugins') }), '.'),
-        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change sync makes on its own, and every copy Apply all replaces, is in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo or Restore.'))));
+        nothingManaged && h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the ${navigator.userAgent.includes('Mac') ? 'menu bar icon and the Central Knot menu' : 'tray icon'}.`),
+        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
 
 // ---------- MCP servers ----------
@@ -209,8 +211,10 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
           ...(snapshot.probe.detail.startsWith('ChatGPT desktop') ? fact('Found as', 'ChatGPT desktop’s own Codex; no Codex CLI found') : []))),
         section('Folders', h('dl.facts', {},
           ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
-          ...[...roots].flatMap(([root, label]) => fact(label, path(root))),
-          ...(disclosed && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
+          // One label for every tool; a second folder (shared .agents) keeps its own name.
+          ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
+          ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
+          ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',
           h('div.link-row', {},

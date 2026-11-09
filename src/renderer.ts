@@ -45,7 +45,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   return h('button.home-row', {
     type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': shown, title: mode === 'custom' && current ? `${state.home!.home}\nClick to choose another folder.` : homeHelp[mode],
     disabled: !!state.busy, onclick: () => void loadHome(mode),
-  }, icon(glyph, 14), h('span.nav-label', {}, shown));
+  }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: 'a backup or another account' }[mode])));
 }
 
 function renderSidebar() {
@@ -73,7 +73,7 @@ function renderHeader(rail: boolean) {
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
-    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'This is the practice copy: nothing touches your real tools. Click to show the practice note.',
+    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),
@@ -87,7 +87,7 @@ function renderPage() {
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
-  if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only: nothing is written here', tone: '' };
+  if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Changes write to your real tools', tone: 'tone-warning' };
   return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes write only to this practice copy' : 'Changes write only inside this folder', tone: '' };
 }
@@ -99,7 +99,7 @@ function renderStatus() {
       ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, 'Home: ', h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-state', {}, 'Paused (preview only)'))
+    state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync:'), h('span.sync-state', {}, 'paused'))
     : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
       title: state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now. Click to turn it on.',
       onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off')) : '',

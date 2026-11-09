@@ -128,13 +128,13 @@ function trayMenu() {
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
     { label: `${!homeWritable && current ? 'Preview only: nothing is written' : unseen ? 'Sync made changes: open to see them' : syncOn ? 'Automatic sync is on' : 'Automatic sync is off'} · ${where}`, enabled: false },
-    { label: homeWritable ? 'Sync automatically' : 'Sync automatically (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
+    { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+    { label: 'Sync now', toolTip: 'Apply waiting changes once', enabled: !!current && homeWritable && !syncOn, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
     { type: 'separator' },
-    { label: 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
+    { label: 'Quit Central Knot (stops syncing)', click: () => { quitting = true; app.quit(); } },
   ]);
 }
 function refreshTray() {
@@ -162,14 +162,14 @@ function appMenu() {
     { label: app.name, submenu: [
       { role: 'about' },
       { type: 'separator' },
-      { label: homeWritable ? 'Sync automatically' : 'Sync automatically (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+      { label: 'Sync now', toolTip: 'Apply waiting changes once', enabled: !!current && homeWritable && !syncOn, click: () => void fromTray(async () => { await pass(true); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' },
-      { label: 'Quit Central Knot', accelerator: 'Command+Q', click: () => { quitting = true; app.quit(); } },
+      { label: 'Quit Central Knot (stops syncing)', accelerator: 'Command+Q', click: () => { quitting = true; app.quit(); } },
     ] },
     { role: 'editMenu' },
     { role: 'windowMenu' },
@@ -549,7 +549,7 @@ app.whenReady().then(async () => {
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
-    ? await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then Write now.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
+    ? await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })

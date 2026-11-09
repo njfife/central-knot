@@ -239,7 +239,7 @@ const saveMcpRecord = (home: string, record: McpRecord) => writeDurably(recordPa
 
 // ---------- View ----------
 
-const summary = (server: NeutralServer) => (server.transport === 'stdio' ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ') : `${server.transport.toUpperCase()} ${server.url ?? ''}`);
+const summary = (server: NeutralServer) => (server.transport === 'stdio' ? `Command · ${[server.command, ...(server.args ?? [])].filter(Boolean).join(' ')}` : `${server.transport.toUpperCase()} · ${server.url ?? ''}`);
 
 async function gatherAll(context: ShareContext, tools: HarnessId[]) {
   const byName = new Map<string, Partial<Record<HarnessId, McpEntry>>>();
