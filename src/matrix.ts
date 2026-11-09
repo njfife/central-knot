@@ -645,7 +645,10 @@ function syncNotice(notice: SyncNotice) {
     'kept-edit': ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit was kept over its deletion in ${list(notice.losers)}.${order}`, notice.orderProved || notice.key.includes(':') ? null : smallAction('Delete everywhere', `notice-delete-${notice.key}`, () => void deleteEverywhereKey(notice.key))],
     reset: ['triangle-alert', 'tone-warning', kind === 'mcp' ? `${who(notice.winner)}'s settings file lost every managed server at once, so Central Knot put them back instead of deleting them everywhere. To delete one, remove it in one tool while the others still have it.` : `${who(notice.winner)}'s skills folder lost every managed skill at once, so Central Knot put them back instead of deleting them everywhere. To delete one, use Delete everywhere in its details.`, null],
   } as Record<SyncNotice['kind'], [IconName, string, string, HTMLElement | null]>)[notice.kind];
-  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), h('span', {}, text), action);
+  // The item's name opens its row here, so "what changed" is one click from the change itself.
+  const shownRow = !notice.item || !committedList().some(skill => skill.key === notice.item.toLowerCase() || skill.name === notice.item) ? null
+    : h('button.text-action.notice-open', { type: 'button', id: `notice-open-${notice.history || notice.item}`, onclick: (event: Event) => { event.stopPropagation(); const key = committedList().find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())!.key; view.comparing = undefined; openRow(key); } }, 'Show');
+  return h('p.sync-notice', { 'data-kind': notice.kind }, icon(glyph, 14, tone), h('span', {}, text), action, shownRow);
 }
 
 export function designOverview(which: Kind = 'skills') {

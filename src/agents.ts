@@ -243,7 +243,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const limits: Partial<Record<HarnessId, string>> = {};
     for (const tool of present) {
       const lost = losses(tool, origin);
-      if (lost.length) limits[tool] = `One-way from ${shown[origin.tool]}. ${shown[tool]} has no setting for ${shown[origin.tool]}'s ${lost.map(field => `“${field}”`).join(lost.length > 2 ? ', ' : ' or ')}, so it gets only the name, description and prompt; an edit made in ${shown[tool]} stays in ${shown[tool]}.`;
+      if (lost.length) limits[tool] = `One-way from ${shown[origin.tool]}. ${shown[tool]} has no setting for ${shown[origin.tool]}'s ${lost.map(field => `“${field}”`).join(lost.length > 2 ? ', ' : ' or ')}, so it gets only the name, description and prompt. Edit this agent in ${shown[origin.tool]}: an edit made in ${shown[tool]} stays there, and Central Knot then stops updating that copy.`;
     }
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];

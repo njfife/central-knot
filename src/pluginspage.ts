@@ -50,7 +50,7 @@ function details(view: PluginsView, plugin: PluginView) {
   return h('div.compare.details.plugin-details', { role: 'region', 'aria-label': `Details for ${plugin.name}` },
     h('div.details-head', {}, h('p.details-status', {}, `Contains ${summary}`), h('p.details-description', {}, plugin.description || 'No description.')),
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
-      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, `In ${names[tool]}`)),
+      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, `When installed in ${names[tool]}`)),
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
         h('span', {}, `${outcome.component} ${outcome.text.replace(/plugin:(skill|agent)/, `${plugin.name}:${'$1'}-name`)}`)))))))) : null);
 }
@@ -71,7 +71,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
           plugin.version ? h('span.plugin-version', {}, plugin.version) : null),
         view.tools.map(tool => cell(view, entry, plugin, tool, index)),
         h('div.plugin-actions', { role: 'cell' }, missing.length && view.canWrite
-          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length ? 'Install' : `Install in ${missing.length} more`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
+          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : missing.length === 1 ? `Install in ${names[missing[0]]}` : `Install in ${missing.length} more`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
           : null),
         h('div.ov-fill')),
       open ? details(view, plugin) : null,
@@ -88,7 +88,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
     entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale ? ` Showing the copy fetched ${when(entry.fetchedAt)}; installing waits until it can be reached.` : '')) : null,
     (() => {
       const cannot = view.tools.filter(tool => !view.clis[tool]);
-      if (!cannot.length || !entry.plugins.length) return entry.plugins.length ? h('p.market-hint', {}, 'Click a tool’s box to install the plugin there; click a check to uninstall it.') : null;
+      if (!cannot.length || !entry.plugins.length) return entry.plugins.length ? h('p.market-hint', {}, 'Click a tool’s box to install the plugin there; click a check to uninstall it. Plugin actions run at once through that tool’s own command; there is no Apply all here.') : null;
       return h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
         `Can’t install in ${cannot.map(tool => names[tool]).join(cannot.length > 2 ? ', ' : ' or ')} here: ${cannot.length === 1 ? 'its' : 'their'} command-line tool${cannot.length === 1 ? ' was' : 's were'} not found${state.home?.mode === 'actual' ? '' : ' (this is not This Mac’s home)'}. Those boxes are striped. `,
         button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${index}`, onclick: () => showPage('tools') }));
@@ -138,5 +138,5 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'Add one above by its Git address, owner/repo, or a folder. Adding reads its catalog and installs nothing.')));
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins: a Git repository or folder with .claude-plugin/marketplace.json. Add one above by its Git address, owner/repo, or folder. Adding reads its catalog and installs nothing.')));
 }
