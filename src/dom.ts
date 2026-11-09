@@ -156,9 +156,13 @@ export function fitBars(): void {
  */
 export const cardGrid = (cards: Node[]): HTMLElement => h('div.card-grid', { 'data-count': String(cards.length) }, cards);
 
-/** Sets a table's column count (--tool-count) through the style object: the page's security policy refuses inline style attributes. */
+/**
+ * Sets a table's tool column count: --tool-count through the style object (the page's security policy refuses inline
+ * style attributes) for its grid, and data-tools for the narrow steps that depend on it (style.css).
+ */
 export function withToolCount(table: HTMLElement, count: number): HTMLElement {
   table.style.setProperty('--tool-count', String(count));
+  table.dataset.tools = String(count);
   return table;
 }
 

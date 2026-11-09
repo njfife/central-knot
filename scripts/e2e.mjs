@@ -153,28 +153,40 @@ const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${J
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
 // ---------- Fit: nothing is cut off ----------
-// In the page: each control (button, switch, input, filter chip, tool label) that the window or a clipping ancestor cuts,
-// each region that scrolls sideways, and an open menu that runs outside its scroll area. A control inside a region that
-// scrolls sideways on purpose (the plugin category chips) is reachable, so it is not counted. Empty when everything fits.
+// In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
+// ancestor cuts. A control that a scroll area can bring into view is reachable, so only a cut that no scrolling undoes
+// counts. Also each region that scrolls sideways (the plugin category chips included), each fitted bar whose contents
+// run into its padding, and an open menu outside its scroll area. Empty when everything fits.
 const CUT_OFF = `(() => {
   const out = [];
   const label = node => node.id || node.getAttribute('aria-label') || (node.textContent || '').trim().slice(0, 40) || String(node.className);
   const across = (box, edge) => box.left >= edge.left - 1 && box.right <= edge.right + 1;
+  const within = (box, edge) => box.top >= edge.top - 1 && box.bottom <= edge.bottom + 1;
+  const scrolls = (node, style, axis) => ['auto', 'scroll'].includes(style[axis === 'x' ? 'overflowX' : 'overflowY']) && (axis === 'x' ? node.scrollWidth > node.clientWidth + 1 : node.scrollHeight > node.clientHeight + 1);
   for (const node of document.querySelectorAll('button, [role="switch"], input:not(.hidden-input), .chip, .ov-tool-head, .plugin-tool-name')) {
     const box = node.getBoundingClientRect();
     if (box.width < 2 || box.height < 2) continue;
     if (!across(box, { left: 0, right: innerWidth })) { out.push('off the window: ' + label(node)); continue; }
-    for (let up = node.parentElement; up && up !== document.body; up = up.parentElement) {
-      const style = getComputedStyle(up);
-      if (style.overflowX === 'visible') continue;
-      const sideways = ['auto', 'scroll'].includes(style.overflowX) && up.scrollWidth > up.clientWidth + 1;
-      if (!sideways && !across(box, up.getBoundingClientRect())) { out.push('cut by ' + (up.id || up.className) + ': ' + label(node)); break; }
+    let reachable = { x: false, y: false }, cut = '';
+    for (let up = node.parentElement; up && up !== document.body && !cut; up = up.parentElement) {
+      const style = getComputedStyle(up), edge = up.getBoundingClientRect();
+      for (const axis of ['x', 'y']) {
+        if (reachable[axis] || style[axis === 'x' ? 'overflowX' : 'overflowY'] === 'visible') continue;
+        if (scrolls(up, style, axis)) reachable[axis] = true;
+        else if (!(axis === 'x' ? across(box, edge) : within(box, edge))) cut = (axis === 'x' ? 'cut sideways by ' : 'cut off below or above by ') + (up.id || up.className);
+      }
     }
+    if (!cut && !reachable.y && (box.top < -1 || box.bottom > innerHeight + 1)) cut = 'below the window';
+    if (cut) out.push(cut + ': ' + label(node));
   }
-  for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
+  for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
+  for (const bar of document.querySelectorAll('.fit-bar')) {
+    const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+    if ([...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5)) out.push('runs into its padding: ' + bar.className);
+  }
   for (const menu of document.querySelectorAll('.tool-menu')) {
     const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
-    if (box.top < area.top - 1 || box.bottom > area.bottom + 1 || !across(box, area)) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
+    if (!within(box, area) || !across(box, area)) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
   }
   return out;
 })()`;
@@ -293,11 +305,18 @@ async function practiceFlow() {
   await a.settle();
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
 
-  // The practice copy has no Pi folder: Pi is no column, box or menu, and Tools shows no card for it.
+  // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
+  // tool present, so Pi is no column, box or menu, and Tools shows no card for it.
+  mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
+  writeFileSync(join(practice, '.agents/skills/shared-only/SKILL.md'), text('shared-only'));
   await a.click('#nav-skills');
+  await a.click('#header-refresh');
   check('a tool not in this home has no column or box', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
   await a.click('#nav-tools');
   check('nor a card on Tools', !(await a.exists('.tool-card[aria-label^="Pi"]')) && await a.exists('.tool-card[aria-label^="Codex"]'));
+  // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
+  rmSync(join(practice, '.agents'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
   await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
@@ -356,6 +375,13 @@ async function practiceFlow() {
   check('the choice waits for Apply all', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   same('the choice previews as a pending sync', [await cellState(a, 'review', 'claude-cli'), await cellState(a, 'review', 'copilot-cli')], ['synced', 'synced']);
   check('the pill gives way to the choice', !(await a.exists('#decide-review')) && (await a.exists('#undo-review')));
+  // With four tools beside an open sidebar the name column is narrowest: the chosen copy still fits, Change included.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#header-refresh');
+  check('a Pi folder makes Pi a fourth column', await a.exists('#tool-pi-cli') && await a.exists('#undo-review'));
+  await fitsAtMinimum(a, 'a chosen copy waiting, with four tools');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   const nameFits = await a.run(`(() => { const cell = document.querySelector('.ov-row[data-key="review"] .ov-name'); return cell.scrollWidth <= cell.clientWidth + 1 && cell.getBoundingClientRect().height < 44; })()`);
   check('the name cell does not overflow or wrap', nameFits);
   await a.shot('practice-choice-made');
@@ -441,8 +467,10 @@ async function practiceFlow() {
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
   await a.click('#detail-switch-standup');
   check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
+  await fitsAtMinimum(a, 'the Files view with a change waiting');
   await a.shot('practice-skills');
-  await a.click('#skills-table');
+  await a.press('Escape');
+  check('Escape leaves the Files view for the table', !(await a.exists('.split')) && await a.exists('.ov-row[data-key="standup"]'));
   same('the table shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
