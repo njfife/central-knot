@@ -177,7 +177,8 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen';
+  /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added';
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string }[];

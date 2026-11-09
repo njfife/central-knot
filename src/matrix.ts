@@ -311,6 +311,14 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
   return base.copies[tool] !== undefined && base.copies[tool] !== base.copies[chosen];
 }
 
+/** Delete everywhere (DEL-02) for a managed skill: two clicks, the second naming what goes. */
+function deleteAction(skill: SampleSkill) {
+  if (designMode || kind !== 'skills' || !committedOf(skill.key).managed) return null;
+  return view.confirmDelete === skill.key
+    ? smallAction(`Delete ${skill.name ?? skill.key} from every tool`, `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; void deleteEverywhereKey(skill.key); }, '.text-danger')
+    : smallAction('Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger');
+}
+
 /** Where each copy lives, folded away: paths matter less than what each tool has. */
 function wherePaths(skill: SampleSkill) {
   const shown = toolList().filter(tool => skill.paths?.[tool]);
@@ -375,11 +383,11 @@ function details(skill: SampleSkill, closable = true) {
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     allSame
-      ? wherePaths(skill)
+      ? (!closable ? h('div.details-where-row', {}, wherePaths(skill), deleteAction(skill)) : wherePaths(skill))
       : differs && !draft ? wherePaths(skill) : [h('div.details-tools', {}, toolList().map(toolRow)), wherePaths(skill)],
     kind === 'agents' ? oneWayNote(skill) : null,
     // Only skills have foot actions (Files, Delete everywhere); other kinds end at the last line, with no empty foot.
-    kind !== 'skills' || designMode ? null : h('div.compare-foot', {},
+    kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
       h('span.compare-foot-start', {},
         // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
         !designMode && kind === 'skills' && closable ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),

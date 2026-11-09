@@ -927,3 +927,10 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugins-page:has(.market-fit) .bands > .band { padding-right: max(16px, calc(100% - 770px)); }
 #add-marketplace:disabled { background: var(--control-line); color: var(--ink-faint); border-color: transparent; }
 .cannot-dash { color: var(--ink-soft); }
+@keyframes ck-spin { to { transform: rotate(360deg); } }
+.spin { animation: ck-spin 1s linear infinite; }
+.cell-working { display: grid; place-items: center; border-style: dashed; color: var(--accent); }
+.details-where-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.list-head-tool img, .list-head-tool svg { filter: none; }
+/* Small Codex mark: a quiet outlined letter instead of a filled blob. */
+.list-head-tool .mono-mark { width: 13px !important; height: 13px !important; background: transparent; color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--ink-faint); font-size: 7.5px; border-radius: 3px; }

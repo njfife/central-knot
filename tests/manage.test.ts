@@ -776,7 +776,8 @@ test('An edit in one tool spreads to the others, and the old copy is kept in His
     const result = await applyChanges(fast(box), []);
     assert.equal(await readFile(join(box.home, COPILOT, 'pair/SKILL.md'), 'utf8'), text('pair', 'Edited in Claude.'));
     assert.deepEqual(result.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'claude-cli', ['copilot-cli']]]);
-    const [event] = await readHistory(box.home);
+    // Managing it first told the copy Apply all added; the edit is the event after.
+    const event = (await readHistory(box.home)).find(entry => entry.kind !== 'added')!;
     assert.equal(event.kind, 'edit');
     assert.ok(event.previous && await exists(join(storeDirectory(box.home), 'items/pair', event.previous)), 'the old version is in the store');
     const before = await readFile(join(storeDirectory(box.home), 'history.json'), 'utf8');
@@ -1468,5 +1469,46 @@ test('T7: a reset first seen by a Sync-off Apply all of another skill is still a
     await settleAndPass(box);
     for (const root of [CLAUDE, COPILOT]) assert.equal(await exists(join(box.home, root, 'foo/SKILL.md')), true, `${root} keeps foo`);
     assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true, 'and Codex gets it back');
+  } finally { await box.cleanup(); }
+});
+
+test('Apply all records the copies it adds; Undo removes them while unchanged and unmanages the skill', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'fresh', text('fresh', 'Mine.'));
+    await applyChanges(fast(box), [manage('fresh')]);
+    assert.ok(await exists(join(box.home, COPILOT, 'fresh')));
+    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'fresh')!;
+    assert.deepEqual(added.losers.map(loser => loser.tool), ['copilot-cli']);
+    const undone = await restoreFromHistory(fast(box), added.id);
+    assert.equal(undone.stopped, undefined);
+    assert.equal(await exists(join(box.home, COPILOT, 'fresh')), false, 'the added copy is gone');
+    assert.equal(await readFile(join(box.home, CLAUDE, 'fresh', 'SKILL.md'), 'utf8'), text('fresh', 'Mine.'), 'the original is untouched');
+    assert.equal((await facts(box, 'fresh')).managed, false);
+    assert.ok((await readHistory(box.home)).find(event => event.id === added.id)!.undoneBy);
+    assert.match((await restoreFromHistory(fast(box), added.id)).stopped ?? '', /already undone/);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of added copies keeps a copy edited since, and that tool keeps syncing', async () => {
+  const box = await sandbox();
+  try {
+    await skill(box.home, CLAUDE, 'kept', text('kept', 'Mine.'));
+    await applyChanges(fast(box), [manage('kept')]);
+    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'kept')!;
+    await writeFile(join(box.home, COPILOT, 'kept', 'SKILL.md'), text('kept', 'Edited in Copilot.'));
+    const undone = await restoreFromHistory(fast(box), added.id);
+    assert.equal(await readFile(join(box.home, COPILOT, 'kept', 'SKILL.md'), 'utf8'), text('kept', 'Edited in Copilot.'), 'an edited copy stays');
+    assert.ok(undone.results.some(entry => entry.outcome === 'held' && /edited since/.test(entry.message)));
+  } finally { await box.cleanup(); }
+});
+
+test('A skill already managed gets no added event when a background pass copies it', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box, 'steady');
+    await rm(join(box.home, COPILOT, 'steady'), { recursive: true, force: true });
+    await applyChanges(fast(box), []);
+    assert.equal((await readHistory(box.home)).filter(event => event.kind === 'added' && event.key === 'steady').length, 1, 'only the first Apply all told it');
   } finally { await box.cleanup(); }
 });

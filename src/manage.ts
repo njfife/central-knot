@@ -350,6 +350,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (!readable.get(copy.harness) || !(await folderExists(dirname(copy.directory)))) return 'unknown';
     try { await lstat(copy.directory); return 'unreadable'; } catch (error) { return errorCode(error) === 'ENOENT' ? 'gone' : 'unknown'; }
   };
+  // Skills this Apply all turns Managed: the copies it creates for them are told in History as 'added', so they can be undone.
+  const newlyManaged = new Set<string>();
+  const added = new Map<string, { name: string; hash: string; copies: { tool: HarnessId; hash: string }[] }>();
   for (const change of changes) {
     const entry = gathered.get(change.key);
     if (!entry) continue;
@@ -366,6 +369,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       if (problem) { results.push({ item: entry.facts.name, outcome: 'held', message: problem }); continue; }
     }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
+    if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
     item.off = change.off.filter(tool => harnesses[tool]);
     // A copy is tracked only while the skill syncs to its tool: one removed while off, or while unmanaged, is no deletion later.
@@ -706,6 +710,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
         }
         context.fault?.('after-rename');
         (intent as { status: string }).status = 'written';
+        if (newlyManaged.has(key)) { const told = added.get(key) ?? { name, hash: tree.hash, copies: [] }; told.copies.push({ tool, hash: tree.hash }); added.set(key, told); }
         writes++;
         if (resetRoots.has(dirname(directory))) putBack.add(tool);
         results.push({ item: name, harness: tool, outcome: 'written', message: harnesses[tool].nextStep });
@@ -715,6 +720,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       results.push({ item: name, outcome: 'failed', message: plainError(error) });
     }
   }
+  for (const [key, told] of added) event({ key, item: told.name, kind: 'added', losers: told.copies, orderProved: true, previous: told.hash });
   if (!options.observeOnly) {
     const now = clock(context);
     for (const [key, item] of Object.entries(record.items)) {
@@ -862,6 +868,7 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     const record = start.record;
     const history = await readHistory(context.home);
     const past = history.find(entry => entry.id === eventId);
+    if (past?.kind === 'added') return await undoAdded(context, record, history, past);
     // A chosen loser must be one this event can put back.
     const hash = past && (choice ? restorableChoices(past).find(entry => entry.hash === choice)?.hash : restorableHash(past));
     const item = past && record.items[past.key];
@@ -928,6 +935,48 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
     if (error instanceof Error && error.message.startsWith('fault:')) throw error;
     return { stopped: `That could not finish. ${plainError(error)} Read again to see where things stand.`, results: [], harnessWrites: 0 };
   }
+}
+
+/**
+ * Undo of an Apply all that made new copies: each copy it added goes again, but only while it is exactly what was written (an
+ * edit since keeps it), and its content stays in the store. The skill is then unmanaged as before; a tool whose copy had to stay
+ * keeps syncing, so nothing is left half-managed.
+ */
+async function undoAdded(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
+  const item = record.items[past.key];
+  if (!item || item.state !== 'shared') return { stopped: `${past.item} is not managed any more, so there is nothing to undo here.`, results: [], harnessWrites: 0 };
+  const entry = (await gather(context, await context.read(), record)).get(past.key);
+  const results: DestinationResult[] = [];
+  const kept: HarnessId[] = [];
+  let writes = 0;
+  for (const loser of past.losers) {
+    const recorded = item.copies.find(copy => copy.harness === loser.tool && copy.created);
+    const here = recorded && entry?.locations.find(location => location.tool === loser.tool && sameDir(location.copy.directory, recorded.directory));
+    if (!recorded || !here) { results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s copy is already gone.` }); continue; }
+    if (here.copy.hash !== loser.hash) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s copy was edited since, so it stays.` }); continue; }
+    if (!here.copy.writable) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name} reads it at ${here.copy.directory}, which Central Knot does not change.` }); continue; }
+    const late = await rootProblem(context, loser.tool);
+    if (late) { kept.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: late }); continue; }
+    try {
+      await importRevision(context, past.key, here.copy.directory, await readTree(here.copy.directory));
+      await removeChecked(context, here.copy.directory, loser.hash);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+      kept.push(loser.tool);
+      results.push({ item: item.name, harness: loser.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: errorCode(error) === 'CK_CHANGED' ? `${harnesses[loser.tool].name}'s copy changed just now, so it stays.` : `Could not remove ${harnesses[loser.tool].name}'s copy: ${plainError(error)}` });
+      continue;
+    }
+    item.copies = item.copies.filter(copy => copy !== recorded);
+    writes++;
+    results.push({ item: item.name, harness: loser.tool, outcome: 'removed', message: 'Removed the copy Apply all added.' });
+  }
+  if (!kept.length) { item.state = 'dont-share'; delete item.use; item.copies = []; }
+  else item.off = [...new Set([...(item.off ?? []), ...past.losers.map(loser => loser.tool).filter(tool => !kept.includes(tool))])];
+  await saveRecord(context.home, record);
+  past.undoneBy = randomUUID();
+  await saveHistory(context.home, history, clock(context));
+  return { results, harnessWrites: writes };
 }
 
 /** Delete everywhere: removes a managed skill from every tool it syncs to, keeping its content for Restore (D-04's offer, DEL-02). */

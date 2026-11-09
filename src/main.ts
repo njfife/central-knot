@@ -83,7 +83,7 @@ async function saveSyncSetting(on: boolean) {
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 async function loadAppSettings() { try { appSettings = JSON.parse(await readFile(appSettingsPath(), 'utf8')) ?? {}; } catch { appSettings = {}; } }
@@ -130,7 +130,7 @@ function trayMenu() {
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: !homeWritable && current ? `Preview only: nothing is written · ${where}` : unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}`, enabled: false },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: syncOn ? 'Sync now (not needed: automatic sync is on)' : 'Sync now', toolTip: 'Apply waiting changes once', enabled: !!current && homeWritable && !syncOn, click: () => void fromTray(async () => { await pass(true); }) },
+    { label: 'Sync now', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
@@ -164,7 +164,7 @@ function appMenu() {
       { role: 'about' },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: syncOn ? 'Sync now (not needed: automatic sync is on)' : 'Sync now', toolTip: 'Apply waiting changes once', enabled: !!current && homeWritable && !syncOn, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: 'Sync now', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
       { type: 'separator' },
@@ -446,7 +446,22 @@ function createWindow(show: boolean) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   log('window created');
-  window.on('close', event => { log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`); if (quitting || !tray) return; event.preventDefault(); window.hide(); });
+  window.on('close', event => {
+    log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`);
+    if (quitting || !tray) return;
+    event.preventDefault();
+    const shown = window;
+    shown.hide();
+    // The first time only: say where Central Knot went, and offer to quit instead, so a hidden window is never a mystery.
+    if (!appSettings.closeExplained && !smoke) {
+      void saveAppSettings({ closeExplained: true });
+      void dialog.showMessageBox({
+        type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
+        message: 'Central Knot keeps syncing in the background',
+        detail: `Open it again from its ${process.platform === 'darwin' ? 'menu bar' : 'tray'} icon. To stop syncing, choose Quit Central Knot there.`,
+      }).then(({ response }) => { if (response === 1) { quitting = true; app.quit(); } });
+    }
+  });
   window.on('closed', () => log('window closed'));
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
   window.webContents.on('did-finish-load', () => log('page loaded'));

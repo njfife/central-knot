@@ -1,4 +1,4 @@
-import type { ApplyResult, Change, DesktopApi, HarnessId, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -29,6 +29,8 @@ export const state = {
   pluginConfirmText: undefined as string | undefined,
   /** The plugin the last install or uninstall was for, so its report can offer the reverse. */
   pluginLast: undefined as { source: string; market: string; plugin: string } | undefined,
+  /** The plugin and tools an install or uninstall is running for, so their boxes show it is working. */
+  pluginWorking: undefined as { plugin: string; tools: HarnessId[] } | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
@@ -121,7 +123,11 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andText(added)}`}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'), item: singleName };
+  // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
+  // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
+  const addedNow = result.stopped || replacedSome ? [] : (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !addedNow.length, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : ''), item: singleName,
+    act: addedNow.length ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -221,7 +227,9 @@ const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot
 
 export const installPlugin = (source: string, plugin: string, tools: HarnessId[]) => busy(`Installing ${plugin}…`, async () => {
   const market = state.plugins?.marketplaces.find(entry => entry.source === source)?.name ?? '';
-  const result = await api().installPlugin(source, plugin, tools, state.home!.home);
+  state.pluginWorking = { plugin, tools };
+  render();
+  const result = await api().installPlugin(source, plugin, tools, state.home!.home).finally(() => { state.pluginWorking = undefined; });
   if (result.view) state.plugins = result.view;
   state.pluginResult = result;
   state.pluginLast = { source, market, plugin };
@@ -230,7 +238,9 @@ export const installPlugin = (source: string, plugin: string, tools: HarnessId[]
 
 export const uninstallPlugin = (marketplace: string, plugin: string, tool: HarnessId) => busy(`Uninstalling ${plugin} from ${names[tool]}…`, async () => {
   const source = state.plugins?.marketplaces.find(entry => entry.name === marketplace)?.source ?? '';
-  const result = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home);
+  state.pluginWorking = { plugin, tools: [tool] };
+  render();
+  const result = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home).finally(() => { state.pluginWorking = undefined; });
   if (result.view) state.plugins = result.view;
   state.pluginResult = result;
   state.pluginLast = { source, market: marketplace, plugin };
@@ -260,6 +270,13 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const undoneBy = past?.undoneBy;
   const everywhere = where.length >= (state.home?.snapshots.length ?? 3) ? `all ${where.length} tools` : andText(where);
   const item = restored[0]?.item ?? past?.item ?? '';
+  const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
+  if (past?.kind === 'added') {
+    const stayed = result.results.filter(entry => entry.outcome === 'held');
+    if (!result.stopped) { state.outcome = { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andText(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ` ${past.item} is unmanaged again.`}` }; flashRow(past.item); }
+    announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
+    return;
+  }
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
@@ -268,6 +285,27 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
   if (!result.stopped && restored.length) flashRow(item);
   announce(result.stopped ?? (restored.length ? text : `Restored in ${plural(restored.length, 'tool')}.`), !result.stopped && !!restored.length);
+});
+
+/** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */
+export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async () => {
+  const home = state.home!;
+  const results: DestinationResult[] = [];
+  let stopped: string | undefined;
+  for (const id of ids) {
+    const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
+    if (result.stopped) { stopped = result.stopped; break; }
+    results.push(...result.results);
+  }
+  const view = await api().refresh();
+  if (view) state.home = view;
+  state.history = await api().history();
+  const removed = results.filter(entry => entry.outcome === 'removed').length;
+  const stayed = results.filter(entry => entry.outcome === 'held');
+  const items = [...new Set(results.map(entry => entry.item))];
+  if (!stopped) state.outcome = { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andText(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` };
+  for (const item of items) flashRow(item);
+  announce(stopped ?? state.outcome?.text ?? '', !stopped);
 });
 
 /** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */

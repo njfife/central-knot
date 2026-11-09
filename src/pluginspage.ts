@@ -21,6 +21,8 @@ function blocked(view: PluginsView, market: MarketplaceView, tool: HarnessId): s
 }
 
 function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, tool: HarnessId, index: number) {
+  // While that tool's own command runs, its box says so.
+  if (state.pluginWorking?.plugin === plugin.name && state.pluginWorking.tools.includes(tool)) return h('div.ov-cell', { role: 'cell' }, h('span.cell-button.cell-working', { 'aria-label': `${names[tool]}: working…`, title: 'Running that tool’s own command…' }, icon('refresh-cw', 14, 'spin')));
   const status: InstallState = market.states[plugin.name]?.[tool] ?? { state: 'not-installed' };
   const why = blocked(view, market, tool);
   const busy = !!state.busy || !view.canWrite;
@@ -202,6 +204,7 @@ export function pluginsPage() {
       state.pluginConfirm ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, state.pluginConfirmText ?? ''),
         h('button.text-action.text-danger', { type: 'button', id: 'plugin-confirm-go', onclick: () => (document.getElementById(state.pluginConfirm!) as HTMLButtonElement | null)?.click() }, 'Uninstall'),
         h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; rerender(); } }, 'Cancel')) : null,
+      state.busy && /^(Installing|Uninstalling)/.test(state.busy) ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, `${state.busy} This runs the tool’s own command and can take a few seconds.`)) : null,
       outcomeBand(),
       reports()),
     h('div.scroll.matrix', { id: 'plugins-scroll' },
