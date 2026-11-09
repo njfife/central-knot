@@ -231,6 +231,8 @@ export interface CatalogPlugin {
   version?: string;
   /** The plugin's folder, when it sits inside the marketplace itself. Elsewhere its components are not known before install. */
   folder?: string;
+  /** Its folder is the marketplace's own root ("source": "./"), whose entry may list the plugin's skills. */
+  isMarketplaceRoot?: boolean;
   components?: Components;
   displayName?: string;
   category?: string;

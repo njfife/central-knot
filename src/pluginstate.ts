@@ -42,7 +42,7 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
-  /** The last contents read of each plugin, shown while it is read again after a new view (see showView and shownDetail). */
+  /** The last contents read of each plugin, shown while it is read again after a new view (see markDetailsStale, shownDetail, forgetDetails). */
   previous: new Map<string, PluginDetail>(),
   /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open (see toggleOpened). */
   opened: new Set<string>(),
@@ -61,7 +61,7 @@ export function toggleOpened(key: string): void {
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
   market.view = undefined; market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); market.details.clear(); market.previous.clear(); market.opened.clear(); market.nav = startNav();
+  market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -105,7 +105,7 @@ function readShown(): void {
  */
 function showView(view: PluginsView | null | undefined, { replace = false } = {}): void {
   if (view || replace) market.view = view ?? undefined;
-  if (view || replace) forgetInstalledCopies();
+  if (view || replace) markDetailsStale();
   prune(market.draft, market.view);
   settleNav();
   readShown();
@@ -117,13 +117,19 @@ function showView(view: PluginsView | null | undefined, { replace = false } = {}
  * dropped when it lands (its placeholder is gone). A read that failed and holds no tool's copy is kept: it is tried again
  * only when its plugin is opened or on Refresh, so an offline Git source isn't cloned again on every view.
  */
-function forgetInstalledCopies(): void {
+function markDetailsStale(): void {
   for (const [key, read] of [...market.details]) {
     const value = read.reading ? undefined : read.value;
     if (value?.problem && !Object.keys(value.installed ?? {}).length) continue;
     if (value) market.previous.set(key, value);
     market.details.delete(key);
   }
+}
+
+/** Forgets every plugin's contents, the ones shown while re-reading too: after a Refresh they may all have changed. */
+function forgetDetails(): void {
+  market.details.clear();
+  market.previous.clear();
 }
 
 /** A plugin's contents to show: the latest read, or while it is read again, the one before (undefined when never read). */
@@ -163,8 +169,8 @@ export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);
   market.problem = undefined;
   // Refresh all reads every README again; a folder marketplace is read from disk every time, so its README may have changed.
-  // Refresh all also tries again the plugins whose files couldn't be read (see forgetInstalledCopies).
-  if (fresh) { market.readmes.clear(); market.details.clear(); }
+  // Refresh all reads every plugin's files again, and tries again those that couldn't be read (see markDetailsStale).
+  if (fresh) { market.readmes.clear(); forgetDetails(); }
   else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
   showView(view, { replace: true });
   announce('');
@@ -195,7 +201,7 @@ export const addMarketplace = (source: string) => act('adding', async () => {
 export const refreshMarketplace = (source: string) => act('refreshing', async () => {
   const view = await api().refreshMarketplace(source);
   market.readmes.delete(source);
-  market.details.clear();
+  forgetDetails();
   showView(view);
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
   app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };

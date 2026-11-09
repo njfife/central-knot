@@ -225,7 +225,8 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // A path outside the marketplace, through a link or not, is not read.
     if (await inside(root, folder)) {
       plugin.folder = folder;
-      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: resolve(folder) === resolve(root) }) : undefined;
+      plugin.isMarketplaceRoot = resolve(folder) === resolve(root) || undefined;
+      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot }) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
       // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
       const fromFiles = contents ? contents.version : text((await pluginManifest(folder, root))?.version);
@@ -328,17 +329,15 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 }
 
 /**
- * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says. Claude Code
- * records "unknown" or a commit hash for a plugin that gives none. For a Codex copy (`codex`), whose folder name is the version only when
- * there is one, its .codex-plugin/plugin.json is read first, as Codex reads it.
+ * The version of a tool's installed copy: what the tool recorded, else what the copy's own manifest says (for a Codex
+ * copy, `codex`, the one manifest Codex reads). Claude Code records "unknown" or a commit hash for a plugin without a
+ * version, and Codex names such a copy's folder "local" or for a commit, so a commit hash is taken as no version (a real
+ * version that looks like one, such as "deadbeef", is then read from the manifest instead).
  */
 async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
   const said = text(recorded);
-  // A commit hash names no release (Claude Code records one for a plugin without a version); the manifest may.
   if (said && said !== 'unknown' && !isCommitHash(said)) return said;
-  const manifests = codex ? [codexManifest(path), pluginManifest(path)] : [pluginManifest(path)];
-  for (const manifest of manifests) { const version = text((await manifest)?.version); if (version) return version; }
-  return undefined;
+  return text((codex ? await codexManifest(path) : await pluginManifest(path))?.version) || undefined;
 }
 
 /**

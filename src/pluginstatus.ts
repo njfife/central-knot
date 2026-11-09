@@ -90,10 +90,19 @@ export const matches = (plugin: PluginView, find: string) => !find || [plugin.na
 const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-([0-9a-f]+)$/i, (suffix, hash: string) => (isCommitHash(hash) ? '' : suffix));
 
 /**
- * The version the marketplace offers, as Claude Code reads it: what the plugin's own files say once read (plugin.json's,
- * else the entry's), else the catalog's (for a plugin kept in another repository, only the entry's until it is read).
+ * The version the marketplace offers, as Claude Code reads it (plugin.json's, else the entry's). For a plugin in the
+ * marketplace's own folder the catalog already read it so, fresh on every view. A plugin kept in another repository has
+ * only the entry's until its own files are read. (A plugin shipping a Codex manifest with another version isn't covered.)
  */
-export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => detail?.version ?? plugin.version;
+export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => (plugin.folder ? plugin.version : detail?.version ?? plugin.version);
+
+/**
+ * The offered version to compare tools' versions with: offeredVersion, but for a plugin kept in another repository only
+ * once the marketplace's copy of its files was read (until then its version is the entry's, which plugin.json may
+ * overrule). Undefined means nothing is compared.
+ */
+export const versionToCompare = (plugin: PluginView, detail: PluginDetail | null | undefined) =>
+  (plugin.folder || detail?.offered ? offeredVersion(plugin, detail) : undefined);
 
 /** The version a tool has installed, when it is installed there and its version is known. */
 export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
@@ -102,7 +111,7 @@ export function installedVersion(entry: MarketplaceView, plugin: string, tool: H
 }
 
 /** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
-const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && releaseOf(installed) !== releaseOf(offered);
+export const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && releaseOf(installed) !== releaseOf(offered);
 
 /** The note "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
 export const marketplaceVersionNote = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);

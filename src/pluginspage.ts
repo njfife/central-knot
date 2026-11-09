@@ -8,7 +8,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, versionToCompare, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -60,9 +60,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
-  // A plugin kept elsewhere is compared only once its own files are read: until then its version is the entry's, which
-  // its plugin.json may overrule.
-  const compareTo = plugin.folder || detail ? offered : undefined;
+  const compareTo = versionToCompare(plugin, detail);
   const others = otherVersions(view, entry, plugin.name, compareTo);
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },

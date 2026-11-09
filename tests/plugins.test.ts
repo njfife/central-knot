@@ -185,6 +185,9 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'unknown' }] } }));
     await put(join(cache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p', version: '0.9.1' }));
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
+    // So does a commit hash, which Claude Code records for a plugin without a version.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'a1b2c3d4e5f6' }] } }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
 
     const copied = join(box.home, '.copilot/installed-plugins/m/p');
     await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', version: '2.1.0', cache_path: copied, enabled: true }] })}`);

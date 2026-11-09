@@ -3,8 +3,8 @@
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
 import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginManifest, readmeIn, sourceLabel } from './catalogdetail.ts';
+import { join } from 'node:path';
+import { codexManifest, marketplacePage, pluginContents, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
@@ -141,9 +141,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const codex = tool === 'codex-cli' ? (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} : undefined;
-      const atMarketplaceRoot = !!item.folder && !!catalog.root && resolve(item.folder) === resolve(catalog.root);
-      const { skills, commands, agents } = await pluginContents(state.path, codex ? {} : item.entry ?? {}, state.path, { codex, atMarketplaceRoot });
+      const codex = tool === 'codex-cli' ? await codexManifest(state.path) : undefined;
+      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path, { codex, atMarketplaceRoot: !!item.isMarketplaceRoot });
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
@@ -199,7 +198,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** What the marketplace offers of one plugin: from its own folder, or read from the repository it is kept in. */
   async function offeredDetail(ctx: engine.PluginContext, root: string, item: CatalogPlugin): Promise<PluginDetail | null> {
-    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, resolve(item.folder) === resolve(root));
+    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, !!item.isMarketplaceRoot);
     if (!item.remote) return null;
     const copy = await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { ...empty, problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };

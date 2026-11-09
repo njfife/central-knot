@@ -7,7 +7,7 @@ import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, installedVersion, limitNote, marketplaceVersionNote, missingTools, offeredVersion, removableTools, comparableText, unavailable } from './pluginstatus.ts';
+import { installed, installedVersion, limitNote, marketplaceVersionNote, missingTools, offeredVersion, removableTools, comparableText, unavailable, versionToCompare } from './pluginstatus.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -43,9 +43,9 @@ function installedLine(version: string | undefined, offered: string | undefined)
  * Where to install it: a box per tool with a status line that is always there (a tool on another version than the
  * marketplace offers adds a second, "Marketplace has …"), and at the right of the heading row (always the same height)
  * one button: choose it for every tool still without it, or, once every tool has it, choose to uninstall it from all of
- * them. An installed tool's line names its version.
+ * them. An installed tool's line names its version, compared with `compareTo` (see versionToCompare).
  */
-function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, offered: string | undefined, components?: Components) {
+function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
   const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
   // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
@@ -53,7 +53,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
-    if (installed(entry, plugin.name, tool)) return installedLine(installedVersion(entry, plugin.name, tool), offered);
+    if (installed(entry, plugin.name, tool)) return installedLine(installedVersion(entry, plugin.name, tool), compareTo);
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
@@ -72,7 +72,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'), allButton),
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
-      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, offered),
+      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
     })));
 }
@@ -236,7 +236,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
-    installPanel(view, entry, plugin, marketIndex, offered, components),
+    installPanel(view, entry, plugin, marketIndex, versionToCompare(plugin, detail), components),
     contentsBlock(entry, marketIndex, plugin, detail, reading, offered),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
     detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);

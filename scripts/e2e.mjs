@@ -518,6 +518,13 @@ async function practiceFlow() {
   if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 30 && /1\.9\.0/.test(await a.text('.plugin-page') ?? '1.9.0'); tries++) await wait(100);
   check('a copy a tool no longer has is gone from the page', !/1\.9\.0/.test(await a.text('.plugin-page')) && /Not installed/.test(await a.text('.plugin-panel')), await a.text('.plugin-page'));
+  // The marketplace moves issue-tracker on; after Refresh its row offers the new version, not one read before.
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), readFileSync(join(market, '.claude-plugin/marketplace.json'), 'utf8').replace('"version": "2.0.0"', '"version": "2.1.0"'));
+  await a.click('#plugin-back');
+  await a.click('#refresh-0');
+  for (let tries = 0; tries < 30 && !/2\.1\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version') ?? ''); tries++) await wait(100);
+  check('after Refresh a row offers the marketplace’s new version', (await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) === '2.1.0', await a.text('[data-plugin="issue-tracker"]'));
+  await a.click('#popen-0-issue-tracker');
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);

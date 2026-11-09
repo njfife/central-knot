@@ -121,10 +121,10 @@ function serverRuns(server: unknown): string {
 /** A plugin's own .claude-plugin/plugin.json as an object, or undefined when it has none. */
 export const pluginManifest = (folder: string, root = folder) => jsonInside(root, join(folder, '.claude-plugin/plugin.json'));
 /**
- * A plugin's .codex-plugin/plugin.json, which Codex reads before Claude Code's when a plugin has both. (Codex also looks
- * first for a root plugin.json naming the agent-plugins schema; that rare layout isn't read here.)
+ * The one manifest Codex reads for a plugin copy: its .codex-plugin/plugin.json, else Claude Code's; {} when it has
+ * neither. (Codex also looks first for a root plugin.json naming the agent-plugins schema; that rare layout isn't read.)
  */
-export const codexManifest = (folder: string) => jsonInside(folder, join(folder, '.codex-plugin/plugin.json'));
+export const codexManifest = async (folder: string) => (await jsonInside(folder, join(folder, '.codex-plugin/plugin.json'))) ?? (await pluginManifest(folder)) ?? {};
 
 /**
  * One plugin section (hooks, MCP servers, LSP servers): its default file in the plugin folder, merged with what the
@@ -152,8 +152,10 @@ export interface ReadAs { codex?: Record<string, unknown>; atMarketplaceRoot?: b
  *   marketplace's root plugin whose entry lists skills: only those load. Commands and agents lists replace their folders.
  * - Codex (`codex`): only the manifest Codex picks, without the entry; a skills list replaces skills/ unless it is empty.
  * - A plugin that is one skill (SKILL.md at its root, no skills/, no list) is that skill.
- * Lists are paths, lists of paths, or (commands) a map of name to { source }; agents folders are read too, though Claude
- * Code takes only files. Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
+ * Lists are paths, lists of paths, or (commands) a map of name to { source }: such a command is named by its file, not
+ * its key, and an inline { content } one isn't listed. Agents folders are read too, though Claude Code takes only files.
+ * An entry with "strict": false that also lists parts beside a plugin.json is one Claude Code refuses; it is read merged.
+ * Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, { codex, atMarketplaceRoot = false }: ReadAs = {}): Promise<PluginContents> {
   const pluginJson = codex ? undefined : await pluginManifest(folder, root);
@@ -166,15 +168,23 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   const isListed = (key: string) => own[key] !== undefined || added[key] !== undefined;
   const listedOr = (key: string, fallback: string) => (isListed(key) ? paths(own[key], added[key]) : [fallback]);
   const skillsFolder = join(folder, 'skills');
-  const codexSkills = codex && paths(own.skills);
-  const skillPaths = codexSkills ? (codexSkills.length ? codexSkills : [skillsFolder])
-    : atMarketplaceRoot && added.skills !== undefined ? paths(added.skills) : paths(skillsFolder, own.skills, added.skills);
-  const skills = await skillsIn(root, folder, skillPaths);
+  /** Where the skills are, by each tool's rule (see the list above). */
+  const skillPathsFor = () => {
+    // Codex: its list, keeping only ./ paths as Codex does, replaces skills/; an empty one falls back to it.
+    if (codex) { const listed = paths((strings(own.skills) ?? []).filter(path => path.startsWith('./'))); return listed.length ? listed : [skillsFolder]; }
+    // A marketplace's root plugin whose entry lists skills: only those.
+    if (atMarketplaceRoot && added.skills !== undefined) return paths(added.skills);
+    // Otherwise skills/ is always read, with every listed folder added.
+    return paths(skillsFolder, own.skills, added.skills);
+  };
+  const listedSkills = await skillsIn(root, folder, skillPathsFor());
+  // Claude Code: a plugin with no skills/ (an empty one counts as none) and no list may be one skill, SKILL.md at its root.
+  const skills = listedSkills.length || codex || isListed('skills') ? listedSkills : await skillsIn(root, folder, [folder], false);
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: skills.length || isListed('skills') ? skills : await skillsIn(root, folder, [folder], false),
+    skills,
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
     agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
     hooks: Object.keys(hooks).sort(),
