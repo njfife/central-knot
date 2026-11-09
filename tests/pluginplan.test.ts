@@ -21,7 +21,7 @@ test('Install in all queues every tool, and a second click clears them all', () 
   const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0 });
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, parts: 0, partsRemovals: 0 });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });

@@ -12,7 +12,6 @@ import { andList, toolNames as names } from './words.ts';
 export type PluginAction = 'install' | 'remove' | 'parts' | 'remove-parts' | 'undo-parts';
 const PARTS: PluginAction[] = ['parts', 'remove-parts', 'undo-parts'];
 export const isParts = (action: PluginAction) => PARTS.includes(action);
-const adds = (action: PluginAction) => action === 'install' || action === 'parts';
 /** One tool's change for one plugin from one marketplace. */
 export interface PluginOp {
   /** The marketplace as added (its address). */
@@ -36,6 +35,9 @@ export interface ResultLine {
 }
 /** What one op did, as its tool reported it. */
 export interface PluginDone extends PluginOp { report: ActionReport }
+
+/** The page's column order. */
+const toolOrder = Object.keys(names);
 
 /** Chosen changes, keyed by marketplace source, plugin and tool. Nothing here has run. */
 export type PluginDraft = Map<string, PluginOp>;
@@ -93,7 +95,8 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
 /** Counts for the change bar. */
 export function summary(draft: PluginDraft) {
   const ops = [...draft.values()];
-  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: ops.filter(op => adds(op.action)).length, removals: ops.filter(op => !adds(op.action)).length };
+  const count = (action: PluginAction) => ops.filter(op => op.action === action).length;
+  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'), parts: count('parts'), partsRemovals: count('remove-parts') };
 }
 
 /** Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then removals and parts tool by tool. */
@@ -128,9 +131,12 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const { plugin, source } = mine[0]!;
-    const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts).map(entry => names[entry.tool]);
+    // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time.
+    const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false, updated = false) => mine
+      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && !!entry.report.partsUpdated === updated)
+      .sort((first, second) => toolOrder.indexOf(first.tool) - toolOrder.indexOf(second.tool)).map(entry => names[entry.tool]);
     const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
-      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('uninstalled', true, true), 'parts removed from'], [tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']];
+      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], [tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']];
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {

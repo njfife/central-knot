@@ -54,11 +54,11 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     const parts = partsOf(entry, plugin.name, tool);
     const preview = view.canWrite ? '' : ` ${PREVIEW_ONLY}`;
     if (pending === 'remove-parts') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove-parts', title: `${name}: its parts are removed on Apply all. Click to keep them.`, glyph: icon('x', 15), action: 'remove-parts' });
-    if (pending === 'parts') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'parts-chosen', title: `${name}: its parts are ${parts ? 'updated' : 'installed as separate items'} on Apply all. Click to leave ${parts ? 'them as they are' : 'them out'}.`, glyph: icon('boxes', 15), action: 'parts' });
+    if (pending === 'parts') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'parts-chosen', title: `${name}: its parts are ${parts ? 'updated' : 'installed as separate items'} on Apply all. Click to leave ${parts ? 'them as they are' : 'them out'}.`, glyph: icon('blocks', 15), action: 'parts' });
     if (parts?.changed) return box({ look: 'cell-differs.cell-on', state: 'parts-changed', title: `${name}: ${changedWords(parts)}. ${preview.trim() || 'Click to update them on Apply all.'}`, glyph: icon('refresh-cw', 14), action: 'parts' });
     if (parts) {
       const from = [partsSummary(parts.items), versionWord(parts.version) && `from ${versionWord(parts.version)}`].filter(Boolean).join(', ');
-      return box({ look: 'cell-synced.cell-on.cell-parts', state: 'parts', title: `${name}: its parts are installed as separate items (${from}). ${preview.trim() || 'Click to remove them on Apply all.'}`, glyph: icon('boxes', 15), action: 'remove-parts' });
+      return box({ look: 'cell-synced.cell-on.cell-parts', state: 'parts', title: `${name}: its parts are installed as separate items (${from}). ${preview.trim() || 'Click to remove them on Apply all.'}`, glyph: icon('blocks', 15), action: 'remove-parts' });
     }
     return box({ look: 'cell-parts-offer', state: 'parts-offer', title: `${name}: ${why} ${preview.trim() || 'Click to install its parts (skills, MCP servers, agents) as separate items on Apply all.'}`, glyph: icon('plus', 13, 'plugin-add-glyph'), action: 'parts' });
   }

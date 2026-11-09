@@ -522,11 +522,10 @@ async function practiceFlow() {
   await a.click('#plugin-back');
   same('Pi is a column whose box offers the plugin’s parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts-offer');
   await a.click('#popen-0-issue-tracker');
-  for (let tries = 0; tries < 40 && !/Goes in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('its page says what goes into Pi', /Pi doesn’t take Claude plugins[\s\S]*Goes in: skill triage; MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  for (let tries = 0; tries < 40 && !/Can go in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('its page says what goes into Pi', /Pi takes no plugins[\s\S]*Can go in: skill triage; MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
   await a.click('#pcell-0-issue-tracker-pi-cli');
   await a.click('#plugins-apply');
-  for (let tries = 0; tries < 60 && await a.run(`document.body.dataset.busy === 'true'`); tries++) await wait(100);
   const piMcp = join(practice, '.pi/agent/mcp.json');
   check('the skill and MCP server are in Pi, values as they are', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && existsSync(piMcp) && JSON.parse(readFileSync(piMcp, 'utf8')).mcpServers?.issues?.args?.[1] === '@example/issues-mcp', existsSync(piMcp) ? readFileSync(piMcp, 'utf8') : await a.text('.bands'));
   same('Pi’s box shows its parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts');
@@ -535,7 +534,6 @@ async function practiceFlow() {
   check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
   await a.click('#nav-plugins');
   await a.click('#plugins-undo');
-  for (let tries = 0; tries < 60 && await a.run(`document.body.dataset.busy === 'true'`); tries++) await wait(100);
   check('Undo takes the parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');

@@ -293,7 +293,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const left = skipped.length ? ` Not installed: ${skipped.join('; ')}` : '';
   if (!moved.held.length) return report(tool, 'failed', `No part went in. ${moved.notes.join(' ')}${left}`.trim(), { run, changed: moved.wrote > 0 });
   const verb = before ? 'Parts brought up to date' : 'Parts installed';
-  return report(tool, 'installed', `${verb}: ${count(moved.held)}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}${left}`, { run, changed: moved.wrote > 0, notes: moved.notes });
+  return { ...report(tool, 'installed', `${verb}: ${count(moved.held)}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}${left}`, { run, changed: moved.wrote > 0, notes: moved.notes }), ...(before ? { partsUpdated: true } : {}) };
 }
 
 /** Removes a plugin's parts from a tool: each one still as it was installed. Edited or managed parts stay. The run can be undone. */

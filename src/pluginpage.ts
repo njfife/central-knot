@@ -19,9 +19,9 @@ const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'c
  * What installing does in each tool. Tools that behave the same share one line, so a real difference stands out. When
  * every part works everywhere (only names differ), it is a few plain lines; a limit anywhere makes it a table.
  */
-function outcomesBlock(view: PluginsView, plugin: PluginView, components: Components) {
-  // A tool that takes no plugins (Pi) has its own section: its parts.
-  const tools = view.tools.filter(tool => pluginTools.includes(tool));
+function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components) {
+  // A tool taking the plugin's parts instead (always Pi) is described by its own section.
+  const tools = view.tools.filter(tool => pluginTools.includes(tool) && !partsOffer(view, entry, plugin.name, tool, components));
   const byTool = Object.fromEntries(tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
   const groups = new Map<string, HarnessId[]>();
   for (const tool of tools) {
@@ -88,10 +88,19 @@ function staysBehind(detail: PluginDetail): string[] {
     detail.lspServers.length ? plural(detail.lspServers.length, 'language server') : '', detail.bin ? 'the bin/ folder' : ''].filter(Boolean);
 }
 
+/** "skill triage; MCP servers a and b", from named parts. */
+function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[]): string {
+  return (['skill', 'mcp', 'agent'] as const).filter(kind => parts.some(part => part.kind === kind)).map(kind => {
+    const named = parts.filter(part => part.kind === kind).map(part => part.name);
+    return `${kindWords[kind][named.length > 1 ? 1 : 0]} ${andList(named)}`;
+  }).join('; ');
+}
+
 /**
- * Tools that can't take the plugin can take its parts: each skill, MCP server and agent as a separate item. Says which
- * tools, what goes in and what doesn't (tools whose plans match share a line), and offers the one next step: update parts
- * that are out of date, else choose them for every tool still without, else remove them.
+ * Tools that can't take the plugin can take its parts: each skill, MCP server and agent as a separate item. Says why,
+ * then one line per state (tools alike share it): what can go in and what can't, what is installed and from which
+ * version, or that the plugin has changed since. Its button is the next step: update parts that are out of date, else
+ * choose them for every tool still without; while any tool holds them, a quieter one chooses their removal.
  */
 function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components | undefined, detail: PluginDetail | null | undefined) {
   const tools = view.tools.filter(tool => partsOffer(view, entry, plugin.name, tool, components));
@@ -99,38 +108,42 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const read = market.partsPlans.get(pluginKey(entry.source, plugin.name));
   const plans = read && !read.reading ? read.value : undefined;
   const op = (tool: HarnessId, action: PluginAction): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
-  const changed = tools.filter(tool => partsOf(entry, plugin.name, tool)?.changed);
-  const without = tools.filter(tool => !partsOf(entry, plugin.name, tool));
-  const holding = tools.filter(tool => partsOf(entry, plugin.name, tool));
-  const [batch, label] = changed.length ? [changed.map(tool => op(tool, 'parts')), 'Update parts']
-    : without.length ? [without.map(tool => op(tool, 'parts')), `Choose parts for ${without.length > 1 ? `all ${without.length}` : names[without[0]!]}`]
-      : [holding.map(tool => op(tool, 'remove-parts')), `Remove parts${holding.length > 1 ? ` from all ${holding.length}` : ''}…`];
-  const action = view.canWrite ? button({ variant: 'outline', size: 'small', id: `pparts-${plugin.name}`, disabled: !!app.busy,
-    label: allQueued(market.draft, batch) ? 'Choose none' : label, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } }) : null;
-  // Tools whose plans match share one line, as "In each tool" groups them.
-  const groups = new Map<string, HarnessId[]>();
-  for (const tool of tools) { const key = JSON.stringify(plans?.[tool] ?? null); groups.set(key, [...(groups.get(key) ?? []), tool]); }
-  // "Copilot CLI and Codex have no command-line tool here, and Pi takes no plugins": tools with the same reason share it.
+  const partsIn = (tool: HarnessId) => partsOf(entry, plugin.name, tool);
+  const changed = tools.filter(tool => partsIn(tool)?.changed);
+  const without = tools.filter(tool => !partsIn(tool));
+  const holding = tools.filter(tool => partsIn(tool));
+  const choose = (batch: PluginOp[], label: string, id: string, variant: 'outline' | 'ghost') => button({ variant, size: 'small', id, disabled: !!app.busy,
+    label: allQueued(market.draft, batch) ? 'Choose none' : label, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } });
+  const count = (list: HarnessId[]) => (list.length > 1 ? `all ${list.length}` : names[list[0]!]);
+  const next = changed.length ? choose(changed.map(tool => op(tool, 'parts')), `Update parts in ${count(changed)}…`, `pparts-${plugin.name}`, 'outline')
+    : without.length ? choose(without.map(tool => op(tool, 'parts')), `Install parts in ${count(without)}…`, `pparts-${plugin.name}`, 'outline') : null;
+  const removal = holding.length ? choose(holding.map(tool => op(tool, 'remove-parts')), `Remove parts${holding.length > 1 ? ` from all ${holding.length}` : ''}…`, `punparts-${plugin.name}`, next ? 'ghost' : 'outline') : null;
+  // "Copilot CLI and Codex have no command-line tools here, and Pi takes no plugins": tools with the same reason share it.
   const byWhy = new Map<string, HarnessId[]>();
   for (const tool of tools) { const why = partsWhy(view, entry, tool)[0]; byWhy.set(why, [...(byWhy.get(why) ?? []), tool]); }
   const reasons = andList([...byWhy.values()].map(group => `${andList(group.map(tool => names[tool]))} ${partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]}`));
-  const planLines = (plan: PartPlan[]) => {
+  // One line per state, in words: what is there (and from which version), what changed, or what can go in.
+  const line = (tool: HarnessId): (string | HTMLElement)[] => {
+    const parts = partsIn(tool);
+    const plan = plans?.[tool];
+    const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${kindWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
+    const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The agent ${part.name}: ${part.limit}`));
+    if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, `Installed: ${partNames(parts.items)}`)];
+    if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: ${partNames(parts.items)}`)];
+    if (!plan) return [h('span.plugin-outcome-item', {}, read?.reading || !read ? 'Reading its parts…' : 'Its files couldn’t be read.')];
     const going = plan.filter(part => !part.why);
-    const kinds = (['skill', 'mcp', 'agent'] as const).filter(kind => going.some(part => part.kind === kind));
-    return [
-      going.length ? h('span.plugin-outcome-item', {}, `Goes in: ${kinds.map(kind => { const names = going.filter(part => part.kind === kind).map(part => part.name); return `${kindWords[kind][names.length > 1 ? 1 : 0]} ${andList(names)}`; }).join('; ')}`) : h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), 'Nothing in it can go in here'),
-      ...plan.filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `Agent ${part.name}: ${part.limit}`)),
-      ...plan.filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not ${kindWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`)),
-    ];
+    return [h('span.plugin-outcome-item', {}, going.length ? `Can go in: ${partNames(going)}` : 'Nothing in it can go in here.'), ...limited, ...missing];
   };
+  const groups = new Map<string, HarnessId[]>();
+  for (const tool of tools) { const key = JSON.stringify([partsIn(tool) ?? null, plans?.[tool] ?? null]); groups.set(key, [...(groups.get(key) ?? []), tool]); }
   const behind = detail && !detail.problem ? staysBehind(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
-    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts, as separate items'), action),
-    h('p.plugin-parts-about', {}, `${reasons}. Its skills, MCP servers and agents can go in there instead, each as a separate item copied as it is. They are marked as from this plugin on the Skills, MCP and Agents pages, are removed together, and show here when the plugin changes.`),
+    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts, as separate items'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
+    h('p.plugin-parts-about', {}, `${reasons}. Its skills, MCP servers and agents can go in there instead, each a separate item copied as it is and marked as from this plugin. They are removed together, and this page says when the plugin has changed.`),
     h('ul.plugin-outcome-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, group.map(tool => names[tool]).join(', '))),
-      h('span.plugin-outcome-what', {}, plans?.[group[0]!] ? planLines(plans[group[0]!]!) : h('span.plugin-outcome-item', {}, read?.reading || !read ? 'Reading its parts…' : 'Its files couldn’t be read.'))))),
-    behind.length ? h('p.plugin-muted', {}, `Stays with the plugin in every tool without it: ${andList(behind)}.`) : null);
+      h('span.plugin-outcome-what', {}, line(group[0]!))))),
+    behind.length ? h('p.plugin-muted', {}, `Stays with the plugin: ${andList(behind)}.`) : null);
 }
 
 /**
@@ -193,6 +206,6 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     installPanel(view, entry, plugin, marketIndex, components),
     partsSection(view, entry, plugin, components, detail),
     contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
-    components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
+    components && view.tools.some(tool => pluginTools.includes(tool) && !partsOffer(view, entry, plugin.name, tool, components)) ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, entry, plugin, components)) : null,
     detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);
 }

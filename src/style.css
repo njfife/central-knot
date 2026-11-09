@@ -1215,7 +1215,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The empty page: the add box in the middle, above the examples */
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
-.market-page, .plugin-page { max-width: 900px; }
+.market-page, .plugin-page { max-width: none; }
 .market-page-title { display: flex; align-items: center; gap: 12px; }
 .market-page-title h2, .plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
 .market-page-actions { margin-left: auto; display: flex; gap: 4px; }
@@ -1255,7 +1255,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .result-link:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
 /* The plugin table */
 .plugins-page .plugin-table { max-width: none; }
-.plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
+/* The boxes stay near the names on a wide window; the spare width collects at the right, as on the other tables */
+.plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 760px) repeat(var(--tool-count, 3), 92px) 28px minmax(0, 1fr); height: auto; min-height: 40px; }
+.market-hint > span { max-width: 110ch; }
 .plugins-page .plugin-table .ov-head .ov-name { font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 6px 0; }
 .plugin-row { cursor: pointer; }
 .plugin-row:hover { background: var(--hover); }
@@ -1283,7 +1285,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel-head .btn { margin-left: auto; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
+.plugin-tool-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-items: center; gap: 10px 24px; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool .ov-cell { width: auto; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
@@ -1355,7 +1357,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-button.cell-parts-offer:hover { border-style: solid; border-color: var(--ink-soft); }
 .details-part .inline-link { white-space: nowrap; }
 .plugin-section-head { display: flex; align-items: center; gap: 12px; min-height: 28px; }
-.plugin-section-head .btn { margin-left: auto; }
+.plugin-section-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .plugin-parts-about { margin: 6px 0 10px; color: var(--ink-soft); font-size: 13px; line-height: 20px; max-width: 72ch; }
 .plugin-parts-section .plugin-muted { margin-top: 8px; }
 .row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
+/* A narrow window: the marketplace list and the tool columns give the plugin names room, and a category chip wraps under its name */
+.plugin-row-open { flex-wrap: wrap; row-gap: 2px; }
+.plugin-chip { white-space: nowrap; }
+@media (max-width: 1100px) {
+  .plugins-page { --market-list-width: 180px; --market-gutter: 16px; }
+  .plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 76px) 20px; }
+  /* Filters wrap onto a second toolbar line rather than running under the result */
+  .plugins-toolbar { height: auto; min-height: 37px; flex-wrap: wrap; row-gap: 4px; }
+  .plugins-page .market-chips { flex-wrap: wrap; overflow: visible; }
+}
+.details .details-limits.details-part { margin-left: 0; }

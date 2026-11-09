@@ -198,7 +198,7 @@ if (wanted('parts')) {
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
-  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/Goes in/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
   await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
   await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
@@ -215,7 +215,7 @@ if (wanted('parts')) {
   await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back');
   await a.click('#refresh-0');
   await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and was refreshed: the parts show as out of date.');
-  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/Goes in/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
   await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await shot(a, 'page-updated', 'Clicked Update parts, then Apply all.');
@@ -228,7 +228,7 @@ if (wanted('parts')) {
   for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
     await size(width, height);
     await shot(a, `list-${width}`, `The list at ${width}×${height}.`);
-    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/Goes in/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
     await shot(a, `page-${width}`, `issue-tracker’s page at ${width}×${height}.`);
     await a.click('#plugin-back');
   }

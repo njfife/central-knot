@@ -40,7 +40,7 @@ function openPlugin(install: PartsInstall) {
 
 /** The note in an item's details: which plugin it is a part of, where, and where its parts are managed together. */
 function partNote(skill: SampleSkill) {
-  return fromPlugins(skill).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('boxes', 12, 'tone-muted'),
+  return fromPlugins(skill).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
     h('span', {}, `Part of the plugin ${install.plugin}${install.version ? ` (version ${install.version})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item because ${tools.length > 1 ? 'they' : 'it'} can’t take the plugin here. Its parts are updated and removed together on `,
       h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.')));
 }
@@ -366,7 +366,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
     const tells = version && others.some(other => other && (other.lines !== version.lines || other.changed !== version.changed));
     return `Has a different copy${tells ? ` (${version!.lines}, ${version!.changed})` : ''}.`;
   }
-  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : 'Has its own copy. Central Knot is not managing this skill.';
+  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : `Has its own copy. Central Knot is not managing this ${kind === 'mcp' ? 'server' : kind === 'agents' ? 'agent' : 'skill'}.`;
   return skill.managed ? 'No copy, and syncing here is turned off.' : 'No copy.';
 };
 
@@ -437,14 +437,15 @@ function limitedFields(skill: SampleSkill) {
 }
 
 /** MCP: the server's definition as labelled lines ("Type HTTP", "URL …"), read from its one-line summary. */
-function definition(summary: string) {
+function definition(summary: string, managed: boolean) {
   const [kind, ...rest] = summary.split(' · ');
   const value = rest.join(' · ');
   const isCommand = kind === 'Command';
   return h('dl.details-definition', {},
     h('dt', {}, 'Type'), h('dd', {}, isCommand ? 'Command (stdio)' : kind),
     h('dt', {}, isCommand ? 'Command' : 'URL'), h('dd.mono', {}, value),
-    h('dd.details-definition-hint', {}, toolList().includes('claude-cli') && toolList().length > 1
+    // An unmanaged server's copies are each tool's own: nothing spreads, so the hint says only where to edit.
+    h('dd.details-definition-hint', {}, !managed ? 'To change it, edit a settings file below; each tool keeps its own copy.' : toolList().includes('claude-cli') && toolList().length > 1
       ? `To change it, edit any settings file below. ${andList(toolList().filter(tool => tool !== 'claude-cli').map(tool => names[tool]))} sync on their own; Claude Code updates when you click Write to Claude Code.`
       : 'To change it, edit any settings file below; the change syncs to the others.'));
 }
@@ -535,7 +536,7 @@ function details(skill: SampleSkill, closable = true) {
     h('div.details-head', {},
       (!closable && allSame) || (differs && !skill.managed && !draft) ? null : h('p.details-status', {}, allSame ? (kind === 'mcp' ? `Synced in ${andList(toolList().map(tool => names[tool]))}` : `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}`) : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
       kind !== 'mcp' && skill.description && !(differs && !draft) && closable ? h('p.details-description', {}, skill.description) : null,
-      kind === 'mcp' && skill.description ? definition(skill.description) : null,
+      kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
       partNote(skill)),
     differs ? compareChoices(skill) : null,
     waitsHere ? h('div.details-waits', {}, icon('clock', 14, 'tone-warning'),
@@ -629,7 +630,7 @@ function row(skill: SampleSkill) {
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.name ?? skill.key),
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
-        fromPlugins(skill).map(({ install, tools }) => h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (version ${install.version})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('boxes', 12, 'tone-faint'), `from ${install.plugin}`)),
+        fromPlugins(skill).map(({ install, tools }) => h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (version ${install.version})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('blocks', 12, 'tone-faint'), `from ${install.plugin}`)),
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping separate copies, on Apply all' : `Every tool will use ${names[decided]}’s copy, on Apply all` },

@@ -64,7 +64,7 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
   } finally { await box.cleanup(); }
 });
 
-test('Parts never replace what was there, removing keeps an edited part, and Undo of a removal puts the rest back', async () => {
+test('Parts never replace what was there, removing keeps an edited or managed part, and Undo of a removal puts the rest back', async () => {
   const box = await sandbox();
   try {
     await mkdir(join(box.home, '.pi/agent/skills/figma-design'), { recursive: true });
@@ -74,14 +74,16 @@ test('Parts never replace what was there, removing keeps an edited part, and Und
     assert.match(pi.notes?.join(' ') ?? '', /Pi already has one of that name/);
     assert.equal(await readFile(join(box.home, '.pi/agent/skills/figma-design/SKILL.md'), 'utf8'), '---\ndescription: mine\n---\nMine.\n');
 
-    const codex = await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
+    await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     await writeFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), `${SKILL}Edited.\n`);
+    // The MCP server was managed since: removing it would spread a deletion through sync, so it stays.
+    await writeFile(join(box.home, '.central-knot/mcp.json'), JSON.stringify({ formatVersion: 1, items: { figma: { state: 'shared', off: [], hash: '', copies: [] } } }));
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     assert.equal(removed.outcome, 'uninstalled', removed.message);
-    assert.match(removed.notes?.join(' ') ?? '', /changed after it was installed/);
+    assert.match(removed.notes?.join(' ') ?? '', /changed after it was installed[\s\S]*managed now/);
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/);
     assert.match(await readFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), 'utf8'), /Edited/);
     await assert.rejects(readFile(join(box.home, '.codex/agents/designer.toml')));
-    assert.ok(codex.partsRun);
 
     const back = await undoParts(box.context, removed.partsRun ?? '');
     assert.equal(back?.outcome, 'installed', back?.message ?? '');
