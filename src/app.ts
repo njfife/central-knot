@@ -1,3 +1,4 @@
+import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
@@ -6,7 +7,7 @@ import { loadPlugins, resetMarket } from './pluginstate.ts';
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools';
+export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -180,6 +181,7 @@ export function showPage(page: Page) {
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
+  if (page === 'settings') void loadSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
   state.page = page;
@@ -395,6 +397,10 @@ export const syncNow = () => busy('Syncing…', async () => {
 
 /** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
 let refreshing = false;
+// The Settings… menu item (and any later page the main process asks for) opens that page.
+const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
+api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
+
 api().onSyncChanged(async () => {
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
