@@ -1243,3 +1243,14 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .notice-name { text-decoration: none; }
 .notice-name:hover { text-decoration: underline; }
 .details-definition-hint { grid-column: 1 / -1; color: var(--ink-faint); font-size: 12px; margin-top: 4px; }
+
+/* Round 19: stopped copy's choices in its row; where the Apply Undo went; footnote and × alignment */
+.details-tool-actions { display: inline-flex; gap: 6px; margin-left: 8px; vertical-align: middle; flex-wrap: wrap; }
+.details .details-footnote { margin-left: 0; }
+.sync-notice-tail { margin: 2px 0 0 22px; font-size: 12px; color: var(--ink-faint); }
+.sync-notice-tail .text-action { font-size: 12px; }
+.sync-notice > .notice-dismiss { top: 2px; }
+.sync-notice.notice-stacked > .notice-dismiss { top: 8px; }
+.inline-link { all: unset; cursor: pointer; color: var(--accent); }
+.inline-link:hover { text-decoration: underline; }
+.inline-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }

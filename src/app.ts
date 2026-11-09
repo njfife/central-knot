@@ -49,6 +49,8 @@ export const state = {
   instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
+  // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
+  undoMoved: undefined as { page: Page; notices: string[] } | undefined,
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
   seenNotices: new Set<string>(),
   /** The window chooses the sidebar shape until the person uses the toggle. */
@@ -79,6 +81,7 @@ const andText = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).j
 async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
   state.outcome = undefined;
+  state.undoMoved = undefined;
   state.busy = message;
   document.body.dataset.busy = 'true';
   announce(message);
@@ -507,7 +510,11 @@ api().onSyncChanged(async () => {
       if (!outcome?.act) state.outcome = undefined;
       // A sync notice is now the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
       // different events, one above the other, is the one thing here that would mislead.
-      else if ([...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].length) state.outcome = undefined;
+      else if ([...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].length) {
+        // Tied to the notices that pushed it aside: the line goes with them, and never outlives a later Apply.
+        state.undoMoved = { page: outcome.page, notices: [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].map(notice => notice.history || notice.item) };
+        state.outcome = undefined;
+      }
       rerender();
     }
   } finally { refreshing = false; }
@@ -540,6 +547,8 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
 // ---------- Agents ----------
 
 export const applyAgentsChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
+  // Read before applying: a copy that had stopped and is now replaced is said as resumed, not as newly managed.
+  const before = state.home?.agents?.servers ?? [];
   const result = await api().applyAgents(changes, state.home!.home);
   const view = await api().refresh();
   if (view) state.home = view;
@@ -559,6 +568,10 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const undo = addedNow.length && !replacedAny;
     state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${source(server)}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
       act: undo ? addedUndo(addedNow) : undefined };
+    const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
+    const resumed = changes.map(change => ({ change, was: before.find(server => server.key === change.key) })).filter(({ change, was }) => change.use && change.use !== 'separate' && was?.managed && was.stopped?.length);
+    if (resumed.length && resumed.length === changes.length && result.writes) state.outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
+      text: resumed.map(({ change, was }) => `${andText(was!.stopped!.map(tool => toolNames[tool] ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolNames[change.use!] ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.' };
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });

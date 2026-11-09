@@ -464,10 +464,15 @@ async function practiceFlow() {
   check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
   // Keep my edit settles it: the box turns quiet and the warning count goes away; the box can still bring the source back.
   check('the stopped copy has its own notice with both choices', await a.exists('#stopped-keep-code-reviewer-codex-cli') && await a.exists('#stopped-use-code-reviewer-codex-cli'));
-  await a.click('#stopped-keep-code-reviewer-codex-cli');
+  check('while its notice shows, the toolbar does not repeat the stopped copy', !(await a.text('.toolbar') ?? '').includes('stopped updating'), await a.text('.toolbar'));
+  check('the status line no longer lists the stopped copy as receiving', /one-way to Copilot CLI · Codex’s copy stopped updating/.test(await a.text('.details-status') ?? ''), await a.text('.details-status'));
+  await a.click('#stopped-dismiss-code-reviewer-codex-cli');
+  check('deciding later keeps both choices in the Codex row', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#stopped-use-code-reviewer-codex-cli-details') && (await a.text('.toolbar') ?? '').includes('stopped updating'));
+  await a.click('#stopped-keep-code-reviewer-codex-cli-details');
   check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
   await a.click('#cell-code-reviewer-codex-cli');
   await applyAll(a);
+  check('the result says Codex resumed, not that an agent was newly managed', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   check('its amber box puts Claude Code’s copy back in Codex', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
   await a.click('#nav-skills');
 
