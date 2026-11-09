@@ -400,14 +400,14 @@ export interface BaseView { path: string; text: string; hash: string; tools: Har
 /** Set the base and its tools. `expected`: the base's hash when opened. `adopt`: the tool whose own text became the base.
  *  `overwrite`: tools whose edited copy is replaced by the base. */
 export interface BaseApply { text: string; expected: string; tools: HarnessId[];
-  /** The files the review showed, by tool, with the hash each held then ('' for no file): only these are written. */
-  seen: Partial<Record<HarnessId, string>>;
+  /** The files the review showed, by tool: the path and the hash it held then ('' for no file). Only these are written. */
+  seen: Partial<Record<HarnessId, { path: string; hash: string }>>;
   adopt?: HarnessId; overwrite?: HarnessId[] }
 /** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
   written: BaseWritten[];
-  /** Not written: its copy was edited there (or, for an undo, the file changed since), the write failed, or (undo) the tool now reads another file. */
-  left: { tool: HarnessId; why: 'edited' | 'failed' | 'moved' }[];
+  /** Not written: its copy was edited there (or, for an undo, the file changed since), or the write failed. */
+  left: { tool: HarnessId; why: 'edited' | 'failed' }[];
   /** Something after the files were written could not be finished, said with the result. */ problem?: string;
   undo?: BaseUndo }
 /** One file written: where, the text before (null: the write created it) and the hash after. */

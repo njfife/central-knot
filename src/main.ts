@@ -407,17 +407,17 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 let queue: Promise<unknown> = Promise.resolve();
 const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && ids(value).length === value.length;
 const isTool = (value: unknown): value is HarnessId => isTools([value]);
-/** Tool ids to strings (hashes): the files a review showed, or the plain text left when a tool was taken off. */
-const isToolHashes = (value: unknown) => !!value && typeof value === 'object' && isTools(Object.keys(value)) && Object.values(value).every(hash => typeof hash === 'string');
+/** An object keyed by tool ids whose every value passes `valid`. */
+const isToolMap = <T>(value: unknown, valid: (entry: T) => boolean) => !!value && typeof value === 'object' && isTools(Object.keys(value)) && Object.values(value as Record<string, T>).every(valid);
 const isBaseApply = (value: unknown): value is BaseApply => {
   const request = value as BaseApply;
   return !!request && typeof request.text === 'string' && typeof request.expected === 'string' && isTools(request.tools)
-    && isToolHashes(request.seen)
+    && isToolMap(request.seen, (seen: { path?: unknown; hash?: unknown }) => typeof seen?.path === 'string' && typeof seen.hash === 'string')
     && (request.adopt === undefined || isTool(request.adopt)) && (request.overwrite === undefined || isTools(request.overwrite));
 };
 const isBaseUndo = (value: unknown): value is BaseUndo => {
   const undo = value as BaseUndo;
-  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && isTools(undo.tools) && isToolHashes(undo.leftPlain) && Array.isArray(undo.files)
+  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && isTools(undo.tools) && isToolMap(undo.leftPlain, (hash: unknown) => typeof hash === 'string') && Array.isArray(undo.files)
     && undo.files.every(file => isTool(file?.tool) && typeof file.path === 'string' && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
 };
 

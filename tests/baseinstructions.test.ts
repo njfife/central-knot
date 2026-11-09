@@ -34,7 +34,7 @@ async function sandbox() {
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
   const snapshots = () => Promise.all(tools.map(harness => discover({ home, mode: 'custom', harness })));
   // What the review would have shown: every file with the hash it holds now.
-  const seen = async () => Object.fromEntries((await instructionsView(context, await snapshots())).map(file => [file.tool, file.hash]));
+  const seen = async () => Object.fromEntries((await instructionsView(context, await snapshots())).map(file => [file.tool, { path: file.path, hash: file.hash }]));
   return { home, context, snapshots, seen, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
@@ -127,14 +127,24 @@ test('Starting from one tool’s instructions shares them with the others; an ed
   } finally { await box.cleanup(); }
 });
 
-test('Undo touches only the file the save wrote: an override that appeared since is left alone', async () => {
+test('A save and its Undo act on the file the review named: an override that appears is never written or removed', async () => {
   const box = await sandbox();
   const agents = join(box.home, '.codex/AGENTS.md'), override = join(box.home, '.codex/AGENTS.override.md');
   try {
-    const saved = await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools: ['codex-cli'] });
+    const save = async () => applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen: reviewed, tools: ['codex-cli'] });
+    // Reviewed, then an override appears with the same text: Codex now reads another file, so nothing is saved.
+    await writeFile(agents, 'Mine.\n');
+    let reviewed = await box.seen();
+    await writeFile(override, 'Mine.\n');
+    assert.ok((await save()).changed);
+    await rm(override); await rm(agents);
+    // Saved (creating AGENTS.md), then an override appears: Undo removes the file it created and leaves the override.
+    reviewed = await box.seen();
+    const saved = await save();
     await writeFile(override, await readFile(agents, 'utf8'));
     const undone = await undoBase(box.context, await box.snapshots(), saved.undo!);
-    assert.deepEqual(undone.left, [{ tool: 'codex-cli', why: 'moved' }]);
-    assert.ok((await stat(override)).isFile() && (await stat(agents)).isFile());
+    assert.deepEqual(undone.left, []);
+    await assert.rejects(stat(agents));
+    assert.ok((await stat(override)).isFile());
   } finally { await box.cleanup(); }
 });

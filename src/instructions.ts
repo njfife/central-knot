@@ -3,9 +3,9 @@
 // earlier version can be put back. Nothing here deletes or empties a file, and no project or workspace file is read or written.
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { errorCode, plainError, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, plainError, recoverParked, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
@@ -78,8 +78,10 @@ async function readBaseList(home: string): Promise<BaseList> {
 }
 const writeBaseList = (home: string, list: BaseList) => writeDurably(baseListPath(home), `${JSON.stringify(list, null, 2)}\n`);
 
-/** The base as stored: base.md as read (undefined: no file), the list beside it, and every earlier base text. */
-async function readBase(home: string) {
+/** The base as stored: base.md as read (undefined: no file), the list beside it, and every earlier base text. `recover`: first
+ *  finish a base.md write a crash interrupted (only where writing is allowed), so a base moved aside is never read as empty. */
+async function readBase(home: string, recover = false) {
+  if (recover) await recoverParked(dirname(basePath(home)));
   const raw = await readText(basePath(home));
   return { raw, text: raw ?? '', list: await readBaseList(home), earlier: await shelf(home, 'base') };
 }
@@ -110,7 +112,7 @@ function baseIfInvolved(state: NonNullable<InstructionFile['base']>) {
 /** Every detected tool's instruction file, read as it is now. */
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
-  const base = await readBase(context.home);
+  const base = await readBase(context.home, (await writeAccess(context)).allowed);
   // Only tools found in this home: an absent tool has no file to edit, and a folder is never created for it here.
   for (const snapshot of snapshots.filter(entry => entry.detection !== 'Not found' || entry.skills.length > 0)) {
     const { path, readers, notes } = await bind(snapshot.harness, snapshot.root);
@@ -178,14 +180,16 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
-  const stored = await readBase(context.home);
+  const stored = await readBase(context.home, true);
   if (sha(stored.text) !== request.expected) return baseChanged;
   const tools = request.text.trim() ? request.tools.filter(tool => snapshots.some(entry => entry.harness === tool)) : [];
   const files: { tool: HarnessId; path: string; current: string | undefined }[] = [];
   for (const snapshot of snapshots.filter(entry => entry.harness in request.seen)) {
     const { path } = await bind(snapshot.harness, snapshot.root);
     const current = await readText(path);
-    if (hashOf(current) !== request.seen[snapshot.harness]) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
+    // The review named a file and what it held: a different file now bound (an override appeared) or new content stops the save.
+    const reviewed = request.seen[snapshot.harness]!;
+    if (path !== reviewed.path || hashOf(current) !== reviewed.hash) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
     files.push({ tool: snapshot.harness, path, current });
   }
   try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailed(error, baseChanged); }
@@ -221,6 +225,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   // The base edited since (in Central Knot or in base.md itself) stays: an Undo never overwrites newer work.
   const baseChanged = { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
+  await recoverParked(dirname(basePath(context.home)));
   const seenBase = await readText(basePath(context.home));
   if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
   try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailed(error, baseChanged); }
@@ -228,11 +233,10 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   try { await writeBaseList(context.home, { tools: undo.tools, leftPlain: undo.leftPlain }); }
   catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   for (const file of undo.files) {
+    // The very file the save wrote, even if the tool now reads another (an override appeared since): that one is never touched.
     const snapshot = snapshots.find(entry => entry.harness === file.tool);
-    if (!snapshot) { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
-    const { path } = await bind(file.tool, snapshot.root);
-    // The tool now reads another file (an override appeared): the file the save wrote is not the one bound now, so nothing is touched.
-    if (path !== file.path) { result.left.push({ tool: file.tool, why: 'moved' }); continue; }
+    const path = file.path;
+    if (!snapshot || relative(snapshot.root, path).startsWith('..')) { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
     const current = await readText(path);
     if (current === undefined || sha(current) !== file.after) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
     try {

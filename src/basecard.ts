@@ -112,7 +112,9 @@ function reviewWords(edit: BaseEdit, { counts, writesText, writes, putBackFile, 
   const before = state.base?.text ?? '';
   const saved = (lead: string) => (written: string) => `${lead}${written ? ` in ${written}` : ''}.`;
   const kind = edit.source?.kind;
-  if (kind === 'putBack') return { title: `Put the base instructions back in ${putBackFile}.`, save: `Put the base back in ${putBackFile}`, done: () => `The base instructions are back in ${putBackFile}. The edited copy is under ${from}’s Earlier versions.` };
+  if (kind === 'putBack') return { title: `Put the base instructions back in ${putBackFile}.`, save: `Put the base back in ${putBackFile}`,
+    // Said only when it was written; otherwise the note after it says why not.
+    done: (written: string) => (written ? `The base instructions are back in ${putBackFile}. The edited copy is under ${from}’s Earlier versions.` : `${putBackFile} was not changed.`) };
   if (kind === 'update') return { title: `Write the base instructions into ${writesText}.`, save: `Update ${writesText}`, done: (written: string) => `Updated ${written || 'nothing'} with the base instructions.` };
   const save = writes ? `Save and update ${writesText}` : 'Save';
   if (kind === 'version') return { title: `Going back to earlier base instructions: ${counts || 'the same text'}.`, save, done: saved('The earlier base instructions are back') };
@@ -155,7 +157,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
     })),
     h('div.ins-actions', {},
       button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy, onclick: () => void applyBaseChange(
-        { text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen: Object.fromEntries(plans.map(({ file }) => [file.tool, file.hash])),
+        { text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen: Object.fromEntries(plans.map(({ file }) => [file.tool, { path: file.path, hash: file.hash }])),
           adopt: kind === 'own' ? edit.source!.tool : undefined, overwrite: putBackFile ? [edit.source!.tool!] : undefined }, done) }),
       startedInReview
         ? button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-back', onclick: () => closeOrBack(edit) })
