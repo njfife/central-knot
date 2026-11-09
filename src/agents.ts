@@ -527,6 +527,7 @@ async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
     const done: AgentCopy[] = [];
     for (const copy of pending) {
       const here = slot[copy.tool];
+      if (item.off.includes(copy.tool)) { done.push(copy); continue; }
       if (!here) { if (inUseAgain || pass.onDisk.folders.has(copy.tool)) done.push(copy); continue; }
       // A file elsewhere now (a moved agents folder) is not the one the deletion was owed for.
       if (inUseAgain || here.bytes !== copy.bytes || here.file !== copy.file) { done.push(copy); continue; }

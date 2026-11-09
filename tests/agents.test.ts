@@ -416,6 +416,22 @@ test('A deletion removed from one tool still finishes later in a tool that was a
   } finally { await box.cleanup(); }
 });
 
+test('A deletion leaves the copy in a tool switched off for the agent while its folder was away', async () => {
+  const box = await sandbox();
+  try {
+    const two: HarnessId[] = ['claude-cli', 'codex-cli'], claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, two, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await applyAgents(box.context, two, [{ key: 'reviewer', managed: true, off: ['codex-cli'] }]);
+    await rm(claude);
+    await applyAgents(box.context, two, [], { settleMs: 0 });
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, two, [], { settleMs: 0 });
+    assert.match(await read(box.home, '.codex/agents/reviewer.toml'), /Be brief/);
+  } finally { await box.cleanup(); }
+});
+
 test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
   const box = await sandbox();
   try {
