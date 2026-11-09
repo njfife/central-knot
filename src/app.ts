@@ -3,6 +3,7 @@ import type { ApplyResult, Change, DesktopApi, ProfileSwitchResult, DestinationR
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { flipCounts } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -242,7 +243,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
   if (past?.kind === 'profile') {
-    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${past.profile?.fromName ?? 'No profile'} is the profile again${result.harnessWrites ? `; ${plural(result.harnessWrites, 'switch', 'switches')} put back` : ''}. New sessions use it.${stayedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
+    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${past.profile?.fromName ?? 'No profile'} is the profile again${result.harnessWrites ? `; ${plural(result.harnessWrites, 'switch', 'switches')} put back` : ''}. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
     return;
   }
@@ -536,10 +537,15 @@ const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…'
 
 // ---------- Profiles ----------
 
-/** What a switch or its undo left as it was, said once after the result. */
-const stayedNote = (results: DestinationResult[]) => {
+/**
+ * What a switch or its undo did not change, said once after the result: switches that could not change (a failure, a tool that
+ * can't be switched), and, for an undo, switches left as they are because they changed since.
+ */
+const notChangedNote = (results: DestinationResult[]) => {
   const failed = results.filter(entry => entry.outcome === 'failed' || entry.outcome === 'held');
-  return failed.length ? ` ${plural(failed.length, 'switch', 'switches')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '';
+  const stayed = results.filter(entry => entry.outcome === 'stayed').length;
+  return (failed.length ? ` ${plural(failed.length, 'switch', 'switches')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '')
+    + (stayed ? ` ${plural(stayed, 'switch', 'switches')} changed since, so ${stayed === 1 ? 'it was' : 'they were'} left as ${stayed === 1 ? 'it is' : 'they are'}.` : '');
 };
 
 /** The profile open on the Profiles page: one of the home's profiles, or 'none' for No profile. */
@@ -547,11 +553,10 @@ export const profileState = { open: undefined as string | undefined, confirmDele
 
 /** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
 function switchOutcome(name: string, result: ProfileSwitchResult) {
-  const items = (disabled: boolean) => new Set(result.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
-  const off = items(true), on = items(false);
+  const { off, on } = flipCounts(result.flips);
   const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
   const what = [off && `${plural(off, 'item')} turned off`, on && `${plural(on, 'item')} turned back on`].filter(Boolean).join(' and ');
-  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${stayedNote(result.results)}`,
+  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
   announce(state.outcome.text, true);
 }

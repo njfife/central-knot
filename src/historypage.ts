@@ -1,7 +1,8 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
-import { toolNames } from './words.ts';
+import { andList, toolNames } from './words.ts';
+import { flipCounts } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -51,12 +52,10 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 /** A profile switch: what it switched to, and how many items it turned off and on, where. An undo says what it undid. */
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action: string } {
   const switched = event.profile!;
-  const items = (disabled: boolean) => new Set(switched.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
-  const off = items(true), on = items(false);
+  const { off, on } = flipCounts(switched.flips);
   const counts = [off && `${off === 1 ? '1 item' : `${off} items`} turned off`, on && `${on === 1 ? '1 item' : `${on} items`} turned back on`].filter(Boolean).join(', ') || 'no switch needed changing';
   // The tools by name, as the result of the switch said them.
-  const tools = [...new Set(switched.flips.map(flip => who(flip.tool)))];
-  const where = tools.length ? ` in ${tools.length > 1 ? `${tools.slice(0, -1).join(', ')} and ${tools.at(-1)}` : tools[0]}` : '';
+  const where = switched.flips.length ? ` in ${andList([...new Set(switched.flips.map(flip => who(flip.tool)))])}` : '';
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? 'No profile';
   if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? 'No profile'}; back to ${to}: ${counts}${where}.`, action: 'Redo' };

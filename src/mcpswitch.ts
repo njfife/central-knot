@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
 import { errorCode, type ShareContext } from './share.ts';
-import { list, parseJson } from './skillswitch.ts';
+import { list, parseJson, switchPath } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -18,8 +18,7 @@ import type { HarnessId } from './types.ts';
  * config.toml and Pi's mcp.json (each server's own entry, as mcp.ts reads them).
  */
 export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
-  const root = configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
-  return join(root, { 'claude-cli': 'settings.json', 'copilot-cli': 'settings.json', 'codex-cli': 'config.toml', 'pi-cli': 'mcp.json' }[tool]);
+  return tool === 'pi-cli' ? join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'mcp.json') : switchPath(context, tool);
 }
 
 /** Each tool's MCP switch file as read ('' when there is none yet), or why it can't be used. */

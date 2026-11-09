@@ -1370,7 +1370,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Profiles: list of profiles beside the open one; per tool, what is on and what a switch changes */
 .profiles-split { min-height: 0; }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
-.profile-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-row-name { min-width: 0; overflow-wrap: anywhere; line-height: 16px; }
 .profile-in-use { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; background: var(--picked); color: var(--accent-ink); }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
@@ -1384,7 +1384,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .profile-name-input:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 .pf-scroll { display: flex; flex-direction: column; container-type: inline-size; }
-.pf-table { --pf-col: clamp(96px, 8cqi, 160px); display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
+.pf-table { --pf-col: clamp(96px, 9cqi, 220px); display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
 .pf-row { display: grid; grid-template-columns: minmax(240px, 1fr) repeat(var(--pf-tools), var(--pf-col)); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
@@ -1392,7 +1392,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-head-cell { flex-direction: column; gap: 2px; color: var(--ink); }
 .pf-head-name { white-space: nowrap; }
 .pf-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
-.pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 .pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 6px; color: var(--ink-soft); }
 .pf-tick:hover { background: var(--press); color: var(--ink); }
@@ -1467,3 +1467,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @media (max-width: 1180px) { .status-profile-drift-text { display: none; } }
 .pf-menu-size { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .pf-menu-size + .pf-menu-note { margin-left: 0; padding-left: 8px; }
+/* A long name wraps instead of being cut: rows grow, keeping their minimum height */
+.pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
+.profile-row { height: auto; min-height: 37px; padding-block: 8px; }

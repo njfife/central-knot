@@ -6,7 +6,7 @@
 //   remembered as held by profiles.
 // - An item in the profile is turned back on only where a profile turned it off. A switch turned off by hand stays off.
 // - No profile turns back on everything profiles turned off, and holds nothing.
-import type { HarnessId, ManageView, McpView, Profile, ProfileFlip, SkillFacts } from './types.ts';
+import type { HarnessId, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
 
 export type ItemKind = 'skill' | 'mcp';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
@@ -89,4 +89,15 @@ export const offByHand = (item: SwitchItem, held: Record<string, HarnessId[]>) =
 export function releaseHeld(held: Record<string, HarnessId[]>, released: { item: string; tool: HarnessId }[]): Record<string, HarnessId[]> {
   const next = Object.fromEntries(Object.entries(held).map(([id, tools]) => [id, tools.filter(tool => !released.some(entry => entry.item === id && entry.tool === tool))]));
   return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.length));
+}
+
+/** How many items flips turn off and back on. An item flipped in several tools counts once. */
+export function flipCounts(flips: ProfileFlip[]): { off: number; on: number } {
+  const count = (disabled: boolean) => new Set(flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
+  return { off: count(true), on: count(false) };
+}
+
+/** How many items the tools no longer match the profile in use on (or No profile, on what profiles still hold off): 0 when they match. */
+export function driftOf(items: SwitchItem[], profiles: Pick<ProfilesView, 'profiles' | 'active' | 'held'>): number {
+  return new Set(planSwitch(items, profiles.profiles.find(profile => profile.id === profiles.active), profiles.held).flips.map(flip => flip.item)).size;
 }

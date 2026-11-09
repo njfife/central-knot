@@ -1,4 +1,4 @@
-import { onlyAllowed } from './values.ts';
+import { onlyAllowed, strings } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
@@ -15,8 +15,8 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { planSwitch, switchItems } from './profileplan.ts';
+import { deleteProfile, driftNow, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
+import { driftOf, switchItems } from './profileplan.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -170,7 +170,8 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // What could not be switched is told on the page, like a background pass's failures.
     for (const entry of [...result.results.filter(item => item.outcome === 'failed'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
     lastProfiles = await readProfiles(current.home);
-    lastDrift = 0;
+    // Whatever could not be switched still differs: the menu keeps saying so until it is applied.
+    lastDrift = await driftNow(context());
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
   const drift = lastDrift ? ` (${lastDrift} to apply)` : '';
@@ -316,7 +317,7 @@ async function view(explicit = false): Promise<HomeView> {
       };
     })()),
   };
-  const drift = planSwitch(switchItems(made.manage, made.mcp), made.profiles.profiles.find(profile => profile.id === made.profiles.active), made.profiles.held).flips.length;
+  const drift = driftOf(switchItems(made.manage, made.mcp), made.profiles);
   if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles) || drift !== lastDrift) { lastProfiles = made.profiles; lastDrift = drift; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
@@ -591,12 +592,11 @@ app.whenReady().then(async () => {
     ? deleteEverywhere(context(), key, resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   // Profiles: their definitions are Central Knot's own file; a switch flips each tool's own switches (profiles.ts).
-  const strings = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
   const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
     const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
-    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items), restore: input.restore === true });
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items) ?? [], restore: input.restore === true });
     return saved.problem ? saved : { ...saved, view: await view() };
   });
   handle('profiles:delete', async (id, home) => {

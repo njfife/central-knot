@@ -9,9 +9,10 @@ import { harnesses } from './harnesses.ts';
 import { appendHistory, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { itemId, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
+import { driftOf, itemId, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, switchState, withSwitch, type SwitchTarget } from './skillswitch.ts';
+import { strings } from './values.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileFlip, ProfileSwitchResult, ProfilesView, Snapshot } from './types.ts';
 
 // ---------- The profiles file ----------
@@ -28,9 +29,8 @@ export async function readProfiles(home: string): Promise<ProfilesView> {
   }
   try {
     const parsed = JSON.parse(text) as Partial<ProfilesFile>;
-    const strings = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
-    const profiles = (Array.isArray(parsed.profiles) ? parsed.profiles : []).filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string').map(profile => ({ id: profile.id, name: profile.name, items: strings(profile.items) }));
-    const held = Object.fromEntries(Object.entries(parsed.held && typeof parsed.held === 'object' ? parsed.held : {}).map(([id, tools]) => [id, strings(tools).filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId))]).filter(([, tools]) => tools.length));
+    const profiles = (Array.isArray(parsed.profiles) ? parsed.profiles : []).filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string').map(profile => ({ id: profile.id, name: profile.name, items: strings(profile.items) ?? [] }));
+    const held = Object.fromEntries(Object.entries(parsed.held && typeof parsed.held === 'object' ? parsed.held : {}).map(([id, tools]) => [id, (strings(tools) ?? []).filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId))]).filter(([, tools]) => tools.length));
     const active = profiles.some(profile => profile.id === parsed.active) ? parsed.active : undefined;
     return { profiles, held, ...(active ? { active } : {}) };
   } catch {
@@ -111,55 +111,79 @@ function skillTarget(snapshots: Snapshot[], manage: Awaited<ReturnType<typeof ma
   return { folder: copy.folder, name: skill?.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
 }
 
-interface Read { snapshots: Snapshot[]; manage: Awaited<ReturnType<typeof manageView>>; items: SwitchItem[] }
-async function readHome(context: ShareContext): Promise<Read> {
+/** What a switch reads once: each tool's skills (to name a copy for its switch), and every item with its switches now. */
+interface HomeRead { snapshots: Snapshot[]; manage: Awaited<ReturnType<typeof manageView>>; items: SwitchItem[] }
+async function readHome(context: ShareContext): Promise<HomeRead> {
   const snapshots = await context.read();
   const manage = await manageView(context);
   const mcp = await mcpView(context, manage.tools);
   return { snapshots, manage, items: switchItems(manage, mcp) };
 }
 
+/** How many items the tools no longer match the profile in use on, read fresh (for the menu bar after a switch made there). */
+export async function driftNow(context: ShareContext): Promise<number> {
+  const view = await readProfiles(context.home);
+  return view.problem ? 0 : driftOf((await readHome(context)).items, view);
+}
+
+/** An item's key without its kind: `skill:notes` → `notes`. */
+const keyOf = (flip: ProfileFlip) => flip.item.slice(flip.item.indexOf(':') + 1);
+
+/** The file that holds this flip's switch. */
+const fileOf = (context: ShareContext, flip: ProfileFlip) => (itemKind(flip.item) === 'mcp' ? mcpSwitchPath(context, flip.tool) : switchPath(context, flip.tool));
+
+/** One file's text with every flip of `group` made in it; a flip that can't be made there is in `failed` with why. */
+function editText(context: ShareContext, text: string, group: ProfileFlip[], targets: Map<ProfileFlip, SwitchTarget | undefined>) {
+  const failed = new Map<ProfileFlip, string>();
+  for (const flip of group) {
+    try {
+      if (itemKind(flip.item) === 'mcp') text = withMcpSwitch(flip.tool, text, keyOf(flip), flip.disabled);
+      else { const target = targets.get(flip); if (!target) throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); text = withSwitch(context, flip.tool, text, target, flip.disabled); }
+    } catch (error) { failed.set(flip, error instanceof Error ? error.message : String(error)); }
+  }
+  return { text, failed };
+}
+
+/**
+ * Writes one file's flips with a single checked write: only over the text read, so a save made meanwhile is never lost. A file
+ * the tool saved just then is read again once and the flips are redone on what it holds. Returns the flips that couldn't be made.
+ */
+async function writeFlips(context: ShareContext, file: string, group: ProfileFlip[], targets: Map<ProfileFlip, SwitchTarget | undefined>): Promise<Map<ProfileFlip, string>> {
+  for (let attempt = 0; ; attempt++) {
+    let original: string | undefined;
+    try { original = await readFile(file, 'utf8'); } catch (error) { if (errorCode(error) !== 'ENOENT') return new Map(group.map(flip => [flip, `${file} could not be read.`])); }
+    const { text, failed } = editText(context, original ?? '', group, targets);
+    if (text === (original ?? '')) return failed;
+    try { await writeFileChecked(file, text, original); return failed; }
+    catch (error) {
+      if ((errorCode(error) === 'CK_CHANGED' || errorCode(error) === 'CK_OCCUPIED') && attempt === 0) continue;
+      const why = errorCode(error) === 'CK_CHANGED' ? `${file} kept changing, so it was left as it is.` : `Could not write ${file}: ${error instanceof Error ? error.message : String(error)}`;
+      for (const flip of group) if (!failed.has(flip)) failed.set(flip, why);
+      return failed;
+    }
+  }
+}
+
 /**
  * Makes the flips, one checked write per settings file (Claude Code's and Copilot's settings.json hold skill and MCP switches
- * together; Codex's config.toml too). A file saved meanwhile is read again once; each flip is confirmed by reading the file back.
+ * together; Codex's config.toml too), then confirms each by reading its file back: what the tool will see, not what was meant.
  */
-async function flipAll(context: ShareContext, home: Read, flips: ProfileFlip[]): Promise<{ done: ProfileFlip[]; results: DestinationResult[] }> {
-  const path = (flip: ProfileFlip) => (itemKind(flip.item) === 'mcp' ? mcpSwitchPath(context, flip.tool) : switchPath(context, flip.tool));
-  const key = (flip: ProfileFlip) => flip.item.slice(flip.item.indexOf(':') + 1);
+async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip[]): Promise<{ done: ProfileFlip[]; results: DestinationResult[] }> {
   const results: DestinationResult[] = [];
   const done: ProfileFlip[] = [];
-  const state = (flip: ProfileFlip, text: string, target?: SwitchTarget) => (itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, text, key(flip)) : switchState(context, flip.tool, text, target!));
   const groups = new Map<string, ProfileFlip[]>();
-  for (const flip of flips) groups.set(path(flip), [...(groups.get(path(flip)) ?? []), flip]);
+  for (const flip of flips) groups.set(fileOf(context, flip), [...(groups.get(fileOf(context, flip)) ?? []), flip]);
   for (const [file, group] of groups) {
-    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.snapshots, home.manage, key(flip), flip.tool) : undefined]));
-    let failed = new Map<ProfileFlip, string>();
-    for (let attempt = 0; attempt < 2; attempt++) {
-      failed = new Map();
-      let original: string | undefined;
-      try { original = await readFile(file, 'utf8'); } catch (error) { if (errorCode(error) !== 'ENOENT') { for (const flip of group) failed.set(flip, `${file} could not be read.`); break; } }
-      let text = original ?? '';
-      for (const flip of group) {
-        try {
-          if (itemKind(flip.item) === 'mcp') text = withMcpSwitch(flip.tool, text, key(flip), flip.disabled);
-          else { const target = targets.get(flip); if (!target) throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); text = withSwitch(context, flip.tool, text, target, flip.disabled); }
-        } catch (error) { failed.set(flip, error instanceof Error ? error.message : String(error)); }
-      }
-      if (text === (original ?? '')) break;
-      try { await writeFileChecked(file, text, original); break; }
-      catch (error) {
-        // Saved by the tool just now: read it again once and redo the edits on what it holds.
-        if ((errorCode(error) === 'CK_CHANGED' || errorCode(error) === 'CK_OCCUPIED') && attempt === 0) continue;
-        for (const flip of group) if (!failed.has(flip)) failed.set(flip, errorCode(error) === 'CK_CHANGED' ? `${file} kept changing, so it was left as it is.` : `Could not write ${file}: ${error instanceof Error ? error.message : String(error)}`);
-        break;
-      }
-    }
-    // Confirmed by reading back: what the tool will see, not what was meant.
+    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.snapshots, home.manage, keyOf(flip), flip.tool) : undefined]));
+    const failed = await writeFlips(context, file, group, targets);
     let after = '';
     try { after = await readFile(file, 'utf8'); } catch { /* every flip below then fails its check */ }
     for (const flip of group) {
       let reason = failed.get(flip);
-      if (!reason) { try { if (state(flip, after, targets.get(flip)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; } catch { reason = `${file} could not be read back.`; } }
+      if (!reason) {
+        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after, keyOf(flip)) : switchState(context, flip.tool, after, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
+        catch { reason = `${file} could not be read back.`; }
+      }
       if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${harnesses[flip.tool].name}: ${reason}` }); continue; }
       done.push(flip);
       results.push({ item: flip.name, harness: flip.tool, outcome: 'switched', message: `${flip.disabled ? 'Off' : 'On'} in ${harnesses[flip.tool].name} from its next session.` });
