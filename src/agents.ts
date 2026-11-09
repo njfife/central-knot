@@ -50,10 +50,12 @@ function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
   return { name: typeof named === 'string' && named ? named : name, description: typeof description === 'string' ? description : '', prompt: match[4].replace(/^\r?\n/, ''), fields };
 }
 
-function fromToml(name: string, text: string): NeutralAgent {
+function fromToml(name: string, text: string): NeutralAgent | undefined {
   const tables = readTomlTables(text);
   const root = tables[0];
   const value = (key: string) => { const found = root.entries.find(entry => entry.key === key)?.value; return typeof found === 'string' ? found : undefined; };
+  // No prompt: an empty file, or one cut off mid-save. Not an agent (yet), so it is held, never read as an edit that empties the others.
+  if (value('developer_instructions') === undefined) return undefined;
   const fields: Record<string, unknown> = Object.fromEntries(root.entries.filter(entry => !['name', 'description', 'developer_instructions'].includes(entry.key)).map(entry => [entry.key, entry.value]));
   for (const table of tables.slice(1)) fields[`[${table.path.join('.')}]`] = true;
   return { name: value('name') || name, description: value('description') ?? '', prompt: value('developer_instructions') ?? '', fields };
@@ -102,7 +104,7 @@ function setFrontLines(front: string, values: [string, string][]): string {
   const missing: string[] = [];
   for (const [key, value] of values) {
     const line = `${key}: ${yamlScalar(value)}`.split('\n');
-    const at = lines.findIndex(candidate => new RegExp(`^${key}\\s*:`).test(candidate));
+    const at = lines.findIndex(candidate => new RegExp(`^(["']?)${key}\\1\\s*:`).test(candidate));
     if (at < 0) { missing.push(...line); continue; }
     let end = at + 1;
     while (end < lines.length && (/^\s+\S/.test(lines[end]) || (lines[end].trim() === '' && end + 1 < lines.length && /^\s+\S/.test(lines[end + 1])))) end++;
@@ -330,6 +332,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
 
     // Deletion of a two-way copy (DEL-01): its file gone from a folder that is there, settled, spreads (DEL-02); an edit racing it wins.
     const missing = [...recorded.values()].filter(copy => twoWay(copy.tool) && !slot[copy.tool]);
+    // With Sync off, Apply all writes only what it shows: this agent's own pending edit or deletion waits for Sync (SYN-03).
+    if (options.only && !chosenNow.has(key) && (changed.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for Sync. Turn Sync on or use Sync now.` }); continue; }
     for (const copy of recorded.values()) if (slot[copy.tool] || away(copy.tool)) missingSince.delete(copy.file);
     let waiting = false;
     for (const copy of missing) { if (!missingSince.has(copy.file)) missingSince.set(copy.file, now); if (now - missingSince.get(copy.file)! < settle) waiting = true; }

@@ -310,6 +310,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const missingSince = (item as McpRecordItem & { missingSince?: Record<string, number> }).missingSince ??= {};
     for (const copy of missing) missingSince[copy.tool] ??= now;
     for (const tool of Object.keys(missingSince) as HarnessId[]) if (!missing.some(copy => copy.tool === tool)) delete missingSince[tool];
+    // With Sync off, Apply all writes only what it shows: this server's own pending edit or deletion waits for Sync (SYN-03).
+    if (options.only && !chosenNow.has(name) && (edited.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for Sync. Turn Sync on or use Sync now.` }); continue; }
     let raced: HarnessId[] | undefined;
     if (missing.length) {
       if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }
@@ -358,10 +360,12 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (!chosenNow.has(name) && entries.some(entry => !recorded.has(entry.tool) && entry.hash !== source.hash && entry.hash !== item.hash)) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
     const competing = edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1;
     const replaced: { tool: HarnessId; hash: string }[] = [];
+    // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
+    const holds = new Map<HarnessId, string>();
     await keep(context, name, source.server, source);
     for (const tool of live) {
       const here = slot[tool];
-      if (here?.hash === source.hash) continue;
+      if (here?.hash === source.hash) { holds.set(tool, source.hash); continue; }
       const reason = cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
@@ -369,6 +373,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const problem = await editEntry(context, tool, name, here?.hash, source.server, here?.extras);
       if (problem) { if (here) undisplace(item, tool, here.hash); results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
       writes++;
+      holds.set(tool, source.hash);
       if (here) replaced.push({ tool, hash: here.hash });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
@@ -382,12 +387,17 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const id = event({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
       notices.push({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
-    // Every copy is recorded with what it holds now; one not written (Claude waiting, a refusal) keeps its own content.
-    const after = await gatherAll(context, live);
+    // A copy not written (Claude waiting, a refusal) keeps what was recorded for it, so a change there is still seen as one. A copy
+    // replaced by this choice that could not be written yet is recorded as it is, so it reads as behind.
+    for (const tool of live) {
+      if (holds.has(tool) || !slot[tool]) continue;
+      const before = recorded.get(tool) ?? (chosenNow.has(name) ? slot[tool]!.hash : undefined);
+      if (before) holds.set(tool, before);
+    }
     item.hash = source.hash;
     item.copies = [
       ...item.copies.filter(copy => copy.status || away(copy.tool)),
-      ...live.filter(tool => after.byName.get(name)?.[tool]).map(tool => ({ tool, hash: after.byName.get(name)![tool]!.hash, file: mcpFile(context, tool) })),
+      ...[...holds].map(([tool, hash]) => ({ tool, hash, file: mcpFile(context, tool) })),
     ];
   }
   // Removals a deletion still owes: Claude Code's once Write now names it, others once their file is back. Only while the entry

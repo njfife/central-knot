@@ -497,3 +497,17 @@ Closing the window kept the app running, and a background edit reached Codex (st
 - **Agents folder identity.** A folder made again between two passes is a reset: copies are put back, never deleted (N2).
 
 **Validation.** 192 unit tests. Linux e2e 121/121.
+
+## Fifth check, Opus (on 51a5d32), November 9, 2026
+
+"Not yet". No new problem in skills sync; the claimed skills fixes were rechecked in the code and hold. Findings 1, 2, 3 and 5 are fixed here. Finding 4 (the gap in the agent write check) was already closed in 27218f0 by `writeFileChecked`, so its probe no longer injects. The other 8 probes are kept in `tests/fifth-check-opus-*.test.ts`.
+
+1. **An MCP edit saved during a pass no longer becomes the baseline.**
+   - A written copy is recorded with the decided content, never a later read.
+   - A copy not written keeps what was recorded, so a change there is still an edit next pass.
+   - A copy a choice will replace but can't yet (Claude Code waiting) is recorded as behind.
+2. **With Sync off, Apply all no longer spreads an agent's or server's own pending edit or deletion.** It is held "waiting for Sync", as for skills.
+3. **A Codex agent TOML with no `developer_instructions`** (empty, or cut off mid-save) is not an agent yet. It is held, never read as an edit that empties the others.
+4. **Quoted frontmatter keys** (`"name":`) are found and replaced, never duplicated.
+
+The Mac real home was not used, because a Central Knot app was running there (a computer-use session).
