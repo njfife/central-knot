@@ -1078,7 +1078,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .detail-scroll > .details { padding-top: 4px; }
 .detail-scroll .details-where-row { margin-right: 18px; }
 .details-tool-head > strong { flex: none; min-width: 150px; }
-.cell-pending-edit .cell-source-mark, .cell-will-sync .cell-source-mark, .ov-row.changed .cell-source-mark { background: var(--ink-faint); }
 .see-change { color: var(--accent-ink); }
 
 .ov-ghost-text { justify-content: space-between; padding-right: 16px; }
@@ -1174,7 +1173,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .overview-scroll { padding-left: 16px; padding-right: 16px; }
 .details > .compare-foot { margin-top: -6px; }
 .compare-foot-start > .text-action { padding-left: 0; margin-left: 0; }
-.split .detail-column { padding-right: max(0px, calc(100% - 604px)); }
 
 /* Round 13: Instructions */
 .ins-saved-group { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
@@ -1193,3 +1191,15 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-mark { border-right: 1px solid var(--line); margin-right: 6px; text-align: center; }
 .ins-line { grid-template-columns: 18px minmax(0, 1fr); }
 .plugin-outcome-row { align-items: center; }
+
+/* Files view: the detail pane keeps its width; its content stops at the page's content edge (list column is 300px). */
+.split .detail-column .pane-header, .split .detail-column .detail-scroll > *, .split .detail-column > .bands { max-width: 604px; }
+.sync-notice > .notice-change { flex: 1 1 100%; }
+
+.details-tool-head { grid-template-columns: 196px minmax(0, 1fr); }
+.details-pending { color: var(--ink-soft); }
+#nav { padding-right: 8px; }
+
+/* Round 14: the pending summary stands apart from the filter tabs */
+.toolbar-end { padding-left: 16px; border-left: 1px solid var(--line); margin-left: auto; }
+.toolbar-end:empty { border-left: 0; }

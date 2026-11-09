@@ -153,7 +153,9 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
 /** After a read: what was found and where, so a home switch or Refresh says what it did. */
 const readSummary = (view: HomeView) => {
   const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
-  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. Nothing changed.`;
+  // "Nothing changed" means nothing was written; a copy that stopped updating is still news, so it is said.
+  const stopped = (view.agents?.servers ?? []).filter(server => server.managed && server.stopped?.length).map(server => `${server.name}’s ${server.stopped!.length === 1 ? 'copy in one tool' : 'copies in some tools'}`);
+  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? `Nothing was written; ${stopped.join(', ')} stopped updating.` : 'Nothing changed.'}`;
 };
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {

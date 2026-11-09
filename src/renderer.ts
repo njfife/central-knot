@@ -103,7 +103,7 @@ function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: s
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', tone: '' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes stay in this practice copy' : 'Changes write only inside this folder', tone: '' };
+  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes stay here' : 'Changes write only inside this folder', tone: '' };
 }
 
 function renderStatus() {
