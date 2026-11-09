@@ -103,6 +103,7 @@ const retireTip = (kind: 'skills' | 'mcp' | 'agents') => { try { localStorage.se
 
 export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const home = state.home!;
+  const started = Date.now();
   const result = await api().apply(changes, home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
   if (view) state.home = view;
@@ -120,17 +121,29 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   // The result matches the bar before it: how many new copies, and of which skills.
   const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
-  const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
+  // Disable, Enable and Remove, per tool, said after the copies.
+  const toolsWhere = (outcome: string, pattern?: RegExp) => [...new Set(result.results.filter(entry => entry.outcome === outcome && (!pattern || pattern.test(entry.message))).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const disabledIn = toolsWhere('switched', /^Disabled/), enabledIn = toolsWhere('switched', /^Enabled/), removedFrom = toolsWhere('removed');
+  const touched = [...new Set(result.results.filter(entry => entry.outcome === 'switched' || entry.outcome === 'removed').map(entry => entry.item))];
+  const whose = touched.length === 1 && !singleName ? `${touched[0]} ` : '';
+  const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '',
+    disabledIn.length ? `${whose}disabled in ${andList(disabledIn)}` : '', enabledIn.length ? `${disabledIn.length ? '' : whose}enabled in ${andList(enabledIn)}` : '', removedFrom.length ? `${disabledIn.length || enabledIn.length ? '' : whose}removed from ${andList(removedFrom)} (kept in History)` : '',
+    !added.length && !replacedIn.length && !touched.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
   // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
   const recent = result.stopped ? [] : (await api().history()).filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
-  const addedNow = replacedSome ? [] : recent.filter(event => event.kind === 'added');
+  // Only a run that wrote new copies offers to undo them: an earlier Apply all's copies are undone from History.
+  const addedNow = replacedSome || !newCopies.length ? [] : recent.filter(event => event.kind === 'added');
   // A copy choice gets its own inline Undo: each replaced copy back in its own tool, new copies removed, the skill unmanaged.
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
+  // A lone Disable, Enable or Remove gets its own Undo here; more than one is undone from History.
+  const switchedNow = recent.filter(event => (event.kind === 'switched' || event.kind === 'removed') && Date.parse(event.at) >= started - 1000);
+  const switchUndo = switchedNow.length === 1 && !addedNow.length && !chosenNow.length
+    ? { label: switchedNow[0].kind === 'removed' ? 'Restore' : 'Undo', id: 'outcome-undo-switch', title: switchedNow[0].kind === 'removed' ? 'Put the removed copy back' : 'Flip it back', run: () => void restoreEvent(switchedNow[0].id) } : undefined;
   const firstApply = !readFlag('ck-applied-once');
   writeFlag('ck-applied-once');
   if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : ''), item: singleName, items: newItems,
-    act: addedNow.length ? addedUndo(addedNow) : chosenNow.length ? choiceUndo(chosenNow) : undefined };
+    act: addedNow.length ? addedUndo(addedNow, switchedNow) : chosenNow.length ? choiceUndo(chosenNow) : switchUndo };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -237,6 +250,13 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
     return;
   }
+  if (past?.kind === 'switched' || past?.kind === 'removed') {
+    const switched = result.results.filter(entry => entry.outcome === 'switched' || entry.outcome === 'written');
+    const text = past.kind === 'removed' ? `${past.item} is back in ${andList(where)}.` : switched.map(entry => `${past.item}: ${entry.message}`).join(' ');
+    if (!result.stopped) { state.outcome = { page: state.page, item: past.item, text, undo: past.kind === 'switched' && undoneBy ? { id: undoneBy, label: 'Undo again' } : undefined }; flashRow(past.item); }
+    announce(result.stopped ?? text, !result.stopped);
+    return;
+  }
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
@@ -322,10 +342,11 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => bus
 });
 
 /** The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. */
-function addedUndo(addedNow: HistoryEvent[]) {
+/** `alongside`: Disable, Enable or Remove from the same Apply all, undone first, while the copies they act on are still there. */
+function addedUndo(addedNow: HistoryEvent[], alongside: HistoryEvent[] = []) {
   const copies = addedNow.reduce((sum, event) => sum + event.losers.length, 0);
   const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;
-  return { label: 'Undo Apply all', id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'new copy' : `${copies} new copies`} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
+  return { label: 'Undo Apply all', id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'new copy' : `${copies} new copies`} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded([...alongside, ...addedNow].map(event => event.id)) };
 }
 
 /** The Undo a copy choice offers: it names the copies it puts back. */

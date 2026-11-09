@@ -505,7 +505,9 @@ app.whenReady().then(async () => {
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
-    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
+    && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
+    && (change.disabled === undefined || Array.isArray(change.disabled)) && (change.remove === undefined || Array.isArray(change.remove))).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
+    ...(change.disabled ? { disabled: ids(change.disabled) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces({ handle, handleRead }, {
     home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),

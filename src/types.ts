@@ -56,7 +56,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
 
@@ -160,6 +160,10 @@ export interface SkillFacts {
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
   stopped?: HarnessId[];
+  /** Skills: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
+  disabled?: HarnessId[];
+  /** Skills: why Disable can't be used in a tool (its settings file can't be read or is in a form Central Knot doesn't edit). */
+  switchProblem?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ManageView {
@@ -185,6 +189,10 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
+  /** Skills: every tool the skill should end up disabled in (each tool's own switch). Left out: switches stay as they are. */
+  disabled?: HarnessId[];
+  /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
+  remove?: HarnessId[];
 }
 
 export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
@@ -210,8 +218,14 @@ export interface HistoryEvent {
   at: string;
   key: string;
   item: string;
-  /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added';
+  /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it.
+   * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
+   * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
+  /** 'switched': each tool and whether it was disabled there (true) or enabled (false). */
+  switched?: { tool: HarnessId; disabled: boolean }[];
+  /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
+  stoppedSync?: HarnessId[];
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
   losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string }[];

@@ -103,9 +103,11 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
         }
         // Other dotted keys inside a server's own table (beyond `env.X` and `http_headers.X`, which are read) are a form Central
         // Knot does not edit: the server is held.
+        // An array of tables under a server (`[[mcp_servers.docs]]`) is a form Central Knot does not edit either.
+        if (table.array && table.path[0] === 'mcp_servers' && table.path.length >= 2) inline.add(table.path[1]);
         if (table.path.length === 2 && table.path[0] === 'mcp_servers' && table.entries.some(entry => entry.keys.length > 1 && !(entry.keys.length === 2 && ['env', 'http_headers'].includes(entry.keys[0])))) inline.add(table.path[1]);
       }
-      for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers')) {
+      for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers' && !candidate.array)) {
         const name = table.path[1];
         const value = (key: string) => table.entries.find(entry => entry.key === key)?.value;
         const subtables = tables.filter(candidate => candidate.path.length >= 3 && candidate.path[0] === 'mcp_servers' && candidate.path[1] === name);

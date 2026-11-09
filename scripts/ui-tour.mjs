@@ -96,6 +96,43 @@ if (wanted('skills')) {
   if (await a.has('#files-standup')) { await a.click('#files-standup'); await shot(a, 'files-view', 'Clicked "Files and contents" in its details.'); await a.click('#skills-table'); }
 }
 
+// ---------- Disable and Remove, per tool ----------
+if (wanted('disable')) {
+  begin('disable');
+  await a.click('#nav-skills');
+  await a.click('#open-notes'); await shot(a, 'unmanaged-details', 'Opened notes, an unmanaged skill in Claude Code and Copilot CLI: each tool\'s row has an Enabled switch and Remove.');
+  await a.click('#switch-notes'); await a.click('#enable-notes-codex-cli');
+  await shot(a, 'managed-codex-disabled-pending', 'Turned Managed on for notes, then switched Codex\'s row to Disabled: queued, nothing written yet.');
+  await a.click('#apply');
+  const toml = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
+  await shot(a, 'applied-disabled', `Clicked "Apply all". Codex got a copy and has it disabled. Codex's config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
+  await a.click('#open-notes');
+  await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
+  await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
+  await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
+  const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked "Restore in Copilot CLI" on the removal.'); }
+  await a.click('#nav-skills');
+  await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
+  await a.click('#open-review');
+  writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
+  await a.click('#header-refresh'); await a.click('#open-notes');
+  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable (the reason is on hover).');
+  rmSync(join(practice, '.copilot/settings.json'));
+  await a.click('#header-refresh');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
+    for (const theme of ['dark', 'light']) {
+      await a.theme(theme);
+      if (!(await a.has('.details'))) await a.click('#open-notes');
+      await shot(a, `size-${width}-${theme}`, `notes' details (managed, disabled in Codex) at ${width}×${height}, ${theme}.`);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
+}
+
 // ---------- Sync, notices and History ----------
 if (wanted('sync')) {
   begin('sync');

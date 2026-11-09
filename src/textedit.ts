@@ -1,5 +1,5 @@
 // Preserving edits (FIL-02): change one entry in a config file and leave every other byte as it was.
-// JSON: a member of an object at a path. TOML: the [mcp_servers.<name>] table and its subtables.
+// JSON: a member of an object at a path. TOML: the [mcp_servers.<name>] table and its subtables, and [[array]] table entries.
 
 // ---------- JSON ----------
 
@@ -139,7 +139,7 @@ export type TomlValue = string | number | boolean | TomlValue[] | { [key: string
 
 /** One `key = value` line in a table, with its raw text so unknown keys can be written back exactly. */
 export interface TomlEntry { key: string; /** The key's parts as decoded, so a quoted part may itself contain dots. */ keys: string[]; value: TomlValue; raw: string; /** Where the entry's line starts and its line ends, in the document. */ start: number; end: number }
-export interface TomlTable { header: string; path: string[]; entries: TomlEntry[]; start: number; end: number }
+export interface TomlTable { header: string; path: string[]; entries: TomlEntry[]; start: number; end: number; /** One entry of an array of tables (`[[skills.config]]`). */ array?: boolean }
 
 function parseKey(text: string, at: number): { key: string; next: number } {
   if (text[at] === '"') { const end = scanString(text, at); return { key: JSON.parse(text.slice(at, end)), next: end }; }
@@ -270,14 +270,15 @@ export function readTomlTables(text: string): TomlTable[] {
     if (char === undefined) break;
     if (char === '\n' || char === '\r' || char === '#') { const end = text.indexOf('\n', at); at = end < 0 ? text.length : end + 1; continue; }
     if (char === '[') {
-      if (text[at + 1] === '[') throw new Error('Arrays of tables are not read here.');
-      const { keys, next } = parseDotted(text, at + 1);
+      const array = text[at + 1] === '[';
+      const { keys, next } = parseDotted(text, at + (array ? 2 : 1));
       const close = skipTomlSpace(text, next, false);
-      if (text[close] !== ']') throw new Error('Expected "]".');
+      if (text[close] !== ']' || (array && text[close + 1] !== ']')) throw new Error('Expected "]".');
+      const last = close + (array ? 1 : 0);
       current.end = lineStart;
-      current = { header: text.slice(at, close + 1), path: keys, entries: [], start: lineStart, end: text.length };
+      current = { header: text.slice(at, last + 1), path: keys, entries: [], start: lineStart, end: text.length, ...(array ? { array } : {}) };
       tables.push(current);
-      const end = text.indexOf('\n', close);
+      const end = text.indexOf('\n', last);
       at = end < 0 ? text.length : end + 1;
       continue;
     }
@@ -306,6 +307,22 @@ export function tomlValue(value: TomlValue): string {
 }
 
 /**
+ * Where a table's own lines end. Its text runs to the next header, but comment lines at its end sit just above that header and
+ * belong to what follows: they stay when the table is replaced or removed.
+ */
+export function tableEnd(text: string, table: TomlTable): number {
+  const lines = text.slice(table.start, table.end).split(/(?<=\n)/);
+  let cut = lines.length;
+  for (let index = lines.length - 1; index > 0; index--) {
+    const line = lines[index].trim();
+    if (line.startsWith('#')) { cut = index; continue; }
+    if (line === '') continue;
+    break;
+  }
+  return table.start + lines.slice(0, cut).join('').length;
+}
+
+/**
  * Replaces the table `[prefix.name]` and its subtables `[prefix.name.*]` with `body` (or removes them when `body` is
  * undefined). Everything else, including comments and other tables, stays byte for byte. A new table goes at the end.
  */
@@ -317,19 +334,7 @@ export function setTomlTable(text: string, prefix: string[], name: string, body:
     if (body === undefined) return text;
     return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text.trim() ? '\n' : ''}${body}`;
   }
-  // A table's text runs to the next header, but comment lines at its end sit just above that header and belong to what follows:
-  // they stay. Only the table's own lines are replaced or removed.
-  const ownEnd = (table: TomlTable) => {
-    const lines = text.slice(table.start, table.end).split(/(?<=\n)/);
-    let cut = lines.length;
-    for (let index = lines.length - 1; index > 0; index--) {
-      const line = lines[index].trim();
-      if (line.startsWith('#')) { cut = index; continue; }
-      if (line === '') continue;
-      break;
-    }
-    return table.start + lines.slice(0, cut).join('').length;
-  };
+  const ownEnd = (table: TomlTable) => tableEnd(text, table);
   // Rebuild in place of the first of its tables; drop its other tables wherever they are.
   let out = '';
   let cursor = 0;

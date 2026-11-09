@@ -202,6 +202,30 @@ async function practiceFlow() {
   same('Codex is a column and gets its copies too', [await a.exists('#tool-codex-cli'), existsSync(join(practice, '.codex/skills/notes/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
 
+  // Disable and Remove, per tool: Codex's own switch turns standup off there while its copy stays; Undo flips it back, byte for byte.
+  // Remove takes only Codex's copy of notes out, and Restore puts it back.
+  const codexConfig = join(practice, '.codex/config.toml');
+  const configBefore = readFileSync(codexConfig, 'utf8');
+  await a.click('#open-standup');
+  await a.click('#enable-standup-codex-cli');
+  check('Disable waits for Apply all', readFileSync(codexConfig, 'utf8') === configBefore && (await a.text('.apply-count') ?? '').includes('1 to disable'), await a.text('.apply-count'));
+  await applyAll(a);
+  check('Disable writes Codex’s own switch and keeps the copy', readFileSync(codexConfig, 'utf8').endsWith(`[[skills.config]]\npath = ${JSON.stringify(join(practice, '.codex/skills/standup/SKILL.md'))}\nenabled = false\n`) && existsSync(join(practice, '.codex/skills/standup/SKILL.md')), readFileSync(codexConfig, 'utf8'));
+  same('the Codex cell is marked disabled, the others are not', [await a.exists('.ov-row[data-key="standup"] [data-tool="codex-cli"] .cell-disabled'), await a.exists('.ov-row[data-key="standup"] [data-tool="claude-cli"] .cell-disabled')], [true, false]);
+  await a.click('#outcome-undo-switch');
+  same('Undo enables it again and leaves config.toml as it was', readFileSync(codexConfig, 'utf8'), configBefore);
+  await a.click('#open-notes');
+  await a.click('#remove-notes-codex-cli');
+  await applyAll(a);
+  same('Remove takes out only Codex’s copy', [existsSync(join(practice, '.codex/skills/notes')), existsSync(join(practice, '.claude/skills/notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/notes/SKILL.md'))], [false, true, true]);
+  await a.click('#header-refresh');
+  same('and nothing syncs it back', existsSync(join(practice, '.codex/skills/notes')), false);
+  await a.click('#nav-history');
+  await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
+  await a.settle();
+  same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
+  await a.click('#nav-skills');
+
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
   const standupBefore = readFileSync(standupPath('claude'), 'utf8');
