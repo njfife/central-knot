@@ -3,6 +3,11 @@ import { icons, type IconName } from './icons.ts';
 type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
 
+/** The page runs on a Mac: shortcuts say ⌘, and the app lives in the menu bar rather than the system tray. */
+export const onMac = navigator.userAgent.includes('Mac');
+/** Where Central Knot's icon sits while its window is closed. */
+export const trayName = onMac ? 'menu bar' : 'system tray';
+
 /** `h('button.btn.ghost', { id: 'x', onclick }, 'Label')`. Keys starting with "on", and value and checked, are set as properties. */
 export function h(spec: string, props: Props = {}, ...children: (Child | Child[])[]): HTMLElement {
   const [tag, ...classes] = spec.split('.');
@@ -62,8 +67,8 @@ export const pathText = (text: string, full = text) => {
   return node;
 };
 
-/** An on/off switch. `attrs` adds to its accessible name and description (Settings ties it to its row's hint). */
-export function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string, attrs: Props = {}) {
+/** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
+export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
   return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
     h('span.switch-knob'));
 }

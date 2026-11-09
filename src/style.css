@@ -1348,8 +1348,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-failure { color: var(--danger); }
-/* A setting that can't be changed here dims its switch, as disabled buttons dim; the row says why in the hint's place. */
-.setting-control .switch:disabled { opacity: 0.5; cursor: default; }
+/* The system has the setting other than chosen and needs the person: it reads apart from the hints, without alarm. */
+.setting-attention { color: var(--ink); }
+.setting-attention .icon { color: var(--warning); }
+.setting-message .text-action { margin: -2px 0 -2px 4px; padding: 2px 4px; line-height: 16px; }
+/* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
+   still reads as an Off switch; the row says why in the hint's place. */
+.setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+/* The ring sits outside the track, as on the status bar's sync switch; inside, the knob would cover it. */
+.setting-control .switch:focus-visible { outline-offset: 2px; }
 /* The sidebar takes width, so the row's own width decides when the control moves under its text. */
 @container (max-width: 511px) { .setting-row { grid-template-columns: minmax(0, 1fr); } .setting-control { justify-self: start; } }
 .appearance-choices { display: flex; gap: 10px; flex-wrap: wrap; }

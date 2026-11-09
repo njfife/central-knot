@@ -1,14 +1,25 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
 import { announce, rerender } from './app.ts';
-import { button, h, icon, toggle } from './dom.ts';
+import { button, h, icon, onMac, toggle, trayName } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { AppPreferences, Appearance } from './types.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
-/** What each row's last action said, by row id: why it failed, or a note on what it did. */
-const messages = new Map<string, { text: string; failed: boolean }>();
+
+/**
+ * A line beneath a row: a note on what its last action did, why it failed, or (attention) that the system has the setting
+ * other than chosen, with an `action` that takes the person to fix it. `about` is the row's value it describes, as `shownIn`.
+ */
+interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention'; action?: { label: string; run: () => void }; about?: string }
+/** What each row's last action said, by row id. */
+const messages = new Map<string, RowMessage>();
+/** What each row shows of the settings, so a message can say which value it is about. */
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance };
+const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
+/** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
+const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
 /** Each row's newest action, so one that finishes late never sets or clears the message of a newer one. */
 const attempts = new Map<string, number>();
 let attempted = 0;
@@ -17,15 +28,18 @@ let attempted = 0;
 let latest = 0;
 
 /**
- * Shows main's answer unless a newer request has started since; a rejected answer propagates to the caller. An answer that
- * matches the page leaves it alone: rebuilding it when the window is focused would swallow the click that focused it.
+ * Shows main's answer unless a newer request has started since, and returns it either way; a rejected answer propagates to the
+ * caller. An answer that matches the page leaves it alone: rebuilding it when the window is focused would swallow the click
+ * that focused it. A row's message that the answer settles goes with it.
  */
-async function showNewest(answer: Promise<AppPreferences>): Promise<void> {
+async function showNewest(answer: Promise<AppPreferences>): Promise<AppPreferences> {
   const mine = ++latest;
   const settings = await answer;
-  if (mine !== latest || JSON.stringify(settings) === JSON.stringify(current)) return;
+  if (mine !== latest || JSON.stringify(settings) === JSON.stringify(current)) return settings;
   current = settings;
+  for (const [row, message] of messages) if (settled(row, message)) messages.delete(row);
   rerender();
+  return settings;
 }
 
 /** Reads the settings for the page: when it opens, and when main says they changed or the window comes back. */
@@ -40,22 +54,23 @@ export function openSettings() {
 }
 
 /**
- * Runs one row's action (a save, Show log file) and shows its outcome in that row: `work` returns a note to show (or nothing),
- * or throws, and `failure` puts why in plain words. Only the row's newest attempt changes the row. True when it worked.
+ * Runs one row's action (a save, Show log file) and shows its outcome in that row: `work` returns a message to show (or
+ * nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row showed when it began (still
+ * in effect). Only the row's newest attempt changes the row, and an outcome a newer read has settled says nothing. True when it worked.
  */
-async function act(row: string, work: () => Promise<string | undefined>, failure: (error: string) => string): Promise<boolean> {
+async function act(row: string, work: () => Promise<RowMessage | undefined>, failure: (error: string) => string): Promise<boolean> {
   const mine = ++attempted;
   attempts.set(row, mine);
-  let message: { text: string; failed: boolean } | undefined;
-  try {
-    const note = await work();
-    if (note) message = { text: note, failed: false };
-  } catch (error) { message = { text: failure(String(error)), failed: true }; }
+  const before = shownIn(row, current);
+  let message: RowMessage | undefined;
+  try { message = await work(); } catch (error) { message = { text: failure(String(error)), tone: 'failure', about: before }; }
+  const worked = message?.tone !== 'failure';
+  if (settled(row, message)) message = undefined;
   if (attempts.get(row) === mine && JSON.stringify(message) !== JSON.stringify(messages.get(row))) {
     if (message) messages.set(row, message); else messages.delete(row);
     rerender();
   }
-  return !message?.failed;
+  return worked;
 }
 
 /** The usual reasons a file can't be written, in plain words, with what to do about each. */
@@ -78,23 +93,24 @@ function saveFailure(error: string, kept: string): string {
 const save = (row: string, change: () => Promise<AppPreferences>, kept: string) =>
   act(row, async () => { await showNewest(change()); return undefined; }, error => saveFailure(error, kept));
 
-const mac = navigator.userAgent.includes('Mac');
-/** What starting at sign-in does. A reason from main (why it's off, or can't be changed here) takes this line's place. */
-const signInHint = `Opens hidden in the ${mac ? 'menu bar' : 'system tray'} when you sign in, so sync keeps running without the window.`;
-/** The system kept its own answer to a change and gave no reason: where the person can look. */
-const signInUnchanged = `Your system didn’t change this. Check ${mac ? 'Login Items in System Settings' : 'Startup apps in Settings'}.`;
+/** What starting at sign-in does. A reason it can't be changed here takes this line's place. */
+const signInHint = `Opens hidden in the ${trayName} when you sign in, so sync keeps running without the window.`;
+/** The system's own place for it, by the name its settings use; the reasons from main name the same place. */
+const signInPlace = onMac ? 'Login Items in System Settings' : 'Startup apps in Settings';
+const openSignInPlace = {
+  label: onMac ? 'Open Login Items' : 'Open Startup apps',
+  run: () => void window.centralKnot.openSignInSettings().catch(() => announce(`Couldn’t open ${signInPlace}. Open it from there.`)),
+};
 
 /** Turns starting at sign-in on or off. The row then shows the system's answer, which has the last word. */
 async function chooseSignIn(on: boolean): Promise<void> {
   const kept = current ? `Start at sign-in is still ${current.signIn.on ? 'on' : 'off'}.` : '';
   await act('sign-in', async () => {
-    const saved = window.centralKnot.setStartAtSignIn(on);
-    await showNewest(saved);
+    const saved = await showNewest(window.centralKnot.setStartAtSignIn(on));
     // A reason the system gives (waiting for approval, say) already shows in the row; a change it ignored without one is said here.
-    const { signIn } = await saved;
-    if (signIn.on !== on && !signIn.reason) throw new Error(signInUnchanged);
-    return undefined;
-  }, error => error.endsWith(signInUnchanged) ? signInUnchanged : saveFailure(error, kept));
+    if (saved.signIn.on === on || saved.signIn.reason) return undefined;
+    return { text: `Your system didn’t change this. Check ${signInPlace}.`, tone: 'attention', action: openSignInPlace, about: shownIn('sign-in', saved) };
+  }, error => saveFailure(error, kept));
 }
 
 const appearances: { value: Appearance; label: string; glyph: IconName }[] = [
@@ -126,23 +142,30 @@ function moveAppearance(event: KeyboardEvent) {
 const showLog = () => act('log', async () => {
   const shown = await window.centralKnot.showLog();
   if (shown.selected) return undefined;
-  return shown.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.';
+  return { text: shown.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.', tone: 'note' };
 }, () => 'Couldn’t open the log’s folder. Try again.');
 
+const messageLook = { note: ['folder-open', 'status'], failure: ['circle-alert', 'alert'], attention: ['info', 'status'] } as const;
+/** One line beneath a row. `role` is left off for a line that describes the row's state rather than news to announce. */
+function messageLine({ text, tone, action }: RowMessage, attrs: Record<string, unknown> = { role: messageLook[tone][1] }): HTMLElement {
+  return h(`p.setting-message.setting-${tone}`, attrs, icon(messageLook[tone][0], 14),
+    h('span', {}, text, action && h('button.text-action', { type: 'button', onclick: action.run }, action.label)));
+}
+
 /**
- * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and what its last
- * action said on a line of its own beneath both, so the control never moves when a message comes or goes.
+ * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and beneath both, on
+ * lines of their own so the control never moves when they come or go: what its last action said, and `notice`, what needs
+ * the person about its current state.
  */
-function settingRow(id: string, title: string, hint: string, control: HTMLElement): HTMLElement {
+function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
       h('div.setting-title', { id: `setting-${id}-title` }, title),
       h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
     h('div.setting-control', {}, control),
-    message && (message.failed
-      ? h('p.setting-message.setting-failure', { role: 'alert' }, icon('circle-alert', 14), h('span', {}, message.text))
-      : h('p.setting-message.setting-note', { role: 'status' }, icon('folder-open', 14), h('span', {}, message.text))));
+    message && messageLine(message),
+    notice && messageLine(notice, { id: `setting-${id}-notice` }));
 }
 
 const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
@@ -151,11 +174,16 @@ const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
 export function settingsPage(): HTMLElement {
   const chosen = current?.appearance;
   const signIn = current?.signIn;
+  // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
+  const cannot = signIn?.available ? undefined : signIn?.reason;
+  const systemSays: RowMessage | undefined = signIn?.available && signIn.reason ? { text: signIn.reason, tone: 'attention', action: openSignInPlace } : undefined;
   return h('div.page', {}, h('div.scroll.settings-scroll', {},
     settingsSection('general', 'General',
-      // Off and unchangeable until main has said, so a click never acts on a guess.
-      settingRow('sign-in', 'Start at sign-in', signIn?.reason ?? signInHint,
-        toggle(!!signIn?.on, 'Start at sign-in', on => void chooseSignIn(on), !signIn?.available, 'start-at-sign-in', { 'aria-describedby': 'setting-sign-in-hint', title: null })),
+      settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
+        // Off and unchangeable until main has said, so a click never acts on a guess. No tooltip: the row's title already says it.
+        toggle({ on: !!signIn?.on, label: 'Start at sign-in', onchange: on => void chooseSignIn(on), disabled: !signIn?.available, id: 'start-at-sign-in',
+          attrs: { 'aria-describedby': systemSays ? 'setting-sign-in-hint setting-sign-in-notice' : 'setting-sign-in-hint', title: null } }),
+        systemSays),
       settingRow('appearance', 'Appearance', 'System follows your computer’s light or dark setting.',
         // Until the settings arrive, no card is chosen; the cards look as usual (not dimmed) and System holds the Tab stop.
         h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'setting-appearance-title', 'aria-describedby': 'setting-appearance-hint', 'aria-busy': String(!current), onkeydown: moveAppearance },

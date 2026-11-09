@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { mainProcess } from './main-process.mjs';
+import { connect, mainProcess } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -118,25 +118,14 @@ async function launch(userData = join(scratch, 'data')) {
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page'); if (!targets.length) targets = undefined; } catch { /* still starting */ }
   }
   if (!targets) { child.kill('SIGKILL'); throw new Error('The app did not open a debug port.'); }
-  const socket = new WebSocket(targets[0].webSocketDebuggerUrl);
-  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = fail; });
-  const pending = new Map();
   const pageErrors = [];
-  let id = 0;
-  socket.onmessage = message => {
-    const data = JSON.parse(message.data);
-    if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); }
+  const page = await connect(targets[0].webSocketDebuggerUrl, data => {
     if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text);
     if (data.method === 'Log.entryAdded' && data.params.entry.level === 'error') pageErrors.push(data.params.entry.text);
-  };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
+  });
+  const { send, run } = page;
   await send('Runtime.enable');
   await send('Log.enable');
-  const run = async expression => {
-    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text);
-    return reply.result.result.value;
-  };
   const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
@@ -150,8 +139,8 @@ async function launch(userData = join(scratch, 'data')) {
     expand: async () => { await run(`[...document.querySelectorAll('button')].filter(b => /^Show \\d+ skill/.test(b.textContent.trim()) && b.getAttribute('aria-expanded') !== 'true').forEach(b => b.click())`); await settle(); },
     plan: () => run(`Object.fromEntries([...document.querySelectorAll('.plan-card')].map(e => [e.dataset.key, e.dataset.state]))`),
     pages: async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page').length,
-    quit: async () => { socket.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
-    crash: () => new Promise(done => { socket.close(); child.once('exit', done); child.kill('SIGKILL'); }),
+    quit: async () => { page.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
+    crash: () => new Promise(done => { page.close(); child.once('exit', done); child.kill('SIGKILL'); }),
   };
   await settle();
   return app;
@@ -604,27 +593,60 @@ async function practiceFlow() {
     await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
     await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
     refused.includes(signInReason), 'startAtSignIn' in savedSettings()], [['false', true], signInReason, true, false]);
-  if (a.main) {
-    // Main keeps every menu it builds from here on, and the first-close dialog answers OK without showing.
+  // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
+  // stood-in packaged app could reach the real system's login items.
+  if (a.main && process.platform === 'linux') {
+    // Main keeps every menu it builds from here on, the first-close dialog answers OK without showing, and the system's
+    // settings pages and login items are stand-ins: the login items keep what they are asked for, unless told to ignore it.
     const main = await a.main();
-    await main.run(`(globalThis.ck = { menus: [], dialogs: [] }, ((build, show) => {
+    await main.run(`(globalThis.ck = { menus: [], dialogs: [], opened: [], asked: [], on: false, ignore: false }, ((build, get, set) => {
+      ck.restore = () => Object.assign(electron.app, { getLoginItemSettings: get, setLoginItemSettings: set });
       electron.Menu.buildFromTemplate = template => (ck.menus.push(template), build.call(electron.Menu, template));
       electron.dialog.showMessageBox = options => (ck.dialogs.push(options), Promise.resolve({ response: 0, checkboxChecked: true }));
-    })(electron.Menu.buildFromTemplate, electron.dialog.showMessageBox))`);
-    // As an installed app on Linux (a stand-in answer from main, put back after): coming back to the window reads it again.
-    await main.run(`Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true })`);
-    await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
-    let reread = false;
-    for (let tries = 0; tries < 20 && !reread; tries++) { await wait(100); reread = await a.text('#setting-sign-in-hint') === 'Not available on Linux yet.'; }
+      electron.shell.openExternal = url => (ck.opened.push(url), Promise.resolve());
+      const exe = electron.app.getPath('exe');
+      electron.app.getLoginItemSettings = () => ({ openAtLogin: ck.on, launchItems: ck.on ? [{ path: exe, args: ['--hidden'], enabled: true }] : [] });
+      electron.app.setLoginItemSettings = ({ openAtLogin }) => { ck.asked.push(openAtLogin); if (!ck.ignore) ck.on = openAtLogin; };
+    })(electron.Menu.buildFromTemplate, electron.app.getLoginItemSettings, electron.app.setLoginItemSettings))`);
+    const refocus = () => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+    const until = async (expected, read) => { let seen; for (let tries = 0; tries < 30; tries++) { seen = await read(); if (JSON.stringify(seen) === JSON.stringify(expected)) break; await wait(100); } return seen; };
+    // The switch, the row's message and its action.
+    const row = () => a.run(`(message => [document.querySelector('#start-at-sign-in').getAttribute('aria-checked'), message?.querySelector('span').firstChild.textContent ?? null, message?.querySelector('.text-action')?.textContent ?? null])(document.querySelector('#setting-sign-in .setting-message'))`);
+    // As an installed app on Windows, coming back to the window: the row can be changed now.
+    await main.run(`(Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }), Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true }))`);
+    await refocus();
+    await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
+    await a.click('#start-at-sign-in');
+    const fromSettings = await until(['true', null, null], row);
+    // The menu's item turns it off while Settings is open: the row follows.
+    await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
+    const fromMenu = await until(['false', null, null], row);
+    // A system that ignores the change: the row says so, with the way to its settings; once it is put right there, coming back clears it.
+    const unchanged = ['false', 'Your system didn’t change this. Check Startup apps in Settings.', 'Open Startup apps'];
+    await main.run(`ck.ignore = true`);
+    await a.click('#start-at-sign-in');
+    const ignored = await until(unchanged, row);
+    await a.click('#setting-sign-in .setting-message .text-action');
+    await main.run(`Object.assign(ck, { ignore: false, on: true })`);
+    await refocus();
+    const putRight = await until(['true', null, null], row);
+    same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, opens Startup apps, and clears once put right',
+      [fromSettings, fromMenu, ignored, putRight, await main.run(`[ck.asked, ck.opened]`)],
+      [['true', null, null], ['false', null, null], unchanged, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
+    // As an installed app on Linux: coming back to the window reads it again.
+    await main.run(`(Object.defineProperty(process, 'platform', { value: 'linux', configurable: true }), ck.asked = [])`);
+    const saved = savedSettings().startAtSignIn;
+    await refocus();
+    const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
     const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
     // The first close explains where the app went; on Linux it offers no start at sign-in.
     await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
     for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
     const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
-    await main.run(`(delete electron.app.isPackaged, electron.BrowserWindow.getAllWindows()[0].show())`);
-    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available, and nothing is saved',
-      [reread, menuItem, dialogs, 'startAtSignIn' in savedSettings()],
-      [true, { label: 'Start at sign-in (not available on Linux yet)', visible: false, enabled: false, checked: false }, [false], false]);
+    await main.run(`(delete electron.app.isPackaged, ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
+      [reread, menuItem, dialogs, await main.run(`ck.asked`), savedSettings().startAtSignIn === saved],
+      ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
     main.close();
   }
   await a.click('#nav-skills');

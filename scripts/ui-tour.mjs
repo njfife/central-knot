@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { mainProcess } from './main-process.mjs';
+import { connect, mainProcess } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -33,13 +33,8 @@ async function launch() {
   const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise(done => { socket.onopen = done; });
-  const pending = new Map();
-  let id = 0;
-  socket.onmessage = message => { const data = JSON.parse(message.data); if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); } };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
-  const run = async expression => { const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text); return reply.result.result.value; };
+  const page = await connect(target.webSocketDebuggerUrl);
+  const { send, run } = page;
   const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
@@ -50,7 +45,7 @@ async function launch() {
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
-    quit: () => { socket.close(); child.kill('SIGKILL'); },
+    quit: () => { page.close(); child.kill('SIGKILL'); },
   };
 }
 
@@ -253,30 +248,39 @@ if (wanted('settings')) {
     await a.click('#nav-skills'); await a.click('#nav-settings');
     const main = await a.main();
     await main.run(`globalThis.real = { platform: process.platform, getPath: electron.app.getPath, getLogin: electron.app.getLoginItemSettings, setLogin: electron.app.setLoginItemSettings, setMenu: electron.Menu.setApplicationMenu }`);
+    const refocus = async () => { await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`); await a.settle(); };
     const system = async (platform, answer) => {
       await main.run(`(() => {
-        Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)}, configurable: true });
-        Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true });
         const exe = ${JSON.stringify(platform === 'darwin' ? '/Applications/Central Knot.app/Contents/MacOS/Central Knot' : 'C:\\Program Files\\Central Knot\\Central Knot.exe')};
         electron.app.getPath = name => name === 'exe' ? exe : real.getPath.call(electron.app, name);
         electron.app.getLoginItemSettings = () => ({ ...${JSON.stringify(answer)}, launchItems: (${JSON.stringify(answer.launchItems ?? [])}).map(item => ({ ...item, path: exe })) });
         electron.app.setLoginItemSettings = () => {};
         electron.Menu.setApplicationMenu = () => {};
+        Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)}, configurable: true });
+        Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true });
       })()`);
-      await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
-      await a.settle();
+      await refocus();
     };
+    const both = async (name, caption) => { await shot(a, `${name}-dark`, caption); await a.theme('light'); await shot(a, `${name}-light`, 'The same, light.'); await a.theme('dark'); };
     await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: true }] });
     await shot(a, 'settings-sign-in-on', 'Stand-in system: an installed app on Windows, starting at sign-in. The switch is on and the hint says what it does.');
-    await system('darwin', { openAtLogin: true, status: 'requires-approval' });
-    await shot(a, 'settings-sign-in-approval-dark', 'Stand-in system: an installed app on macOS that turned it on, with macOS waiting for approval. The switch shows Off (the system’s answer), and the hint’s place says how to finish.');
-    await a.theme('light'); await shot(a, 'settings-sign-in-approval-light', 'The same, light.'); await a.theme('dark');
+    // Keyboard focus: from the Appearance cards, Shift+Tab goes back to the switch.
+    await a.run(`document.querySelector('#appearance-system').focus()`);
+    for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
+    await a.settle();
+    await both('settings-sign-in-focused', `Focused the Appearance cards and pressed Shift+Tab: the switch has the focus ring, outside its track (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.run(`document.activeElement?.blur()`);
     await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: false }] });
-    await shot(a, 'settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Task Manager’s startup apps. Off, and the row says where it was turned off; the switch can turn it on again.');
+    await both('settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Startup apps. Off; the hint still says what it does, and beneath it the row says where it was turned off, with Open Startup apps.');
     await system('win32', { openAtLogin: false, launchItems: [] });
     await a.click('#start-at-sign-in');
-    await shot(a, 'settings-sign-in-unchanged-dark', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says the system didn’t change it and where to look.');
-    await a.theme('light'); await shot(a, 'settings-sign-in-unchanged-light', 'The same, light.'); await a.theme('dark');
+    await both('settings-sign-in-unchanged', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says the system didn’t change it, where to look, and Open Startup apps.');
+    // macOS: the page names macOS's places once it knows it runs on a Mac, so it is reloaded as one.
+    const agent = await a.run('navigator.userAgent');
+    const reloadAs = async userAgent => { await a.send('Emulation.setUserAgentOverride', { userAgent }); await a.send('Page.reload'); await wait(1500); await a.settle(); await a.click('#nav-settings'); };
+    await system('darwin', { openAtLogin: true, status: 'requires-approval' });
+    await reloadAs(agent.replace(/\(X11;[^)]*\)/, '(Macintosh; Intel Mac OS X 10_15_7)'));
+    await both('settings-sign-in-approval', 'Stand-in system: an installed app on macOS that turned it on, with macOS waiting for approval (as it also reports one turned off in Login Items). The switch shows Off, the system’s answer; the hint stays, and beneath it how to finish, with Open Login Items. (With main standing in as an installed app, the sidebar leaves out the Practice copy, as a released app does.)');
     // Back to this Linux dev run: the row is off and disabled again, with its reason.
     await main.run(`(() => {
       Object.defineProperty(process, 'platform', { value: real.platform, configurable: true });
@@ -284,8 +288,7 @@ if (wanted('settings')) {
       Object.assign(electron.app, { getPath: real.getPath, getLoginItemSettings: real.getLogin, setLoginItemSettings: real.setLogin });
       electron.Menu.setApplicationMenu = real.setMenu;
     })()`);
-    await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
-    await a.settle();
+    await reloadAs(agent);
     main.close();
   }
   await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');

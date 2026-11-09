@@ -15,7 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import { signInArgs, signInLabel, signInState } from './signin.ts';
+import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -153,28 +153,37 @@ function showPage(page: string) {
   if (window && !window.isDestroyed()) window.webContents.send('navigate', page);
 }
 
+const signInFacts = () => ({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke });
 /** Whether Central Knot starts at sign-in, as the system has it now, and why not where it can't (see signin.ts). */
-const signIn = () => signInState({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke }, () => app.getLoginItemSettings({ args: signInArgs }));
+const signIn = () => signInState(signInFacts(), () => app.getLoginItemSettings({ args: signInArgs }));
 /**
  * Registers or removes the login item as last chosen. Only a save calls it (the first launch's too), never a start: one the
- * person turned off in the system stays off.
+ * person turned off in the system stays off. A system that refuses (a Windows policy, say) is logged; whoever asked then reads
+ * the system's answer, which says it didn't change.
  */
 function applySignIn() {
-  if (signIn().available) app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: signInArgs });
+  if (whyNoSignIn(signInFacts())) return;
+  try { app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: signInArgs }); } catch (error) { logFailure('start at sign-in', error); }
 }
 /** On by default (PLT-03): registered at the first launch of an installed app, then left alone. */
 async function firstSignIn() {
-  if (!signIn().available || appSettings.startAtSignIn !== undefined) return;
+  if (whyNoSignIn(signInFacts()) || appSettings.startAtSignIn !== undefined) return;
   await saveAppSettings({ startAtSignIn: true });
 }
 /** Every place that turns it on or off (Settings, both menus, the first-close dialog) saves through the settings chain. */
 const setStartAtSignIn = (on: boolean) => saveAppSettings({ startAtSignIn: on });
 /** A menu or the dialog has nowhere to say a save failed: it is logged, and the menus go back to the system's answer. */
-const setFromMenu = (on: boolean) => void setStartAtSignIn(on).catch(error => { logFailure('start at sign-in', error); refreshTray(); });
+const saveSignInQuietly = (on: boolean) => void setStartAtSignIn(on).catch(error => { logFailure('start at sign-in', error); refreshTray(); });
 /** The checkbox both menus show: the system's answer, the reason beside it, and changeable only where it can be. */
 function signInItem(): MenuItemConstructorOptions {
   const state = signIn();
-  return { label: signInLabel(state), type: 'checkbox', checked: state.on, enabled: state.available, click: item => setFromMenu(item.checked) };
+  return { label: signInLabel(state), type: 'checkbox', checked: state.on, enabled: state.available, click: item => saveSignInQuietly(item.checked) };
+}
+/** Where the person finishes or undoes it in the system's own settings: fixed places, never one the page names. */
+function openSignInSettings(): Promise<void> {
+  if (process.platform === 'darwin') return shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
+  if (process.platform === 'win32') return shell.openExternal('ms-settings:startupapps');
+  return Promise.reject(new Error('No sign-in settings to open on this system.'));
 }
 const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
 
@@ -259,6 +268,8 @@ function makeTray() {
   image.setTemplateImage(true);
   tray = new Tray(image);
   tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
+  // The menu is rebuilt as the pointer reaches the icon, so it shows a change made in System Settings while no window was open.
+  tray.on('mouse-enter', refreshTray);
   refreshTray();
 }
 
@@ -421,8 +432,8 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   try {
     const shown = await view();
     void startWatching();
+    // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
-    refreshTray();
     return shown;
   } catch (error) { current = previous; throw error; }
 }
@@ -496,7 +507,7 @@ function createWindow(show: boolean) {
     // show the sign-in start it turned on, so neither a hidden window nor a login item is a surprise.
     if (!appSettings.closeExplained && !smoke) {
       void saveAppSettings({ closeExplained: true });
-      const icon = process.platform === 'darwin' ? 'menu bar' : 'tray';
+      const icon = process.platform === 'darwin' ? 'menu bar' : 'system tray';
       const syncing = syncOn && homeWritable && lastManagedCount > 0;
       // The checkbox shows the system's answer as the dialog opens; only a change the person makes to it is saved.
       const signedIn = signIn();
@@ -506,7 +517,7 @@ function createWindow(show: boolean) {
         detail: syncing ? `Open it again from its ${icon} icon, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
         ...(signedIn.available ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: signedIn.on } : {}),
       }).then(({ response, checkboxChecked }) => {
-        if (signedIn.available && checkboxChecked !== signedIn.on) setFromMenu(checkboxChecked);
+        if (signedIn.available && checkboxChecked !== signedIn.on) saveSignInQuietly(checkboxChecked);
         if (response === 1) { quitting = true; app.quit(); }
       });
     }
@@ -548,11 +559,12 @@ app.whenReady().then(async () => {
   });
   handleNow('settings:sign-in', async on => {
     if (typeof on !== 'boolean') throw new Error('Invalid start at sign-in.');
-    const state = signIn();
-    if (!state.available) throw new Error(state.reason);
+    const why = whyNoSignIn(signInFacts());
+    if (why) throw new Error(why);
     await setStartAtSignIn(on);
     return preferences();
   });
+  handleNow('settings:open-sign-in', openSignInSettings);
   handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');

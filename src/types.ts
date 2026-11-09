@@ -81,6 +81,8 @@ export interface DesktopApi {
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
   /** Turns starting at sign-in on or off. Returns the settings as saved, with the system's answer. */
   setStartAtSignIn(on: boolean): Promise<AppPreferences>;
+  /** Opens the system's own sign-in settings: Login Items on macOS, Startup apps on Windows. */
+  openSignInSettings(): Promise<void>;
   /** Main saved a change to the settings, whoever made it (this page, a menu, a dialog). */
   onSettingsChanged(callback: () => void): void;
   /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
@@ -383,7 +385,10 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
-/** Whether Central Knot starts at sign-in, as the system has it now; `reason` says why it is off or can't be changed here. */
+/**
+ * Whether Central Knot starts at sign-in, as the system has it now. `reason` says why it can't be changed here (`available`
+ * false) or, where it can, why the system has it off (waiting for approval, turned off in the system's settings).
+ */
 export interface SignIn { on: boolean; available: boolean; reason?: string }
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn }

@@ -17,8 +17,8 @@ test('Start at sign-in shows the system’s answer, and why it is off or can’t
     ['macOS removed from Login Items', mac, { openAtLogin: false, status: 'not-registered' }, { on: false, available: true }],
     ['macOS 12, no status', mac, { openAtLogin: true }, { on: true, available: true }],
     ['Windows on', windows, { openAtLogin: true, launchItems: [item(true)] }, { on: true, available: true }],
-    ['Windows turned off in Task Manager', windows, { openAtLogin: true, launchItems: [item(false)] }, { on: false, available: true, reason: 'Turned off in your system’s startup settings.' }],
-    ['Windows, only another copy or other arguments', windows, { openAtLogin: false, launchItems: [item(true, 'C:\\Old\\Central Knot.exe'), item(true, windows.exe, [])] }, { on: false, available: true }],
+    ['Windows turned off in Task Manager', windows, { openAtLogin: true, launchItems: [item(false)] }, { on: false, available: true, reason: 'Turned off in Startup apps in Settings. Turn it on here to start again.' }],
+    ['Windows, only another copy or other arguments', windows, { openAtLogin: true, launchItems: [item(true, 'C:\\Old\\Central Knot.exe'), item(true, windows.exe, [])] }, { on: false, available: true }],
   ];
   for (const [name, facts, items, expected] of cases) {
     let asked = false;
@@ -27,7 +27,7 @@ test('Start at sign-in shows the system’s answer, and why it is off or can’t
     // Where a login item can't exist, the system is never asked (no login-item calls on Linux or in a dev build).
     assert.equal(asked, items !== undefined, `${name}: system asked`);
   }
-  // The menus carry the same reason as Settings.
-  assert.equal(signInLabel(cases[3][3]), 'Start at sign-in (move Central Knot to the Applications folder first)');
+  // The menus carry the same reason as Settings, shortened.
+  assert.equal(signInLabel(cases[3][3]), 'Start at sign-in (move to Applications first)');
   assert.equal(signInLabel(cases[4][3]), 'Start at sign-in');
 });
