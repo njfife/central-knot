@@ -88,7 +88,7 @@ const pull = () => busy('Pulling from the repo…', async () => {
   const waiting = result.waitsForClaude ?? [];
   const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.';
   const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
-    waiting.length ? `Claude Code doesn’t have ${andList(waiting)} yet: close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
+    waiting.length ? `Claude Code gets ${andList(waiting)} once it’s closed and you click Write to Claude Code.` : ''].filter(Boolean);
   // One wording for the promise, always with History one click away.
   await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : 'any of them'} in History.` : undefined);
   if (waiting.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
@@ -129,7 +129,8 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
   const label = side === 'in'
     ? { added: 'New in the repo', changed: 'Changed in the repo', removed: 'Removed in the repo' }[change.change]
     : { added: 'New here', changed: 'Changed here', removed: 'Removed here' }[change.change];
-  const note = change.held ? (side === 'in' ? `Can’t come in: ${change.held}` : `Stays out of the repo: ${change.held}`)
+  // Held from the repo: Push never touches it there (unless it was only waiting on the last Pull, which Pull retries).
+  const note = change.held ? (side === 'in' ? `Can’t come in. ${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}` : `Stays out of the repo. ${change.held}`)
     : change.alsoHere === 'removed' ? 'Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.'
     : change.alsoHere ? `Changed here too. Pull uses the repo’s version; yours stays in History.`
     : change.keptHere ? 'Removed in the repo but changed here, so it stays, and Push puts it back.'
@@ -166,7 +167,7 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string) => h('span.repo-state-part', {}, icon(glyph, 14, tone), h('span', {}, text));
   const { pull: incoming, push: outgoing } = waiting(view);
   const stuck = [...view.incoming, ...view.outgoing].filter(change => change.held).length;
-  const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', 'tone-accent', `${outgoing} to push`) : null];
+  const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', view.pushBlocked ? `${outgoing} to push after Pull` : `${outgoing} to push`) : null];
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
     : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts]
     : !incoming && !outgoing && stuck ? [part('triangle-alert', 'tone-warning', `Up to date, except ${plural(stuck, 'item')} that can’t move`)]
@@ -198,7 +199,8 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   // Only what has happened: right after Connect that is just the check.
   const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
   // Each separator belongs to the part after it, so a wrapped line starts with "·", never ends with one.
-  const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, index ? `· ${text}` : text.charAt(0).toUpperCase() + text.slice(1))]);
+  // Parts sit apart by space, not dots, so a wrapped line neither starts nor ends on a separator.
+  const activity = parts.map((text, index) => h('span.repo-activity-part', {}, index ? text : text.charAt(0).toUpperCase() + text.slice(1)));
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
       summary(view),
