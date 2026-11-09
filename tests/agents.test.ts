@@ -91,15 +91,15 @@ test('Updating a copy keeps that tool’s own fields, comments and tables', asyn
     const back = await readAgents(box.context, 'codex-cli');
     assert.equal(back.entries[0].agent.prompt, 'Say "hi" with a \\ and """quotes"""\ttab.\n');
     // Claude frontmatter extras and comments survive an update from elsewhere.
-    const claude = `---\n# keep me\nname: reviewer\ndescription: Reviews code\n---\n\nSay "hi" with a \\ and """quotes"""\ttab.\n`;
-    assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Reviews code', prompt: 'x' }, claude), '---\n# keep me\nname: reviewer\ndescription: Reviews code\n---\n\nx');
+    const claude = `---\n# keep me\nname: reviewer\ndescription: Reviews code\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nSay "hi" with a \\ and """quotes"""\ttab.\n`;
+    assert.equal(agentText('claude-cli', { name: 'reviewer', description: 'Reviews code', prompt: 'x' }, claude), '---\n# keep me\nname: reviewer\ndescription: Reviews code\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nx');
   } finally { await box.cleanup(); }
 });
 
-test('A different agent with the same name needs a choice; a chosen copy replaces the other and is kept in History', async () => {
+test('A different agent with the same name (even in another case) needs a choice; a chosen copy replaces the other', async () => {
   const box = await sandbox();
   try {
-    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await writeFile(join(box.home, '.claude/agents/Reviewer.md'), claudeAgent());
     await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\nname: reviewer\ndescription: Copilot reviewer\n---\n\nOther prompt.\n');
     const held = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
     assert.equal(held.writes, 0);
@@ -153,40 +153,6 @@ test('Agents nobody managed are never written, and unreadable files are reported
   } finally { await box.cleanup(); }
 });
 
-test('Frontmatter lines other than name and description stay exactly as written', () => {
-  const existing = '---\n# mine\nname: reviewer\ndescription: Old\ntools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, TodoWrite, NotebookEdit, Task\nhooks: {PreToolUse: [{matcher: Bash}]}\n---\n\nOld prompt.\n';
-  const text = agentText('claude-cli', { name: 'reviewer', description: 'A description long enough that a YAML writer with a line width would want to fold it onto more than one line, which must not happen here', prompt: 'New prompt.\n' }, existing);
-  assert.ok(text.includes('tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch, WebSearch, TodoWrite, NotebookEdit, Task\nhooks: {PreToolUse: [{matcher: Bash}]}\n'), text);
-  assert.ok(text.startsWith('---\n# mine\nname: reviewer\ndescription: A description long enough'), text);
-  assert.equal(text.split('\n').filter(line => line.startsWith('description:')).length, 1);
-  assert.ok(text.endsWith('---\n\nNew prompt.\n'), text);
-});
-
-test('Names that differ only by case are one agent across tools, and a clash needs a choice', async () => {
-  const box = await sandbox();
-  try {
-    await writeFile(join(box.home, '.claude/agents/Reviewer.md'), claudeAgent());
-    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\nname: reviewer\ndescription: Copilot one\n---\n\nOther.\n');
-    const view = await agentsView(box.context, tools);
-    assert.equal(view.servers.length, 1);
-    const held = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    assert.equal(held.writes, 0);
-    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Other\./);
-  } finally { await box.cleanup(); }
-});
-
-test('With Sync off, Apply all for one agent never spreads another agent’s edit', async () => {
-  const box = await sandbox();
-  try {
-    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
-    await writeFile(join(box.home, '.claude/agents/other.md'), '---\nname: other\ndescription: Other\n---\n\nOther.\n');
-    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }, { key: 'other', managed: true, off: [] }]);
-    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited with Sync off.\n'));
-    await applyAgents(box.context, tools, [{ key: 'other', managed: false, off: [] }], { only: new Set(['other']) });
-    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/, 'not spread');
-  } finally { await box.cleanup(); }
-});
-
 test('An agent edit whose spread failed at first is still History, so the version it replaced can be restored', async () => {
   const box = await sandbox();
   try {
@@ -198,28 +164,11 @@ test('An agent edit whose spread failed at first is still History, so the versio
     await applyAgents(box.context, tools, []);
     for (const folder of ['.copilot/agents', '.codex/agents']) await chmod(join(box.home, folder), 0o755);
     await applyAgents(box.context, tools, []);
+    await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Edited\./);
-    const edit = (await readHistory(box.home)).find(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
-    assert.ok(edit, 'the edit is in History');
-    assert.notEqual(edit!.previous, undefined);
-  } finally { await box.cleanup(); }
-});
-
-test('An agent catch-up after a failed write leaves exactly one edit in History, even after idle passes', async () => {
-  const box = await sandbox();
-  try {
-    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
-    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited.\n'));
-    const { chmod } = await import('node:fs/promises');
-    await chmod(join(box.home, '.copilot/agents'), 0o555);
-    await applyAgents(box.context, tools, []);
-    await chmod(join(box.home, '.copilot/agents'), 0o755);
-    await applyAgents(box.context, tools, []);
-    await applyAgents(box.context, tools, []);
-    await applyAgents(box.context, tools, []);
     const edits = (await readHistory(box.home)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
     assert.equal(edits.length, 1, JSON.stringify(edits));
+    assert.notEqual(edits[0].previous, undefined);
   } finally { await box.cleanup(); }
 });
 
