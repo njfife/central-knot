@@ -453,7 +453,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', /Tools \(.*model \(.*aren’t copied/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the details name the limits', /can’t hold its tools \(.*model \(.*edits only flow out/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
   // One-way edge: an edit in a receiving tool stays there and stops updating; its amber box queues the source's copy again.
   const codexAgent = join(practice, '.codex/agents/code-reviewer.toml');
@@ -469,11 +469,15 @@ async function practiceFlow() {
   await a.click('#stopped-dismiss-code-reviewer-codex-cli');
   check('deciding later keeps both choices in the Codex row', await a.exists('#stopped-keep-code-reviewer-codex-cli-details') && await a.exists('#stopped-use-code-reviewer-codex-cli-details') && (await a.text('.toolbar') ?? '').includes('stopped updating'));
   await a.click('#stopped-keep-code-reviewer-codex-cli-details');
+  check('keeping the edit is said with an Undo, and the toolbar counts it', /Codex keeps its own edit of code-reviewer/.test(await a.text('main') ?? '') && await a.exists('#outcome-undo-keep') && /All synced · 1 kept edit/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   check('Keep my edit clears the warning and leaves the edit', await a.exists('#cell-code-reviewer-codex-cli[data-state="kept"]') && !(await a.text('.toolbar') ?? '').includes('stopped updating') && readFileSync(codexAgent, 'utf8').includes('Edited in Codex.'));
   await a.click('#cell-code-reviewer-codex-cli');
   await applyAll(a);
   check('the result says Codex resumed, not that an agent was newly managed', /Codex has Claude Code’s copy of code-reviewer again/.test(await a.text('main') ?? ''), (await a.text('main') ?? '').slice(0, 300));
   check('its amber box puts Claude Code’s copy back in Codex', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
+  check('the resume result offers to restore Codex’s edit', await a.exists('#outcome-restore-edit'));
+  await a.click('#outcome-restore-edit');
+  check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
   // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.

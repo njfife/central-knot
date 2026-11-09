@@ -570,8 +570,16 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
       act: undo ? addedUndo(addedNow) : undefined };
     const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
     const resumed = changes.map(change => ({ change, was: before.find(server => server.key === change.key) })).filter(({ change, was }) => change.use && change.use !== 'separate' && was?.managed && was.stopped?.length);
-    if (resumed.length && resumed.length === changes.length && result.writes) state.outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
-      text: resumed.map(({ change, was }) => `${andText(was!.stopped!.map(tool => toolNames[tool] ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolNames[change.use!] ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.' };
+    // A resumed copy receives updates again: an earlier "keep my edit" no longer stands for a later edit.
+    for (const { change, was } of resumed) for (const tool of was!.stopped!) { try { localStorage.removeItem(`ck-kept-edit:${state.home?.home ?? ''}:${change.key}:${tool}`); } catch { /* nothing kept */ } }
+    if (resumed.length && resumed.length === changes.length && result.writes) {
+      // The edit the resume replaced is one click back: its 'chosen' event restores it, and the copy stops again.
+      const chosen = (await api().history()).filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+      const back = [...new Set(chosen.flatMap(event => event.losers.map(loser => toolNames[loser.tool] ?? loser.tool)))];
+      state.outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
+        text: resumed.map(({ change, was }) => `${andText(was!.stopped!.map(tool => toolNames[tool] ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolNames[change.use!] ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.',
+        act: chosen.length === 1 && back.length ? { label: `Restore ${andText(back)}’s edit`, id: 'outcome-restore-edit', title: `Puts ${andText(back)}’s edited copy back; it stops updating again`, run: () => void restoreEvent(chosen[0]!.id, 'narrow') } : undefined };
+    }
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });

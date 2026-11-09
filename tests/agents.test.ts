@@ -277,3 +277,35 @@ test('Convert to skill: an agent becomes a Pi skill once, with its origin record
     assert.equal(await read(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\n', 'model: opus\n'), 'the agent is unchanged');
   } finally { await box.cleanup(); }
 });
+
+test('Undo of using the source’s copy over a stopped one-way copy puts back only that edit, and it stops again', async () => {
+  const box = await sandbox();
+  try {
+    const source = claudeAgent(undefined, 'tools: Read, Grep\nmodel: opus\n');
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), source);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const codex = await read(box.home, '.codex/agents/reviewer.toml');
+    const edited = codex.replace('Be brief.', 'Codex only.');
+    await writeFile(join(box.home, '.codex/agents/reviewer.toml'), edited);
+    await applyAgents(box.context, tools, []);
+    assert.deepEqual((await agentsView(box.context, tools)).servers[0].stopped, ['codex-cli']);
+    const resumed = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
+    assert.equal(resumed.writes, 1, JSON.stringify(resumed.results));
+    assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), codex);
+    const chosen = (await readHistory(box.home)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
+    const copilotBefore = await read(box.home, '.copilot/agents/reviewer.agent.md');
+    const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
+    assert.equal(undone.stopped, undefined, JSON.stringify(undone));
+    assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+    assert.equal(await read(box.home, '.claude/agents/reviewer.md'), source, 'the source is never touched');
+    assert.equal(await read(box.home, '.copilot/agents/reviewer.agent.md'), copilotBefore);
+    const view = await agentsView(box.context, tools);
+    assert.deepEqual(view.servers[0].stopped, ['codex-cli']);
+    assert.ok(view.servers[0].limits?.['copilot-cli'], 'still one-way from Claude Code');
+    // A later source edit reaches Copilot only, not the restored Codex edit.
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Newer.\n', 'tools: Read, Grep\nmodel: opus\n'));
+    await applyAgents(box.context, tools, []);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Newer\./);
+    assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+  } finally { await box.cleanup(); }
+});

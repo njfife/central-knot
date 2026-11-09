@@ -582,6 +582,12 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedAgent(context, tools, history, past);
   const key = past?.key.replace(/^agent:/, '');
+  // A one-way copy that a choice replaced: 'narrow' puts back only that tool's own edited file, and it stops updating again.
+  // The source and the other receiving tools keep what they have; the agent stays one-way from the same source.
+  if (past && key && past.kind === 'chosen' && !past.undoneBy) {
+    const copies = (await readAgentRecord(context.home)).items[key]?.copies ?? [];
+    if (choice === 'narrow' || (past.losers.length && past.losers.every(loser => copies.find(copy => copy.tool === loser.tool)?.oneWay))) return restoreReplacedOneWay(context, tools, history, past, key);
+  }
   const options = past ? past.losers.filter(loser => loser.hash && loser.hash !== past.previous && loser.hash !== past.winner?.hash) : [];
   const hash = past && (choice ? options.find(option => option.hash === choice)?.hash
     : past.kind === 'conflict' || past.kind === 'kept-edit' ? options[0]?.hash ?? (past.kind === 'conflict' ? past.previous : undefined)
@@ -639,5 +645,47 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const id = randomUUID();
   past.undoneBy = id;
   await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: replaced[0]?.tool ?? version.tool, hash }, losers: replaced, orderProved: true, previous: before }]);
+  return { results, writes };
+}
+
+/** Undo of "use the source's copy" for a stopped one-way copy: that tool gets its own edited file back, unchanged since, and stops again. */
+async function restoreReplacedOneWay(context: ShareContext, tools: HarnessId[], history: HistoryEvent[], past: HistoryEvent, key: string): Promise<McpResult> {
+  const record = await readAgentRecord(context.home);
+  const item = record.items[key];
+  if (!item || item.state !== 'shared') return { stopped: 'That agent is not managed any more.', results: [], writes: 0 };
+  const present = tools.filter(tool => agentTools.includes(tool));
+  for (const tool of present) await recoverParked(folder(context, tool));
+  const { byKey, unreadable, duplicates } = await gatherAgents(context, present);
+  const problem = blocked(key, unreadable, duplicates, present);
+  if (problem) return { stopped: problem, results: [], writes: 0 };
+  const slot = byKey.get(key) ?? {};
+  const results: DestinationResult[] = [];
+  const replaced: { tool: HarnessId; hash: string }[] = [];
+  let writes = 0;
+  for (const loser of past.losers) {
+    const copy = item.copies.find(entry => entry.tool === loser.tool);
+    const here = slot[loser.tool];
+    const version = await kept(context, key, loser.hash);
+    const text = version?.texts[loser.tool];
+    if (!copy || !here || !text) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: 'Its edited copy can’t be put back here.' }); continue; }
+    // Only over the copy the choice wrote: a later change in that tool is never overwritten.
+    if (here.bytes !== copy.bytes) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `Changed in ${harnesses[loser.tool].name} since, so nothing was put back.` }); continue; }
+    try {
+      await keep(context, here);
+      await writeChecked(here.file, text, here.text);
+    } catch (error) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
+    writes++;
+    replaced.push({ tool: loser.tool, hash: here.hash });
+    copy.hash = loser.hash;
+    copy.bytes = sha(text);
+    copy.stopped = true;
+    results.push({ item: item.name, harness: loser.tool, outcome: 'written', message: `Its edited copy is back; it doesn’t receive updates from ${harnesses[item.origin ?? past.winner?.tool ?? 'claude-cli'].name}.` });
+  }
+  if (!writes) return { stopped: results[0]?.message ?? 'Nothing was put back.', results, writes };
+  record.items[key] = item;
+  await saveAgentRecord(context.home, record);
+  const id = randomUUID();
+  past.undoneBy = id;
+  await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: past.losers[0]!.tool, hash: past.losers[0]!.hash }, losers: replaced, orderProved: true, previous: item.hash }]);
   return { results, writes };
 }
