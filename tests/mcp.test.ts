@@ -88,6 +88,7 @@ test('An edit in one tool spreads; a deletion spreads once it holds; differing c
     const held = await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'] }]);
     assert.ok(held.results.some(entry => /Copies differ/.test(entry.message)));
     await applyMcp(box.context, tools, [{ key: 'twin', managed: true, off: ['claude-cli'], use: 'copilot-cli' }]);
+    assert.ok((await readHistory(box.home)).some(e => e.kind === 'chosen' && e.key === 'mcp:twin' && e.losers.some(l => l.tool === 'codex-cli')), 'the replaced copy is in History');
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "x"'));
   } finally { await box.cleanup(); }
 });

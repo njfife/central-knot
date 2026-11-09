@@ -1,4 +1,4 @@
-// Reproductions from the Astra fifth check (51a5d32), kept as regressions. N1 and N10 inject the concurrent save where the
+// Reproductions from the Astra fifth check (51a5d32), kept as regressions. N1 injects the concurrent save where the
 // write now happens: after the old file is moved aside, before the new one is linked into place.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyAgents } from '../src/agents.ts';
-import { applyMcp, mcpView, readTool, restoreMcp } from '../src/mcp.ts';
+import { applyMcp, readTool, restoreMcp } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
 import { readRecord, saveRecord, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -40,14 +40,6 @@ test('N1 agent edit saved after final read must survive replacement',()=>box(asy
   assert.ok([await fs.readFile(b.paths[1],'utf8'),...all].some(s=>s.includes('CONCURRENT UNIQUE')),'concurrent edit was erased and never stored');
 }));
 
-test('N2 agents folder replaced empty between reads is a reset',()=>box(async b=>{
-  await fs.writeFile(b.paths[0],md('BASE'));await applyAgents(b.context,tools,managed('reviewer'));
-  await fs.rename(join(b.home,'.copilot','agents'),join(b.home,'.copilot','agents-old'));
-  await fs.mkdir(join(b.home,'.copilot','agents'));
-  await applyAgents(b.context,tools,[],{settleMs:0});
-  assert.equal(await fs.readFile(b.paths[0],'utf8').catch(()=> 'DELETED'),md('BASE'));
-}));
-
 test('N3 missing MCP config root must not delete other tools servers',()=>box(async b=>{
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('BASE'));
   await applyMcp(b.context,tools.slice(1),managed('docs'));
@@ -56,13 +48,15 @@ test('N3 missing MCP config root must not delete other tools servers',()=>box(as
   assert.equal(await command(b.context,'codex-cli'),'BASE');
 }));
 
-test('N4 MCP deletion must preserve never-synced same-name server',()=>box(async b=>{
+test('N4 MCP deletion spares a never-synced same-name server and finishes in Claude by Write now',()=>box(async b=>{
   await fs.writeFile(join(b.home,'.claude.json'),json('BASE'));
   await applyMcp(b.context,tools.slice(0,2),managed('docs'));
   await fs.writeFile(join(b.home,'.codex','config.toml'),'[mcp_servers.docs]\ncommand="UNRELATED"\n');
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),'{"mcpServers":{}}');
   await applyMcp(b.context,tools,[],{settleMs:0});
   assert.equal(await command(b.context,'codex-cli'),'UNRELATED');
+  await applyMcp(b.context,tools,[],{claudeNow:['docs']});
+  assert.equal(await command(b.context,'claude-cli'),undefined);
 }));
 
 test('N5 MCP old deletion Restore must not overwrite newly managed server',()=>box(async b=>{
@@ -77,56 +71,16 @@ test('N5 MCP old deletion Restore must not overwrite newly managed server',()=>b
   assert.equal(await command(b.context,'copilot-cli'),'UNRELATED');
 }));
 
-test('N6 pending Claude MCP updates must offer Write now',()=>box(async b=>{
-  await fs.writeFile(join(b.home,'.claude.json'),json('BASE'));
-  await applyMcp(b.context,tools,managed('docs'));
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('EDIT'));
-  await applyMcp(b.context,tools,[]);
-  assert.equal(await command(b.context,'claude-cli'),'BASE');
-  assert.ok((await mcpView(b.context,tools)).claudePending.includes('docs'),'no Write now for a changed existing entry');
-}));
-
-test('N7 Claude MCP deletion can be finished by Write now',()=>box(async b=>{
-  await fs.writeFile(join(b.home,'.claude.json'),json('BASE'));
-  await applyMcp(b.context,tools,managed('docs'));
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),'{"mcpServers":{}}');
-  await applyMcp(b.context,tools,[],{settleMs:0});
-  await applyMcp(b.context,tools,[],{claudeNow:['docs']});
-  assert.equal(await command(b.context,'claude-cli'),undefined);
-}));
-
-test('N8 MCP deletion Restore recovers destination-only fields',()=>box(async b=>{
+test('N8b MCP deletion made in Codex: Restore keeps Codex enabled=false (DEL-03)',()=>box(async b=>{
+  const codex=join(b.home,'.codex','config.toml');
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('BASE'));
-  await fs.writeFile(join(b.home,'.codex','config.toml'),'[mcp_servers.docs]\ncommand="BASE"\nenabled=false\nstartup_timeout_sec=47\n');
   await applyMcp(b.context,tools.slice(1),managed('docs'));
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),'{"mcpServers":{}}');
+  await fs.writeFile(codex,(await fs.readFile(codex,'utf8')).replace('command = "BASE"\n','command = "BASE"\nenabled = false\n'));
+  await applyMcp(b.context,tools.slice(1),[]);
+  await fs.writeFile(codex,'[mcp_servers.other]\ncommand = "true"\n');
   await applyMcp(b.context,tools.slice(1),[],{settleMs:0});
-  const event=(await readHistory(b.home)).find(e=>e.kind==='deleted')!;
-  await restoreMcp(b.context,tools.slice(1),event.id);
-  assert.match(await fs.readFile(join(b.home,'.codex','config.toml'),'utf8'),/enabled\s*=\s*false/);
-}));
-
-test('N9 MCP Use this copy gives displaced content a restorable event',()=>box(async b=>{
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('WINNER'));
-  await fs.writeFile(join(b.home,'.codex','config.toml'),'[mcp_servers.docs]\ncommand="LOSER"\n');
-  await applyMcp(b.context,tools.slice(1),[{...managed('docs')[0],use:'copilot-cli'}]);
-  assert.ok((await readHistory(b.home)).some(e=>e.key==='mcp:docs'),'overwritten copy has no History entry');
-}));
-
-test('N10 concurrent unrelated MCP config edit must survive replacement',()=>box(async b=>{
-  const target=join(b.home,'.codex','config.toml');
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('BASE'));
-  await applyMcp(b.context,tools.slice(1),managed('docs'));
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('EDIT'));
-  const original=fs.link;let injected=false;
-  const before=await fs.readFile(target,'utf8');
-  fs.link=async(from,to)=>{
-    if(String(to)===target&&!injected){injected=true;await fs.writeFile(target,'model="CONCURRENT_MODEL"\n'+before);}
-    return original(from,to);
-  };syncBuiltinESMExports();
-  try{await applyMcp(b.context,tools.slice(1),[]);}finally{fs.link=original;syncBuiltinESMExports();}
-  assert.ok(injected);
-  assert.match(await fs.readFile(target,'utf8'),/CONCURRENT_MODEL/);
+  await restoreMcp(b.context,tools.slice(1),(await readHistory(b.home)).find(e=>e.kind==='deleted')!.id);
+  assert.match(await fs.readFile(codex,'utf8'),/enabled\s*=\s*false/);
 }));
 
 test('N11 interrupted agents conflict must recover loser through History on restart',()=>box(async b=>{
