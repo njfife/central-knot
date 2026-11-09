@@ -1210,8 +1210,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The plugin table */
 .plugins-page .plugin-table { max-width: none; }
 .plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
-.plugins-page .plugin-table .ov-head { padding-block: 8px; }
-.plugins-page .plugin-table .ov-head .ov-name { font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 6px 0; }
+/* Its header is shorter than the other tables' and may grow: the hint beside the tool names wraps in a narrow window */
+.plugins-page .plugin-table { --ov-head-height: 48px; }
+.plugins-page .plugin-table .ov-head { min-height: var(--ov-head-height); }
+.plugins-page .plugin-table .ov-head .ov-name { align-self: end; font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 0 0 6px; }
 .plugin-row { cursor: pointer; }
 .plugin-row:hover { background: var(--hover); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px 8px 0; min-width: 0; text-align: left; }
