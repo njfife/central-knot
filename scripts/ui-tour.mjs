@@ -219,8 +219,8 @@ if (wanted('plugin-skills')) {
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   await a.click('#pskill-0-document-tools-pdf-reader-copilot-cli');
   await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
-  await a.run(`document.querySelector('#pskill-0-document-tools-spreadsheet-codex-cli').focus({ focusVisible: true })`);
-  await shot(a, 'skill-focus', 'Moved keyboard focus to spreadsheet’s Codex switch (as Tab would), beside pdf-reader’s chosen ones.');
+  await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s chosen Codex switch (as Tab would): focus ring and waiting ring together.');
   await a.run(`document.activeElement?.blur()`);
   await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();

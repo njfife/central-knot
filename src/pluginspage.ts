@@ -193,8 +193,10 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
     // Undo still says it was undone.
-    const elsewhere = market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin);
-    const changed = parts.filter(part => typeof part !== 'string');
+    // Once the tools were read again (Refresh) the run is only named, so its sentence never contradicts what the page now shows.
+    const elsewhere = last.reread || (market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin));
+    // Each plugin the run changed, once, whether or not the sentence names it (it leaves out the plugin on screen).
+    const changed = [...new Map(lines.filter(line => line.ok).map(line => [pluginKey(line.source, line.plugin), { plugin: line.plugin, source: line.source }])).values()];
     const sentence = elsewhere
       ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)])]
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));

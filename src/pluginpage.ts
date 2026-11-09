@@ -91,10 +91,11 @@ const partList = (owner: string, parts: { name: string; text: string; mono?: boo
   const more = h('button.part-more', { type: 'button', onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } }, open ? 'Show less' : 'Show more');
   return h(`li${open ? '.clamped' : ''}${part.end ? '.with-end' : ''}`, {},
     h('code.plugin-name', {}, part.name),
-    part.text || part.note ? h('span.plugin-part-body', {}, part.text ? h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text) : null, part.text ? more : null,
-      // A row with switches keeps its middle column even with nothing in it, so the switches stay in the third.
-      part.note ? h('span.plugin-part-note', {}, ...inlineMarkdown(part.note, openLink)) : null) : part.end ? h('span') : null,
-    part.end ?? null);
+    // A row with switches keeps its middle column even with nothing in it, so the switches stay in the third.
+    part.text ? h('span.plugin-part-body', {}, h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text), more) : part.end ? h('span') : null,
+    part.end ?? null,
+    // Its own line under the description, as wide as description and switches together, so a command never breaks.
+    part.note ? h('span.plugin-part-note', {}, ...inlineMarkdown(part.note, openLink)) : null);
 }));
 
 /**
@@ -116,7 +117,7 @@ function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
     rerender();
   }, !!app.busy || !!why, `pskill-${marketIndex}-${plugin.name}-${skill}-${tool}`);
   return h(`span.skill-switch${chosen ? '.skill-switch-chosen' : ''}${why ? '.skill-switch-stuck' : ''}`, { 'data-state': chosen ?? (on ? 'on' : 'off') },
-    control, why ? icon('lock', 11, 'skill-switch-lock') : null);
+    control, why ? icon('lock', 13, 'skill-switch-lock') : null);
 }
 
 /**
@@ -147,7 +148,7 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
   return h('div.plugin-group.plugin-skills', {},
     h('h4', {}, `Skills (${skills.length})`),
-    switchable.length ? line(`Turn a skill off, or back on, in ${andList(switchable.map(tool => names[tool]))} without uninstalling the plugin; nothing changes until Apply all.`) : null,
+    switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin; nothing changes until Apply all.') : null,
     tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
     [...columnWide].map(why => line(why)),
     switchable.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, switchable.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), names[tool])))) : null,

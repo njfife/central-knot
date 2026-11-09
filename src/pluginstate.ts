@@ -136,8 +136,12 @@ export const loadPlugins = (fresh = false) => act('reading', async () => {
   if (fresh) { market.readmes.clear(); market.details.clear(); }
   else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
   showView(view, { replace: true });
+  markReread();
   announce('');
 });
+
+/** The tools were read again: the last run's result is only named from now on (its Undo stays), never restated over a page that may differ. */
+const markReread = () => { if (market.lastRun) market.lastRun = { ...market.lastRun, reread: true }; };
 
 /** Runs an action with the page saying what it is doing. */
 function act(activity: MarketActivity, work: () => Promise<void>) {
@@ -171,6 +175,7 @@ export const refreshMarketplace = (source: string) => act('refreshing', async ()
   const view = await api().refreshMarketplace(source);
   dropReads(source);
   showView(view);
+  markReread();
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
   app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
   announce(app.outcome.text, true);

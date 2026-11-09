@@ -51,11 +51,11 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code has no switch for a single skill of a plugin; to stop one there, uninstall the plugin from Claude Code.',
+  'claude-cli': 'Claude Code has no switch for a single skill of a plugin; to stop one there, uninstall the plugin there.',
 };
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
-export const offByBareName = (skill: string) => `Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
+export const offByBareName = (skill: string) => `Can’t be turned on here: Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
 /** Why Codex's skill switches aren't edited: its config.toml writes the list as a value, which a `[[skills.config]]` block can't extend. */
 export const INLINE_SKILLS_CONFIG = 'Codex’s config.toml writes skills.config as a value, a form Central Knot doesn’t edit, so its plugin skills can’t be switched here.';
 /** Why a skill the marketplace lists can't be switched where the installed copy (an older or newer version) lacks it. */
