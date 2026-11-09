@@ -409,3 +409,35 @@ test('A tool with no agents folder yet gets the agent, as skills and MCP servers
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/);
   } finally { await box.cleanup(); }
 });
+
+const originShown = async (context: ShareContext) => { const [agent] = (await agentsView(context, tools)).servers; return { oneWay: agent.oneWay, limits: agent.limits, kept: agent.kept }; };
+
+test('An unmanaged agent whose Claude copy differs from Copilot’s shows no origin, as Apply holds for a choice', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\nname: reviewer\ndescription: Copilot reviewer\n---\n\nOther prompt.\n');
+    assert.deepEqual(await originShown(box.context), { oneWay: undefined, limits: {}, kept: undefined });
+    const held = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(held.writes, 0);
+    assert.match(held.results[0].message, /Copies differ/);
+    assert.deepEqual(await originShown(box.context), { oneWay: undefined, limits: {}, kept: undefined });
+  } finally { await box.cleanup(); }
+});
+
+test('A richer copy in Copilot doesn’t take over as origin on the page when Apply keeps the recorded Claude origin', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }]);
+    const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(copilot, (await readFile(copilot, 'utf8')).replace('description: Reviews code\n', 'description: Reviews code\nmodel: gpt-6\ntools: [read]\n'));
+    const before = await originShown(box.context);
+    assert.deepEqual(before.oneWay, { from: 'claude-cli', lost: ['model'] });
+    assert.match(before.limits?.['copilot-cli'] ?? '', /^One-way from Claude Code\./);
+    const result = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(result.writes, 0, JSON.stringify(result.results));
+    assert.deepEqual(await originShown(box.context), before);
+  } finally { await box.cleanup(); }
+});
