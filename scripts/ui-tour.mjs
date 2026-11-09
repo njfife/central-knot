@@ -247,7 +247,7 @@ if (wanted('profiles')) {
   await a.run(`document.activeElement?.blur()`);
   await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
   await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
-  await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: standup is off where a profile turned it off.');
+  await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: release-notes and review are off where a profile turned them off (the profile mark).');
   await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
   await a.click('#nav-skills'); await a.click('#open-notes'); await a.click('#enable-notes-claude-cli'); await a.click('#apply');
   await a.click('#nav-profiles');
