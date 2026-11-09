@@ -118,6 +118,10 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await pushRepo(first);
     await pullRepo(second);
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+    const settings = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
+    assert.equal((await restoreAgent(second, tools, settings.id)).stopped, undefined);
+    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
+    await writeFile(join(second.home, '.claude/agents/planner.md'), (await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8')).replace('model: opus', 'model: sonnet'));
 
     // The repo changes an agent this computer can't read just now: Pull leaves it for later rather than losing it, and once the copy
     // reads again, the repo's version comes in (never overwritten by the next Push).
@@ -195,17 +199,18 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
     assert.deepEqual(rows(live(await repoView(second)).outgoing), ['review:changed']);
     assert.equal((await pushRepo(second)).stopped, undefined);
 
+    // Edited here and not synced yet (Sync off): Pull must keep that edit, and Undo must bring it back.
     await writeFile(join(first.home, '.claude/skills/review/SKILL.md'), skillText('review', 'From the first computer.'));
-    await applyChanges(first, []);
     const view = live(await repoView(first, { check: true }));
     assert.deepEqual(view.incoming.map(row => [row.name, row.change, row.alsoHere]), [['review', 'changed', 'changed']]);
     assert.ok(view.pushBlocked);
     assert.ok((await pushRepo(first)).stopped, 'a push never overwrites a commit this computer hasn’t seen');
 
-    assert.equal((await pullRepo(first)).stopped, undefined);
+    assert.equal((await pullRepo(first, { syncOn: false })).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the second computer/);
-    const pulled = (await readHistory(first.home)).filter(event => event.via === 'repo').at(-1)!;
-    assert.equal(pulled.kind, 'chosen');
+    const pulls = (await readHistory(first.home)).filter(event => event.via === 'repo' && event.key === 'review' && Date.parse(event.at) > Date.now() - 60_000);
+    assert.equal(pulls.length, 1, 'one pull, one History row');
+    const pulled = pulls[0];
     assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the first computer/);
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['review:changed'], 'the undone pull is a change here, ready to push');
@@ -335,4 +340,7 @@ test('Removed here but edited in the repo: the edit comes back on Pull', () => {
   const item = (id: string): SideItem => ({ key: 'skill:review', kind: 'skill', name: 'review', id, paths: [] });
   const sides = { base: new Map([['skill:review', item('old')]]), latest: new Map([['skill:review', item('new')]]), here: new Map(), unsent: new Map() };
   assert.deepEqual(classify(sides).incoming.map(row => [row.change, row.alsoHere]), [['changed', 'removed']]);
+  // An item the last Pull couldn't finish, edited here since, then deleted in the repo: the edit still beats the deletion.
+  const left = { base: new Map([['skill:review', item('new')]]), latest: new Map(), here: new Map([['skill:review', item('edited')]]), unsent: new Map() };
+  assert.deepEqual(classify(left, { 'skill:review': { reason: 'busy', here: 'old' } }).outgoing.map(row => [row.change, row.keptHere]), [['added', true]]);
 });

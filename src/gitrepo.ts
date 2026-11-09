@@ -29,6 +29,8 @@ import type { Change, DestinationResult, HarnessId, RepoChange, RepoCommit, Repo
 /** The base instruction set (feedback/base-instructions): read for Push, applied on Pull. Without it, instructions/ is left alone. */
 export interface BaseInstructions { read(): Promise<string | undefined>; apply(text: string | undefined): Promise<string | undefined> }
 
+type Unfinished = Record<string, { reason: string; /** The item's id here when the Pull failed, to tell an edit made since. */ here?: string }>;
+
 interface RepoState {
   url: string;
   branch: string;
@@ -39,8 +41,8 @@ interface RepoState {
   checkedAt?: string;
   /** Why the last check could not reach the repo. */
   problem?: string;
-  /** Items the last Pull could not bring in, and why: Pull tries them again, and Push leaves them as the repo has them. */
-  unfinished?: Record<string, string>;
+  /** Items the last Pull could not bring in: why, and what this computer had then. Pull tries them again; Push leaves them as the repo has them. */
+  unfinished?: Unfinished;
 }
 
 const cloneFolder = (home: string) => join(storeDirectory(home), 'repo');
@@ -342,15 +344,17 @@ async function stageSides(context: ShareContext, dir: string, state: RepoState, 
 }
 
 const same = (first?: SideItem, second?: SideItem) => first?.id === second?.id;
+/** Whether this computer's copy of an unfinished item changed after the Pull that couldn't finish it. */
+const editedSince = (left: Unfinished[string], atHere?: SideItem) => left.here !== undefined && left.here !== atHere?.id;
 /** Whether the repo has a change to this item that hasn't come in yet: made since the base, or left by the last Pull. */
-const repoChangeWaits = (sides: Pick<Sides, 'base' | 'latest'>, unfinished: Record<string, string>, key: string) => !same(sides.base.get(key), sides.latest.get(key)) || !!unfinished[key];
+const repoChangeWaits = (sides: Pick<Sides, 'base' | 'latest'>, unfinished: Unfinished, key: string) => !same(sides.base.get(key), sides.latest.get(key)) || !!unfinished[key];
 const changeFrom = (from?: SideItem, to?: SideItem): RepoChange['change'] => (!from ? 'added' : !to ? 'removed' : 'changed');
 
 /**
  * Sorts what differs into what Pull brings in and what Push sends. `unfinished`: items the last Pull couldn't finish, offered to
  * Pull again while the repo still has what it had then.
  */
-export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent'>, unfinished: Record<string, string> = {}): { incoming: RepoChange[]; outgoing: RepoChange[] } {
+export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent'>, unfinished: Unfinished = {}): { incoming: RepoChange[]; outgoing: RepoChange[] } {
   const incoming: RepoChange[] = [];
   const outgoing: RepoChange[] = [];
   const { base, latest, here, unsent } = sides;
@@ -368,8 +372,11 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     const { kind, name } = (inRepo ?? atHere ?? atBase)!;
     const row = { key, kind, name };
     if (inRepo?.problem) incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: inRepo.problem });
-    // The last Pull couldn't finish it: the repo's version (as it is now, even if it changed again) is still what comes in.
-    else if (unfinished[key]) incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key], retry: true });
+    // The last Pull couldn't finish it. Unless it was edited here since, the repo's version (as it is now) is still what comes in; an
+    // edit since keeps the usual rules: it beats the repo's deletion, and gives way to the repo's edit with History keeping it.
+    // (A copy that couldn't be read when the Pull failed has nothing to compare with: the repo's version comes in.)
+    else if (unfinished[key] && editedSince(unfinished[key], atHere) && atHere && !inRepo) outgoing.push({ ...row, change: 'added', keptHere: true });
+    else if (unfinished[key]) incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].reason, retry: true, alsoHere: editedSince(unfinished[key], atHere) ? (atHere ? 'changed' : 'removed') : undefined });
     else if (same(atHere, atBase)) incoming.push({ ...row, change: changeFrom(atBase, inRepo) });
     else if (same(inRepo, atBase)) outgoing.push({ ...row, change: changeFrom(atBase, atHere) });
     // Both changed. An edit beats a deletion: removed in the repo but edited here stays, and goes out with the next Push.
@@ -502,10 +509,12 @@ const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `
 /** What a sync pass started by Pull may touch: with Sync off, this item alone (as Apply all does); with Sync on, undefined, an ordinary pass. */
 type PassScope = (key: string) => Set<string> | undefined;
 /**
- * Told what Pull wrote into the first tool before sync carried it on: what was there (`before`; none for an item no tool here had)
- * and what went in, so History can undo that copy too.
+ * What Pull wrote into the first tool before sync carried it on, so History can undo that copy too: what was there (`before`; none for
+ * an item no tool here had) and what went in. `pending`: what was there was an edit made here that hadn't spread yet, so it is what
+ * Undo puts back. `settingsOnly`: only an agent's Claude Code settings changed, which sync's versions don't tell apart.
  */
-type Wrote = (tool: HarnessId, before: string | undefined, after: string) => void;
+interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; after: string; pending?: boolean; settingsOnly?: boolean }
+type Wrote = (write: Omit<FirstWrite, 'change'>) => void;
 /** A context whose passes decide at once: a copy Pull just removed is a deletion, with no settle window to wait out. */
 const decidingAtOnce = (context: ShareContext): ShareContext => ({ ...context, settleMs: 0 });
 
@@ -528,9 +537,14 @@ async function pullSkill(context: ShareContext, dir: string, change: RepoChange,
   if (!writer) return [notIn(change.name, 'No tool here can take it: each is turned off for it or can’t be written.')];
   const copy = facts?.copies[writer];
   try {
-    if (copy && copy.hash !== tree.hash) await replaceCopy(context, change.key, source, copy.directory, copy.hash);
-    else if (!copy) await placeCopy(context, source, { harness: writer, directory: join(view.writes[writer]!.to, item.folder!), limits: [] }, tree);
-    if (!facts || copy) wrote(writer, copy?.hash, tree.hash);
+    if (copy && copy.hash !== tree.hash) {
+      // On sync's record before the copy is replaced, as sync does itself: the next pass names it in History, and nothing prunes it.
+      const { record } = await readRecord(context.home);
+      const recorded = record?.items[change.key];
+      if (record && recorded && !recorded.displaced?.some(entry => entry.hash === copy.hash)) { (recorded.displaced ??= []).push({ tool: writer, hash: copy.hash }); await saveRecord(context.home, record); }
+      await replaceCopy(context, change.key, source, copy.directory, copy.hash);
+    } else if (!copy) await placeCopy(context, source, { harness: writer, directory: join(view.writes[writer]!.to, item.folder!), limits: [] }, tree);
+    if (!facts || copy) wrote({ tool: writer, before: copy?.hash, after: tree.hash, pending: facts?.edited?.includes(writer) });
   } catch (error) {
     return [notIn(change.name, errorCode(error) === 'CK_CHANGED' ? `${harnesses[writer].name}’s copy changed just now, so it was left as it is. Pull again.` : `Could not write ${harnesses[writer].name}’s copy: ${plainError(error)}`)];
   }
@@ -556,7 +570,8 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
     const problem = await editEntry(context, writer, change.name, here?.hash, server);
     if (problem) return [notIn(change.name, problem)];
     // History accounts for this write when sync can't: a server no tool had (no facts), or this tool's own entry replaced (here).
-    if (server && (!facts || here)) wrote(writer, here?.hash, serverHash(server));
+    const recorded = (await readMcpRecord(context.home)).items[change.name]?.copies.find(entry => entry.tool === writer && !entry.status);
+    if (server && (!facts || here)) wrote({ tool: writer, before: here?.hash, after: serverHash(server), pending: !!here && !!recorded && recorded.hash !== here.hash });
   }
   const changes: Change[] = server ? [{ key: change.name, managed: true, off: facts?.off ?? [], use: writer, useHash: serverHash(server) }] : [];
   const done = await applyMcp(context, tools, changes, { only: only(change.name), settleMs: 0 });
@@ -574,7 +589,6 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const writer = agentTools.filter(tool => view.tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool) && (item ? true : !!facts?.copies[tool]));
   if (!writer) return [notIn(change.name, 'No tool here takes agents.')];
   const existing = (await readAgents(context, writer)).entries.find(entry => entry.key === key);
-  let settingsKept: string | undefined;
   const text = item && await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
   if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
@@ -586,19 +600,12 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
       if (existing?.text !== next) {
         // What this tool had is kept first, so Undo can put it back.
         if (existing) await keepAgentVersion(context, existing);
-        // Only Claude Code's own settings changed (model, tools): sync's versions don't tell those apart, so the earlier file is also
-        // kept whole under its own bytes, where nothing later writes over it, and the result says where.
-        if (existing && existing.hash === agentHash(agent)) {
-          const keptAt = join(storeDirectory(context.home), 'items', 'agent-settings', encodeURIComponent(key), `${sha(existing.text)}.md`);
-          await writeDurably(keptAt, existing.text);
-          settingsKept = keptAt;
-        }
         await mkdir(dirname(file), { recursive: true });
         await writeFileChecked(file, next, existing?.text);
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
         // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
-        if (!facts) wrote(writer, undefined, sha(next));
-        else if (existing && existing.hash !== agentHash(agent)) wrote(writer, existing.hash, agentHash(agent));
+        if (!facts) wrote({ tool: writer, after: sha(next) });
+        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) });
       }
     }
   } catch (error) {
@@ -607,7 +614,9 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const changes: Change[] = agent ? [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }] : [];
   const done = await applyAgents(context, tools, changes, { only: only(key), settleMs: 0 });
   if (done.stopped) return [notIn(change.name, done.stopped)];
-  if (settingsKept) done.results.push({ item: change.name, harness: writer, outcome: 'written', message: `Only its Claude Code settings changed; the earlier file is kept at ${settingsKept}.` });
+  // Only Claude Code's settings changed: sync may have kept the new file under the same version as the old one, so the old one is
+  // kept again, last, where Undo of this pull reads it.
+  if (existing && agent && existing.hash === agentHash(agent) && existing.text !== text) await keepAgentVersion(context, existing);
   return !agent || (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) ? done.results : [...done.results, notManaged(change, writer)];
 }
 
@@ -615,8 +624,6 @@ async function pullBase(dir: string, change: RepoChange, item: SideItem | undefi
   const failed = await base?.apply(item ? await readFile(join(dir, item.paths[0]), 'utf8') : undefined);
   return failed ? [notIn(change.name, failed)] : [{ item: change.name, outcome: 'written', message: 'Base instructions updated.' }];
 }
-
-interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; after: string }
 
 /**
  * (Follow-up: this reaches into the engines' bookkeeping, the 'added' event's losers and a skill copy's `created`; an engine option
@@ -626,12 +633,13 @@ interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; aft
  * accounts for the copy Pull wrote into the first tool itself, which sync never saw being replaced:
  * - an item no tool here had: that copy joins its 'added' event (one is made if sync added no other copy), so Undo add takes every
  *   copy away, as it does after Apply all;
- * - an item whose first tool's copy Pull replaced: that copy joins the event sync made, or, when sync had nothing else to replace
- *   (the only tool with it), an edit event of its own, so Undo puts it back (its content was kept before the write).
+ * - an item whose first tool's copy Pull replaced: that copy joins the event sync made (first, when it was an edit made here that
+ *   hadn't spread, so Undo puts that back), or, when sync had nothing else to replace (the only tool with it, or only an agent's
+ *   Claude Code settings changed), an edit event of its own. Its content was kept before the write.
  */
 async function tellHistory(context: ShareContext, made: Set<string>, firstWrites: FirstWrite[]) {
   const history = (await readHistory(context.home)).map(event => (made.has(event.id) ? { ...event, via: 'repo' as const } : event));
-  for (const { change, tool, before, after } of firstWrites) {
+  for (const { change, tool, before, after, pending, settingsOnly } of firstWrites) {
     const mine = history.filter(event => made.has(event.id) && event.key === change.key);
     if (before === undefined) {
       const added = mine.find(event => event.kind === 'added');
@@ -643,10 +651,15 @@ async function tellHistory(context: ShareContext, made: Set<string>, firstWrites
         const copy = record?.items[change.key]?.copies.find(entry => entry.harness === tool);
         if (record && copy) { copy.created = true; await saveRecord(context.home, record); }
       }
-    } else if (before !== after) {
+    } else if (before !== after || settingsOnly) {
       const replaced = mine.find(event => event.kind === 'chosen');
-      if (replaced) { if (!replaced.losers.some(loser => loser.tool === tool)) replaced.losers.push({ tool, hash: before }); }
-      else if (!mine.length) history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo' });
+      // Sync names displaced content it finds on record in an event of its own; with the pull's own event there, that one says it.
+      const separate = mine.find(event => event !== replaced && event.kind === 'edit' && event.previous === before);
+      if (replaced && separate) history.splice(history.indexOf(separate), 1);
+      if (replaced && !settingsOnly) {
+        // An edit here that hadn't spread is the newest content this computer had: first, so it is what Undo puts back.
+        if (!replaced.losers.some(loser => loser.hash === before)) { if (pending) replaced.losers.unshift({ tool, hash: before }); else replaced.losers.push({ tool, hash: before }); }
+      } else if (!replaced && !separate) history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo' });
     }
   }
   await replaceHistory(context, history);
@@ -682,10 +695,11 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
     await gitOrThrow(dir, ['checkout', '--quiet', '--force', '-B', state.branch, sides.latestId]);
     await gitOrThrow(dir, ['clean', '--quiet', '-ffdx']);
     const results: DestinationResult[] = [];
-    const unfinished: Record<string, string> = {};
+    const unfinished: Unfinished = {};
+    const unfinish = (key: string, reason: string) => { unfinished[key] = { reason, here: sides.here.get(key)?.id }; };
     // A repo change to an item this computer can't read right now isn't taken, and isn't lost: once the copy here reads again, it
     // comes in like any change the last Pull couldn't finish (and the repo's version wins over this computer's, as it would have).
-    for (const [key, { reason }] of sides.unsent) if (repoChangeWaits(sides, state.unfinished ?? {}, key)) unfinished[key] = reason;
+    for (const [key, { reason }] of sides.unsent) if (repoChangeWaits(sides, state.unfinished ?? {}, key)) unfinish(key, reason);
     // With Sync off, each pass runs for its one item alone, as Apply all does: nothing else spreads, and a deletion of an MCP server or
     // agent waits for Sync like any other (it shows here as unfinished until then; skills have their own Delete everywhere).
     const only: PassScope = key => (options.syncOn === false ? new Set([key]) : undefined);
@@ -693,7 +707,7 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
     const made = new Set<string>();
     for (const change of todo) {
       const item = sides.latest.get(change.key);
-      const wrote: Wrote = (tool, before, after) => firstWrites.push({ change, tool, before, after });
+      const wrote: Wrote = write => firstWrites.push({ change, ...write });
       const before = new Set((await readHistory(context.home)).map(event => event.id));
       let outcome: DestinationResult[];
       try {
@@ -705,7 +719,7 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
       // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
       for (const event of await readHistory(context.home)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
       const stuck = outcome.find(result => result.outcome === 'held' && !result.harness) ?? outcome.find(result => result.outcome === 'failed');
-      if (stuck) unfinished[change.key] = stuck.message;
+      if (stuck) unfinish(change.key, stuck.message);
       results.push(...outcome);
     }
     await tellHistory(context, made, firstWrites);
