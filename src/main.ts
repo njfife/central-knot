@@ -526,7 +526,7 @@ function createWindow(show: boolean) {
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
   window.webContents.on('did-finish-load', () => log('page loaded'));
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
-  // are rebuilt and the page re-reads. This is main's focus, not the page's: on macOS the page hears no focus event on a switch back.
+  // are rebuilt and the page re-reads, both from this one event.
   window.on('focus', () => { unseen = false; refreshTray(); window?.webContents.send('settings:changed'); });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
