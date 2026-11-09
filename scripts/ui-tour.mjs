@@ -225,7 +225,12 @@ async function everyPage(tag) {
   await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
   await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
   const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
-  if (first) { await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at}.`); await a.click(`#${first}`); }
+  if (first) {
+    await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at}.`);
+    const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
+    if (files) { await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`); await a.click('#skills-table'); }
+    if (await a.has('.ov-row.open')) await a.click(`#${first}`);
+  }
   const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the first tool column's menu ${at}.`); await a.click(`#${head}`); }
   await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}.`);
