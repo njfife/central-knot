@@ -145,11 +145,28 @@ test('Agents nobody managed are never written, and unreadable files are reported
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await writeFile(join(box.home, '.claude/agents/broken.md'), 'no frontmatter');
     await writeFile(join(box.home, '.codex/agents/bad.toml'), 'name = ');
+    await writeFile(join(box.home, '.codex/agents/empty.toml'), '');
     const view = await agentsView(box.context, tools);
     assert.deepEqual(view.servers.map(server => server.key), ['reviewer']);
-    assert.equal(view.problems.length, 2);
+    assert.equal(view.problems.length, 3);
     assert.equal((await applyAgents(box.context, tools, [])).writes, 0);
     assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool turned off and back on for an agent never spreads what was done there meanwhile: a deletion is put back, an edit needs a choice', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    const on = [{ key: 'reviewer', managed: true, off: [] as HarnessId[] }], off = [{ key: 'reviewer', managed: true, off: ['copilot-cli'] as HarnessId[] }];
+    await writeFile(claude, claudeAgent()); await applyAgents(box.context, tools, on);
+    await applyAgents(box.context, tools, off); await rm(copilot);
+    await applyAgents(box.context, tools, on, { settleMs: 0 });
+    assert.equal(await readFile(claude, 'utf8'), claudeAgent());
+    assert.match(await readFile(copilot, 'utf8'), /Be brief/, 'put back');
+    await applyAgents(box.context, tools, off); await writeFile(copilot, claudeAgent('Copilot only.\n'));
+    assert.match(JSON.stringify((await applyAgents(box.context, tools, on)).results), /Choose which copy/);
+    assert.equal(await readFile(claude, 'utf8'), claudeAgent());
   } finally { await box.cleanup(); }
 });
 
