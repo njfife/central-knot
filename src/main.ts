@@ -16,6 +16,7 @@ import { instructionsView, instructionVersion, saveInstruction } from './instruc
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, readProfiles, saveProfile, switchProfile, undoProfileSwitch } from './profiles.ts';
+import { planSwitch, switchItems } from './profileplan.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -32,6 +33,8 @@ let homeWritable = true;
 let lastManagedCount = 0;
 /** The open home's profiles as last read, for the menu bar's Profile menu. */
 let lastProfiles: ProfilesView = { profiles: [], held: {} };
+/** How many switches no longer match the profile in use, as last read (the menus say so beside its name). */
+let lastDrift = 0;
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -166,9 +169,11 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // What could not be switched is told on the page, like a background pass's failures.
     for (const entry of [...result.results.filter(item => item.outcome === 'failed'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
     lastProfiles = await readProfiles(current.home);
+    lastDrift = 0;
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
-  return { label: activeProfileName() ? `Profile: ${activeProfileName()}` : 'Profile: No profile', submenu: [
+  const drift = lastDrift ? ` (${lastDrift} to apply)` : '';
+  return { label: `Profile: ${activeProfileName() ?? 'No profile'}${drift}`, submenu: [
     { label: 'No profile', type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
@@ -308,7 +313,8 @@ async function view(explicit = false): Promise<HomeView> {
       };
     })()),
   };
-  if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles)) { lastProfiles = made.profiles; refreshTray(); }
+  const drift = planSwitch(switchItems(made.manage, made.mcp), made.profiles.profiles.find(profile => profile.id === made.profiles.active), made.profiles.held).flips.length;
+  if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles) || drift !== lastDrift) { lastProfiles = made.profiles; lastDrift = drift; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;

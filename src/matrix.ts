@@ -720,7 +720,13 @@ function legend(list: SampleSkill[]) {
   oneWaySwatch.classList.add('cell-oneway');
   oneWaySwatch.append(h('span.cell-oneway-mark', {}, icon('arrow-up-right', 8)));
   const fresh = list.some(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined));
-  const disabledShown = list.some(skill => toolList().some(tool => skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool)));
+  const disabledIn = (skill: SampleSkill) => toolList().filter(tool => skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool));
+  const disabledShown = list.some(skill => disabledIn(skill).some(tool => !heldByProfile(skill.key, tool)));
+  // A switch a profile turned off is marked apart (amber), and keyed apart, so it reads as the profile's doing.
+  const profileShown = list.some(skill => disabledIn(skill).some(tool => heldByProfile(skill.key, tool)));
+  const profileSwatch = swatch('present', false);
+  profileSwatch.classList.add('cell-disabled');
+  profileSwatch.append(h('span.cell-disabled-mark.cell-disabled-profile', {}, icon('circle-off', 8)));
   const disabledSwatch = swatch('present', false);
   disabledSwatch.classList.add('cell-disabled');
   disabledSwatch.append(h('span.cell-disabled-mark', {}, icon('circle-off', 8)));
@@ -734,6 +740,7 @@ function legend(list: SampleSkill[]) {
     fresh ? entry('New copy on Apply all', plus) : null,
     replaced ? entry('Replaced on Apply all (kept in History)', (() => { const mark = swatch('will-sync', true); mark.replaceChildren(icon('refresh-cw', 11)); return mark; })()) : null,
     disabledShown ? entry('Disabled in that tool', disabledSwatch) : null,
+    profileShown ? entry('Off by a profile (see Profiles)', profileSwatch) : null,
     list.some(skill => skill.removing?.length) ? entry('Removed on Apply all (kept in History)', removingSwatch) : null,
     seen.has('edited') ? entry('Edited in that tool', swatch('edited', true)) : null,
     seen.has('waiting') ? entry('Waiting for sync', swatch('waiting', true)) : null,

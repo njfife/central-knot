@@ -1372,8 +1372,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
 .profile-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-in-use { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; background: var(--picked); color: var(--accent-ink); }
-.profile-header .pane-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile-header .pane-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
 .profile-header .pane-title { flex: 1 1 220px; }
 .profile-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
@@ -1441,3 +1440,23 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A narrow status bar keeps the home, the profile in use and the sync switch whole: the write note goes icon-only (its words stay on
    hover) and the sync switch drops its idle note. */
 @media (max-width: 1180px) { .status-write .status-clip, .sync-note { display: none; } }
+
+/* Profiles: the setup step in an empty profile is a full small button, not the band's inline link size */
+.band #profile-from-now { height: 28px; padding: 0 8px; flex: none; }
+.profiles-page .band:has(#profile-from-now) { flex-wrap: wrap; row-gap: 6px; }
+/* The result of a switch spans the pane, like the table under it */
+.profiles-page > .bands > .band { padding-right: 16px; }
+/* In a profile, what it leaves out reads quieter, so its set reads as a set at any width */
+.pf-table-profile .pf-row:not(.pf-included):not(.pf-head) .pf-name-text { color: var(--ink-soft); font-weight: 400; }
+.pf-blocked { list-style: none; margin: 0; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 16px; color: var(--ink-soft); max-width: 80ch; }
+.pf-blocked li { display: flex; align-items: flex-start; gap: 8px; }
+.pf-blocked .icon { flex: none; margin-top: 1px; }
+.status-profile-drift { width: 6px; height: 6px; border-radius: 999px; background: var(--accent-ink); flex: none; }
+/* A row's states and full description, shown under it while its tick box has keyboard focus */
+.pf-name { position: relative; }
+.pf-tip { display: none; position: absolute; left: 44px; top: calc(100% + 2px); z-index: 4; max-width: min(560px, 90%); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: var(--overlay, 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)); font-size: 12px; line-height: 16px; color: var(--ink); flex-direction: column; gap: 2px; }
+.pf-tip-desc { color: var(--ink-soft); }
+.pf-name:has(.hidden-input:focus-visible) .pf-tip { display: flex; }
+.pf-row:not(.pf-head):focus-within { background: var(--hover); }
+.pf-save-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
+@container (max-width: 639px) { .pf-save-note { display: none; } }

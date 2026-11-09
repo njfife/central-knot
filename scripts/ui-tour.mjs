@@ -243,10 +243,23 @@ if (wanted('profiles')) {
   await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu, with focus on the profile in use.');
   await a.press('ArrowDown'); await shot(a, 'status-menu-keys', 'Pressed the Down arrow key: focus moves to Development (Up, Down, Home and End move; Escape closes).');
   await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Development')).click()`); await a.settle();
+  // A scripted click counts as a keyboard choice (focus returns to the status item, ringed); a mouse click leaves no ring.
+  await a.run(`document.activeElement?.blur()`);
   await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
   await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
   await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: standup is off where a profile turned it off.');
   await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
+  await a.click('#nav-skills'); await a.click('#open-notes'); await a.click('#enable-notes-claude-cli'); await a.click('#apply');
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
+  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand, which profiles leave alone; the status bar dot says Development no longer fully matches.');
+  const copilotSettings = join(practice, '.copilot/settings.json');
+  const copilotKept = existsSync(copilotSettings) ? readFileSync(copilotSettings, 'utf8') : undefined;
+  writeFileSync(copilotSettings, '{ not json');
+  await a.click('#header-refresh');
+  await shot(a, 'cant-switch', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: Copilot\'s cells say they can\'t be switched, and why is listed under the table.');
+  if (copilotKept === undefined) rmSync(copilotSettings); else writeFileSync(copilotSettings, copilotKept);
+  await a.click('#header-refresh');
   await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch is one row with Undo.');
   const undo = await a.run(`document.querySelector('.history-row[data-kind="profile"] button')?.id ?? ''`);
   if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo switch" on the newest switch: Incident is in use again.'); }
