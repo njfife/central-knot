@@ -7,7 +7,7 @@ import { withoutBom } from './values.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { harnesses } from './harnesses.ts';
+import { configRoot, harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
@@ -42,15 +42,15 @@ export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 
 
 // ---------- Files ----------
 
-const configRoot = (context: ShareContext, tool: HarnessId) => context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig);
+const rootOf = (context: ShareContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
 /** Where each tool keeps user-wide MCP servers. Claude Code's moves with CLAUDE_CONFIG_DIR. */
 export function mcpFile(context: ShareContext, tool: HarnessId): string {
   if (tool === 'claude-cli') return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
-  if (tool === 'copilot-cli') return join(configRoot(context, tool), 'mcp-config.json');
+  if (tool === 'copilot-cli') return join(rootOf(context, tool), 'mcp-config.json');
   // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
-  if (tool === 'pi-cli') return join(configRoot(context, tool), 'mcp.json');
-  return join(configRoot(context, tool), 'config.toml');
+  if (tool === 'pi-cli') return join(rootOf(context, tool), 'mcp.json');
+  return join(rootOf(context, tool), 'config.toml');
 }
 
 const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
@@ -551,14 +551,6 @@ function restorable(past: HistoryEvent): string | undefined {
 }
 
 /**
- * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
- * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
- */
-/**
- * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
- * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
- */
-/**
  * Undo of Write to Claude Code, right after it: each entry goes back to what Claude Code held before (removed when it was new),
  * and the server waits for Write again. All or nothing: an entry changed since stops it. Claude Code must be closed, as for Write.
  */
@@ -591,6 +583,10 @@ export async function undoClaudeWrite(context: ShareContext, written: ClaudeWrit
   return { results, writes };
 }
 
+/**
+ * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
+ * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
+ */
 async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
   const name = past.key.replace(/^mcp:/, '');
@@ -619,6 +615,10 @@ async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past
   return { results, writes };
 }
 
+/**
+ * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
+ * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
+ */
 export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
