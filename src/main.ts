@@ -566,7 +566,8 @@ app.whenReady().then(async () => {
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.
-  const otherHome = async () => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], view: await repoView(context()) });
+  const NOT_THIS_HOME = 'The home on screen is not the one open. Nothing was written. Read it again.';
+  const otherHome = async () => ({ stopped: NOT_THIS_HOME, results: [], view: await repoView(context()) });
   handleRead('repo:view', async check => (current ? repoView(context(), { check: check === true }) : null));
   handle('repo:connect', async (url, branch, home) => (home === current?.home && typeof url === 'string' && typeof branch === 'string' ? connectRepo(context(), url, branch) : otherHome()));
   handle('repo:pull', async home => (home === current?.home ? pullRepo(context(), { syncOn }) : otherHome()));

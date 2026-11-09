@@ -83,6 +83,9 @@ export function run(file: string, args: string[], options: { env?: NodeJS.Proces
   });
 }
 
+/** Git as Central Knot runs it: hooks off, prompts off, and the sign-in this computer already has. */
+export const runGit = (args: string[], timeoutMs = 60_000) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
+
 /** Why a Git command failed, in words a person can act on (MKT-05). */
 export function whyGitFailed(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): string {
   const text = output.toLowerCase();
@@ -131,7 +134,7 @@ async function cloneInto(context: PluginContext, url: string, target: string, { 
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   await dropStages(target);
-  const git = (args: string[]) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+  const git = (args: string[]) => runGit(args, context.timeoutMs ?? 60_000);
   const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage]);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });

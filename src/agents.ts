@@ -32,9 +32,9 @@ export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: Neutra
 const suffixOf = (tool: HarnessId) => (tool === 'codex-cli' ? '.toml' : tool === 'copilot-cli' ? '.agent.md' : '.md');
 const folder = (context: ShareContext, tool: HarnessId) => join(context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig), 'agents');
 export const fileFor = (context: ShareContext, tool: HarnessId, name: string) => join(folder(context, tool), `${name}${suffixOf(tool)}`);
-const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
+export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
-const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
+export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */

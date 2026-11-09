@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
 import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
-import { applyMcp, mcpView } from '../src/mcp.ts';
-import { agentsView, applyAgents } from '../src/agents.ts';
+import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
+import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, RepoView } from '../src/types.ts';
 
@@ -66,6 +66,12 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['agents/planner.md', 'mcp/docs.json', 'skills/review/SKILL.md', 'skills/review/notes.log']);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/docs.json')), { type: 'stdio', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' } });
     assert.match(git(box.remote, 'show', 'main:agents/planner.md'), /model: opus/, 'Claude Code’s own agent file goes as written');
+    // A Managed agent one tool can't read just now is never offered as removed (Push would delete it from the repo).
+    const copilotPlanner = join(first.home, '.copilot/agents/planner.agent.md');
+    const kept = await readFile(copilotPlanner, 'utf8');
+    await writeFile(copilotPlanner, 'half saved');
+    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['planner', true]]);
+    await writeFile(copilotPlanner, kept);
 
     const second = await box.home('second');
     view = live((await connectRepo(second, box.remote, '')).view);
@@ -82,10 +88,14 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/);
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);
-    const added = (await readHistory(second.home)).find(event => event.key === 'review')!;
-    assert.deepEqual([added.kind, added.via, added.losers.map(loser => loser.tool).sort()], ['added', 'repo', tools]);
-    assert.equal((await restoreFromHistory(second, added.id)).stopped, undefined);
-    assert.equal((await manageView(second)).skills.length, 0, 'Undo add takes back every copy Pull made');
+    // Undo add after a Pull takes back every copy Pull made, whatever the kind.
+    const addedBy = (key: string) => readHistory(second.home).then(events => events.find(event => event.key === key && event.kind === 'added')!);
+    const review = await addedBy('review');
+    assert.deepEqual([review.via, review.losers.map(loser => loser.tool).sort()], ['repo', tools]);
+    assert.equal((await restoreFromHistory(second, review.id)).stopped, undefined);
+    assert.equal((await restoreMcp(second, tools, (await addedBy('mcp:docs')).id)).stopped, undefined);
+    assert.equal((await restoreAgent(second, tools, (await addedBy('agent:planner')).id)).stopped, undefined);
+    assert.deepEqual([(await manageView(second)).skills, (await mcpView(second, tools)).servers, (await agentsView(second, tools)).servers].map(list => list.length), [0, 0, 0]);
   } finally { await box.cleanup(); }
 });
 
@@ -189,7 +199,10 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     await writeFile(join(author, '.gitignore'), '*.log\n');
     await writeFile(join(author, 'skills/README.md'), 'One folder per skill.\n');
     await writeFile(join(author, 'skills/linked/SKILL.md'), skillText('linked'));
-    execFileSync('ln', ['-s', 'SKILL.md', join(author, 'skills/linked/alias.md')]);
+    await symlink('SKILL.md', join(author, 'skills/linked/alias.md'));
+    // Written by hand, with a key Central Knot doesn't use: Push leaves it byte for byte while it doesn't change here.
+    await mkdir(join(author, 'mcp'));
+    await writeFile(join(author, 'mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }\n');
     git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'start'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
     const here = await box.home('here');
@@ -197,12 +210,13 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     await writeFile(join(here.home, '.claude/skills/mine/debug.log'), 'part of the skill\n');
     await applyChanges(here, [{ key: 'mine', managed: true, off: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
-    assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['linked', true]]);
+    assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true]]);
     await pullRepo(here);
     assert.equal((await manageView(here)).skills.some(item => item.key === 'linked'), false, 'a link is never put in a tool');
     view = live((await pushRepo(here)).view);
-    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log']);
+    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'mcp/notes.json', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log']);
     assert.deepEqual(view.outgoing, []);
+    assert.equal(git(box.remote, 'show', 'main:mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }');
   } finally { await box.cleanup(); }
 });
 

@@ -162,13 +162,18 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
     return setTomlTable(text, ['mcp_servers'], name, body);
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);
+  return setJsonMember(text, ['mcpServers', name], jsonEntry(tool, server, extras));
+}
+
+/** A server as a JSON tool writes it (Claude Code, Copilot CLI, Pi), with that tool's own fields kept. */
+export function jsonEntry(tool: HarnessId, server: NeutralServer, extras: Record<string, unknown> = {}): Record<string, unknown> {
   const entry: Record<string, unknown> = {
     type: tool === 'copilot-cli' && server.transport === 'stdio' ? 'local' : server.transport,
     command: server.command, args: server.args, env: server.env, cwd: server.cwd, url: server.url, headers: server.headers, ...extras,
   };
   // Copilot offers every tool of a server only when told to (CD §5): a new entry gets its documented default.
   if (tool === 'copilot-cli' && entry.tools === undefined) entry.tools = ['*'];
-  return setJsonMember(text, ['mcpServers', name], Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined)));
+  return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
 
 /**

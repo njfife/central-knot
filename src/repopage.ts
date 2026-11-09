@@ -5,7 +5,7 @@ import { busy, rerender, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
-import { plural } from './model.ts';
+import { dayAndTime, plural } from './model.ts';
 import type { RepoChange, RepoCommit, RepoResult, RepoView } from './types.ts';
 
 const api = () => window.centralKnot;
@@ -23,14 +23,23 @@ export const repo = {
   confirmDisconnect: false,
 };
 
+/** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */
+let loads = 0;
+
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
-  try { repo.view = (await api().repo(false)) ?? undefined; } catch { repo.view = undefined; }
+  const turn = ++loads;
+  let view: RepoView | undefined;
+  try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
+  if (turn !== loads) return;
+  repo.view = view;
   rerender();
-  if (!check || !repo.view?.connected || !repo.view.access.allowed) return;
+  if (!check || !view?.connected || !view.access.allowed) return;
   repo.checking = true;
   rerender();
-  try { repo.view = (await api().repo(true)) ?? repo.view; } catch { /* the view already shown stands */ }
+  try { view = (await api().repo(true)) ?? view; } catch { /* the view already shown stands */ }
+  if (turn !== loads) return;
+  repo.view = view;
   repo.checking = false;
   rerender();
 }
@@ -78,14 +87,7 @@ const kinds: Record<RepoChange['kind'], { glyph: IconName; label: string }> = {
   base: { glyph: 'pencil-line', label: 'Instructions' },
 };
 
-const when = (iso?: string) => {
-  if (!iso) return undefined;
-  const date = new Date(iso);
-  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  if (date.toDateString() === new Date().toDateString()) return `today at ${time}`;
-  if (date.toDateString() === new Date(Date.now() - 86_400_000).toDateString()) return `yesterday at ${time}`;
-  return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' })} at ${time}`;
-};
+const when = (iso?: string) => (iso ? dayAndTime(iso) : undefined);
 
 /** A commit as people read it in a git client: short id, subject, when. */
 const commitText = (commit: RepoCommit) => h('span.repo-commit', { title: `${commit.id}\n${commit.subject}` },
@@ -141,7 +143,9 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
 function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const { pull: pullable, push: pushable } = waiting(view);
   const locked = !!state.busy || !view.access.allowed;
-  const pullButton = view.incoming.length ? button({ variant: pullable ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : 'Pull', id: 'repo-pull', disabled: locked || repo.checking || !view.latest,
+  // Held items whose fault is in the repo can't be pulled at all; only those the last Pull couldn't finish are worth another try.
+  const retryable = view.incoming.filter(change => change.retry).length;
+  const pullButton = pullable || retryable ? button({ variant: pullable ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : 'Try again', id: 'repo-pull', disabled: locked || repo.checking || !view.latest,
     attrs: { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
   const pushButton = pushable ? button({ variant: view.pushBlocked ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: `Push ${pushable}`, id: 'repo-push', disabled: locked || repo.checking || !!view.pushBlocked,
     attrs: view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;

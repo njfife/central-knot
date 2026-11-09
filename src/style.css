@@ -1411,4 +1411,4 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-layout dt { color: var(--ink); }
 .repo-layout dd { margin: 0; color: var(--ink-soft); }
 .repo-start .empty-aside { margin: 0; padding: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-@container (max-width: 420px) { .repo-layout { grid-template-columns: minmax(0, 1fr); } .repo-layout dd { margin-bottom: 4px; } }
+@container (max-width: 300px) { .repo-layout { grid-template-columns: minmax(0, 1fr); } .repo-layout dd { margin-bottom: 4px; } }

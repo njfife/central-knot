@@ -80,6 +80,8 @@ export async function busy(message: string, work: () => Promise<void>) {
   document.body.dataset.busy = 'false';
   rerender();
   focusById(focused);
+  // Any change may change what differs from the git repo: its page and sidebar count read again (no fetch).
+  if (state.home) void loadRepo();
 }
 
 function accept(view: HomeView) {
@@ -406,6 +408,7 @@ const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'p
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
 api().onSyncChanged(async () => {
+  void loadRepo();
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.

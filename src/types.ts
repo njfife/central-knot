@@ -396,6 +396,7 @@ export type RepoKind = 'skill' | 'mcp' | 'agent' | 'base';
 
 /** One item that differs between the Managed set here and the repo. */
 export interface RepoChange {
+  /** History's key for the item (a skill's key, `mcp:<name>`, `agent:<key>`), or `instructions:base`. */
   key: string;
   kind: RepoKind;
   name: string;
@@ -407,6 +408,8 @@ export interface RepoChange {
   keptHere?: boolean;
   /** Why it can't be brought across, if it can't. */
   held?: string;
+  /** Held only because the last Pull couldn't finish it: the next Pull tries again. */
+  retry?: boolean;
 }
 
 export interface RepoCommit { id: string; subject: string; at: string }
