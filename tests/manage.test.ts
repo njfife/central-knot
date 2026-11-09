@@ -1063,6 +1063,24 @@ test('Delete everywhere removes the copy of a tool whose skills folder was away 
   } finally { await box.cleanup(); }
 });
 
+for (const how of ['spread', 'Delete everywhere'] as const) {
+  test(`An owed removal (${how}) leaves a folder Codex no longer uses alone`, async () => {
+    const box = await sandbox();
+    try {
+      await managedThree(box);
+      await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+      if (how === 'spread') { await rm(join(box.home, CLAUDE, 'foo'), { recursive: true }); await settleAndPass(box); }
+      else await deleteEverywhere(three(box), 'foo');
+      const moved = join(box.base, 'other-codex');
+      await mkdir(join(moved, 'skills'), { recursive: true });
+      await settleAndPass(box, { overrides: { 'codex-cli': moved } });
+      await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+      await settleAndPass(box, { overrides: { 'codex-cli': moved } });
+      assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true);
+    } finally { await box.cleanup(); }
+  });
+}
+
 test('R11: a linked skill folder is followed when its source is edited', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {

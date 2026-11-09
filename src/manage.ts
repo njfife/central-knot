@@ -750,7 +750,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       if (deletedNow.has(key)) continue;
       const readded = gathered.get(key)?.locations.some(location => !item.off?.includes(location.tool) && !item.copies.some(copy => sameDir(copy.directory, location.copy.directory)));
       for (const copy of item.copies.filter(entry => entry.status === 'removing')) {
-        if (resetRoots.has(dirname(copy.directory)) || readded) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
+        const elsewhere = !ownRoots(context, copy.harness).some(root => sameDir(dirname(copy.directory), root));
+        if (resetRoots.has(dirname(copy.directory)) || readded || elsewhere) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
         try {
           if ((await readTree(copy.directory)).hash === copy.hash) { await removeChecked(context, copy.directory, copy.hash); writes++; results.push({ item: item.name, harness: copy.harness, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); }
           item.copies = item.copies.filter(entry => entry !== copy);
