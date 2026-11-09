@@ -33,7 +33,7 @@ export function unverifiedBuild(tool: HarnessId, version: string | undefined): s
   const parts = (value: string) => value.split(/[.+-]/).slice(0, 3).map(Number);
   const [have, floor] = [parts(version), parts(VERIFIED_FROM[tool])];
   const first = have.findIndex((part, index) => part !== floor[index]);
-  return first >= 0 && have[first] < floor[first] ? `Disable is verified from ${harnesses[tool].name} ${VERIFIED_FROM[tool]}; this is ${version}. Update ${harnesses[tool].name} to use it.` : undefined;
+  return first >= 0 && have[first] < floor[first] ? `Disable is verified from version ${VERIFIED_FROM[tool]}; this is ${version}. Update it to use Disable here.` : undefined;
 }
 
 /** The file that holds a tool's skill switches. */
@@ -42,15 +42,16 @@ export const switchPath = (context: ShareContext, tool: HarnessId) => join(toolC
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
   const path = switchPath(context, tool);
-  const name = harnesses[tool].name;
+  // Said in the tool's own row, so the file is named as the person knows it (~/…) and the tool is "here".
+  const shown = path.startsWith(context.home + sep) ? `~${path.slice(context.home.length)}` : path;
   let text: string;
   try { text = await readFile(path, 'utf8'); } catch (error) {
-    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: `${path} could not be read, so Disable can’t be used in ${name}.` };
+    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: `${shown} can’t be read, so Disable isn’t available here.` };
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}`;
-    return { tool, path, text, exists: true, problem: `${path} ${why}, so Disable can’t be used in ${name}.` };
+    const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}`;
+    return { tool, path, text, exists: true, problem: `${shown} ${why}, so Disable isn’t available here.` };
   }
 }
 
