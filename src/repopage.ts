@@ -2,7 +2,7 @@
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
 import { announce, busy, rerender, showPage, state } from './app.ts';
-import { button, closeButton, emptyState, h, icon, middle } from './dom.ts';
+import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
@@ -64,7 +64,7 @@ export async function loadRepo(check = false): Promise<void> {
   // What the check found, in the status bar, so it never disagrees with the page.
   if (view?.connected && state.page === 'repo') {
     const { pull: toPull, push: toPush } = waitingCounts(view);
-    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
+    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? pushCountText(view, toPush) : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
   }
   rerender();
 }
@@ -188,17 +188,29 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
 /** Changes waiting each way, leaving out items that can't move. */
 export const waitingCounts = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
 
+/** Push's count as the toolbar and status bar say it: waiting on Pull when Push can't run yet. */
+const pushCountText = (view: Extract<RepoView, { connected: true }>, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
+
+/** Items that can't move, in the same words as their list: "can't come in" from the repo, "can't go" from here. */
+function stuckText(view: Extract<RepoView, { connected: true }>): string {
+  const cantCome = view.incoming.filter(change => change.held && !change.retry).length;
+  const cantGo = view.outgoing.filter(change => change.held).length;
+  return [cantCome ? `${cantCome} can’t come in` : '', cantGo ? `${cantGo} can’t go` : ''].filter(Boolean).join(', ');
+}
+
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
 function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
-  const part = (glyph: IconName, tone: string, text: string) => h('span.repo-state-part', {}, icon(glyph, 14, tone), h('span', {}, text));
+  const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
   const { pull: incoming, push: outgoing } = waitingCounts(view);
-  const stuck = [...view.incoming, ...view.outgoing].filter(change => change.held).length;
-  const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', view.pushBlocked ? `${outgoing} to push after Pull` : `${outgoing} to push`) : null];
+  const stuckNote = stuckText(view);
+  const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null,
+    outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', pushCountText(view, outgoing), !!view.pushBlocked) : null,
+    stuckNote ? h('span.repo-state-part.tone-muted', {}, stuckNote) : null];
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
     : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts]
-    : !incoming && !outgoing && stuck ? [part('triangle-alert', 'tone-warning', `Up to date, except ${plural(stuck, 'item')} that can’t move`)]
+    : !incoming && !outgoing && stuckNote ? [part('triangle-alert', 'tone-warning', `Up to date, except: ${stuckNote}`)]
     : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
-    : [...counts, stuck ? h('span.repo-state-part.tone-muted', {}, `${stuck} can’t move`) : null];
+    : counts;
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
   return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
 }
@@ -263,7 +275,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },
-        h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), middle(view.url, 24, 'mono repo-url'), h('span.repo-branch', { title: 'Branch' }, view.branch)),
+        h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), h('span.mono.repo-url', {}, view.url), h('span.repo-branch', { title: 'Branch' }, view.branch)),
         h('dl.facts.repo-facts', {},
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),

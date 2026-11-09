@@ -1360,9 +1360,13 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-scroll { display: flex; flex-direction: column; gap: 24px; padding: 16px calc(16px + var(--overlay-gutter, 0px)) 24px 16px; }
 .repo-scroll > * { flex: none; }
 .repo-where { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.repo-address { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.repo-address { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.repo-address > svg { margin-top: 2px; }
+.repo-address .repo-branch { margin-top: 1px; }
 .repo-address > svg { flex: none; }
-.repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; }
+/* The address wraps rather than shortening: it is how a user knows which repo is in use. */
+.repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
+.repo-page .market-add-input[aria-invalid='true'] { border-color: var(--danger); }
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
 .repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
 .repo-facts dd { min-width: 0; }
