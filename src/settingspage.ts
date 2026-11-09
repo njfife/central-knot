@@ -16,7 +16,7 @@ interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 's
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
-const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance };
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays };
 const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
 /** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
 const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
@@ -168,7 +168,7 @@ function closeShortening() {
 /** The row's question before a shorter window removes anything: from when, that it can't be undone, and that other homes follow later. */
 function shortenConfirmation(days: HistoryDays): HTMLElement {
   const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  return h('div.notice.notice-danger.setting-confirm', { role: 'group', 'aria-labelledby': 'history-shorten-text' },
+  return h('div.notice.notice-danger.setting-confirm', { id: 'setting-history-notice', role: 'group', 'aria-labelledby': 'history-shorten-text' },
     icon('circle-alert', 16, 'tone-danger'),
     h('p.setting-confirm-text', { id: 'history-shorten-text', role: 'alert' }, `History from before ${from} will be removed and can’t be restored. Other homes apply this the next time they write History.`),
     h('div.setting-confirm-actions', {},
