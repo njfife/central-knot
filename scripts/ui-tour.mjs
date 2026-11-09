@@ -198,7 +198,7 @@ if (wanted('instructions')) {
 if (wanted('repo')) {
   begin('repo');
   const sizes = async (name, caption) => {
-    for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    for (const [width, height] of [[860, 560], [1100, 720], [1728, 1117], [2560, 1440]]) {
       await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false });
       await a.settle(); await shot(a, `${name}-${width}`, `${caption} At ${width}×${height}.`);
     }
