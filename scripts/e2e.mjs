@@ -96,12 +96,12 @@ function seedHome() {
 
 // ---------- App ----------
 let app;
-async function launch(userData = join(scratch, 'data')) {
+async function launch(userData = join(scratch, 'data'), extra = []) {
   const port = 9400 + randomInt(500);
   const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
     await wait(200);
@@ -153,7 +153,7 @@ const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${J
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
 async function practiceFlow() {
-  const a = await launch();
+  const a = await launch(undefined, ['--practice-copy']);
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
   await wait(1500);
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
@@ -572,6 +572,7 @@ async function practiceFlow() {
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
+  same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], ['This Mac’s home', false]);
   await a.click('#home-actual');
   await a.click('#nav-skills');
   same('the disposable HOME is what "this Mac" reads', await a.run(`document.querySelector('.status-home').title`), HOME);

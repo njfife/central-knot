@@ -382,7 +382,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
  * The Practice copy (throwaway sample files) exists only in dev builds and tests. A released app works on this
  * computer's own home, and other folders can still be opened.
  */
-const practiceAvailable = () => !app.isPackaged || smoke;
+const practiceAvailable = () => !app.isPackaged || smoke || process.argv.includes('--practice-copy');
 
 /**
  * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
