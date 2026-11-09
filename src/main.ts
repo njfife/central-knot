@@ -165,6 +165,8 @@ function appMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: app.name, submenu: [
       { role: 'about' },
+      // The same status line as the menu bar menu: where, and any news.
+      { label: unseen ? `Sync made changes: open to see them · ${current?.label ?? 'No home open yet'}` : `Home: ${current?.label ?? 'No home open yet'}`, enabled: false },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },

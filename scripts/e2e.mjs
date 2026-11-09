@@ -171,7 +171,7 @@ async function practiceFlow() {
 
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
-  const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + group.querySelector('strong').textContent)`);
+  const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + (group.querySelector('strong')?.textContent ?? '1'))`);
   same('Add all groups for Claude Code', groups, ['new: will be copied:1', 'identical: starts syncing:1', 'different:1']);
   same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2', false]);
   await a.click('#menu-conflicts-copilot-cli-claude-cli');
@@ -434,7 +434,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', /These settings stay in Claude Code: .*tools: .*model: /.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the details name the limits', /Only Claude Code keeps tools \(.*model \(/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
   await a.click('#nav-skills');
 

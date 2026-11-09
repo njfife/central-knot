@@ -44,7 +44,7 @@ export const state = {
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
-  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean } | undefined,
+  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
@@ -338,12 +338,18 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
   state.instructions = (await api().instructions()) ?? state.instructions;
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
-  if (result.stopped) { state.outcome = undefined; announce(result.stopped); if (state.instructionEdit) state.instructionEdit.stage = 'edit'; return; }
+  if (result.stopped) {
+    state.outcome = undefined;
+    const now = state.instructions?.find(entry => entry.tool === file.tool);
+    // Changed outside: the draft stays, now checked against the file as it is, and the review compares with that.
+    if (state.instructionEdit && now && now.hash !== state.instructionEdit.hash) { Object.assign(state.instructionEdit, { hash: now.hash, stage: 'review', conflict: true }); announce(`${name} changed outside Central Knot. Your draft is kept; review it against the current file.`); return; }
+    announce(result.stopped); if (state.instructionEdit) state.instructionEdit.stage = 'edit'; return;
+  }
   state.instructionEdit = undefined;
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `Saved ${name}${file.exists ? '' : ' (new file)'}. ${file.nextStep}` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', item: name, text: result.saved ? `Saved ${name}${file.exists ? '' : ' (new file)'}. Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -381,7 +387,7 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => bus
 function addedUndo(addedNow: HistoryEvent[]) {
   const copies = addedNow.reduce((sum, event) => sum + event.losers.length, 0);
   const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;
-  return { label: `Undo: remove ${copies === 1 ? 'the new copy' : `${copies} new copies`}`, id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'copy' : 'copies'} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
+  return { label: `Undo: remove ${copies === 1 ? 'the new copy' : `${copies} new copies`} and stop managing`, id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'copy' : 'copies'} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
 }
 
 /** The Undo a copy choice offers: it names the copies it puts back. */

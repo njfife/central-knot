@@ -255,7 +255,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     }
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
-    const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field}: ${fieldText(value)}`) : undefined;
+    const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
     servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
   }
   return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };

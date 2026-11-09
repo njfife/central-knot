@@ -35,7 +35,7 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
   }
   const notes: string[] = [];
   try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
-  notes.push('Not confirmed for the Copilot app.');
+  notes.push('The Copilot app may not read this file; that isn’t confirmed yet.');
   return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
 }
 

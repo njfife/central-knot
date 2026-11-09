@@ -1029,3 +1029,23 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugins-page .plugin-details { margin-left: 16px; }
 .plugins-page .btn:disabled { opacity: 0.5; }
 .plugins-page #add-marketplace:disabled { border-color: var(--control-line); color: var(--ink-soft); }
+
+/* Round 10: band actions sit at the right, like notices; History rows top-aligned; chooser close on the title row */
+.band-done > .band-text, .band-sync-off > .band-text { flex: 1 1 auto; min-width: 0; }
+.band-sync-off > .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
+.history-what { align-items: flex-start; }
+.history-what > svg { margin-top: 2px; flex: none; }
+.history-row > .history-actions, .history-row > .btn { align-self: start; }
+.details-head:empty { display: none; }
+.details-differs .compare-title { padding-right: 28px; }
+.decided-undo { width: auto; padding: 0 6px 0 7px; border-left: 1px solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: 0 999px 999px 0; }
+.details-tools + .details-limits { margin-top: -4px; }
+.details .details-limits { padding-left: 0; }
+
+/* Round 10: Instructions diff and preview */
+.ins-removed { background: color-mix(in oklab, var(--danger, #f85149) 14%, transparent); }
+.ins-added .ins-mark { color: var(--success, #3fb950); }
+.ins-removed .ins-mark { color: var(--danger, #f85149); }
+.ins-fold { display: block; width: 100%; text-align: left; border: 0; background: var(--hover); color: var(--ink-soft); font: inherit; padding: 1px 6px; margin: 2px 0; border-radius: 4px; cursor: pointer; }
+.ins-preview { font-size: 12.5px; max-height: none; }
+.ins-draft[hidden] { display: none; }

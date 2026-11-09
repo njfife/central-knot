@@ -82,7 +82,7 @@ function actions(event: HistoryEvent, action?: string) {
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'Edits that sync between tools, and copies Apply all adds or replaces, show up here with Undo.', button({ variant: 'outline', label: 'Go to Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
+  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'Edits that sync between tools, and copies Apply all adds or replaces, show up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   // The row's own button redoes; the band only confirms.
   const done = state.outcome?.page === 'history' ? h('div.bands.history-bands', {}, outcomeBand(false)) : null;

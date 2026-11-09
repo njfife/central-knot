@@ -26,6 +26,21 @@ export function lineDiff(before: string, after: string): { kind: 'same' | 'remov
   return out;
 }
 
+type Line = { kind: 'same' | 'removed' | 'added'; text: string };
+/** A long file's unchanged runs fold to one row, keeping three lines of context on each side of a change. */
+function folded(diff: Line[], full: boolean): (Line | { kind: 'fold'; count: number })[] {
+  if (full) return diff;
+  const near = diff.map((_, index) => diff.slice(Math.max(0, index - 3), index + 4).some(line => line.kind !== 'same'));
+  const out: (Line | { kind: 'fold'; count: number })[] = [];
+  for (let index = 0; index < diff.length;) {
+    if (near[index]) { out.push(diff[index++]); continue; }
+    let end = index;
+    while (end < diff.length && !near[end]) end++;
+    if (end - index < 4) out.push(...diff.slice(index, end)); else out.push({ kind: 'fold', count: end - index });
+    index = end;
+  }
+  return out;
+}
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const ago = (at: string) => {
   const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
@@ -48,16 +63,30 @@ function editor(file: InstructionFile) {
     return h('div.ins-editor', {},
       h('p.ins-review-title', {}, title),
       empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${names[file.tool]} will start sessions with no instructions from it.`)) : null,
-      h('pre.ins-diff', { tabindex: '0', 'aria-label': 'Changes' }, diff.map(line => h(`span.ins-line.ins-${line.kind}`, {},
-        h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
-        h('span.ins-code', {}, `${line.text}\n`)))),
+      edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
+      h('pre.ins-diff', { tabindex: '0', 'aria-label': 'Changes' }, folded(diff, !!edit.fullDiff).map(line => line.kind === 'fold'
+        ? h('button.ins-fold', { type: 'button', onclick: () => { edit.fullDiff = true; rerender(); } }, `… ${plural(line.count, 'unchanged line')} · show`)
+        : h(`span.ins-line.ins-${line.kind}`, {},
+          h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
+          h('span.ins-code', {}, `${line.text}\n`)))),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
         button({ variant: 'primary', size: 'small', label: file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
         button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
-    oninput: (event: Event) => { edit.text = (event.target as HTMLTextAreaElement).value; edit.confirmDiscard = false; } }) as HTMLTextAreaElement;
+    oninput: (event: Event) => {
+      edit.text = (event.target as HTMLTextAreaElement).value; edit.confirmDiscard = false;
+      // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
+      const changed = edit.text !== file.text;
+      const review = document.getElementById(`ins-review-${file.tool}`) as HTMLButtonElement | null;
+      if (review) review.disabled = !changed;
+      document.getElementById(`ins-draft-${file.tool}`)?.toggleAttribute('hidden', !changed);
+    },
+    onkeydown: (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); document.getElementById(`ins-cancel-${file.tool}`)?.click(); }
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== file.text) { event.preventDefault(); edit.stage = 'review'; rerender(); }
+    } }) as HTMLTextAreaElement;
   area.value = edit.text;
   if (!file.text) area.classList.add('ins-text-new');
   const dirty = () => edit.text !== file.text;
@@ -67,12 +96,15 @@ function editor(file: InstructionFile) {
       button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-discard-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Keep editing', id: `ins-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById(`ins-text-${file.tool}`)?.focus(); } }))
     : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, onclick: () => { edit.stage = 'review'; rerender(); } }),
+      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), attrs: { title: 'Ctrl+Enter or ⌘+Enter' }, onclick: () => { edit.stage = 'review'; rerender(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { if (dirty()) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); } }));
   return h('div.ins-editor', {},
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     area, actions);
 }
+
+/** Cards whose whole file is shown, for reading without editing. */
+const open = new Set<string>();
 
 function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
@@ -82,20 +114,21 @@ function card(file: InstructionFile) {
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
       file.exists ? null : h('span.ins-missing', {}, 'No file yet'),
-      editing && state.instructionEdit!.text !== file.text ? h('span.ins-missing.ins-draft', {}, 'Unsaved changes') : null),
+      editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === file.text }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
     editing ? editor(file)
       : h('div.ins-body', {},
-        file.exists && file.text.trim() ? h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, preview.slice(0, 14).join('\n') + (preview.length > 14 ? `\n… ${preview.length - 14} more lines` : ''))
+        file.exists && file.text.trim() ? [h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, open.has(file.tool) ? preview.join('\n') : preview.slice(0, 14).join('\n')),
+          preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
           : h('p.ins-empty', {}, file.exists ? 'The file is empty.' : `Saving creates ${fileName(file.path)} here.`),
         h('div.ins-actions', {},
           button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || !!state.instructionEdit, attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
-        h('span', {}, 'Replaced by a save · ', new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)})`)),
-        button({ variant: 'link', size: 'micro', label: 'Review going back to this', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || !!state.instructionEdit, attrs: state.instructionEdit ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
+        h('span', {}, 'Version from ', new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)})`)),
+        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || !!state.instructionEdit, attrs: state.instructionEdit ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 
 export function instructionsPage() {
@@ -106,6 +139,6 @@ export function instructionsPage() {
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own instruction file when a session starts, so a change takes effect in new sessions. Edit them here: you review the change before saving, and each save keeps the version it replaces. Instruction files are not synced between tools; automatic sync leaves them alone.'),
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. You review every change before saving, and earlier versions are kept. Automatic sync does not touch these files.'),
       files.length ? files.map(card) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }
