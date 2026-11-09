@@ -199,7 +199,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   if (counts.plugins) {
     return h('div.apply', {},
       h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
-        counts.parts ? `parts for ${plural(counts.parts, 'tool')}` : '', counts.partsRemovals ? `parts out of ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
+        counts.parts ? `parts for ${plural(counts.parts, 'tool')}` : '', counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }

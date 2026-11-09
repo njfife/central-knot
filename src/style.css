@@ -1255,8 +1255,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .result-link:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
 /* The plugin table */
 .plugins-page .plugin-table { max-width: none; }
-/* The boxes stay near the names on a wide window; the spare width collects at the right, as on the other tables */
-.plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 760px) repeat(var(--tool-count, 3), 92px) 28px minmax(0, 1fr); height: auto; min-height: 40px; }
+.plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
 .market-hint > span { max-width: 110ch; }
 .plugins-page .plugin-table .ov-head .ov-name { font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 6px 0; }
 .plugin-row { cursor: pointer; }
@@ -1285,7 +1284,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel-head .btn { margin-left: auto; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); align-items: center; gap: 10px 24px; }
+.plugin-tool-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); align-items: start; gap: 10px 16px; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool .ov-cell { width: auto; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
@@ -1372,3 +1371,5 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .plugins-page .market-chips { flex-wrap: wrap; overflow: visible; }
 }
 .details .details-limits.details-part { margin-left: 0; }
+.plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-faint); }
+.plugin-outcome-what code.plugin-name { font-size: 12px; }

@@ -523,7 +523,7 @@ async function practiceFlow() {
   same('Pi is a column whose box offers the plugin’s parts', await a.run(`document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state`), 'parts-offer');
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 40 && !/Can go in/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('its page says what goes into Pi', /Pi takes no plugins[\s\S]*Can go in: skill triage; MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  check('its page says what goes into Pi', /Pi takes no plugins[\s\S]*Can go in: skill triage · MCP server issues/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
   await a.click('#pcell-0-issue-tracker-pi-cli');
   await a.click('#plugins-apply');
   const piMcp = join(practice, '.pi/agent/mcp.json');

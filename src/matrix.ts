@@ -29,7 +29,9 @@ function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: Harnes
     entry.tools.push(install.tool);
     found.set(key, entry);
   }
-  return [...found.values()];
+  // Tools in column order, as everywhere else ("Codex and Pi").
+  const order = Object.keys(toolNames);
+  return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort((first, second) => order.indexOf(first) - order.indexOf(second)) }));
 }
 
 /** Opens a plugin's page on Plugins, where its parts are updated or removed together. */
@@ -512,7 +514,7 @@ function details(skill: SampleSkill, closable = true) {
       : kind === 'mcp' && skill.waits?.includes('claude-cli') && !draft ? `Waits for Write to Claude Code · synced in ${andList(toolList().filter(tool => tool !== 'claude-cli' && cellOf(skill, tool) === 'synced').map(tool => names[tool]))}`
       : kind === 'mcp' && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced in ${andList(toolList().map(tool => names[tool]))}`
       : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)}` : 'Managed · syncing to no tool')
-    : differs ? 'Not managed yet. Its copies differ.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
+    : differs ? 'Not managed yet. Its copies differ.' : fromPlugins(skill).length ? 'Unmanaged: Central Knot doesn’t sync its copies.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   // MCP keeps one layout in every state (a row per tool with its status and settings file), so it never takes the one-line form.
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);

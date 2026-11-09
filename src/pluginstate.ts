@@ -174,6 +174,8 @@ function dropReads(source: string): void {
 export const refreshMarketplace = (source: string) => act('refreshing', async () => {
   const view = await api().refreshMarketplace(source);
   dropReads(source);
+  // A refresh can change what the last run's result describes (parts now out of date): it gives way to the refresh's own notice.
+  market.lastRun = undefined;
   showView(view);
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
   app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
