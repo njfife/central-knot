@@ -1,10 +1,10 @@
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'plugins' | 'history' | 'tools';
+export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -39,6 +39,10 @@ export const state = {
   outcome: undefined as { page: Page; text: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
+  /** Each tool's instruction file, read when the Instructions page opens. */
+  instructions: undefined as InstructionFile[] | undefined,
+  /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
+  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review' } | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
@@ -167,6 +171,7 @@ export function showPage(page: Page) {
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
+  if (page === 'instructions') { state.instructionEdit = undefined; void loadInstructions(); }
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -285,6 +290,32 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
   if (!result.stopped && restored.length) flashRow(item);
   announce(result.stopped ?? (restored.length ? text : `Restored in ${plural(restored.length, 'tool')}.`), !result.stopped && !!restored.length);
+});
+
+// ---------- Instructions ----------
+
+export const loadInstructions = () => busy('Reading instruction files…', async () => {
+  state.instructions = (await api().instructions()) ?? undefined;
+  announce('', true);
+});
+
+/** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
+export const saveInstructionText = (file: InstructionFile, text: string) => busy('Saving…', async () => {
+  const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
+  state.instructions = (await api().instructions()) ?? state.instructions;
+  const name = file.path.split(/[\\/]/).pop() ?? file.path;
+  if (result.stopped) { state.outcome = undefined; announce(result.stopped); if (state.instructionEdit) state.instructionEdit.stage = 'edit'; return; }
+  state.instructionEdit = undefined;
+  state.outcome = { page: 'instructions', item: name, text: result.saved ? `Saved ${name}${file.exists ? '' : ' (new file)'}. ${file.nextStep}${file.exists ? ' The previous version is under Earlier versions.' : ''}` : `${name} already said that; nothing was written.` };
+  announce(state.outcome.text, true);
+});
+
+/** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
+export const loadInstructionVersion = (file: InstructionFile, id: string) => busy('Reading the earlier version…', async () => {
+  const text = await api().instructionVersion(file.tool, id);
+  if (text === undefined) { announce('That version is no longer kept.'); return; }
+  state.instructionEdit = { tool: file.tool, text, hash: file.hash, stage: 'review' };
+  announce('Earlier version loaded. Review the change, then save to put it back.', true);
 });
 
 /** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */

@@ -73,6 +73,10 @@ export interface DesktopApi {
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
+  /** Each tool's own instruction file (INS-01). */
+  instructions(): Promise<InstructionFile[] | null>;
+  saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
+  instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView }>;
   refreshMarketplace(source: string): Promise<PluginsView | null>;
@@ -261,3 +265,23 @@ export interface McpView {
 }
 
 export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean }
+
+// ---------- Instructions ----------
+
+/** One tool's personal instruction file, as the editor shows it (INS-01, INS-02). */
+export interface InstructionFile {
+  tool: HarnessId;
+  path: string;
+  exists: boolean;
+  text: string;
+  /** Of the text opened, so a save writes only over what was seen. '' when there is no file yet. */
+  hash: string;
+  /** Who reads this file. */
+  readers: string;
+  notes: string[];
+  nextStep: string;
+  /** Earlier versions kept before each save, newest first. */
+  versions: { id: string; at: string }[];
+}
+
+export interface InstructionSave { stopped?: string; saved?: boolean }

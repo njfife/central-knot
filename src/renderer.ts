@@ -6,12 +6,13 @@ import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
+import { instructionsPage } from './instructionspage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', plugins: 'Plugins', history: 'History', tools: 'Tools' };
+const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */
@@ -63,6 +64,7 @@ function renderSidebar() {
     navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
     navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
     navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
+    navRow('instructions', 'Instructions', 'pencil-line'),
     navRow('plugins', 'Plugins', 'puzzle'),
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
@@ -91,7 +93,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.remove('has-item');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : toolsPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : toolsPage());
 }
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {

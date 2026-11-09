@@ -161,6 +161,19 @@ if (wanted('plugins')) {
   }
 }
 
+// ---------- Instructions ----------
+if (wanted('instructions')) {
+  begin('instructions');
+  await a.click('#nav-instructions');
+  await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`);
+  await shot(a, 'instructions-start', 'Clicked "Instructions" in the sidebar. The practice copy has CLAUDE.md and AGENTS.md; Copilot CLI has no file yet.');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'instructions-editing', 'Clicked Edit on Claude Code\'s file.');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value.replace('Prefer small commits', 'Prefer small, focused commits') + '- Never push without asking.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
+  await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
+  await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+}
+
 a.quit();
 rmSync(scratch, { recursive: true, force: true });
 console.log(`tour in ${out}`);

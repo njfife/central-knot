@@ -447,6 +447,19 @@ async function practiceFlow() {
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#forget-0');
   check('Remove from list forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
+  check('Instructions show Claude Code’s CLAUDE.md and who reads it', (await a.text('#instructions-scroll')).includes('Explain the plan in two or three lines') && (await a.text('#instructions-scroll')).includes('Claude Code reads this in every session'), await a.text('#instructions-scroll'));
+  check('a tool with no file says so', (await a.text('#instructions-scroll')).includes('No file yet'));
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value = area.value + '- Edited in Central Knot.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli');
+  check('the change is shown before saving', (await a.text('.ins-diff')).includes('+ - Edited in Central Knot.'), await a.text('.ins-diff'));
+  await a.click('#ins-save-claude-cli');
+  await wait(400);
+  check('Save writes CLAUDE.md', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Edited in Central Knot.'));
+  check('and keeps the version it replaced', (await a.text('#instructions-scroll')).includes('Earlier versions (1)'), await a.text('#instructions-scroll'));
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
