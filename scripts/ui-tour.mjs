@@ -144,7 +144,7 @@ if (wanted('agents')) {
   await waitFor(a, `!!document.querySelector('.sync-notice')`);
   await shot(a, 'agents-edit-notice', 'Outside the app, release-notes was edited in Codex. A few seconds later.');
   // The one-way edge: an edit to a receiving copy stays there, and that copy stops updating.
-  edit(join(practice, '.codex/agents/code-reviewer.toml'), text => text.replace('developer_instructions = "' + '""', 'developer_instructions = "' + '""Edited in Codex. '));
+  edit(join(practice, '.codex/agents/code-reviewer.toml'), text => text.replace('description = "', 'description = "Edited in Codex. '));
   await wait(4000); await a.settle();
   await shot(a, 'agents-oneway-stopped', 'Outside the app, code-reviewer (one-way from Claude Code) was edited in Codex. A few seconds later.');
   if (await a.has('#cell-code-reviewer-codex-cli')) { await a.click('#cell-code-reviewer-codex-cli'); await shot(a, 'agents-oneway-resume', "Clicked code-reviewer's Codex box."); }

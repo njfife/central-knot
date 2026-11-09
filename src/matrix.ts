@@ -250,6 +250,15 @@ function changeBar(bulk = true) {
 
 function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const base = committedOf(skill.key);
+  // Agents: a one-way copy edited in its own tool stopped updating. It shows amber, and a click queues the source's copy again.
+  const source = kind === 'agents' ? oneWaySource(skill) : undefined;
+  if (source && skill.stopped?.includes(tool) && !view.draft.get(skill.key)?.resolve && skill.managed && !skill.off.includes(tool)) {
+    const text = `${names[tool]}: edited here, so it stopped updating. Click to use ${names[source]}’s copy again (on Apply all; this copy is kept in History).`;
+    return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
+      h(`button.cell-button.${cellLook.differs.tone}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: text, 'aria-label': text, 'data-state': 'stopped',
+        onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, source); view.comparing = skill.key; rerender(); } },
+        cellLook.differs.glyph ? icon(cellLook.differs.glyph, 16) : null));
+  }
   const state = cellOf(skill, tool);
   const on = skill.managed && !skill.off.includes(tool);
   const wasOn = base.managed && !base.off.includes(tool);
@@ -385,7 +394,7 @@ function details(skill: SampleSkill, closable = true) {
   const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Each tool keeps its own copy.' : skill.managed
-    ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source · one-way to ${andList(Object.keys(skill.limits ?? {}).filter(tool => !skill.off.includes(tool as Tool)).map(tool => names[tool as Tool]))}`
+    ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source · one-way to ${andList(Object.keys(skill.limits ?? {}).filter(tool => !skill.off.includes(tool as Tool)).map(tool => names[tool as Tool]))}${skill.stopped?.length ? ` · stopped updating in ${andList(skill.stopped.map(tool => names[tool]))}: click its amber box to use ${names[oneWaySource(skill)!]}’s copy again` : ''}`
       : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)}` : 'Managed · syncing to no tool')
     : differs ? 'Not managed yet. Its copies differ.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.

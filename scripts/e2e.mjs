@@ -448,6 +448,16 @@ async function practiceFlow() {
   await a.click('#open-code-reviewer');
   check('the details name the limits', /Tools \(.*model \(.*stay in Claude Code only/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
+  // One-way edge: an edit in a receiving tool stays there and stops updating; its amber box queues the source's copy again.
+  const codexAgent = join(practice, '.codex/agents/code-reviewer.toml');
+  const codexAgentBefore = readFileSync(codexAgent, 'utf8');
+  writeFileSync(codexAgent, codexAgentBefore.replace('description = "', 'description = "Edited in Codex. '));
+  await a.click('#header-refresh');
+  check('the edited one-way copy stays and shows amber', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'));
+  check('Claude Code’s copy was not touched', !readFileSync(join(practice, '.claude/agents/code-reviewer.md'), 'utf8').includes('Edited in Codex.'));
+  await a.click('#cell-code-reviewer-codex-cli');
+  await applyAll(a);
+  check('its amber box puts Claude Code’s copy back in Codex', !readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && !(await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]')), readFileSync(codexAgent, 'utf8'));
   await a.click('#nav-skills');
 
   // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.

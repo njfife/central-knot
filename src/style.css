@@ -1087,7 +1087,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 /* Round 11: Overview lead keeps its reading width; bands line up with the page; zero counts quiet; homes match nav */
 #overview-scroll > .overview-lead, #overview-scroll > .overview-more > .overview-line { max-width: 760px; }
 .page:has(> #overview-scroll) > .bands > .band { padding-left: 24px; padding-right: max(24px, calc(100% - 956px)); }
-#homes { padding-right: 18px; }
 .nav-count:empty, .nav-count-zero { opacity: 0.45; }
 #header { padding-right: max(16px, calc(100% - 956px)); }
 
