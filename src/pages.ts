@@ -9,16 +9,23 @@ import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } f
 
 const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
 /** Nothing of this kind in this home: what was looked for, and somewhere useful to go next. */
-const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyState(glyph, title, body,
+/** Bands an empty page still needs: what the last action did, and why nothing can be written here. */
+const emptyBands = () => {
+  const done = outcomeBand();
+  const access = state.home?.manage.access;
+  const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, `Preview only: ${access.reason ?? 'nothing is written here'}. You can look around; nothing is written.`)) : null;
+  return done || preview ? h('div.bands', {}, done, preview) : null;
+};
+const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.mode !== 'fixture' ? button({ variant: 'ghost', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a user-wide skill in this home. Add one in Claude Code, Copilot CLI or Codex, or choose another home at the bottom left.', id);
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a user-wide skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
   if (state.busy) return reading();
-  return h('div.page', {}, emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome('fixture') })));
+  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome('fixture') })));
 }
 
 const remembered = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
@@ -42,7 +49,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
   const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'has' : 'have'} different copies` }
-    : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} ${edits === 1 ? 'edit waits' : 'edits wait'} to spread` }
+    : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} ${edits === 1 ? 'change' : 'changes'} waiting` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Claude Code` }
         : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All managed ones in sync' }
           : total ? { tone: 'tone-muted', glyph: 'circle' as const, text: 'Nothing managed yet' } : { tone: 'tone-muted', glyph: 'circle' as const, text: 'None in this home' };
@@ -79,16 +86,16 @@ export function overviewPage() {
         : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
           ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), 'Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the menu bar icon and the Central Knot menu.'),
-        h('p.overview-line', {}, icon('puzzle', 14, 'tone-muted'), 'Plugins are installed through each tool’s own CLI on the ', button({ variant: 'link', size: 'micro', label: 'Plugins page', id: 'overview-plugins', onclick: () => showPage('plugins') }), '.'),
-        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Everything sync does on its own is listed in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo or Restore.'))));
+        nothingManaged && h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), 'Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the menu bar icon and the Central Knot menu.'),
+        nothingManaged && h('p.overview-line', {}, icon('puzzle', 14, 'tone-muted'), 'Plugins are installed through each tool’s own CLI on the ', button({ variant: 'link', size: 'micro', label: 'Plugins page', id: 'overview-plugins', onclick: () => showPage('plugins') }), '.'),
+        h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change sync makes on its own, and every copy Apply all replaces, is in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo or Restore.'))));
 }
 
 // ---------- MCP servers ----------
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has a user-wide MCP server in this home. Add one in a tool, then Refresh.', 'mcp-empty');
+  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has a user-wide MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -96,7 +103,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has a user-wide agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh.', 'agents-empty');
+  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has a user-wide agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'agents-empty');
   return designOverview('agents');
 }
 
@@ -203,7 +210,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
         section('Folders', h('dl.facts', {},
           ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
           ...[...roots].flatMap(([root, label]) => fact(label, path(root))),
-          ...(disclosed ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
+          ...(disclosed && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',
           h('div.link-row', {},

@@ -34,7 +34,7 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
+  outcome: undefined as { page: Page; text: string; item?: string; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
   /** Sync notices the person has dismissed, by History event or item. */
@@ -91,19 +91,23 @@ function accept(view: HomeView) {
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
+/** After the first Apply all on a page, its tip has done its job. */
+const retireTip = (kind: 'skills' | 'mcp' | 'agents') => { try { localStorage.setItem(`ck-help-dismissed-${kind}`, '1'); } catch { /* shows again */ } };
+
 export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const home = state.home!;
   const result = await api().apply(changes, home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
   if (view) state.home = view;
   state.applied = result;
-  if (!result.stopped) onDone();
+  if (!result.stopped) { onDone(); retireTip('skills'); }
   const managed = changes.filter(change => change.managed).length;
   // History holds what Apply all replaced (a chosen copy); new copies are undone by turning Managed off, which leaves them in place.
   const replacedSome = result.results.some(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message));
   // Say what was added and what was replaced, apart: only a replacement is kept in History.
   const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
-  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
+  const order = Object.values(toolNames);
+  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const added = writtenTo(false), replacedIn = writtenTo(true);
   const what = [managed ? `${plural(managed, 'skill')} managed` : '', added.length ? `copied to ${andText(added)}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To stop, turn Managed off: copies stay where they are.') };
@@ -245,7 +249,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
   const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : 'Redo edit';
-  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
+  if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
 
@@ -289,13 +293,13 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) onDone();
+  if (!result.stopped) { onDone(); retireTip('mcp'); }
   if (!result.stopped) {
     const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
     const managed = changes.filter(change => change.managed).length;
-    const waiting = view?.mcp.claudePending ?? [];
-    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}.${waiting.length ? ` ${andText(waiting)} ${waiting.length === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : ''} To stop, turn Managed off: copies stay where they are.` };
+    // The write band right below says what waits for Claude Code; the result says what was written.
+    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop, turn Managed off: copies stay where they are.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -307,7 +311,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   const view = await api().refresh();
   if (view) state.home = view;
   state.agentsResult = result;
-  if (!result.stopped) onDone();
+  if (!result.stopped) { onDone(); retireTip('agents'); }
   if (!result.stopped) {
     // One-way agents are said apart: an edit spreads from their source only.
     const managed = changes.filter(change => change.managed).map(change => state.home?.agents?.servers.find(server => server.key === change.key)).filter(server => !!server);
@@ -315,8 +319,8 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const twoWay = managed.filter(server => !Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
-    const how = [twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : '', ...oneWay.map(server => `${nameOf(server)} syncs one-way from ${source(server)}`)].filter(Boolean).join('; ');
-    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}` };
+    const how = [...oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)} (↗)`), twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : ''].filter(Boolean).join('; ');
+    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}` };
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });

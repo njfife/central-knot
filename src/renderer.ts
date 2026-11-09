@@ -96,7 +96,7 @@ function renderStatus() {
   const write = state.home && writeFact(state.home.manage);
   region('status-facts').replaceChildren(
     state.home
-      ? h('span.status-item.status-home', { title: state.home.home }, icon('eye', 14), h('span', {}, 'Home: ', h('span', { id: 'home-label' }, state.home.label)))
+      ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, 'Home: ', h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-state', {}, 'Paused (preview only)'))

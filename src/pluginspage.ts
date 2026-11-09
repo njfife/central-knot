@@ -40,7 +40,7 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
     onclick: (event: Event) => { event.stopPropagation(); void installPlugin(market.source, plugin.name, [tool]); } }, icon('plus', 14, 'plugin-add-glyph')));
 }
 
-const tone: Record<Outcome['result'], string> = { works: 'tone-success', limited: 'tone-warning', ignored: 'tone-faint', fails: 'tone-danger', unknown: 'tone-faint' };
+const tone: Record<Outcome['result'], string> = { works: 'tone-muted', limited: 'tone-warning', ignored: 'tone-faint', fails: 'tone-danger', unknown: 'tone-faint' };
 const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'check', limited: 'circle-minus', ignored: 'circle-off', fails: 'circle-x', unknown: 'circle-question-mark' };
 
 /** "named plugin:skill" with the real names, as one unbroken code name: it is what the person types in that tool. */
@@ -64,7 +64,7 @@ function details(view: PluginsView, plugin: PluginView) {
     h('div.details-head', {}, h('p.details-status', {}, plugin.description || 'No description.'),
       h('p.details-description', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : `Contains ${summary}${skillList ? `: ${skillList}` : ''}`)),
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
-      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, `When installed in ${names[tool]}`)),
+      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, `If installed in ${names[tool]}`)),
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
         h('span', {}, ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
 }
@@ -80,7 +80,7 @@ function boxKey(view: PluginsView, entry: MarketplaceView) {
     states.includes('not-installed') ? item('Not installed: click to install', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
     states.includes('installed') ? item('Installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
     states.includes('not-known') ? item('Not confirmed yet', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
-    states.includes('cannot') ? item('Can’t install here (hover for why)', h('span.legend-cell.cell-cannot', {})) : null);
+    states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Can’t install here (see the note above)' : 'Can’t install here (hover for why)', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
 function market(view: PluginsView, entry: MarketplaceView, index: number) {
@@ -96,7 +96,8 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
         h('div.ov-name', { role: 'cell', title: plugin.description },
           h('button.row-open', { type: 'button', id: `popen-${index}-${plugin.name}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); toggle(); } }, icon(open ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
           h('span.ov-name-text', {}, plugin.name),
-          plugin.version ? h('span.plugin-version', {}, plugin.version) : null),
+          plugin.version ? h('span.plugin-version', {}, plugin.version) : null,
+          plugin.description ? h('span.plugin-desc', {}, plugin.description) : null),
         view.tools.map(tool => cell(view, entry, plugin, tool, index)),
         h('div.plugin-actions', { role: 'cell' }, missing.length && view.canWrite
           ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : `Install in ${missing.map(tool => names[tool]).join(' + ')}`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
@@ -105,7 +106,8 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       open ? details(view, plugin) : null,
     ];
   };
-  return h('section.market', { 'aria-label': title },
+  const fits = !entry.plugins.some(plugin => view.canWrite && view.tools.some(tool => !blocked(view, entry, tool) && entry.states[plugin.name]?.[tool]?.state !== 'installed'));
+  return withTools(view, h(`section.market${fits ? '.market-fit' : ''}`, { 'aria-label': title },
     h('div.market-head', {},
       h('div.market-title', {}, icon('puzzle', 16, 'tone-muted'), h('strong', {}, title), entry.origins.map(origin => h('span.market-origin', {}, originText(origin)))),
       h('span.market-source', { title: entry.source }, entry.kind === 'folder' ? shownPath(entry.source) : entry.source),
@@ -134,7 +136,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
           h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, 'Plugin'), toolHeads, h('div.plugin-actions', { role: 'columnheader' }), h('div.ov-fill')),
           entry.plugins.flatMap(row)))
       : entry.problem ? null : h('p.market-empty', {}, 'This marketplace lists no plugins.'),
-    entry.plugins.length ? boxKey(view, entry) : null);
+    entry.plugins.length ? boxKey(view, entry) : null));
 }
 
 /** Column count through the style object; the page's security policy refuses inline style attributes. */
@@ -169,7 +171,7 @@ function reports() {
 export function pluginsPage() {
   const view = state.plugins;
   if (!view) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
-  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: Git URL, owner/repo or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
+  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: owner/repo, Git URL or folder (e.g. ~/my-marketplace)', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
     oninput: (event: Event) => { state.marketDraft = (event.target as HTMLInputElement).value; },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); } }) as HTMLInputElement;
   const add = () => { const text = input.value.trim(); if (text) void addMarketplace(text); };

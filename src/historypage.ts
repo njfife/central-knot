@@ -59,7 +59,10 @@ function actions(event: HistoryEvent, action?: string) {
     return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}'s`, name: `Use ${who(option.tool)}'s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
   }
   if (!action) return h('span');
-  const label = action === 'Undo' || action === 'Restore' ? `${action} in all tools` : action === 'Delete again' ? 'Delete again in all tools' : action;
+  // The scope is the tools the event touched, as the notices say it.
+  const touched = [...new Set([...(event.winner ? [event.winner.tool] : []), ...event.losers.map(loser => loser.tool)])];
+  const scope = touched.length >= (state.home?.snapshots.length ?? 3) || !touched.length ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
+  const label = action === 'Undo' || action === 'Restore' || action === 'Delete again' ? `${action} ${scope}` : action;
   const control = button({ variant: 'outline', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;
@@ -68,9 +71,10 @@ function actions(event: HistoryEvent, action?: string) {
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
-  if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'When sync spreads an edit, settles competing edits or spreads a deletion on its own, it shows here, with Undo or Restore.'));
+  if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'Changes sync makes on its own (an edit spread, a winner picked when two tools changed the same item, a deletion spread) and copies Apply all replaced appear here, with Undo or Restore.'));
   const ordered = [...events].reverse();
-  const done = state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null;
+  // The row's own button redoes; the band only confirms.
+  const done = state.outcome?.page === 'history' ? h('div.bands.history-bands', {}, outcomeBand(false)) : null;
   return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;

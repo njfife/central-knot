@@ -128,7 +128,7 @@ function trayMenu() {
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
     { label: `${!homeWritable && current ? 'Preview only: nothing is written' : unseen ? 'Sync made changes: open to see them' : syncOn ? 'Automatic sync is on' : 'Automatic sync is off'} · ${where}`, enabled: false },
-    { label: 'Sync automatically', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+    { label: homeWritable ? 'Sync automatically' : 'Sync automatically (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
@@ -162,7 +162,7 @@ function appMenu() {
     { label: app.name, submenu: [
       { role: 'about' },
       { type: 'separator' },
-      { label: 'Sync automatically', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+      { label: homeWritable ? 'Sync automatically' : 'Sync automatically (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
