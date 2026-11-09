@@ -296,3 +296,22 @@ test('A deletion owed to a tool that was away finishes when it returns, though a
     assert.equal(await readFile(copilot, 'utf8'), claudeAgent('Copilot only.\n'));
   } finally { await box.cleanup(); }
 });
+
+test('A deletion leaves the copy in a tool switched off for the agent, and still finishes in a tool that was away', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    assert.equal((await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 })).settling, true);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'] }], { now: 1500, settleMs: 2000 });
+    await applyAgents(box.context, tools, [], { now: 4000, settleMs: 2000 });
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { now: 5000, settleMs: 2000 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+  } finally { await box.cleanup(); }
+});

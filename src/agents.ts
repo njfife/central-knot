@@ -389,7 +389,7 @@ async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: 
     // A stopped one-way copy is the person's own now: it stays, and stays known as this agent's, so Restore leaves it alone.
     if (is === 'stopped') remaining.push(copy);
     else if (is === 'away' || is === 'removalOwed') remaining.push(removalStillOwed(copy));
-    else if (here) {
+    else if (here && is !== 'off') {
       try { await keep(pass.context, here); await removeFileChecked(here.file, here.text); log.writes++; removedFrom.push(copy.tool); log.results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: `Deleted in ${harnesses[deletedIn].name}, so removed here too.` }); }
       catch (error) {
         if (errorCode(error) === 'CK_CHANGED') { log.results.push({ item: item.name, harness: copy.tool, outcome: 'held', message: `${harnesses[copy.tool].name}'s copy was changed just as the deletion spread, so it was kept as it is.` }); continue; }
@@ -483,7 +483,7 @@ async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
     const pending = item.copies.filter(copy => copy.status === 'removing');
     if ((pass.limitedToKeys && !pass.limitedToKeys.has(key)) || !pending.length) continue;
     const slot = pass.onDisk.byKey.get(key) ?? {};
-    const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !item.copies.some(copy => copy.tool === entry.tool));
+    const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !item.off.includes(entry.tool) && !item.copies.some(copy => copy.tool === entry.tool));
     const done: AgentCopy[] = [];
     for (const copy of pending) {
       const here = slot[copy.tool];
