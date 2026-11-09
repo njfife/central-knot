@@ -258,7 +258,8 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const item = record.items[key];
     const entries = Object.values(slot) as AgentEntry[];
     const managed = item?.state === 'shared';
-    const origin = (managed && item.origin && slot[item.origin]) || withMostFields(entries, (entries.find(entry => entry.tool === 'claude-cli') ?? entries[0]).hash) || entries[0];
+    const origin = originOnApply(item, slot, present);
+    const shownCopy = origin ?? slot['claude-cli'] ?? entries[0];
     const copies: Partial<Record<HarnessId, ToolCopy>> = {};
     for (const entry of entries) {
       let modified = '';
@@ -266,18 +267,30 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
       copies[entry.tool] = { hash: entry.hash, directory: entry.file, rootLabel: harnesses[entry.tool].name, lines: entry.agent.prompt.split('\n').length, modified, summary: entry.agent.description, writable: true, folder: entry.name };
     }
     const cannot: Partial<Record<HarnessId, string>> = {};
-    if (!safeName(origin.name)) for (const tool of present) if (!slot[tool]) cannot[tool] = 'This name can’t be a file name in another tool.';
+    if (!safeName(shownCopy.name)) for (const tool of present) if (!slot[tool]) cannot[tool] = 'This name can’t be a file name in another tool.';
     const limits: Partial<Record<HarnessId, string>> = {};
-    for (const tool of present) {
+    if (origin) for (const tool of present) {
       const lost = losses(tool, origin);
       if (lost.length) limits[tool] = `One-way from ${shown[origin.tool]}. ${shown[tool]} has no setting for ${shown[origin.tool]}'s ${lost.map(field => `“${field}”`).join(lost.length > 2 ? ', ' : ' or ')}, so it gets only the name, description and prompt. Edit this agent in ${shown[origin.tool]}: an edit made in ${shown[tool]} stays there, and Central Knot then stops updating that copy.`;
     }
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
-    const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
-    agents.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept });
+    const kept = origin && Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
+    agents.push({ key, name: shownCopy.name, description: shownCopy.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: origin && Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept });
   }
   return { tools: present, servers: agents, claudePending: [], access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
+}
+
+/** The origin the next Apply records for this agent, from its copies as that pass would classify them; none when it would hold. */
+function originOnApply(item: AgentRecordItem | undefined, slot: AgentSlot, present: HarnessId[]): AgentEntry | undefined {
+  const found = present.filter(tool => !item?.off.includes(tool)).flatMap(tool => {
+    const entry = slot[tool], recorded = item?.copies.find(copy => copy.tool === tool && !copy.status);
+    return entry && !recorded?.stopped ? [{ entry, recorded }] : [];
+  });
+  const twoWayFound = found.flatMap(({ entry, recorded }) => (recorded?.oneWay ? [] : [entry]));
+  const edited = found.flatMap(({ entry, recorded }) => (recorded && !recorded.oneWay && entry.hash !== recorded.hash ? [entry] : []));
+  const unrecorded = found.flatMap(({ entry, recorded }) => (recorded ? [] : [entry]));
+  return sourceAndOrigin(twoWayFound, edited, unrecorded, item ?? { hash: '' }, false)?.origin;
 }
 
 // ---------- Apply ----------
@@ -426,13 +439,10 @@ async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: 
 async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, copies: CopyNow[], targets: Target[], deletedMeanwhile: HarnessId[]) {
   const twoWayFound = targets.flatMap(({ entry, recorded }) => (entry && recorded?.is !== 'oneWay' ? [entry] : []));
   const edited = targets.flatMap(({ entry, recorded }) => (entry && recorded?.is === 'edited' ? [entry] : []));
-  const recordedOrigin = twoWayFound.find(({ tool }) => tool === item.origin);
-  const source = pickSource(edited, twoWayFound, recordedOrigin, item.hash);
-  // An unrecorded copy that differs, with no baseline to call it behind, is a same-name collision: it needs a choice.
-  const sameNameCollision = !!source && !pass.chosen.has(key) && targets.some(({ entry, recorded }) => entry && !recorded && entry.hash !== source.hash && entry.hash !== item.hash);
-  if (!source || sameNameCollision) { log.results.push({ item: item.name, outcome: 'held', message: twoWayFound.length ? 'Copies differ. Choose which copy to use.' : 'No copy is left to start from.' }); return; }
-  // The origin stays the same tool unless it is chosen anew or can no longer be one (stable, so one-way never flips by itself).
-  const origin = recordedOrigin || withMostFields(twoWayFound, source.hash) || source;
+  const unrecorded = targets.flatMap(({ entry, recorded }) => (entry && !recorded ? [entry] : []));
+  const picked = sourceAndOrigin(twoWayFound, edited, unrecorded, item, pass.chosen.has(key));
+  if (!picked) { log.results.push({ item: item.name, outcome: 'held', message: twoWayFound.length ? 'Copies differ. Choose which copy to use.' : 'No copy is left to start from.' }); return; }
+  const { source, origin } = picked;
   item.origin = origin.tool;
   // An edit raced the deletion: the edit is kept, and the deleted copy comes back with it (CON-01, D-04's offer).
   const historyWillName = edited.length > 0 || pass.chosen.has(key) || deletedMeanwhile.length > 0;
@@ -447,6 +457,15 @@ async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: A
   }
   logSpreadEvents(log, key, item, source, { chosen: pass.chosen.has(key), edited, deletedMeanwhile }, replaced, added);
   Object.assign(item, { name: source.name, hash: source.hash, copies: nextCopies } satisfies Partial<AgentRecordItem>);
+}
+/** What a pass spreads and the origin it records (the page shows the same), or nothing when it holds for a choice. */
+function sourceAndOrigin(twoWayFound: AgentEntry[], edited: AgentEntry[], unrecorded: AgentEntry[], item: Pick<AgentRecordItem, 'origin' | 'hash'>, chosen: boolean): { source: AgentEntry; origin: AgentEntry } | undefined {
+  const recordedOrigin = twoWayFound.find(({ tool }) => tool === item.origin);
+  const source = pickSource(edited, twoWayFound, recordedOrigin, item.hash);
+  // An unrecorded copy that differs, with no baseline to call it behind, is a same-name collision: it needs a choice.
+  if (!source || (!chosen && unrecorded.some(entry => entry.hash !== source.hash && entry.hash !== item.hash))) return undefined;
+  // The origin stays the same tool unless it is chosen anew or can no longer be one (stable, so one-way never flips by itself).
+  return { source, origin: recordedOrigin || withMostFields(twoWayFound, source.hash) || source };
 }
 // The winner: a one-sided edit at a two-way copy; competing edits by the fixed tool order (D-04); else the last synced content.
 function pickSource(edited: AgentEntry[], twoWayFound: AgentEntry[], recordedOrigin: AgentEntry | undefined, lastSyncedHash: ContentHash): AgentEntry | undefined {
