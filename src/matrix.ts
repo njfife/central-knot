@@ -261,12 +261,14 @@ function changeBar(bulk = true) {
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
   const label = resumeNeeded() ? 'Resume and apply all' : 'Apply all';
+  // Also Apply all's tooltip: on a narrow window the breakdown itself gives way.
+  const summary = count ? pendingSummary(count) : '';
   if (count) return h('div.apply', {}, manageAll,
     // The breakdown can outgrow a narrow toolbar: it then ends in an ellipsis, with all of it in the tooltip.
-    ((summary: string) => h('span.apply-count.apply-quiet', { title: `${summary}. Nothing is written until Apply all.` }, summary))(pendingSummary(count)),
+    h('span.apply-count.apply-quiet', { title: `${summary}. Nothing is written until Apply all.` }, summary),
     // A bulk Manage leaves differing items out; the bar still points at the one waiting for a choice.
     button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
-    button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
+    button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), attrs: { title: summary }, onclick: applyAll }));
   if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
   // Lost settings stop catch-up until the person resumes, even when nothing is waiting.
   if (resumeNeeded()) return h('div.apply', {}, manageAll, button({ variant: 'primary', size: 'small', label: 'Resume', id: 'apply', disabled: !canWrite(), onclick: applyAll }));

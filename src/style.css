@@ -1376,3 +1376,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-remove-slot { display: inline-block; }
 /* Differing copies hide an empty foot, but not one holding Delete everywhere. */
 .details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action) { display: flex; }
+/* The change bar's breakdown gives way first on a narrow window (ellipsis, full text on hover), so Discard and Apply all always show. */
+.toolbar-end:has(> .apply) { flex: 0 1 auto; min-width: 0; }
+.toolbar-end > .apply { min-width: 0; }
+.toolbar-end > .apply > :not(.apply-count) { flex: none; }
+.toolbar-end .apply-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
