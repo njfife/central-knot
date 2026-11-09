@@ -43,8 +43,7 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
-    const note = marketplaceVersionNote(status.version, offered);
-    const version = status.version ? ` ${status.version}${note ? ` (${note.replace(/^M/, 'm')})` : ''}` : '';
+    const version = status.version ? ` ${status.version}${marketplaceVersionNote(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
     const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
@@ -74,6 +73,9 @@ export function readme(body: string, name: string, descriptions: string[] = [], 
   rendered.set(cacheKey, node);
   return node;
 }
+
+/** A note in the warning tone with its icon: a tool on another version, or a copy that differs. */
+export const versionNote = (text: string | Node, extra = '') => h(`span.plugin-version-differs${extra}`, {}, icon('circle-alert', 12), text);
 
 /** Parts joined with a quiet middle dot between them: "Version 1.2 · by Docs crew · productivity". */
 export const dotted = (parts: (string | Element)[]) => parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part]));

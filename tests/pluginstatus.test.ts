@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, comparableText, limitNote, missingTools, offeredVersion, otherVersions, otherVersionsLine, unavailable } from '../src/pluginstatus.ts';
+import { blocked, limitNote, missingTools, offeredVersion, otherVersions, otherVersionsLine, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -32,9 +32,7 @@ test('Only a known version that names another release is a difference', () => {
   assert.equal(otherVersionsLine(otherVersions(view, states('1.1.0', '1.1.0'), 'p', '1.2.0')), 'Claude Code and Codex have\u00a01.1.0');
   // Once a plugin's own files are read, their version (plugin.json's) is the one offered, not the catalog entry's.
   assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, { version: '1.1.0' } as PluginDetail), '1.1.0');
-  assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, undefined), '1.0.0');
-  // A copy checked out with Windows line endings is the same text.
-  assert.equal(comparableText('---\r\nname: s\r\n'), comparableText('---\nname: s\n'));
+
 });
 
 test('A tool’s limits are named in a few words', () => {

@@ -3,6 +3,7 @@
 import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
+import { isCommitHash } from './values.ts';
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -86,7 +87,7 @@ export const matches = (plugin: PluginView, find: string) => !find || [plugin.na
  * (Codex names a copy 0.1.13-77c10e110b37). A hash has a letter in it, so a dated pre-release such as 1.2.0-20250101
  * stays as it is. Choosing which cached copy Codex loads is stricter: see compareVersions in plugins.ts.
  */
-const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-(?=[0-9]*[a-f])[0-9a-f]{7,40}$/i, '');
+const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-([0-9a-f]+)$/i, (suffix, hash: string) => (isCommitHash(hash) ? '' : suffix));
 
 /**
  * The version the marketplace offers, as Claude Code reads it: what the plugin's own files say once read (plugin.json's,

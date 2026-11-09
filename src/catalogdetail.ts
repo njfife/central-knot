@@ -71,13 +71,13 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
 }
 
 /**
- * Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. Each part's `path`
- * is its folder relative to the plugin's `folder`, the same in every copy of the plugin.
+ * Skills from the given paths: each one a skill folder (with SKILL.md) or, with `subfolders`, a folder of skill folders.
+ * Each part's `path` is its folder relative to the plugin's `folder` ("." for the folder itself), the same in every copy.
  */
-async function skillsIn(root: string, folder: string, paths: string[]): Promise<NamedPart[]> {
+async function skillsIn(root: string, folder: string, paths: string[], subfolders = true): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
-    const path = relative(folder, dir);
+    const path = relative(folder, dir) || '.';
     // A folder listed twice (skills/ and skills/pdf) is one skill.
     if (found.some(part => part.path === path)) return true;
     const body = await partFile(root, join(dir, 'SKILL.md'));
@@ -86,7 +86,7 @@ async function skillsIn(root: string, folder: string, paths: string[]): Promise<
     found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body, path });
     return true;
   };
-  for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
+  for (const path of paths) if (!(await add(path)) && subfolders) for (const name of await listInside(root, path)) await add(join(path, name));
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
@@ -140,32 +140,41 @@ async function section(root: string, folder: string, named: unknown, key: string
   return Object.assign({}, ...parts);
 }
 
+/** How to read a plugin's parts: as Codex does, by the one manifest it picks (`codex`); and whether the plugin is its marketplace's own root. */
+export interface ReadAs { codex?: Record<string, unknown>; atMarketplaceRoot?: boolean }
+
 /**
  * What one plugin holds, by name, read as Claude Code reads it (or, with `codex`, as Codex does). `root` bounds every
  * read: the marketplace, or the plugin's own repository.
  * - Claude Code: plugin.json is the manifest, and its marketplace `entry` adds to it: the entry's skills, commands and
- *   agents are appended to plugin.json's lists (its default, "strict" mode); plugin.json's version wins. A skills list in
- *   plugin.json adds to the default skills/ folder; commands and agents lists replace theirs. With no plugin.json the
- *   entry is the manifest, and an entry's skills list replaces skills/ (a marketplace's root plugin lists its own).
- * - Codex (`codex`): only the manifest Codex picks, without the entry; every list replaces its default folder.
- * Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
+ *   agents are appended to plugin.json's lists (its default, "strict" mode); plugin.json's version wins. With no
+ *   plugin.json the entry is the manifest. skills/ is always read, with listed skill folders added, except for a
+ *   marketplace's root plugin whose entry lists skills: only those load. Commands and agents lists replace their folders.
+ * - Codex (`codex`): only the manifest Codex picks, without the entry; a skills list replaces skills/ unless it is empty.
+ * - A plugin that is one skill (SKILL.md at its root, no skills/, no list) is that skill.
+ * Lists are paths, lists of paths, or (commands) a map of name to { source }; agents folders are read too, though Claude
+ * Code takes only files. Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
  */
-export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string,
-  codex?: { manifest: Record<string, unknown> }): Promise<PluginContents> {
+export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, { codex, atMarketplaceRoot = false }: ReadAs = {}): Promise<PluginContents> {
   const pluginJson = codex ? undefined : await pluginManifest(folder, root);
-  const own = codex?.manifest ?? pluginJson ?? {};
+  const own = codex ?? pluginJson ?? {};
   const added = codex ? {} : entry;
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  /** Each listed path once, resolved in the plugin's folder. */
-  const paths = (...lists: unknown[]) => [...new Set(lists.flatMap(list => strings(list) ?? []).map(path => resolve(folder, path)))];
-  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : paths(own[key], added[key]));
+  const named = (list: unknown) => strings(list) ?? Object.values(record(list) ?? {}).map(item => text(record(item)?.source)).filter(Boolean);
+  /** Each listed file or folder once, resolved in the plugin's folder. */
+  const paths = (...lists: unknown[]) => [...new Set(lists.flatMap(named).map(path => resolve(folder, path)))];
+  const isListed = (key: string) => own[key] !== undefined || added[key] !== undefined;
+  const listedOr = (key: string, fallback: string) => (isListed(key) ? paths(own[key], added[key]) : [fallback]);
   const skillsFolder = join(folder, 'skills');
-  const skillPaths = pluginJson && (own.skills !== undefined || added.skills !== undefined) ? paths(skillsFolder, own.skills, added.skills) : listedOr('skills', skillsFolder);
+  const codexSkills = codex && paths(own.skills);
+  const skillPaths = codexSkills ? (codexSkills.length ? codexSkills : [skillsFolder])
+    : atMarketplaceRoot && added.skills !== undefined ? paths(added.skills) : paths(skillsFolder, own.skills, added.skills);
+  const skills = await skillsIn(root, folder, skillPaths);
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, folder, skillPaths),
+    skills: skills.length || isListed('skills') ? skills : await skillsIn(root, folder, [folder], false),
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
     agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
     hooks: Object.keys(hooks).sort(),
@@ -178,11 +187,11 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
 }
 
 /**
- * A plugin's contents plus its README. `withReadme: false` leaves the README out: a plugin that is the marketplace's own
- * root shares the marketplace's README, which the marketplace's page already shows.
+ * A plugin's contents plus its README. A plugin that is the marketplace's own root (`atMarketplaceRoot`) has no README of
+ * its own: it shares the marketplace's, which the marketplace's page already shows.
  */
-export async function pluginDetail(folder: string, entry: Record<string, unknown>, root: string, withReadme = true): Promise<PluginDetail> {
-  return { ...(await pluginContents(folder, entry, root)), readme: withReadme ? await readmeIn(folder, root) : undefined };
+export async function pluginDetail(folder: string, entry: Record<string, unknown>, root: string, atMarketplaceRoot = false): Promise<PluginDetail> {
+  return { ...(await pluginContents(folder, entry, root, { atMarketplaceRoot })), readme: atMarketplaceRoot ? undefined : await readmeIn(folder, root), offered: true };
 }
 
 /** Where a plugin outside the marketplace lives: a Git URL to read it from (https only), a folder in it and a branch. */

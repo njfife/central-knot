@@ -202,22 +202,30 @@ test('Installed means files where the tool records them; a record with no files 
     assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'not-known');
     await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
     assert.deepEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/1.0.0'), version: '1.0.0' });
+  } finally { await box.cleanup(); }
+});
+
+test('Codex loads the copy it chooses from its cache: the highest version, or "local", and a commit-named copy has its manifest\'s version', async () => {
+  const box = await sandbox();
+  try {
+    const version = async (plugin = 'p') => (await installState(box.context, 'codex-cli', 'm', plugin) as { version?: string }).version;
+    await put(join(box.home, '.codex/config.toml'), '[plugins."p@m"]\nenabled = true\n\n[plugins."h@m"]\nenabled = true\n');
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
     // With several copies kept, Codex loads the highest version (numbers compared as numbers), or "local" when there is one.
     await put(join(box.home, '.codex/plugins/cache/m/p/1.10.0/skills/s/SKILL.md'), 'x');
     await put(join(box.home, '.codex/plugins/cache/m/p/1.9.0/skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p') as { version?: string }).version, '1.10.0');
+    assert.equal(await version(), '1.10.0');
     // A release ranks above its own pre-release, as semantic versions do.
     await put(join(box.home, '.codex/plugins/cache/m/p/1.10.0-rc.1/skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p') as { version?: string }).version, '1.10.0');
+    assert.equal(await version(), '1.10.0');
     // Codex reads "v1.9.0" as no semantic version, so plain text orders it, and it sorts above "1.10.0".
     await put(join(box.home, '.codex/plugins/cache/m/p/v1.9.0/skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p') as { version?: string }).version, 'v1.9.0');
+    assert.equal(await version(), 'v1.9.0');
     await put(join(box.home, '.codex/plugins/cache/m/p/local/.codex-plugin/plugin.json'), JSON.stringify({ version: '2.0.0-dev' }));
     assert.deepEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/local'), version: '2.0.0-dev' });
     // A curated plugin's folder is named for a commit, not a version: its manifest gives the version.
-    await put(join(box.home, '.codex/config.toml'), '[plugins."h@m"]\nenabled = true\n');
     await put(join(box.home, '.codex/plugins/cache/m/h/77c10e110b37/.codex-plugin/plugin.json'), JSON.stringify({ version: '0.2.0' }));
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'h') as { version?: string }).version, '0.2.0');
+    assert.equal(await version('h'), '0.2.0');
   } finally { await box.cleanup(); }
 });
 

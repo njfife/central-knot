@@ -329,7 +329,10 @@ export interface PluginContents {
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
 export interface PluginDetail extends PluginContents {
   readme?: string;
+  /** Why its files couldn't be read. */
   problem?: string;
+  /** Whether the marketplace's own copy of its files was read; when not, its parts come only from the tools' copies. */
+  offered: boolean;
   /** Each tool's installed copy, read from where that tool keeps it: its version and its parts with their files. */
   installed?: Partial<Record<HarnessId, InstalledCopy>>;
 }

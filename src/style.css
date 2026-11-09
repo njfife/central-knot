@@ -1333,7 +1333,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
 .plugin-row-version, .plugin-meta-version { font-size: 12px; font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 /* The icon keeps its own column, so a wrapped second line stays under the first line's text */
-.plugin-version-differs, .plugin-row-holds.plugin-version-differs { display: inline-flex; align-items: baseline; gap: 4px; color: var(--warning); }
+.plugin-version-differs { display: inline-flex; align-items: baseline; gap: 4px; color: var(--warning); }
 .plugin-version-differs > .icon { flex: none; align-self: center; }
 .plugin-version-differs > span { min-width: 0; }
 .plugin-row-holds.plugin-version-differs > .icon { align-self: flex-start; margin-top: 2px; }

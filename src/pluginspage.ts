@@ -6,12 +6,11 @@ import { button, closeButton, emptyState, h, icon, withToolCount } from './dom.t
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
+import { dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
-import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { valueOf } from './reads.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolName, toolNames as names } from './words.ts';
 
@@ -55,13 +54,16 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
 function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
-  const read = market.details.get(pluginKey(entry.source, plugin.name));
-  const detail = valueOf(read);
-  const readContents = read?.reading ? 'Reading what it holds…' : detail && !detail.problem ? summaryOf(componentsFrom(detail)) : '';
+  const key = pluginKey(entry.source, plugin.name);
+  const detail = shownDetail(key);
+  const readContents = detail === undefined && market.details.get(key)?.reading ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
   const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
-  // A tool with another version than the marketplace offers is named on the row, so it shows without opening the plugin.
-  const others = otherVersions(view, entry, plugin.name, offered);
+  // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
+  // A plugin kept elsewhere is compared only once its own files are read: until then its version is the entry's, which
+  // its plugin.json may overrule.
+  const compareTo = plugin.folder || detail ? offered : undefined;
+  const others = otherVersions(view, entry, plugin.name, compareTo);
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
@@ -72,9 +74,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
       holds ? h('span.plugin-row-holds', {}, holds) : null,
       // On its own line under what it holds.
-      others.length ? h('span.plugin-row-holds.plugin-version-differs', {}, icon('circle-alert', 12),
-        h('span', {}, otherVersionsLine(others))) : null),
-    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, offered)),
+      others.length ? versionNote(h('span', {}, otherVersionsLine(others)), '.plugin-row-holds') : null),
+    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
 

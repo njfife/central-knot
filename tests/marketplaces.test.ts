@@ -133,6 +133,19 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     assert.match(await box.markets.readme(root) ?? '', /Our tools/);
     const detail = await box.markets.detail(root, 'pdf');
     assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim()], [['pdf'], 'Reads PDFs.']);
+    assert.equal(await box.markets.detail(root, 'missing'), null);
+    const after = await box.markets.forget(root);
+    assert.equal(after.marketplaces.length, 0);
+    assert.ok(!box.calls.some(call => call.startsWith('uninstall')), 'nothing was uninstalled');
+  } finally { await box.cleanup(); }
+});
+
+test('Each tool’s installed copy is read as that tool reads it, which may be another release than the marketplace’s', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
     // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own
     // parts, not as the marketplace's current entry does (which now names another folder).
     await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'pdf', source: './plugins/pdf', skills: ['./skills/pdf'] }] }));
@@ -151,10 +164,6 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     const installed = (await box.markets.detail(root, 'pdf'))?.installed;
     assert.deepEqual([installed?.['claude-cli']?.version, installed?.['claude-cli']?.skills.map(skill => skill.description), installed?.['codex-cli']?.skills.map(skill => skill.description)],
       ['0.9.0', ['older'], ['for codex']]);
-    assert.equal(await box.markets.detail(root, 'missing'), null);
-    const after = await box.markets.forget(root);
-    assert.equal(after.marketplaces.length, 0);
-    assert.ok(!box.calls.some(call => call.startsWith('uninstall')), 'nothing was uninstalled');
   } finally { await box.cleanup(); }
 });
 
@@ -169,7 +178,7 @@ test('A plugin the marketplace can’t give files for (an npm package) is read f
     await box.markets.add(external);
     const fromTool = await box.markets.detail(external, 'tool');
     assert.deepEqual([fromTool?.skills, fromTool?.installed?.['claude-cli']?.skills.map(skill => skill.description)], [[], ['from npm']]);
-    assert.match(fromTool?.problem ?? '', /read from the tools that installed it/);
+    assert.deepEqual([fromTool?.offered, fromTool?.problem], [false, undefined]);
   } finally { await box.cleanup(); }
 });
 

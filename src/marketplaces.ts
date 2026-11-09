@@ -60,7 +60,7 @@ const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.ma
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
 const RETRY_MS = 60_000;
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
-const empty: Omit<PluginDetail, 'problem'> = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false };
+const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine) {
   const listPath = join(host.dataDir, 'marketplaces.json');
@@ -141,8 +141,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const codex = tool === 'codex-cli' ? { manifest: (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} } : undefined;
-      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path, codex);
+      const codex = tool === 'codex-cli' ? (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} : undefined;
+      const atMarketplaceRoot = !!item.folder && !!catalog.root && resolve(item.folder) === resolve(catalog.root);
+      const { skills, commands, agents } = await pluginContents(state.path, codex ? {} : item.entry ?? {}, state.path, { codex, atMarketplaceRoot });
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
@@ -193,12 +194,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const [offered, installed] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item)]);
     if (offered) return { ...offered, installed };
     // Files the marketplace can't give (an npm or pip package) may still be read from a tool that installed it.
-    return Object.keys(installed).length ? { ...empty, installed, problem: 'Its files live outside this marketplace, so its skills, commands and agents are read from the tools that installed it.' } : null;
+    return Object.keys(installed).length ? { ...empty, installed } : null;
   }
 
   /** What the marketplace offers of one plugin: from its own folder, or read from the repository it is kept in. */
   async function offeredDetail(ctx: engine.PluginContext, root: string, item: CatalogPlugin): Promise<PluginDetail | null> {
-    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, resolve(item.folder) !== resolve(root));
+    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, resolve(item.folder) === resolve(root));
     if (!item.remote) return null;
     const copy = await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { ...empty, problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };

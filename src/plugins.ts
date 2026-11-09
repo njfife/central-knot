@@ -10,7 +10,7 @@ import { MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginMan
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
-import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
+import { githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, NativeRun } from './types.ts';
 
@@ -225,7 +225,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // A path outside the marketplace, through a link or not, is not read.
     if (await inside(root, folder)) {
       plugin.folder = folder;
-      const contents = counts ? await pluginContents(folder, item, root) : undefined;
+      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: resolve(folder) === resolve(root) }) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
       // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
       const fromFiles = contents ? contents.version : text((await pluginManifest(folder, root))?.version);
@@ -329,12 +329,13 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 
 /**
  * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says. Claude Code
- * records "unknown" for a plugin that gives none. For a Codex copy (`codex`), whose folder name is the version only when
+ * records "unknown" or a commit hash for a plugin that gives none. For a Codex copy (`codex`), whose folder name is the version only when
  * there is one, its .codex-plugin/plugin.json is read first, as Codex reads it.
  */
 async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
   const said = text(recorded);
-  if (said && said !== 'unknown') return said;
+  // A commit hash names no release (Claude Code records one for a plugin without a version); the manifest may.
+  if (said && said !== 'unknown' && !isCommitHash(said)) return said;
   const manifests = codex ? [codexManifest(path), pluginManifest(path)] : [pluginManifest(path)];
   for (const manifest of manifests) { const version = text((await manifest)?.version); if (version) return version; }
   return undefined;
@@ -375,7 +376,7 @@ function compareVersions(first: string, second: string): number {
 /**
  * The copy Codex loads from its cache folder for one plugin, as Codex chooses it: "local" (the name Codex gives a copy
  * whose manifest has no version) when there is one, else the highest version (see compareVersions). Only folders with
- * files count.
+ * files count here; Codex counts an empty one too (left by a failed install), so then the two may differ.
  */
 async function codexCopy(cache: string): Promise<string | undefined> {
   const folders: string[] = [];
@@ -415,13 +416,12 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     return { state: 'not-installed' };
   }
   if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
-  // Codex names each copy's folder for its version; "local" (no version) and a bare commit prefix (its curated plugins)
-  // name none, so the copy's manifest gives it.
+  // Codex names each copy's folder for its version; "local" (no version) and a commit prefix (its curated plugins) name
+  // none, so the copy's manifest gives it (see copyVersion).
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const copy = await codexCopy(cache);
   if (!copy) return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
-  const named = copy === 'local' || /^[0-9a-f]{7,40}$/i.test(copy) ? undefined : copy;
-  return { state: 'installed', path: join(cache, copy), version: await copyVersion(named, join(cache, copy), true) };
+  return { state: 'installed', path: join(cache, copy), version: await copyVersion(copy === 'local' ? undefined : copy, join(cache, copy), true) };
 }
 
 // ---------- Install and uninstall ----------

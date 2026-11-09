@@ -30,3 +30,6 @@ export const isHttps = (value: unknown): value is string => typeof value === 'st
 
 /** True when a marketplace source names a folder on this computer (an absolute path), not a URL or owner/repo. */
 export const isFolder = (source: string) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(source.trim());
+
+/** Whether a name is a Git commit hash or a prefix of one (7 to 40 hex digits, at least one a letter, so 20250101 is not). */
+export const isCommitHash = (name: string) => /^(?=\d*[a-f])[0-9a-f]{7,40}$/i.test(name);
