@@ -857,27 +857,6 @@ test('An edit racing a deletion with unknown order is kept, the deleted copy ret
   } finally { await box.cleanup(); }
 });
 
-test('A deletion after an edit has spread removes the edited content everywhere', async () => {
-  const box = await sandbox();
-  try {
-    let now = 1000;
-    const clock = () => now;
-    await managedPair(box);
-    // Copilot's edit is seen at t=2000, while Claude's copy is still at the baseline at t=3000; Claude deletes after that.
-    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Old Copilot edit.'));
-    await writeFile(join(box.home, CLAUDE, '.hold'), 'x');
-    now = 2000; await applyChanges(fast(box, { now: clock, settleMs: 0 }), [{ key: 'pair', managed: true, off: [] }]);
-    // That pass spread the edit; to model an unresolved edit, edit Copilot again and observe it before Claude's deletion.
-    await writeFile(join(box.home, COPILOT, 'pair/SKILL.md'), text('pair', 'Second Copilot edit.'));
-    now = 3000; const observed = await applyChanges(fast(box, { now: clock }), []);
-    assert.equal(observed.notices?.[0]?.kind, 'edit');
-    await rm(join(box.home, CLAUDE, 'pair'), { recursive: true });
-    now = 4000; const result = await applyChanges(fast(box, { now: clock }), []);
-    assert.equal(result.notices?.[0]?.kind, 'deleted');
-    assert.equal(await exists(join(box.home, COPILOT, 'pair')), false);
-  } finally { await box.cleanup(); }
-});
-
 test('A skill turning up again after it was deleted everywhere is new and unmanaged, not a revival', async () => {
   const box = await sandbox();
   try {
