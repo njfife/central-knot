@@ -605,3 +605,18 @@ All sixth-check findings stayed fixed.
 2. **A moved-aside settings file is never deleted.** If its place is taken (a crash after the write, or another program's save), crash recovery keeps it as a visible `<file>.central-knot-<time>.bak`.
 
 **Validation.** 230 unit tests. Linux e2e 123/123.
+
+## Confirming checks (on b7b2ea9), November 9, 2026
+
+**Opus: "safe to hand to Nathan".** Its three small points are fixed:
+- the agents version of the "edit recorded before any write" fix now has a test, which fails without the fix;
+- the Write now guard also finds a global npm Claude Code (`node …/bin/claude`);
+- the `recoverParked` comment was corrected.
+
+**Astra: "not yet"**, with two confirmed findings, now fixed:
+1. **Backups never overwrite each other.** Each moved-aside file is kept under its own name (time plus a random part), placed with an exclusive link. Ten recovered originals give ten backups (`tests/share-recovery.test.ts`).
+2. **The agent catch-up after a failed write no longer records the behind copy as displaced,** so no second "edit" entry with the same tool as winner and loser appears. This is MCP's existing guard, now in agents (new test in `tests/agents.test.ts`).
+
+Both new tests fail on b7b2ea9.
+
+**Validation.** 234 unit tests. Linux e2e 123/123.

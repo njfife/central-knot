@@ -314,7 +314,8 @@ function claudeRunning(): Promise<boolean> {
   // The native `claude` binary, or Claude Code run through node (an npm install shows as node with its package in the command).
   const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
   // Only node running the package's CLI counts, never a shell or search that merely mentions the package.
-  return found(['-x', 'claude']).then(native => native || found(['-f', '^[^ ]*node .*@anthropic-ai/claude-code/']));
+  // A global npm install runs as `node …/bin/claude`.
+  return found(['-x', 'claude']).then(native => native || found(['-f', '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/claude( |$))']));
 }
 
 /** A tool's own CLI, never an app's bundled copy (CD §3), searched as version probes are. */

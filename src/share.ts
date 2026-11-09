@@ -230,7 +230,7 @@ export async function writeFileChecked(path: string, text: string, expected: str
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
       if (errorCode(error) === 'EEXIST') {
         // Even if that rename fails, the original is never deleted here: it stays moved aside for the next pass to find.
-        if (parkedThere) { await rename(parked, `${path}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).catch(() => undefined); parkedThere = false; }
+        if (parkedThere) { await keepAsBackup(parked, path); parkedThere = false; }
         throw expected === undefined ? occupiedError() : changedWhileSyncing();
       }
       // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
@@ -250,6 +250,18 @@ export async function writeFileChecked(path: string, text: string, expected: str
   }
 }
 
+/**
+ * Keeps a moved-aside file beside `path` as a visible backup. Each gets its own name (time plus a random part) and is placed without
+ * replacing anything, so two backups of the same file never overwrite each other. If it can't be placed, it stays where it is.
+ */
+async function keepAsBackup(parked: string, path: string) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const backup = `${path}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.bak`;
+    try { await link(parked, backup); await unlink(parked).catch(() => undefined); return; }
+    catch (error) { if (errorCode(error) !== 'EEXIST') break; }
+  }
+}
+
 /** Puts a moved-aside file back where it was, never over something saved there since. True when it is back. */
 async function putBack(parked: string, path: string): Promise<boolean> {
   try { await link(parked, path); await unlink(parked).catch(() => undefined); return true; }
@@ -262,8 +274,8 @@ async function putBack(parked: string, path: string): Promise<boolean> {
 
 /**
  * Finishes what a crash interrupted in a folder Central Knot writes single files into: a file moved aside (`.name.ck-*.old`) whose
- * place is still empty goes back, so it is never read as deleted; one whose replacement is in place, and stray temporary files,
- * go. Moved-aside content was already kept in the store before it was moved.
+ * place is still empty goes back, so it is never read as deleted; one whose place is taken is kept beside it as a visible
+ * `<file>.central-knot-<time>.bak`, never deleted. Stray temporary files go.
  */
 export async function recoverParked(folder: string) {
   let names: string[];
@@ -276,7 +288,7 @@ export async function recoverParked(folder: string) {
       catch (error) {
         if (errorCode(error) !== 'EEXIST') continue;
         // Its place is taken (the write finished, or something else saved there): kept beside it as a visible backup, never deleted.
-        await rename(join(folder, name), `${home}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).catch(() => undefined);
+        await keepAsBackup(join(folder, name), home);
       }
       continue;
     }

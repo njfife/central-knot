@@ -186,3 +186,39 @@ test('With Sync off, Apply all for one agent never spreads another agent’s edi
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/, 'not spread');
   } finally { await box.cleanup(); }
 });
+
+test('An agent edit whose spread failed at first is still History, so the version it replaced can be restored', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited.\n'));
+    const { chmod } = await import('node:fs/promises');
+    for (const folder of ['.copilot/agents', '.codex/agents']) await chmod(join(box.home, folder), 0o555);
+    await applyAgents(box.context, tools, []);
+    for (const folder of ['.copilot/agents', '.codex/agents']) await chmod(join(box.home, folder), 0o755);
+    await applyAgents(box.context, tools, []);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Edited\./);
+    const edit = (await readHistory(box.home)).find(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
+    assert.ok(edit, 'the edit is in History');
+    assert.notEqual(edit!.previous, undefined);
+  } finally { await box.cleanup(); }
+});
+
+test('An agent catch-up after a failed write leaves exactly one edit in History, even after idle passes', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('Edited.\n'));
+    const { chmod } = await import('node:fs/promises');
+    await chmod(join(box.home, '.copilot/agents'), 0o555);
+    await applyAgents(box.context, tools, []);
+    await chmod(join(box.home, '.copilot/agents'), 0o755);
+    await applyAgents(box.context, tools, []);
+    await applyAgents(box.context, tools, []);
+    await applyAgents(box.context, tools, []);
+    const edits = (await readHistory(box.home)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
+    assert.equal(edits.length, 1, JSON.stringify(edits));
+  } finally { await box.cleanup(); }
+});

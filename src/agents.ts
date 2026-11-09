@@ -414,8 +414,12 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
       try {
         if (here) {
           await keep(context, here);
-          (item.displaced ??= []).push({ tool, hash: here.hash });
-          await saveAgentRecord(context.home, record);
+          // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (a write that
+          // failed, caught up now) holds an older version that History already has.
+          if (changed.length || chosenNow.has(key) || raced) {
+            (item.displaced ??= []).push({ tool, hash: here.hash });
+            await saveAgentRecord(context.home, record);
+          }
         }
         await writeChecked(path, text, here?.text);
       } catch (error) {
