@@ -130,6 +130,7 @@ function trayMenu() {
   ]);
 }
 function refreshTray() {
+  appMenu();
   if (!tray) return;
   tray.setContextMenu(trayMenu());
   tray.setToolTip(unseen ? 'Central Knot: sync made changes' : 'Central Knot');
@@ -143,6 +144,30 @@ async function fromTray(work: () => Promise<void>) {
   refreshTray();
   if (window && !window.isDestroyed()) window.webContents.send('sync:changed');
 }
+/**
+ * The app menu carries the menu bar's controls too, so they are always reachable: a crowded menu bar (or the notch) can hide the
+ * icon. Edit and Window keep the standard shortcuts (copy, paste, close, minimise).
+ */
+function appMenu() {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: app.name, submenu: [
+      { role: 'about' },
+      { type: 'separator' },
+      { label: 'Sync', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
+      { label: 'Sync now', enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
+        click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
+      { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+      { type: 'separator' },
+      { label: 'Quit Central Knot', accelerator: 'Command+Q', click: () => { quitting = true; app.quit(); } },
+    ] },
+    { role: 'editMenu' },
+    { role: 'windowMenu' },
+  ]));
+}
+
 function makeTray() {
   if (smoke || tray) return;
   const image = nativeImage.createFromBuffer(Buffer.from(trayIconPng, 'base64'), { scaleFactor: 2 });
@@ -387,7 +412,10 @@ function createWindow(show: boolean) {
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
 }
 
-if (!smoke && !app.requestSingleInstanceLock()) app.quit();
+// One Central Knot at a time: a second launch hands over to the first (which shows its window) and exits at once, before it opens
+// a window of its own. app.quit() would let it start up first.
+const primary = smoke || app.requestSingleInstanceLock();
+if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
 app.on('before-quit', () => { quitting = true; });
@@ -395,6 +423,7 @@ app.on('before-quit', () => { quitting = true; });
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
 
 app.whenReady().then(async () => {
+  if (!primary) return;
   await loadSyncSetting();
   await loadAppSettings();
   await firstSignIn();

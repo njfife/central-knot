@@ -470,3 +470,11 @@ Both said "not yet". Opus confirmed 7 problems, Astra 11, overlapping. The agent
   - Start at sign-in is registered once, at first launch, and a later "off" in Login Items is respected (the menu reads the system's state).
 
 **Validation.** 179 unit tests. Linux e2e 121/121.
+
+## Computer use on e805d21 (agents and menu bar), November 9, 2026
+
+Agents passed in the real window: steps 1–5 (Manage all, files and limits, the runtime note, an edit spreading with Undo, History's Agent tag and Undo). The background steps found two problems:
+- **A second launch opened its own window** ("Could not read this home"). `app.quit()` let the second instance start up before exiting. It now exits at once (`app.exit`), and only the first instance shows its window.
+- **The menu bar icon was not found:** a crowded menu bar (and the MacBook notch) hides status items. The app menu now carries Sync, Sync now, Start at sign-in and Quit too, so they are always reachable. The Dock icon also reopens the window.
+
+Closing the window kept the app running, and a background edit reached Codex (step 6, first half).
