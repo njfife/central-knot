@@ -9,7 +9,7 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import { loadRepo, repo, repoPage, waiting } from './repopage.ts';
+import { loadRepo, repo, repoPage, waitingCounts } from './repopage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -66,7 +66,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 /** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
 function repoRow() {
   const view = repo.view;
-  const { pull, push } = view?.connected ? waiting(view) : { pull: 0, push: 0 };
+  const { pull, push } = view?.connected ? waitingCounts(view) : { pull: 0, push: 0 };
   // Directions, not an item count: ↓ to pull, ↑ to push.
   const shown = [pull ? `↓${pull}` : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
   return navRow('repo', 'Git repo', 'git-branch', shown || undefined, [pull ? `${pull} to pull` : '', push ? `${push} to push` : ''].filter(Boolean).join(' · '));

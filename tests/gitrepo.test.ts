@@ -154,6 +154,9 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:changed', 'planner:removed']);
     await pushRepo(first);
 
+    // With Sync off, the agent's deletion can't spread, so Pull leaves every copy and says why; with Sync on, it comes in.
+    assert.match((await pullRepo(second, { syncOn: false })).results.map(result => result.message).join(' '), /waits for Sync/);
+    assert.equal(Object.keys((await agentsView(second, tools)).servers[0].copies).length, 2, 'no copy removed while the deletion waits');
     const view = live((await pullRepo(second)).view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
     assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);

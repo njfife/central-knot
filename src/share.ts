@@ -329,6 +329,9 @@ export async function remember(context: ShareContext, generation: string) {
 const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
+/** Why nothing may be written right now (another build owns syncing, or the record needs Resume), if so. */
+export const gateRefusal = (gate: SyncGate) => (gate.state === 'stopped' || gate.state === 'needs-resume' ? gate.reason : undefined);
+
 export async function syncGate(context: ShareContext): Promise<SyncGate> {
   const { record, problem } = await readRecord(context.home);
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };

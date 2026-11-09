@@ -24,7 +24,7 @@ import { harnesses } from './harnesses.ts';
 import { applyChanges, deleteEverywhere, displace, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpView, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { gitEnv, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
-import { copyTree, errorCode, itemKey, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { copyTree, errorCode, exists, gateRefusal, itemKey, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
 
 /** The base instruction set (feedback/base-instructions): read for Push, applied on Pull. Without it, instructions/ is left alone. */
@@ -100,7 +100,10 @@ async function listTree(dir: string, treeish: string): Promise<{ mode: string; b
   });
 }
 
-/** The bytes of several blobs, read in one `git cat-file --batch`, which is stopped if it hangs. */
+/**
+ * The bytes of several blobs, read in one `git cat-file --batch`, which is stopped if it hangs. (Not runGit: this needs stdin, and
+ * bytes rather than trimmed text.)
+ */
 function readBlobs(dir: string, blobs: string[]): Promise<Map<string, Buffer>> {
   const wanted = [...new Set(blobs)];
   if (!wanted.length) return Promise.resolve(new Map());
@@ -167,9 +170,20 @@ function unreadableSkill(text: string, folder: string): string | undefined {
  * Reads the Managed set out of a commit or tree, in the layout above. A skill's identity is its files' paths, executable bits and
  * contents, as git holds them; a server's and an agent's is what every tool holds of them (the same ids sync uses).
  */
-async function readSide(dir: string, treeish: string | undefined, withBase: boolean): Promise<Side> {
+/** Commits and trees never change, so what one holds is read once (a few kept, as each view reads three). */
+const sidesRead = new Map<string, Promise<Side>>();
+function readSide(dir: string, treeish: string | undefined, withBase: boolean): Promise<Side> {
+  if (!treeish) return Promise.resolve(new Map());
+  const id = `${dir}\0${treeish}\0${withBase}`;
+  if (!sidesRead.has(id)) {
+    sidesRead.set(id, readSideOnce(dir, treeish, withBase).catch(error => { sidesRead.delete(id); throw error; }));
+    while (sidesRead.size > 12) sidesRead.delete(sidesRead.keys().next().value!);
+  }
+  return sidesRead.get(id)!;
+}
+
+async function readSideOnce(dir: string, treeish: string, withBase: boolean): Promise<Side> {
   const side: Side = new Map();
-  if (!treeish) return side;
   const files = await listTree(dir, treeish);
   const skills = new Map<string, typeof files>();
   for (const file of files) {
@@ -231,7 +245,7 @@ function sourceTool(facts: SkillFacts, preferNot: HarnessId[] = []): HarnessId |
 
 /** Managed items that can't go in the repo, with why: Push leaves the repo's copy of each as it is. */
 type Unsent = Map<string, { item: SideItem; reason: string }>;
-const unsendable = (unsent: Unsent, key: string, kind: RepoKind, name: string, reason: string) => unsent.set(key, { item: { key, kind, name, id: '', paths: [] }, reason });
+const markUnsendable = (unsent: Unsent, key: string, kind: RepoKind, name: string, reason: string) => unsent.set(key, { item: { key, kind, name, id: '', paths: [] }, reason });
 
 /** Removes what the layout holds in one folder (`keep`: entries left as they are); a README beside them, or any other file, stays. */
 async function clearLayout(dir: string, folder: string, isLayout: (entry: Dirent) => boolean, keep: Set<string> = new Set()) {
@@ -253,19 +267,19 @@ async function writeSkills(dir: string, skills: SkillFacts[], unsent: Unsent) {
   const sources = new Map<string, { directory: string; hash: string }>();
   for (const facts of skills.filter(skill => skill.managed)) {
     const tool = sourceTool(facts);
-    if (tool === UNSETTLED) { unsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
+    if (tool === UNSETTLED) { markUnsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
     const copy = tool && facts.copies[tool];
     if (!copy) continue;
-    if (facts.held) { unsendable(unsent, facts.key, 'skill', copy.folder, facts.held); continue; }
+    if (facts.held) { markUnsendable(unsent, facts.key, 'skill', copy.folder, facts.held); continue; }
     sources.set(copy.folder, { directory: copy.directory, hash: copy.hash });
   }
   const unchanged = new Set([...sources].filter(([folder, { hash }]) => before[folder] === hash).map(([folder]) => folder));
   await clearLayout(dir, 'skills', entry => entry.isDirectory(), unchanged);
   const after: Record<string, string> = {};
   for (const [folder, { directory, hash }] of sources) {
-    if (unchanged.has(folder) && await stat(join(dir, 'skills', folder)).then(() => true, () => false)) { after[folder] = hash; continue; }
+    if (unchanged.has(folder) && await exists(join(dir, 'skills', folder))) { after[folder] = hash; continue; }
     const tree = await readTree(directory);
-    if (tree.held) { unsendable(unsent, itemKey(folder), 'skill', folder, tree.held); continue; }
+    if (tree.held) { markUnsendable(unsent, itemKey(folder), 'skill', folder, tree.held); continue; }
     await removeTree(join(dir, 'skills', folder));
     await mkdir(join(dir, 'skills'), { recursive: true });
     await copyTree(directory, join(dir, 'skills', folder), tree);
@@ -282,7 +296,7 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
   for (const facts of view.servers.filter(server => server.managed)) {
     const tool = sourceTool(facts, ['claude-cli']);
     const server = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.name}`) : undefined;
-    if (facts.held || !server) { unsendable(unsent, serverKey(facts.name), 'mcp', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s settings could be read for it just now.')); continue; }
+    if (facts.held || !server) { markUnsendable(unsent, serverKey(facts.name), 'mcp', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s settings could be read for it just now.')); continue; }
     await writeDurably(join(dir, 'mcp', `${toFile(facts.name)}.json`), `${JSON.stringify(jsonEntry('claude-cli', server), null, 2)}\n`);
   }
 }
@@ -295,7 +309,7 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   for (const facts of view.servers.filter(agent => agent.managed)) {
     const tool = sourceTool(facts);
     const entry = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.key}`) : undefined;
-    if (facts.held || !entry) { unsendable(unsent, agentKey(facts.name), 'agent', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s file could be read for it just now.')); continue; }
+    if (facts.held || !entry) { markUnsendable(unsent, agentKey(facts.name), 'agent', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s file could be read for it just now.')); continue; }
     // Claude Code's own file goes as written, with its own settings (tools, model). Another tool's is put in Claude Code's format
     // over the repo's file, so the settings only Claude Code has stay as the repo has them.
     const path = `agents/${toFile(entry.name)}.md`;
@@ -312,17 +326,17 @@ const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is aw
  * with no copy that could be read. Never offered as removed: absence is only a deletion once sync has recorded one.
  */
 async function holdUnseen(context: ShareContext, dir: string, unsent: Unsent) {
-  const written = async (path: string) => stat(join(dir, path)).then(() => true, () => false);
+  const written = (path: string) => exists(join(dir, path));
   // Skill folders by key: the folder's case is the source tool's, which may differ from the record's copies.
   const skillKeys = new Set((await readdir(join(dir, 'skills')).catch(() => [] as string[])).map(itemKey));
   for (const [key, item] of Object.entries((await readRecord(context.home)).record?.items ?? {})) {
-    if (item.state === 'shared' && !item.deleted && !unsent.has(key) && !skillKeys.has(key)) unsendable(unsent, key, 'skill', item.name, UNSEEN);
+    if (item.state === 'shared' && !item.deleted && !unsent.has(key) && !skillKeys.has(key)) markUnsendable(unsent, key, 'skill', item.name, UNSEEN);
   }
   for (const [name, item] of Object.entries((await readMcpRecord(context.home)).items)) {
-    if (item.state === 'shared' && !item.deleted && !unsent.has(serverKey(name)) && !(await written(`mcp/${toFile(name)}.json`))) unsendable(unsent, serverKey(name), 'mcp', name, UNSEEN);
+    if (item.state === 'shared' && !item.deleted && !unsent.has(serverKey(name)) && !(await written(`mcp/${toFile(name)}.json`))) markUnsendable(unsent, serverKey(name), 'mcp', name, UNSEEN);
   }
   for (const [key, item] of Object.entries((await readAgentRecord(context.home)).items)) {
-    if (item.state === 'shared' && !item.deleted && !unsent.has(`agent:${key}`) && !(await written(`agents/${toFile(item.name)}.md`))) unsendable(unsent, `agent:${key}`, 'agent', item.name, UNSEEN);
+    if (item.state === 'shared' && !item.deleted && !unsent.has(`agent:${key}`) && !(await written(`agents/${toFile(item.name)}.md`))) markUnsendable(unsent, `agent:${key}`, 'agent', item.name, UNSEEN);
   }
 }
 
@@ -535,8 +549,11 @@ const notIn = (item: string, message: string): DestinationResult => ({ item, out
 /** A write into the first tool that didn't happen: changed just now (left as it is), or any other failure, in plain words. */
 const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: unknown) => notIn(change.name, errorCode(error) === 'CK_CHANGED'
   ? `${harnesses[tool].name}’s ${noun} changed just now, so it was left as it is. Pull again.` : `Could not write ${harnesses[tool].name}’s ${noun}: ${plainError(error)}`);
-/** Said when a deletion from the repo already reached one tool and waits for Sync to reach the rest: Pull doesn't remove another copy. */
-const DELETION_WAITS = 'Its deletion is waiting for sync to reach your other tools. Turn on Sync or use Sync once.';
+/**
+ * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
+ * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
+ */
+const DELETION_WAITS = 'Its deletion from the repo waits for Sync: turn on Sync or use Sync once, then Pull again.';
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
 /** What a sync pass started by Pull may touch: with Sync off, this item alone (as Apply all does); with Sync on, undefined, an ordinary pass. */
@@ -593,7 +610,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
   const facts = view.servers.find(server => server.key === change.name);
   if (!item && !facts?.managed) return [];
   // A copy already gone while others remain: the last Pull's deletion is waiting for sync, and this one removes nothing more.
-  if (!item && (await readMcpRecord(context.home)).items[change.name]?.copies.some(copy => !copy.status && !facts?.copies[copy.tool])) return [notIn(change.name, DELETION_WAITS)];
+  if (!item && only(change.name)) return [notIn(change.name, DELETION_WAITS)];
   const server = item && parseServer(change.name, await readFile(join(dir, item.paths[0]), 'utf8'));
   if (item && !server) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   const writer = view.tools.filter(tool => tool !== 'claude-cli').sort(byPreference).find(tool => !facts?.off.includes(tool) && (server ? !cannotHold(tool, server) : !!facts?.copies[tool]));
@@ -620,7 +637,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const key = keyOf(change.name);
   const facts = view.servers.find(agent => agent.key === key);
   if (!item && !facts?.managed) return [];
-  if (!item && (await readAgentRecord(context.home)).items[key]?.copies.some(copy => !copy.status && !facts?.copies[copy.tool])) return [notIn(change.name, DELETION_WAITS)];
+  if (!item && only(key)) return [notIn(change.name, DELETION_WAITS)];
   const writer = agentTools.filter(tool => view.tools.includes(tool)).sort(byPreference).find(tool => !facts?.off.includes(tool) && (item ? true : !!facts?.copies[tool]));
   if (!writer) return [notIn(change.name, 'No tool here takes agents.')];
   const existing = (await readAgents(context, writer)).entries.find(entry => entry.key === key);
@@ -640,7 +657,10 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
         // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
         if (!facts) wrote({ tool: writer, after: sha(next) });
-        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing, next) : undefined });
+        else if (existing) {
+          const settingsOnly = existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing, next) : undefined;
+          wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly });
+        }
       }
     }
   } catch (error) {
@@ -677,7 +697,8 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
   const access = await writeAccess(context);
   if (!access.allowed) return stop(access.reason);
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return stop(gate.reason);
+  const gated = gateRefusal(gate);
+  if (gated) return stop(gated);
   const history = await readHistory(context.home);
   const past = history.find(event => event.id === eventId);
   if (!past?.settingsFile) return stop('That change can’t be restored.');
@@ -745,6 +766,9 @@ function accountForReplacedCopy(history: HistoryEvent[], mine: HistoryEvent[], {
   // Sync names displaced content it finds on record in an event of its own; with the pull's own event there, that one says it.
   const separate = mine.find(event => event !== replaced && event.kind === 'edit' && event.previous === before);
   if (replaced && separate) history.splice(history.indexOf(separate), 1);
+  // Only an agent's Claude Code settings changed: the pull's own event (whichever survives) carries the file Undo puts back.
+  const kept = replaced ?? separate;
+  if (settingsOnly && kept) { kept.settingsFile = settingsOnly; return; }
   if (replaced && !settingsOnly) {
     // Named per tool, even when its old copy matched another's: the row says every tool the pull changed.
     if (replaced.losers.some(loser => loser.tool === tool)) return;
@@ -762,7 +786,8 @@ async function readyToMove(context: ShareContext, base: BaseInstructions | undef
   if (!found) return { refused: await refusal(context, 'No repo is connected.', base) };
   // Pull writes a tool's copy before sync runs, so sync's own gate (another build syncing, a record to resume) is asked first.
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { refused: await refusal(context, gate.reason, base) };
+  const gated = gateRefusal(gate);
+  if (gated) return { refused: await refusal(context, gated, base) };
   const problem = await check(context);
   if (problem) return { refused: await refusal(context, problem, base) };
   const state = (await readState(context.home))!;

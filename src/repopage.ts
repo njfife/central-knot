@@ -34,17 +34,21 @@ export function loadRepoSoon(): void {
   soon = setTimeout(() => void loadRepo(), 1500);
 }
 
-/** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 /** The check (fetch) in flight, if any: a load that overtakes it waits for this one rather than starting another. */
 let inFlight: Promise<RepoView | null> | undefined;
+/** A check asked for by a load that a newer one overtook before its fetch began: the newer load does it instead. */
+let wantCheck = false;
 
+/** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
   const turn = ++loads;
+  check ||= wantCheck;
+  wantCheck = false;
   // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
   if (inFlight) { check = false; await inFlight.catch(() => undefined); }
   let view: RepoView | undefined;
   try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
-  if (turn !== loads) return;
+  if (turn !== loads) { wantCheck ||= check; return; }
   repo.view = view;
   if (!inFlight) repo.checking = false;
   rerender();
@@ -161,12 +165,12 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
 }
 
 /** Changes waiting each way, leaving out items that can't move. */
-export const waiting = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
+export const waitingCounts = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
 
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
 function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string) => h('span.repo-state-part', {}, icon(glyph, 14, tone), h('span', {}, text));
-  const { pull: incoming, push: outgoing } = waiting(view);
+  const { pull: incoming, push: outgoing } = waitingCounts(view);
   const stuck = [...view.incoming, ...view.outgoing].filter(change => change.held).length;
   const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', view.pushBlocked ? `${outgoing} to push after Pull` : `${outgoing} to push`) : null];
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
@@ -180,27 +184,46 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
 /** While the repo can't be reached: said once, above both lists, and named by both buttons. */
 const WAITING_ID = 'repo-waiting';
 
+/**
+ * Pull: shown when something can come in, an unfinished item can be tried again, or a newer commit changes nothing here (Pull then
+ * just moves to it). Items whose fault is in the repo can't be pulled at all.
+ */
+function pullButton(view: Extract<RepoView, { connected: true }>, pullable: number, moving: boolean) {
+  const retryable = view.incoming.filter(change => change.retry).length;
+  if (!pullable && !retryable && !view.pushBlocked) return null;
+  return button({
+    variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', id: 'repo-pull', disabled: moving || !view.latest,
+    label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull',
+    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' },
+    onclick: () => void pull(),
+  });
+}
+
+/** Push: shown when something here can go, or the branch is gone from the repo (Push puts it back with nothing else to send). */
+function pushButton(view: Extract<RepoView, { connected: true }>, pushable: number, moving: boolean) {
+  if (!pushable && !view.branchGone) return null;
+  const describedBy = view.problem ? WAITING_ID : view.pushBlocked ? 'repo-outgoing-blocked' : undefined;
+  return button({
+    variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', id: 'repo-push', disabled: moving || !!view.pushBlocked,
+    label: pushable ? `Push ${pushable}` : 'Push',
+    attrs: describedBy ? { 'aria-describedby': describedBy } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` },
+    onclick: () => void push(),
+  });
+}
+
 function connectedPage(view: Extract<RepoView, { connected: true }>) {
-  const { pull: pullable, push: pushable } = waiting(view);
+  const { pull: pullable, push: pushable } = waitingCounts(view);
   const locked = !!state.busy || !view.access.allowed;
   // While the repo can't be reached, Pull and Push wait for Try again (in the band) rather than fail the same way.
   const moving = locked || repo.checking || !!view.problem;
-  // Held items whose fault is in the repo can't be pulled at all; only those the last Pull couldn't finish are worth another try.
-  const retryable = view.incoming.filter(change => change.retry).length;
-  // A newer commit that changes nothing here still has to be pulled before a push: Pull then just moves to it.
-  const pullButton = pullable || retryable || view.pushBlocked ? button({ variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull', id: 'repo-pull', disabled: moving || !view.latest,
-    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
-  // The branch gone from the repo: Push puts it back even with nothing else to send.
-  const pushButton = pushable || view.branchGone ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: pushable ? `Push ${pushable}` : 'Push', id: 'repo-push', disabled: moving || !!view.pushBlocked,
-    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
+  const pullControl = pullButton(view, pullable, moving);
+  const pushControl = pushButton(view, pushable, moving);
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
-  // Each part stays whole when the row wraps, so a narrow window breaks at a dot, never inside a time.
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
   // Only what has happened: right after Connect that is just the check.
   const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
-  // Each separator belongs to the part after it, so a wrapped line starts with "·", never ends with one.
-  // One sentence: each part keeps its comma, so a wrapped line ends on a comma, never starts with a separator.
+  // One sentence; each part stays whole and keeps its comma, so a wrapped line breaks after a comma, never inside a time.
   const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, `${index ? text : text.charAt(0).toUpperCase() + text.slice(1)}${index < parts.length - 1 ? ',' : ''}`)]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
@@ -224,12 +247,12 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
       view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}; Pull and Push wait until it can be reached again.`) : null,
-      inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushButton)
-        : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
+      inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
+        : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
         : h('div.repo-sides', {},
-          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
-          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', pushable && !view.problem ? view.pushBlocked : undefined)),
+          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
+          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushControl, 'Nothing here that the repo doesn’t have.', pushable && !view.problem ? view.pushBlocked : undefined)),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 

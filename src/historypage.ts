@@ -78,7 +78,7 @@ function actions(event: HistoryEvent, action?: string) {
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
-  // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
+  // Only an 'added' undo is narrower: it removes the copies Apply all (or Pull) added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
   const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
