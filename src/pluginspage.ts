@@ -30,7 +30,7 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
     // Uninstalling takes a second click on the same cell; the band above says what it will do.
     const confirming = state.pluginConfirm === id;
     return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
-      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? You can reinstall afterwards from the result line. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
+      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? A Reinstall link appears afterwards. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
       confirming ? h('span.cell-confirm-label', { 'aria-hidden': 'true' }, 'Uninstall?') : null);
   }
   if (why) return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-cannot', { type: 'button', id, title: why, 'aria-label': `${names[tool]}: ${why}`, disabled: true, 'data-state': 'cannot' }, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–')));
@@ -90,7 +90,7 @@ function boxKey(view: PluginsView, entry: MarketplaceView) {
     states.includes('not-installed') ? item('Not installed: click to install', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
     states.includes('installed') ? item('Installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
     states.includes('not-known') ? item('Not confirmed yet', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
-    states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Unavailable: command-line tool not found' : 'Can’t install here (hover for why)', h('span.legend-cell.cell-cannot', {})) : null);
+    states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Unavailable: command-line tool not found' : 'Can’t install here: see the note above', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
 function market(view: PluginsView, entry: MarketplaceView, index: number) {
@@ -138,7 +138,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       if (!cannot.length) return refusal ? h('div.market-hints', {}, how, refusal) : how;
       const orList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(' or '));
       return h('div.market-hints', {}, how, refusal, h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
-        h('span.hint-body', {}, `Can’t install: the command-line tool${cannot.length === 1 ? '' : 's'} for ${orList(cannot.map(tool => names[tool])).replace(/ or /, ' and ')} ${cannot.length === 1 ? 'wasn’t' : 'weren’t'} found. Striped boxes can’t be clicked. `,
+        h('span.hint-body', {}, `Can’t install: the command-line tool${cannot.length === 1 ? '' : 's'} for ${orList(cannot.map(tool => names[tool])).replace(/ or /, ' and ')} ${cannot.length === 1 ? 'wasn’t' : 'weren’t'} found. `,
           button({ variant: 'link', size: 'micro', label: 'See Tools →', id: `market-tools-${index}`, onclick: () => showPage('tools') }))));
     })(),
     entry.plugins.length
@@ -164,7 +164,7 @@ function reverse(report: ActionReport) {
     // The same two-step confirm as the table's check: arm that cell and say what the next click does.
     const index = state.plugins?.marketplaces.findIndex(entry => entry.name === last.market) ?? -1;
     state.pluginConfirm = `pcell-${index}-${last.plugin}-${report.tool}`;
-    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? You can reinstall afterwards from the result line. Esc cancels.`;
+    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? A Reinstall link appears afterwards. Esc cancels.`;
     rerender();
   } });
   if (report.outcome === 'uninstalled' && last.source) return button({ variant: 'link', size: 'micro', label: `Reinstall in ${names[report.tool]}`, id: `report-reinstall-${report.tool}`, disabled: !!state.busy, onclick: () => void installPlugin(last.source, last.plugin, [report.tool]) });
@@ -207,6 +207,6 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins: a Git repository or folder with .claude-plugin/marketplace.json. Add one above by its Git address or owner/repo (for example, owner/plugins), or choose a folder. Adding reads its catalog and installs nothing. Marketplaces you already added in Claude Code, Copilot CLI or Codex show up here by themselves.',
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Add one above (for example, owner/plugins) or choose a folder; adding installs nothing. Ones you already added in Claude Code, Copilot CLI or Codex show up here by themselves.',
           button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }))));
 }

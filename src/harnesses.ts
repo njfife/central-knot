@@ -32,7 +32,7 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
   'copilot-cli': {
     id: 'copilot-cli', name: 'GitHub Copilot', surface: 'CLI', binary: 'copilot',
     configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [], loadsDotFolders: false,
-    otherReaders: ['GitHub Copilot app (likely)', 'VS Code'],
+    otherReaders: ['GitHub Copilot app', 'VS Code'],
     nextStep: 'Written. In Copilot CLI, run /skills reload or start a new session to use it.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Copilot skills' },

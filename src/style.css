@@ -923,3 +923,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .decided-undo span { text-decoration: none; color: var(--accent); }
 .legend-plain.cell-oneway .cell-oneway-mark { color: var(--ink-soft); }
 .sync-paused .sync-track { opacity: 0.6; }
+.plugin-outcome-card .details-tool-head strong { min-width: 0; }
+.plugins-page:has(.market-fit) .bands > .band { padding-right: max(16px, calc(100% - 770px)); }
+#add-marketplace:disabled { background: var(--control-line); color: var(--ink-faint); border-color: transparent; }
+.cannot-dash { color: var(--ink-soft); }

@@ -24,7 +24,7 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a user-wide skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
@@ -102,7 +102,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has a user-wide MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
+  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -110,7 +110,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has a user-wide agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'agents-empty');
+  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has an agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'agents-empty');
   return designOverview('agents');
 }
 
@@ -220,8 +220,8 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
           ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
           ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
           // Where its MCP servers and agents live, read from what was found there.
-          ...fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '—'); })()),
-          ...fact('Agents folder', (() => { const file = home.agents?.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '—'); })()),
+          ...fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '— (no MCP servers found)'); })()),
+          ...fact('Agents folder', (() => { const file = home.agents?.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '— (no agents found)'); })()),
           ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',

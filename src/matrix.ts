@@ -348,11 +348,11 @@ function details(skill: SampleSkill, closable = true) {
   const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Each tool keeps its own copy.' : skill.managed
     ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source · one-way to ${andList(Object.keys(skill.limits ?? {}).filter(tool => !skill.off.includes(tool as Tool)).map(tool => names[tool as Tool]))}`
-      : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)} · ${state.home && !state.home.syncOn ? 'automatic sync paused' : 'syncing'}` : 'Managed · syncing to no tool')
+      : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)} · ${state.home && !state.home.syncOn ? 'automatic sync off' : 'syncing'}` : 'Managed · syncing to no tool')
     : differs ? 'Not managed yet. Its copies differ.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   const allSame = skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
-  const paused = state.home && !state.home.syncOn ? ' · automatic sync paused' : '';
+  const paused = state.home && !state.home.syncOn ? ' · automatic sync off' : '';
   const toolRow = (tool: Tool) => h('div.details-tool', {},
     h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
       h('span.details-tool-line', {}, toolLine(skill, tool))),
@@ -583,7 +583,7 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   const noun = (n: number) => (n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
-    h('p.tool-menu-label', {}, `Copy ${names[tool]}'s ${nouns[kind][1].toLowerCase()} to…`),
+    h('p.tool-menu-label', {}, `Manage ${names[tool]}’s ${kind === 'mcp' ? 'MCP servers' : nouns[kind][1].toLowerCase()} in…`),
     others(tool).map(target => addRow(tool, target, list)),
     h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.'),
     h('div.tool-menu-stop', {},
