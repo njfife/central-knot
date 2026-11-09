@@ -25,7 +25,7 @@ function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: Harnes
   const named = [skill.key, skill.name].filter(Boolean).map(name => name!.toLowerCase());
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
-    if (!install.items.some(item => item.kind === partKind && named.includes(item.name.toLowerCase()))) continue;
+    if (!install.items.some(item => !item.removed && item.kind === partKind && named.includes(item.name.toLowerCase()))) continue;
     const key = pluginKey(install.source, install.plugin);
     const entry = found.get(key) ?? { install, tools: [] };
     entry.tools.push(install.tool);

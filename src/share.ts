@@ -6,6 +6,8 @@ import { harnesses, writeRoot } from './harnesses.ts';
 import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
+/** A text's SHA-256, hex: what Central Knot names content by. */
+export const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const STAGE_PREFIX = '.ck-stage-';
 const STAGE_NAME = /^\.ck-stage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Finder drops these into any folder it opens; they are no change to a skill. */

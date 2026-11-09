@@ -68,6 +68,12 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     assert.deepEqual(record.find(entry => entry.tool === 'codex-cli')?.items.map(item => `${item.kind}:${item.name}`).sort(), ['agent:designer', 'mcp:figma', 'mcp:remote', 'skill:figma-design']);
     assert.equal(record[0]?.version, '1.0.0');
 
+    // An agent whose front matter stops parsing is no sign the plugin dropped it: the installed copy stays.
+    await writeFile(join(box.plugin, 'agents', 'designer.md'), '---\nname: [\n---\n\nBroken.\n');
+    await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
+    assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /You design/);
+    await writeFile(join(box.plugin, 'agents', 'designer.md'), AGENT);
+
     const undone = await undoParts(box.context, codex.partsRun ?? '');
     assert.equal(undone?.outcome, 'uninstalled', undone?.message ?? '');
     await assert.rejects(readFile(join(box.home, '.codex/skills/figma-design/SKILL.md')));
@@ -89,6 +95,14 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
     assert.equal(pi.outcome, 'installed');
     assert.match(pi.notes?.join(' ') ?? '', /Pi already has one of that name[\s\S]*“remote”: one of that name is managed/);
     assert.equal(await readFile(join(box.home, '.pi/agent/skills/figma-design/SKILL.md'), 'utf8'), '---\ndescription: mine\n---\nMine.\n');
+
+    // A part the person deletes stays out: neither this update nor the next one puts it back.
+    await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
+    await rm(join(box.home, '.copilot/agents/designer.agent.md'));
+    const update = await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
+    assert.match(update.notes?.join(' ') ?? '', /Left out the agent “designer”: it was removed/);
+    await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
+    await assert.rejects(readFile(join(box.home, '.copilot/agents/designer.agent.md')));
 
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     await writeFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), `${SKILL}Edited.\n`);
@@ -136,8 +150,13 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
     await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
     await chmod(pluginSkill, 0o644);
     assert.ok((await readParts(box.home))[0]?.items.some(item => item.kind === 'skill'));
+    // Nor is a skills folder that can't be listed.
+    await chmod(join(box.plugin, 'skills'), 0o000);
+    await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
+    await chmod(join(box.plugin, 'skills'), 0o755);
+    assert.ok((await readParts(box.home))[0]?.items.some(item => item.kind === 'skill'));
     // A servers file that can't be read now is no sign the plugin dropped its server: the installed one stays.
-    for (const unreadable of ['{ not json', '{ "mcpServers": null }']) {
+    for (const unreadable of ['{ not json', '{ "mcpServers": null }', '{ "mcpServers": { "figma": null } }']) {
       await writeFile(join(box.plugin, '.mcp.json'), unreadable);
       await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
       assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/, unreadable);

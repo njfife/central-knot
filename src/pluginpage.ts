@@ -3,10 +3,10 @@
 import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
-import { componentsFrom, outcomes } from './pluginoutcomes.ts';
+import { outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { installed, partWords, partsTools, partsWhy, stateOf, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
+import { installed, partWords, partsEligible, partsFit, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
@@ -15,8 +15,7 @@ import { openItem } from './matrix.ts';
 
 /** A tool that takes parts, can't take this plugin, and gets none of its parts (Pi, for a plugin of agents and commands). */
 const takesNoneOf = (view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId) =>
-  partsTools.includes(tool) && !plugin.gone && !partsOf(entry, plugin.name, tool) && !installed(entry, plugin.name, tool)
-  && !!unavailable(view, entry, plugin.name, tool) && stateOf(entry, plugin.name, tool).state === 'not-installed' && !partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin));
+  partsEligible(view, entry, plugin.name, tool) && !partsFit(tool, componentsOf(entry, plugin));
 
 /** Tools that can take the plugin itself here (or have it): what "In each tool" describes. A tool taking its parts, or none, is left out. */
 const nativeTools = (view: PluginsView, entry: MarketplaceView, plugin: string, components: Components) =>
@@ -212,8 +211,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   const read = market.details.get(pluginKey(entry.source, plugin.name));
   const reading = !read || read.reading;
   const detail = read && !read.reading ? read.value : undefined;
-  // A plugin kept elsewhere has no counts from the catalog; once its files are read, its contents give them.
-  const components = plugin.components ?? (detail && !detail.problem ? componentsFrom(detail) : undefined);
+  const components = componentsOf(entry, plugin);
   const title = pluginTitle(plugin);
   const facts: (string | HTMLElement)[] = [plugin.version && `Version ${plugin.version}`, plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
   if (plugin.homepage) facts.push(button({ variant: 'link', size: 'micro', label: 'Website', id: 'plugin-homepage', onclick: () => openLink(plugin.homepage!) }));

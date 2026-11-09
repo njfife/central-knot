@@ -213,7 +213,13 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
     // Parts are ordinary skills, MCP servers and agents: the other pages see them (and where they came from) at once.
-    if (ops.some(op => isParts(op.action))) { const view = await api().refresh().catch(() => null); if (view) app.home = view; }
+    if (ops.some(op => isParts(op.action))) {
+      const view = await api().refresh().catch(() => null);
+      if (view) app.home = view;
+      // What each tool now holds changed, so each plugin's plan (which names clash) is read again.
+      for (const op of ops) market.partsPlans.delete(pluginKey(op.source, op.plugin));
+      readShown();
+    }
   }
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);
 });

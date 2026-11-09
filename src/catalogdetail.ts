@@ -56,6 +56,14 @@ export async function readManifest(root: string): Promise<{ manifest: Record<str
   return manifest ? { manifest } : { problem: 'Its marketplace.json could not be read as JSON.' };
 }
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
+/**
+ * The same, noting in `unread` (as '*', "any of them") a folder that is there but can't be listed, so its contents count as
+ * unknown rather than none.
+ */
+const listOrNote = async (root: string, folder: string, unread?: string[]) => {
+  if (!(await inside(root, folder))) { if (unread && await present(folder)) unread.push('*'); return [] as string[]; }
+  return readdir(folder).catch(error => { if (unread && !['ENOENT', 'ENOTDIR'].includes(String(error?.code))) unread.push('*'); return [] as string[]; });
+};
 
 /** The README in this folder, cut to a readable size. */
 export async function readmeIn(folder: string, root = folder): Promise<string | undefined> {
@@ -65,7 +73,7 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
 }
 
 /** Whether something is at this path, readable or not: a file that is there but can't be read is not absent. */
-const present = (path: string) => lstat(path).then(() => true, () => false);
+const present = (path: string) => lstat(path).then(() => true, error => error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR');
 
 /**
  * Skill folders (each with a SKILL.md) at the given paths: each path a skill folder or a folder of skill folders. A skill
@@ -80,7 +88,7 @@ async function skillFolders(root: string, paths: string[], unread?: string[]): P
     found.push({ part: { name: meta.name || basename(dir), description: meta.description ?? '' }, dir });
     return true;
   };
-  for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
+  for (const path of paths) if (!(await add(path))) for (const name of await listOrNote(root, path, unread)) await add(join(path, name));
   return found.sort((first, second) => first.part.name.localeCompare(second.part.name));
 }
 
@@ -90,10 +98,10 @@ async function skillFolders(root: string, paths: string[], unread?: string[]): P
  */
 async function markdownFiles(root: string, paths: string[], unread?: string[]): Promise<{ part: NamedPart; file: string; text: string; whole: boolean }[]> {
   const found: { part: NamedPart; file: string; text: string; whole: boolean }[] = [];
-  const filesIn = async (folder: string) => (await listInside(root, folder)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
+  const filesIn = async (folder: string) => (await listOrNote(root, folder, unread)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path]
-      : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
+      : [...(await filesIn(path)), ...(await Promise.all((await listOrNote(root, path, unread)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
       const read = await readInside(root, file);
       if (!read) { if (unread && await present(file)) unread.push(basename(file, '.md')); continue; }
@@ -166,7 +174,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
 /**
  * The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts), from
  * `folder` (relative server paths are checked against it). `unread`: what is there but couldn't be read (skills and agents
- * by name; `servers` when a servers file isn't readable JSON, so some may be missing): an update keeps those parts as
+ * by name, or '*' when a folder of them couldn't be listed; `servers` when a servers file isn't readable JSON): an update keeps those parts as
  * installed rather than reading their absence as the plugin dropping them.
  */
 export interface PluginFiles { folder: string; skills: { name: string; dir: string }[]; agents: { name: string; text: string; whole: boolean }[]; servers: Record<string, unknown>; unread: { skills: string[]; agents: string[]; servers: boolean } }

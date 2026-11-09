@@ -58,18 +58,24 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
 export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
 
 /**
- * Whether this plugin's parts can go into this tool as separate items: a tool that takes parts, where the plugin itself
- * is not installed and can't be installed here (Pi always; Codex or Copilot CLI with their plugin route blocked), and
- * not a tool holding another marketplace of this name. `components`, when known, must hold a skill, MCP server or (not
- * for Pi) an agent. Parts already there always count, so they can be updated or removed.
+ * Whether a tool is one that would take this plugin's parts, whatever they are: it takes parts, has none of this plugin's
+ * yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
+ * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
+ */
+export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
+  if (!partsTools.includes(tool) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
+}
+
+/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents). Unknown counts as yes. */
+export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+
+/**
+ * Whether this plugin's parts can go into this tool as separate items, or are there already (then they can always be
+ * updated or removed, even once the plugin could go there itself).
  */
 export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
-  if (!partsTools.includes(tool)) return false;
-  // Parts there are always offered, so they can be updated or removed, even once the plugin could go there itself.
-  if (partsOf(entry, plugin, tool)) return true;
-  if (installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
-  if (!unavailable(view, entry, plugin, tool) || stateOf(entry, plugin, tool).state !== 'not-installed') return false;
-  return !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
 }
 
 /**

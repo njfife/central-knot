@@ -85,7 +85,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
     const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
       : op.action === 'remove' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool)
-      : op.action === 'install-parts' ? !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
+      : op.action === 'install-parts' ? !view.canWrite || !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
       : op.action === 'remove-parts' ? !parts || !view.canWrite : true);
     if (stale) draft.delete(key);
   }
@@ -139,7 +139,8 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && !!entry.report.partsUpdated === updated)
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
-      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], [tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']];
+      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], ...(undo ? [[[...tools('installed', false, true), ...tools('uninstalled', false, true)], 'nothing left to undo in'] as [string[], string]]
+        : [[tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']] as [string[], string][])];
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
