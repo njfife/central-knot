@@ -333,6 +333,17 @@ const touched = (context: PluginContext, tool: HarnessId) => {
 
 const readOrNull = (path: string) => readFile(path, 'utf8').catch(() => null);
 
+/** Keeps a native command's output and the bytes of each file it changed, before and after, in Central Knot's data folder (FIL-03). */
+async function keepRecord(context: PluginContext, tool: HarnessId, command: string, output: string, changed: NativeRun['changed']): Promise<void> {
+  const folder = join(context.dataDir, 'native', `${new Date().toISOString().replace(/[:.]/g, '-')}-${tool}-${randomUUID().slice(0, 8)}`);
+  await mkdir(folder, { recursive: true });
+  await writeFile(join(folder, 'command.txt'), `${command}\n\n${output}\n`);
+  for (const [index, entry] of changed.entries()) {
+    if (entry.before !== null) await writeFile(join(folder, `${index}-before-${basename(entry.path)}`), entry.before);
+    if (entry.after !== null) await writeFile(join(folder, `${index}-after-${basename(entry.path)}`), entry.after);
+  }
+}
+
 /** Runs one native command for a tool against the chosen home, keeping the prior bytes of every file it may change. */
 async function native(context: PluginContext, tool: HarnessId, args: string[]): Promise<NativeRun> {
   const binary = context.binaries[tool];
@@ -349,15 +360,9 @@ async function native(context: PluginContext, tool: HarnessId, args: string[]): 
   const result = await run(binary, args, { env, cwd: context.home, timeoutMs: context.timeoutMs ?? 180_000 });
   const after = await Promise.all(files.map(readOrNull));
   const changed = files.map((path, index) => ({ path, before: before[index], after: after[index] })).filter(entry => entry.before !== entry.after);
-  if (changed.length) {
-    const folder = join(context.dataDir, 'native', `${new Date().toISOString().replace(/[:.]/g, '-')}-${tool}-${randomUUID().slice(0, 8)}`);
-    await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, 'command.txt'), `${command}\n\n${result.output}\n`);
-    for (const [index, entry] of changed.entries()) {
-      if (entry.before !== null) await writeFile(join(folder, `${index}-before-${basename(entry.path)}`), entry.before);
-      if (entry.after !== null) await writeFile(join(folder, `${index}-after-${basename(entry.path)}`), entry.after);
-    }
-  }
+  // The record of what changed is kept beside the result, not instead of it: if it can't be written (a full disk), what
+  // the tool did is still reported, so a real install stays in the report and its Undo.
+  if (changed.length) await keepRecord(context, tool, command, result.output, changed).catch(() => undefined);
   const output = result.code === 'timeout' ? `${command} did not finish in time and was stopped. ${result.output}`.trim() : result.code === 'missing' ? `${binary} could not be run.` : result.output || (result.code === 0 ? '' : `It stopped with exit code ${result.code} and said nothing.`);
   return { tool, command, ok: result.code === 0, output, changed };
 }

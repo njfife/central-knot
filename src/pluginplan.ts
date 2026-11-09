@@ -69,7 +69,8 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   for (const [key, op] of draft) {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
     const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
-    const stale = !view || !entry || !listed || (op.action === 'install'
+    // A marketplace whose catalog now gives another name is another plugin@name to the tools: the choice no longer means it.
+    const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
       : !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool));
     if (stale) draft.delete(key);
@@ -157,7 +158,7 @@ export function recordRun(draft: PluginDraft, ops: PluginOp[], done: PluginDone[
 
 /** The two calls a run needs, as the page's API gives them (tests pass their own). */
 export interface PlanApi {
-  install(source: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstall(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
 }
 
@@ -173,7 +174,7 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
     let result: PluginActionResult;
     try {
       result = step.action === 'install'
-        ? await api.install(step.source, step.plugin, step.tools, home)
+        ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
         : await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home);
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };

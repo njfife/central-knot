@@ -72,12 +72,12 @@ test('Installs act only on the home on screen, and only where writing is allowed
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    assert.match((await box.markets.install(root, 'pdf', ['claude-cli'], '/elsewhere')).stopped ?? '', /not the one open/);
-    const result = await box.markets.install(root, 'pdf', ['claude-cli'], box.home);
+    assert.match((await box.markets.install(root, 'team', 'pdf', ['claude-cli'], '/elsewhere')).stopped ?? '', /not the one open/);
+    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli'], box.home);
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, report.changed]), [['claude-cli', 'installed', true]]);
     assert.deepEqual(result.reports[0]!.runs[0]!.changed, [{ path: '/p', before: null, after: null }], 'file bytes stay in the main process');
     const locked = await setup({ allowed: false });
-    try { assert.equal((await locked.markets.install(root, 'pdf', ['claude-cli'], locked.home)).stopped, 'Preview only.'); } finally { await locked.cleanup(); }
+    try { assert.equal((await locked.markets.install(root, 'team', 'pdf', ['claude-cli'], locked.home)).stopped, 'Preview only.'); } finally { await locked.cleanup(); }
   } finally { await box.cleanup(); }
 });
 
@@ -87,7 +87,7 @@ test('One tool’s error fails that tool only: the others’ reports stay, and l
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const result = await box.markets.install(root, 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], box.home);
+    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], box.home);
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
     assert.match(result.reports[1]!.message, /disk full/);
   } finally { await box.cleanup(); }
@@ -106,13 +106,27 @@ test('A Git marketplace that can’t be reached is not fetched again on every vi
   } finally { await box.cleanup(); }
 });
 
+test('A choice made before the marketplace renamed itself fails, rather than installing under a name Undo won’t find', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await box.markets.add(root);
+    await marketplace(root, 'renamed', ['pdf']);
+    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli'], box.home);
+    assert.deepEqual(result.reports.map(report => report.outcome), ['failed']);
+    assert.match(result.reports[0]!.message, /now named “renamed”/);
+    assert.ok(!box.calls.some(call => call.startsWith('install ')), 'nothing ran');
+  } finally { await box.cleanup(); }
+});
+
 test('A plugin gone from the marketplace fails for its tools; uninstall names the marketplace source it is for', async () => {
   const box = await setup();
   try {
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const gone = await box.markets.install(root, 'removed', ['claude-cli', 'codex-cli'] as HarnessId[], box.home);
+    const gone = await box.markets.install(root, 'team', 'removed', ['claude-cli', 'codex-cli'] as HarnessId[], box.home);
     assert.equal(gone.stopped, undefined);
     assert.deepEqual(gone.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
     await box.markets.uninstall(root, 'team', 'pdf', 'claude-cli', box.home);
@@ -143,7 +157,7 @@ test('An install reads the tool’s records afresh: the read-sharing of a view n
     const markets = createMarketplaces({ home: () => ({ home: box.home, snapshots: [] }), tools: async () => ['claude-cli'], writeAccess: async () => ({ allowed: true }), dataDir: join(box.base, 'data'), pickFolder: async () => undefined, openExternal: async () => {} },
       { findClis: async () => ({ 'claude-cli': '/bin/true' }), readCatalog: engine.readCatalog, readRemotePlugin: async () => ({ problem: '' }), uninstall: engine.uninstall,
         install: async (context, _catalog, _plugin, tool) => { seenReads = context.reads; return { tool, outcome: 'installed', message: '', runs: [] }; } });
-    await markets.install(root, 'pdf', ['claude-cli'], box.home);
+    await markets.install(root, 'team', 'pdf', ['claude-cli'], box.home);
     assert.equal(seenReads, undefined);
   } finally { await box.cleanup(); }
 });

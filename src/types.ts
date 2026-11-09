@@ -102,8 +102,8 @@ export interface DesktopApi {
   refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
-  installPlugin(source: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
-  uninstallPlugin(source: string, marketplace: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }

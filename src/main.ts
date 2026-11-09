@@ -386,6 +386,17 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
   });
 }
 
+/**
+ * A request that only reads Central Knot's own copies and writes nothing a tool reads (a README, a plugin's contents):
+ * answered at once, outside the queue, so background reads never hold up a change the person asked for.
+ */
+function handleRead(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
+  ipcMain.handle(channel, (event, ...args) => {
+    if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
+    return work(...args);
+  });
+}
+
 /** The main window. Closing it hides it (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
 let loading: Promise<void> = Promise.resolve();
 function createWindow(show: boolean) {
@@ -459,7 +470,7 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
-  registerMarketplaces(handle, {
+  registerMarketplaces({ handle, handleRead }, {
     home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
     tools: async () => presentTools(latestSnapshots),
     writeAccess: () => writeAccess(context()),

@@ -1,7 +1,7 @@
 // Marketplaces in the main process: the list added here, each catalog as last read, what each tool has installed, and the
 // requests the Plugins page makes. Kept apart from the other features: createMarketplaces holds the logic as plain
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
-import { access, constants, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { marketplacePage, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
@@ -11,6 +11,7 @@ import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
 import { SAFE_NAME, cachedCatalog, heldBy, installState, parseCatalog, pluginTools, registeredMarketplaces, remoteCopyFolder, sameSource, type PluginContext } from './plugins.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
+import { writeDurably } from './share.ts';
 import { isFolder, isHttps } from './values.ts';
 import { toolNames } from './words.ts';
 
@@ -66,7 +67,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const added = async (): Promise<string[]> => {
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
-  const saveAdded = async (list: string[]) => { await mkdir(host.dataDir, { recursive: true }); await writeFile(listPath, `${JSON.stringify(list, null, 2)}\n`); };
+  const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
   /**
    * A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them).
    * `shareReads`: read each record once for the whole request; only a read-only view may, because an install reads the
@@ -222,13 +223,17 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return access.allowed ? undefined : access.reason ?? 'Writing isn’t allowed in this home, so nothing was changed.';
   };
 
-  /** Each tool's own install. A plugin gone from the marketplace fails for its tools instead of stopping the whole run. */
-  async function install(source: string, plugin: string, tools: HarnessId[], home: unknown): Promise<PluginActionResult> {
+  /**
+   * Each tool's own install. A plugin gone from the marketplace, or a marketplace that now gives another name than the
+   * one chosen (`marketName`), fails for its tools instead of stopping the whole run.
+   */
+  async function install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
+    if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {
@@ -253,22 +258,25 @@ const isText = (value: unknown, max = 2000): value is string => typeof value ===
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
 const isName = (value: unknown): value is string => typeof value === 'string' && SAFE_NAME.test(value);
 
-/** The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. */
-export function registerMarketplaces(handle: Handle, host: MarketplaceHost): void {
+/**
+ * The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. `handle`
+ * queues a request behind the app's other work; `handleRead` answers at once, for reads that change nothing a tool uses.
+ */
+export function registerMarketplaces({ handle, handleRead }: { handle: Handle; handleRead: Handle }, host: MarketplaceHost): void {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
   handle('plugins:view', async fresh => (open() ? markets.view(fresh === true ? true : undefined) : null));
-  handle('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
-  handle('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
+  handleRead('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
+  handleRead('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
-  handle('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
+  handleRead('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:refresh', async source => (open() && isText(source) ? markets.refresh(source) : null));
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
-  handle('plugins:install', async (source, plugin, tools, home) => (open() && isText(source) && isName(plugin) ? markets.install(source, plugin, toolIds(tools), home) : refused(tools)));
+  handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && ids.length ? markets.uninstall(source, marketplace, plugin, ids[0]!, home) : refused(tool);

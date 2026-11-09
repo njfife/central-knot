@@ -77,13 +77,16 @@ test('Choices that no longer mean anything are dropped: already installed, not i
   toggle(draft, op('nocli', 'codex-cli'));
   toggle(draft, op('keep', 'claude-cli'));
   const plugins = ['done', 'gone', 'held', 'nocli', 'keep'].map(name => ({ name, description: '' }));
-  prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins,
+  prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins,
     states: { done: { 'claude-cli': { state: 'installed', path: '/p' } }, held: { 'claude-cli': { state: 'held', reason: 'other' } } } }] });
   assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['keep']);
   // A refresh that makes Copilot refuse the whole marketplace drops a Copilot choice, as its box now shows "not available".
   toggle(draft, op('keep', 'copilot-cli'));
-  prune(draft, { home: '/h', tools: ['claude-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'copilot-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins, states: {}, copilotRefuses: 'npm source' }] });
+  prune(draft, { home: '/h', tools: ['claude-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'copilot-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins, states: {}, copilotRefuses: 'npm source' }] });
   assert.deepEqual([...draft.values()].map(entry => entry.tool), ['claude-cli']);
+  // A marketplace that renamed itself makes plugin@old another plugin: the choice goes.
+  prune(draft, { home: '/h', tools: ['claude-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'renamed', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins, states: {} }] });
+  assert.equal(draft.size, 0);
 });
 
 test('A run goes on past a step that throws, and a refusal stops it with the rest still chosen', async () => {
@@ -91,7 +94,7 @@ test('A run goes on past a step that throws, and a refusal stops it with the res
   const ops = [op('pdf', 'claude-cli'), op('docx', 'claude-cli'), op('xlsx', 'claude-cli')];
   const seen: string[] = [];
   const api = {
-    install: async (_source: string, plugin: string, tools: HarnessId[]) => {
+    install: async (_source: string, _marketName: string, plugin: string, tools: HarnessId[]) => {
       seen.push(plugin);
       if (plugin === 'pdf') throw new Error('IPC gone');
       if (plugin === 'xlsx') return { stopped: 'Writing isn’t allowed here.', reports: [] };
