@@ -787,7 +787,7 @@ button.apply-state.text-action:hover { text-decoration-color: currentColor; }
 .ov-head { height: 60px; }
 .ov-section { top: 60px; }
 .item-name { font-weight: 600; color: var(--ink); }
-.ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; opacity: 0.7; }
+.ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; border-color: var(--ink-faint); }
 button.apply-state.text-action { text-decoration: underline dotted; text-underline-offset: 3px; }
 /* Controls and bands line up with the table instead of running to the window edge. */
 .ov-page > .toolbar, .ov-page .bands > .band { padding-right: max(16px, calc(100% - 760px)); }
@@ -832,3 +832,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugins-page .market-fit .plugin-table { width: fit-content; }
 .plugins-page .market-fit .market-head, .plugins-page .market-fit .market-hints, .plugins-page .market-fit > .market-hint { max-width: calc(360px + var(--tool-count, 3) * 120px + 32px); }
 .cell-cannot { background-image: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px) !important; }
+.ov-row { scroll-margin-top: 96px; }
+.list-head { padding-right: 23px; }
+.list-head-tool > * { width: 12px !important; height: 12px !important; font-size: 7px; }

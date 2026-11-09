@@ -235,7 +235,9 @@ function changeBar(bulk = true) {
   const writes = committedList().filter(skill => skill.managed && skill.waits?.length).length;
   const status = edits ? h('span.apply-state.apply-waiting', {}, icon('clock', 14, 'tone-warning'), `${edits} ${edits === 1 ? 'change' : 'changes'} waiting`)
     : writes ? h('button.apply-state.apply-waiting.text-action', { type: 'button', id: 'go-write-now', title: 'Go to Write to Claude Code', onclick: () => document.getElementById('mcp-write-claude')?.focus() }, icon('clock', 14, 'tone-warning'), `${writes} ${writes === 1 ? 'server waits' : 'servers wait'} for Claude Code`)
-      : h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
+      // An unresolved copy choice is not "up to date", even while its chooser is open.
+      : needChoice ? h('span.apply-state.apply-waiting', {}, icon('diff', 14, 'tone-warning'), `${needChoice} ${needChoice === 1 ? 'has' : 'have'} different copies`)
+        : h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'Up to date');
   if (manageAll || choiceNote) return h('div.apply', {}, choiceNote, manageAll, edits || writes ? status : null);
   return status;
 }
@@ -418,7 +420,14 @@ function compareChoices(skill: SampleSkill) {
 function openRow(key: string) {
   view.comparing = view.comparing === key ? undefined : key;
   rerender();
-  if (view.comparing) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"] + .details`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  // Bring the details into view without losing the row (its name and close button) under the sticky header.
+  if (view.comparing) requestAnimationFrame(() => {
+    const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
+    const details = rowEl?.nextElementSibling;
+    const box = rowEl?.closest('.scroll')?.getBoundingClientRect();
+    if (!rowEl || !details || !box) return;
+    if (details.getBoundingClientRect().bottom > box.bottom) rowEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  });
 }
 
 function row(skill: SampleSkill) {
@@ -469,7 +478,7 @@ function legend(list: SampleSkill[]) {
     fresh ? entry('New copy on Apply all', plus) : null,
     replaced ? entry('Replaced on Apply all (kept in History)', (() => { const mark = swatch('will-sync', true); mark.replaceChildren(icon('refresh-cw', 11)); return mark; })()) : null,
     seen.has('edited') ? entry('Edited here', swatch('edited', true)) : null,
-    seen.has('waiting') ? entry('Change waiting', swatch('waiting', true)) : null,
+    seen.has('waiting') ? entry('Waiting for sync', swatch('waiting', true)) : null,
     source ? entry('Source (one-way)', (() => { const mark = swatch('synced', true); mark.append(h('span.cell-source-mark')); return mark; })()) : null,
     seen.has('write-now') ? entry('Waits for Write to Claude Code', swatch('write-now', true)) : null,
     oneWay ? entry('Receives one-way (with limits)', oneWaySwatch) : null,
@@ -640,7 +649,7 @@ function syncOffBand(): HTMLElement | null {
   // Right after a sync, its notice says what spread; the idle banner comes back once that is dismissed.
   if (!waiting.length && visibleNotices().length) return null;
   return h('div.band.band-sync-off', { role: 'status' }, icon('circle-minus', 14, 'tone-warning'),
-    h('span.band-text', {}, ...(waiting.length ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.'] : ['Automatic sync is off. No changes waiting; edits in your tools wait here until you sync.'])),
+    h('span.band-text', {}, ...(waiting.length ? [`Automatic sync is off. ${waiting.length} ${waiting.length === 1 ? 'change' : 'changes'} waiting: `, ...what, '.'] : ['Automatic sync is off. No changes waiting; edits and deletions in your tools wait here until you sync.'])),
     smallAction('Sync now', 'sync-now', () => void syncNow()),
     smallAction('Turn sync on', 'sync-turn-on', () => void setSync(true)));
 }
@@ -653,7 +662,7 @@ function helpBand(): HTMLElement | null {
   if (designMode || !list.length || readFlag(key) || state.skillsView === 'files') return null;
   const one = kind === 'mcp' ? 'an MCP server' : kind === 'agents' ? 'an agent' : 'a skill';
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
-    h('span.band-text', {}, `Turn on Managed (or Manage all) to keep ${one} the same in every tool; click a tool's box to leave it out. Nothing is written until Apply all; turning Managed off later keeps every copy.${kind === 'mcp' && !view.draft.size ? ' Changes for Claude Code always take one more step: Write to Claude Code.' : kind === 'agents' ? ' Copies marked ↗ get updates only from the source (●).' : ''}`),
+    h('span.band-text', {}, `Turn on Managed (or Manage all) to sync ${one} across the tools you include; click a tool's box to include or leave it out. These setup changes wait for Apply all; after that, edits and deletions sync on their own while Automatic sync is on. Turning Managed off (then Apply all) keeps existing copies.${kind === 'mcp' && !view.draft.size ? ' Writes to Claude Code always wait for Write to Claude Code.' : kind === 'agents' ? ' Copies marked ↗ get updates only from the source (●).' : ''}`),
     h('button.band-dismiss', { type: 'button', id: 'help-dismiss', 'aria-label': 'Hide this tip', title: 'Hide this tip', onclick: () => { writeFlag(key); rerender(); } }, icon('x', 12)));
 }
 
@@ -758,7 +767,7 @@ function syncNotice(notice: SyncNotice) {
   // The button names the tools it changes: all of them, or only those the event touched.
   const involved = [...new Set([notice.winner, ...notice.losers].filter(Boolean))] as string[];
   const scope = involved.length >= toolList().length ? 'in all tools' : `in ${list(involved)}`;
-  const undo = (title: string) => { const action = smallAction(`Undo ${scope}`, `notice-undo-${notice.history}`, () => void restoreEvent(notice.history)); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
+  const undo = (title: string) => { const action = smallAction(`Undo ${notice.kind === 'edit' ? 'edit ' : ''}${scope}`, `notice-undo-${notice.history}`, () => void restoreEvent(notice.history)); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const [glyph, tone, text, action] = ({
     edit: ['check', 'tone-success', `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}'s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
     conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}'s edit won over ${list(notice.losers)}'s.${order}`, undo(`Use ${list(notice.losers)}'s version of ${notice.item} instead, in every tool it syncs to`)],

@@ -109,8 +109,10 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const order = Object.values(toolNames);
   const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const added = writtenTo(false), replacedIn = writtenTo(true);
-  const what = [managed ? `${plural(managed, 'skill')} managed` : '', added.length ? `copied to ${andText(added)}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To stop, turn Managed off: copies stay where they are.') };
+  const single = managed === 1 ? changes.find(change => change.managed)?.key : undefined;
+  const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
+  const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', added.length ? `copied to ${andText(added)}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To stop future syncing, turn Managed off, then Apply all; copies already written stay.'), item: singleName };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -299,7 +301,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
     const managed = changes.filter(change => change.managed).length;
     // The write band right below says what waits for Claude Code; the result says what was written.
-    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop, turn Managed off: copies stay where they are.` };
+    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop future syncing, turn Managed off, then Apply all; copies already written stay.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -331,6 +333,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.` };
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To stop syncing ${names.length === 1 ? 'it' : 'them'} to Claude Code, turn off its box, then Apply all.` };
   announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code.`);
 });

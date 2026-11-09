@@ -80,7 +80,7 @@ function boxKey(view: PluginsView, entry: MarketplaceView) {
     states.includes('not-installed') ? item('Not installed: click to install', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
     states.includes('installed') ? item('Installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
     states.includes('not-known') ? item('Not confirmed yet', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
-    states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Can’t install here (see the note above)' : 'Can’t install here (hover for why)', h('span.legend-cell.cell-cannot', {})) : null);
+    states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Unavailable: command-line tool not found' : 'Can’t install here (hover for why)', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
 function market(view: PluginsView, entry: MarketplaceView, index: number) {
@@ -149,7 +149,13 @@ function withTools(view: PluginsView, table: HTMLElement) {
 function reverse(report: ActionReport) {
   const last = state.pluginLast;
   if (!last) return null;
-  if (report.outcome === 'installed') return button({ variant: 'link', size: 'micro', label: `Uninstall from ${names[report.tool]}`, id: `report-uninstall-${report.tool}`, disabled: !!state.busy, onclick: () => void uninstallPlugin(last.market, last.plugin, report.tool) });
+  if (report.outcome === 'installed') return button({ variant: 'link', size: 'micro', label: `Uninstall from ${names[report.tool]}`, id: `report-uninstall-${report.tool}`, disabled: !!state.busy, onclick: () => {
+    // The same two-step confirm as the table's check: arm that cell and say what the next click does.
+    const index = state.plugins?.marketplaces.findIndex(entry => entry.name === last.market) ?? -1;
+    state.pluginConfirm = `pcell-${index}-${last.plugin}-${report.tool}`;
+    state.pluginConfirmText = `Click the red box (or Uninstall below) to uninstall ${last.plugin} from ${names[report.tool]}. Central Knot saves a copy of the files it changes first. Esc cancels.`;
+    rerender();
+  } });
   if (report.outcome === 'uninstalled' && last.source) return button({ variant: 'link', size: 'micro', label: `Reinstall in ${names[report.tool]}`, id: `report-reinstall-${report.tool}`, disabled: !!state.busy, onclick: () => void installPlugin(last.source, last.plugin, [report.tool]) });
   return null;
 }
@@ -182,7 +188,9 @@ export function pluginsPage() {
       button({ variant: 'ghost', size: 'small', icon: 'folder-plus', label: 'Choose folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!state.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
-      state.pluginConfirm ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, state.pluginConfirmText ?? ''), h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; rerender(); } }, 'Cancel')) : null,
+      state.pluginConfirm ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, state.pluginConfirmText ?? ''),
+        h('button.text-action.text-danger', { type: 'button', id: 'plugin-confirm-go', onclick: () => (document.getElementById(state.pluginConfirm!) as HTMLButtonElement | null)?.click() }, 'Uninstall'),
+        h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; rerender(); } }, 'Cancel')) : null,
       outcomeBand(),
       reports()),
     h('div.scroll.matrix', { id: 'plugins-scroll' },
