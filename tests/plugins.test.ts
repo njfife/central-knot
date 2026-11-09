@@ -363,6 +363,12 @@ test('Codex switches the skills of the cached version it loads: local, else the 
     assert.deepEqual(['1.0.0', '1.0.0-beta.10', '0.9.0', '1.0.0-beta.2'].sort(compareVersions), ['0.9.0', '1.0.0-beta.2', '1.0.0-beta.10', '1.0.0']);
     for (const older of ['0.9.0', '1.0.0-beta.10', '1.0.0-beta.2']) await put(join(box.home, `.codex/plugins/cache/ck-test-market/full/${older}/skills/old/SKILL.md`), '---\nname: old\n---\nB\n');
     assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { path?: string }).path, copy);
+    // A `local` copy wins over every version; once it is empty the plugin is Not known yet, never an older copy instead.
+    const local = join(box.home, '.codex/plugins/cache/ck-test-market/full/local');
+    await put(join(local, 'skills/one/SKILL.md'), '---\nname: one\n---\nB\n');
+    assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { path?: string }).path, local);
+    await rm(join(local, 'skills'), { recursive: true });
+    assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full')).state, 'not-known');
   } finally { await box.cleanup(); }
 });
 

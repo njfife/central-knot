@@ -7,7 +7,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginOp } from './pluginplan.ts';
-import { NO_SKILL_SWITCH, cantSwitchSkill, installed, limitNote, missingTools, removableTools, skillOff, stateOf, unavailable } from './pluginstatus.ts';
+import { NO_SKILL_SWITCH, cantSwitchSkill, installed, limitNote, missingTools, removableTools, skillOff, stateOf, unavailable, untestedBuild } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
@@ -142,7 +142,10 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const rowNote = (skill: string) => {
     const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, skill) === action).map(tool => names[tool]);
     const stuck = new Set(switchable.map(tool => why(tool, skill)).filter((reason): reason is string => !!reason && !columnWide.has(reason)));
-    const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...stuck];
+    // Turning one back on is offered on any build (ENB-01's reversal), but on an untested one its effect isn't verified: said so.
+    const unverified = switchable.filter(tool => skillOff(entry, plugin.name, tool, skill) && !why(tool, skill)).map(tool => untestedBuild(tool, view.versions?.[tool], !!view.clis[tool])).filter((reason): reason is string => !!reason)
+      .map(reason => `${reason} Turning it back on is still offered; its effect there isn’t verified.`);
+    const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...stuck, ...unverified];
     return notes.filter(Boolean).join(' ') || undefined;
   };
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
