@@ -35,10 +35,10 @@ export function splitBase(text: string): { own: string; copy?: string } {
   return { own: before + found.after, copy: found.copy };
 }
 
-/** Whether a file's copy says the same as this base (a missing final line break doesn't count). */
 /** Base text as compared: as a block holds it, with Windows line breaks read as plain ones (an editor re-saving a file with CRLF
  *  changes nothing anyone wrote). */
 export const comparableBase = (text: string) => blockText(text.replace(/\r\n/g, '\n'));
+/** Whether a file's copy says the same as this base (a missing final line break or CRLF line breaks don't count). */
 export const sameBase = (copy: string | undefined, base: string) => copy !== undefined && comparableBase(copy) === comparableBase(base);
 
 /** The file with this base in it: an existing block is replaced where it stands; otherwise the block goes after the own text. */

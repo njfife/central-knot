@@ -97,7 +97,7 @@ function editor(file: InstructionFile) {
 }
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && state.outcome.kind === 'tool-save';
+const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.tool === file.tool && state.outcome.kind === 'tool-save';
 
 function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;

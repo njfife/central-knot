@@ -7,7 +7,7 @@ import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
 import { errorCode, landingOf, plainError, recoverParked, sha, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseAction, comparableBase, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
-import { andList, lineCount, linesOf, toolNames } from './words.ts';
+import { lineCount, linesOf, toolList } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
@@ -125,7 +125,7 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
   for (const { snapshot, path, readers, notes, sameFile } of await destinations(snapshots)) {
-    if (sameFile.length) notes.push(`This is the same file as ${andList(sameFile.map(tool => toolNames[tool]))} reads (a link), so they get the same base instructions.`);
+    if (sameFile.length) notes.push(`This is the same file as ${toolList(sameFile)} reads (a link), so they get the same base instructions.`);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
@@ -202,7 +202,7 @@ async function storeBaseText(home: string, text: string, seen: string | undefine
 const changedMeanwhile = (error: unknown) => ['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error));
 
 /** A base.md write that failed: changed meanwhile (the review is shown again), or could not be written at all. */
-const storeFailure = (error: unknown, changed: BaseResult): BaseResult => (changedMeanwhile(error) ? changed
+const storeFailure = (error: unknown, ifChanged: BaseResult): BaseResult => (changedMeanwhile(error) ? ifChanged
   : { stopped: `The base instructions could not be saved: ${plainError(error)} Nothing was changed.`, written: [], left: [] });
 
 /**

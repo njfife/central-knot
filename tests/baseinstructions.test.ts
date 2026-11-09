@@ -210,6 +210,18 @@ test('An Undo that leaves a file changed since alone keeps its record, so its co
   } finally { await box.cleanup(); }
 });
 
+test('A file linked after the base was saved counts as chosen for every tool reading it', async () => {
+  const box = await sandbox();
+  const claude = box.file('.claude/CLAUDE.md'), codex = box.file('.codex/AGENTS.md');
+  try {
+    await writeFile(claude, 'Mine.\n');
+    await box.set('Shared.\n', ['claude-cli']);
+    await symlink(claude, codex);
+    const codexFile = (await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!;
+    assert.deepEqual([codexFile.base!.chosen, codexFile.base!.state], [true, 'same']);
+  } finally { await box.cleanup(); }
+});
+
 test('Pi with only a CLAUDE.md gets the base in that file, so no new AGENTS.md shadows it', async () => {
   const box = await sandbox(['claude-cli', 'pi-cli']);
   try {

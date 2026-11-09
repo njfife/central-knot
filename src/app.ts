@@ -2,7 +2,7 @@ import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { plural } from './model.ts';
-import { andList, fileName, toolName, toolNames as namedTools } from './words.ts';
+import { andList, fileName, toolList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -42,8 +42,8 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  /** `kind` 'tool-save': a tool file's save, shown on its card with Undo; any other result is a band at the top of the page. */
-  outcome: undefined as { page: Page; kind?: 'tool-save'; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
+  /** `kind` 'tool-save': a tool file's save (of `tool`), shown on its card with Undo; any other result is a band at the top. */
+  outcome: undefined as { page: Page; kind?: 'tool-save'; tool?: HarnessId; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
@@ -337,7 +337,7 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', kind: file.exists && result.saved ? 'tool-save' : undefined, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot doesn’t delete instruction files you keep; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', kind: file.exists && result.saved ? 'tool-save' : undefined, tool: file.tool, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot doesn’t delete instruction files you keep; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -397,7 +397,7 @@ export const savingOff = () => !!state.home && !state.home.manage.access.allowed
 export function startInstructionEdit(file: InstructionFile) {
   if (askAboutOpenDraft()) return;
   // A save on another card keeps its Undo there; any other result belongs to the last task.
-  if (!(state.outcome?.kind === 'tool-save' && state.outcome.item !== fileName(file.path))) state.outcome = undefined;
+  if (!(state.outcome?.kind === 'tool-save' && state.outcome.tool !== file.tool)) state.outcome = undefined;
   state.baseEdit = undefined;
   state.instructionEdit = { tool: file.tool, text: ownText(file), hash: file.hash, stage: 'edit' };
   rerender();
@@ -430,8 +430,13 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => ask
 // ---------- Base instructions ----------
 
 const fileOf = (tool: HarnessId) => state.instructions?.find(file => file.tool === tool);
-const fileNames = (tools: HarnessId[]) => andList(tools.map(tool => { const file = fileOf(tool); return file ? fileName(file.path) : namedTools[tool]; }));
-const toolNamesOf = (tools: HarnessId[]) => andList(tools.map(tool => namedTools[tool]));
+/** The files of these tools by name; a name two tools share (Codex's and Pi's AGENTS.md) says whose it is. */
+const fileNames = (tools: HarnessId[]) => {
+  const name = (tool: HarnessId) => { const file = fileOf(tool); return file ? fileName(file.path) : namedTools[tool]; };
+  const shared = (tool: HarnessId) => (state.instructions ?? []).some(file => file.tool !== tool && fileName(file.path) === name(tool));
+  return andList(tools.map(tool => (shared(tool) ? `${namedTools[tool]}’s ${name(tool)}` : name(tool))));
+};
+const toolNamesOf = toolList;
 
 /** What an apply or undo left alone, said after what it did: for an apply, a copy of the base edited there; for an undo, a file
  *  changed since the save. */

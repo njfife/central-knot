@@ -16,4 +16,6 @@ export const lineCount = (text: string) => (text ? linesOf(text).length : 0);
 
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));
+/** Tools by name, as an and-list: "Claude Code, Copilot CLI and Codex". */
+export const toolList = (tools: HarnessId[]) => andList(tools.map(tool => toolNames[tool]));
 

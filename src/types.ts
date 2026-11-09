@@ -98,7 +98,8 @@ export interface DesktopApi {
   pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
-  /** `restoring`: an earlier version put back, whose base copy counts as one Central Knot wrote (an older base, not an edit). */
+  /** `restoring`: an earlier version put back (or a save undone): its base copy is judged again, counting as one Central Knot
+   *  wrote only when it matches a base text Central Knot kept; otherwise it stays protected as an edit. */
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string, restoring?: boolean): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId | 'base', id: string): Promise<string | undefined>;
   /** The base instructions and the tools that get them (INS-03). */

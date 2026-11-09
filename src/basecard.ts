@@ -7,7 +7,7 @@ import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
 import { changeCounts, diffView, discardConfirm, keys, legend, previewBlock, versionsList } from './editparts.ts';
 import { brandMark } from './matrix.ts';
-import { andList, fileName, lineCount, toolNames } from './words.ts';
+import { fileName, lineCount, toolList, toolNames } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 
@@ -40,9 +40,9 @@ function closeOrBack(edit: BaseEdit) {
 const requestOf = (edit: BaseEdit) => ({ adopt: edit.source?.kind === 'own' ? edit.source.tool : undefined, overwrite: edit.source?.kind === 'putBack' && edit.source.tool ? [edit.source.tool] : undefined });
 
 /** Tools reading one physical file (linked dotfiles) are one destination: shown once, under the first of them. */
-const leads = (file: InstructionFile, files: InstructionFile[]) => !files.slice(0, files.indexOf(file)).some(other => file.sameFile.includes(other.tool));
+const isFirstReader = (file: InstructionFile, files: InstructionFile[]) => !files.slice(0, files.indexOf(file)).some(other => file.sameFile.includes(other.tool));
 const readers = (file: InstructionFile) => readersOfFile(file.tool, file.sameFile);
-const readerNames = (file: InstructionFile) => andList(readers(file).map(tool => toolNames[tool]));
+const readerNames = (file: InstructionFile) => toolList(readers(file));
 
 /** What saving the draft does to one destination's file: the new text, and a sentence saying so. Undefined: not involved. */
 function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string } | undefined {
@@ -100,7 +100,7 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
     from && edit.source?.kind === 'own' ? h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, `${fileName(from.path)}’s instructions move into the base: ${toolNames[from.tool]} still reads them, now from the base block, and the tools you choose get them too. A line meant only for ${toolNames[from.tool]} can go back into its own instructions after saving.`)) : null,
     area,
     h('fieldset.base-tools', {}, h('legend', {}, 'Tools that get them, after each tool’s own instructions. Review changes shows what unticking one does to its file.'),
-      files.filter(file => leads(file, files)).map(file => checkbox({ id: `base-tool-${file.tool}`, checked: edit.tools.includes(file.tool), onchange: checked => {
+      files.filter(file => isFirstReader(file, files)).map(file => checkbox({ id: `base-tool-${file.tool}`, checked: edit.tools.includes(file.tool), onchange: checked => {
         // One file read by several tools is ticked or unticked for all of them.
         const group = readers(file);
         // Listed tools not found in this home right now stay listed.
@@ -151,7 +151,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const diff = lineDiff(before, edit.text);
   // Putting the base back concerns one file, and an update only the files it writes; other reviews list each file involved.
   const kind = edit.source?.kind;
-  const all = files.filter(file => leads(file, files) && (kind !== 'putBack' || file.tool === edit.source!.tool)).map(file => ({ file, plan: planFor(file, edit) })).filter(entry => entry.plan);
+  const all = files.filter(file => isFirstReader(file, files) && (kind !== 'putBack' || file.tool === edit.source!.tool)).map(file => ({ file, plan: planFor(file, edit) })).filter(entry => entry.plan);
   const writes = all.filter(entry => entry.plan!.next !== entry.file.text);
   const plans = kind === 'update' ? writes : all;
   const putBackFile = kind === 'putBack' ? fileName(plans[0]?.file.path ?? '') : '';
@@ -220,13 +220,13 @@ export function baseCard(files: InstructionFile[]) {
   const lockedWhy = readOnly ? 'Saving is off in this home.' : toolDirty ? `Finish or cancel the ${fileName(toolFile!.path)} edit first.` : undefined;
   const locked = !!state.busy || !!lockedWhy;
   const lockAttrs = lockAttrsFor(lockedWhy);
-  const chosen = files.filter(file => file.base?.chosen && leads(file, files));
+  const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
   const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
   const others = files.filter(file => !file.base?.chosen);
   const edited = chosen.filter(file => file.base!.state === 'edited');
   const hasBase = !!base.text.trim();
   // A file still holding a block (left there edited) can't start the base: its block would stay beside the moved text.
-  const starts = files.filter(file => leads(file, files) && ownText(file).trim() && file.base?.copy === undefined);
+  const starts = files.filter(file => isFirstReader(file, files) && ownText(file).trim() && file.base?.copy === undefined);
 
   const head = h('header.ins-head', {}, icon('layers', 18, 'tone-muted'), h('h2.tool-title', {}, 'Base instructions'),
     hasBase || edit ? pathText(shownPath(base.path), base.path) : null,
@@ -252,7 +252,7 @@ export function baseCard(files: InstructionFile[]) {
       h('div.base-columns', {},
         h('div.base-column', {},
           chosen.length ? h('ul.plain-list.base-tool-list', {}, chosen.map(file => toolRow(file, locked, lockAttrs))) : null,
-          others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${andList(others.map(file => toolNames[file.tool]))}.`) : null),
+          others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${toolList(others.map(file => file.tool))}.`) : null),
         h('div.base-column', {},
           edited.length ? h('p.base-subhead', {}, 'The base instructions') : null,
           previewBlock(base.text, 'base', 'Base instructions', 'base-more'))),
