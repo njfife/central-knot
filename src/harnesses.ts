@@ -71,6 +71,9 @@ export function configRoot(definition: HarnessDefinition, home: string, override
   return override === undefined ? join(home, definition.defaultConfig) : override;
 }
 
+/** A tool's config folder in a home, following its override (CLAUDE_CONFIG_DIR, COPILOT_HOME, CODEX_HOME, PI_CODING_AGENT_DIR). */
+export const toolConfigRoot = (where: { home: string; overrides?: Partial<Record<HarnessId, string>> }, tool: HarnessId) => configRoot(harnesses[tool], where.home, where.overrides?.[tool]);
+
 /** Where CK writes for this harness: its own documented root (D-05). */
 export function writeRoot(definition: HarnessDefinition, home: string, override?: string): string {
   return definition.skillRoots(configRoot(definition, home, override), home)[0].path;

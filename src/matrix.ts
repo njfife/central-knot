@@ -144,6 +144,14 @@ function setDisabledIn(key: string, tool: Tool, disabled: boolean) {
   rerender();
 }
 
+/** Skills: the tools a draft disables or enables, compared with what each tool has now. Only those are sent, so a switch another tool flipped meanwhile stays. */
+function switchChanges(key: string, draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
+  if (!draft.disabled) return {};
+  const now = committedOf(key).disabled ?? [];
+  const disable = draft.disabled.filter(tool => !now.includes(tool)), enable = now.filter(tool => !draft.disabled!.includes(tool));
+  return { ...(disable.length ? { disable } : {}), ...(enable.length ? { enable } : {}) };
+}
+
 /** Skills: remove these tools' copies on Apply all, or keep them again. A managed skill also stops syncing there, or it would come back. */
 function setRemoved(key: string, tools: Tool[], remove: boolean) {
   edit(key, (skill, draft) => {
@@ -178,7 +186,7 @@ function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
     const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
-      ...(draft.disabled ? { disabled: draft.disabled } : {}), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
+      ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
     const drafts = view.draft;
     if (kind === 'mcp') void applyMcpChanges(changes, () => drafts.clear());
     else if (kind === 'agents') void applyAgentsChanges(changes, () => drafts.clear());
@@ -404,6 +412,16 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
   return was ? 'Enabled again on Apply all.' : '';
 }
 
+/**
+ * A tool row's sentence. `quiet` (the status above already says how the copies stand), a queued removal, or a new copy that
+ * arrives disabled: only what Disable or Remove does there. Otherwise how the copies stand, then that.
+ */
+function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
+  const switching = switchLine(skill, tool);
+  if (quiet || skill.removing?.includes(tool) || (skill.copies[tool] === undefined && skill.disabled?.includes(tool))) return switching || (skill.copies[tool] === undefined ? 'No copy.' : '');
+  return [toolLine(skill, tool), switching].filter(Boolean).join(' ');
+}
+
 /** Skills: one tool's switch (Enabled or Disabled, applied on Apply all) and Remove, for a copy it has or gets. */
 function toolControls(skill: SampleSkill, tool: Tool) {
   if (designMode || kind !== 'skills') return null;
@@ -416,9 +434,9 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   const disabled = !!skill.disabled?.includes(tool);
   const pending = disabled !== !!committedOf(key).disabled?.includes(tool);
   // Queued and restorable, so it is a quiet action, not a red one; a row without it keeps its place so the switches line up.
-  const remove = skill.copies[tool] !== undefined && skill.writable?.[tool] !== false
-    ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
-  if (remove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
+  const canRemove = skill.copies[tool] !== undefined && skill.writable?.[tool] !== false;
+  const remove = canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
+  if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
     problem ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
       : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
@@ -463,6 +481,7 @@ function convertBlock(skill: SampleSkill) {
 
 /** Tool rows, with tools that say exactly the same thing (an agent's receiving copies) folded into one row naming them all. */
 function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
+  // Not map(toolRow): map's index would land in toolRow's `quiet`.
   if (kind !== 'agents') return toolList().map(tool => toolRow(tool));
   const byLine = new Map<string, Tool[]>();
   for (const tool of toolList()) { const line = toolLine(skill, tool); byLine.set(line, [...(byLine.get(line) ?? []), tool]); }
@@ -581,8 +600,7 @@ function details(skill: SampleSkill, closable = true) {
   // `quiet`: the status above already says how the copies stand, so a row says only what Disable or Remove does there.
   const toolRow = (tool: Tool, quiet = false) => h('div.details-tool', {},
     h('div.details-tool-head', {}, h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
-      h('span.details-tool-line', {}, skill.removing?.includes(tool) ? switchLine(skill, tool)
-        : quiet || (skill.copies[tool] === undefined && skill.disabled?.includes(tool)) ? switchLine(skill, tool) || (skill.copies[tool] === undefined ? 'No copy.' : '') : [toolLine(skill, tool), switchLine(skill, tool)].filter(Boolean).join(' '),
+      h('span.details-tool-line', {}, rowLine(skill, tool, quiet),
         // MCP: the settings file sits on the same line as the status, and Claude Code's row can finish the Write step itself.
         kind === 'mcp' && skill.paths?.[tool] ? pathLine(tool, skill.paths[tool]!, true) : null,
         kind === 'mcp' && skill.managed && !draft && tool === 'claude-cli' && skill.waits?.includes(tool) ? h('span.details-tool-actions', {}, button({ variant: 'outline', size: 'small', label: 'Write to Claude Code', id: `write-claude-row-${skill.key}`, onclick: () => void writeClaudeNow([skill.key]) })) : null,

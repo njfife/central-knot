@@ -56,7 +56,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string }
+export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; /** `switched`: which way. */ disabled?: boolean }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
 
@@ -189,8 +189,10 @@ export interface Change {
   useHash?: string;
   /** Whether the page showed it managed: a change made from an older read is refused if that no longer holds. */
   seenManaged?: boolean;
-  /** Skills: every tool the skill should end up disabled in (each tool's own switch). Left out: switches stay as they are. */
-  disabled?: HarnessId[];
+  /** Skills: tools to disable it in with each tool's own switch. Tools named in neither list keep their switch as it is. */
+  disable?: HarnessId[];
+  /** Skills: tools to enable it in again. */
+  enable?: HarnessId[];
   /** Skills: tools whose copy is removed, kept in History for Restore. A managed skill also stops syncing there. */
   remove?: HarnessId[];
 }
@@ -222,13 +224,13 @@ export interface HistoryEvent {
    * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
    * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
-  /** 'switched': each tool and whether it was disabled there (true) or enabled (false). */
-  switched?: { tool: HarnessId; disabled: boolean }[];
+  /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
+  switched?: { tool: HarnessId; disabled: boolean; before?: string }[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
-  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string }[];
+  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

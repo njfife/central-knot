@@ -122,8 +122,8 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   // Disable, Enable and Remove, per tool, said after the copies.
-  const toolsWhere = (outcome: string, pattern?: RegExp) => [...new Set(result.results.filter(entry => entry.outcome === outcome && (!pattern || pattern.test(entry.message))).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
-  const disabledIn = toolsWhere('switched', /^Disabled/), enabledIn = toolsWhere('switched', /^Enabled/), removedFrom = toolsWhere('removed');
+  const toolsWhere = (match: (entry: DestinationResult) => boolean) => [...new Set(result.results.filter(match).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const disabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === true), enabledIn = toolsWhere(entry => entry.outcome === 'switched' && entry.disabled === false), removedFrom = toolsWhere(entry => entry.outcome === 'removed');
   const touched = [...new Set(result.results.filter(entry => entry.outcome === 'switched' || entry.outcome === 'removed').map(entry => entry.item))];
   const whose = touched.length === 1 && !singleName ? `${touched[0]} ` : '';
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '',
@@ -146,7 +146,9 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
     act: addedNow.length ? addedUndo(addedNow, switchedNow) : chosenNow.length ? choiceUndo(chosenNow) : switchUndo };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
-  announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
+  // Copies written are counted; a run that only disabled, enabled or removed says so in the band's words.
+  const copiesWritten = result.results.filter(entry => entry.outcome === 'written').length;
+  announce(result.stopped ?? [copiesWritten ? `${plural(copiesWritten, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : touched.length ? `${what.charAt(0).toUpperCase()}${what.slice(1)}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
 });
 
 /** After a read: what was found and where, so a home switch or Refresh says what it did. */
@@ -341,8 +343,10 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => bus
   announce('Review going back to the earlier version, then save to put it back.', true);
 });
 
-/** The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. */
-/** `alongside`: Disable, Enable or Remove from the same Apply all, undone first, while the copies they act on are still there. */
+/**
+ * The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. `alongside`: Disable, Enable or
+ * Remove from the same Apply all, undone first, while the copies they act on are still there.
+ */
 function addedUndo(addedNow: HistoryEvent[], alongside: HistoryEvent[] = []) {
   const copies = addedNow.reduce((sum, event) => sum + event.losers.length, 0);
   const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;

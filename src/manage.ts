@@ -8,7 +8,8 @@ import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import { isDisabled, readSwitchFile, setDisabled, type SwitchTarget } from './skillswitch.ts';
+import { nameAndDescription } from './discovery.ts';
+import { isDisabled, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
@@ -73,13 +74,15 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
     }
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
   }
-  // Each tool's own switch (Disable): read once, then asked about every copy there.
+  // Each tool's own switch (Disable): read and parsed once, then asked about every copy there. Why a tool can't take a new
+  // Disable (its settings file, or a build older than the one verified) applies to a copy it is about to get, too.
   const switches = new Map(await Promise.all(tools.map(async tool => [tool, await readSwitchFile(context, tool)] as const)));
+  const switchProblems = new Map(tools.map(tool => [tool, switches.get(tool)!.problem ?? unverifiedBuild(tool, snapshots.find(snapshot => snapshot.harness === tool)?.probe.version)] as const));
   for (const entry of map.values()) {
-    for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
-      const file = switches.get(tool)!;
-      if (file.problem) (entry.facts.switchProblem ??= {})[tool] = file.problem;
-      else if (isDisabled(context, tool, file, switchTarget(context, entry, tool)!)) (entry.facts.disabled ??= []).push(tool);
+    for (const tool of tools) {
+      const problem = switchProblems.get(tool);
+      if (problem && !entry.facts.cannot[tool]) (entry.facts.switchProblem ??= {})[tool] = problem;
+      if (entry.facts.copies[tool] && isDisabled(context, switches.get(tool)!, switchTarget(context, entry, tool)!)) (entry.facts.disabled ??= []).push(tool);
     }
   }
   // A skill converted from an agent never goes back to the agent's own tool on its own (AGT-03): only an explicit request could.
@@ -110,15 +113,20 @@ export async function recordConverted(home: string, key: string, from: Converted
 /** The skill as found at a tool's main copy. */
 const skillAt = (entry: Gathered, tool: HarnessId) => entry.skills[tool]?.find(skill => skill.directory === entry.facts.copies[tool]?.directory);
 
-/**
- * How a tool's switch names its copy of this skill: the copy it has, or, with `placed`, the copy this pass wrote into its own
- * folder. Undefined when it has neither.
- */
-function switchTarget(context: ShareContext, entry: Gathered, tool: HarnessId, placed = false): SwitchTarget | undefined {
+/** How a tool's switch names the copy it had when this pass read it. Undefined when it had none. */
+function switchTarget(context: ShareContext, entry: Gathered, tool: HarnessId): SwitchTarget | undefined {
   const copy = entry.facts.copies[tool];
-  if (copy) return { folder: copy.folder, name: skillAt(entry, tool)?.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
-  if (!placed) return undefined;
-  return { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(rootOf(context, tool), entry.facts.name, 'SKILL.md') };
+  return copy && { folder: copy.folder, name: skillAt(entry, tool)?.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
+}
+
+/**
+ * How a tool's switch names its copy as it is on disk now: after this pass replaced it (a chosen copy may carry another name)
+ * or wrote it into the tool's own folder. Undefined when the tool has no copy there.
+ */
+async function liveSwitchTarget(context: ShareContext, entry: Gathered, tool: HarnessId): Promise<SwitchTarget | undefined> {
+  const folder = entry.facts.copies[tool]?.folder ?? entry.facts.name;
+  const skillFile = entry.facts.copies[tool] ? join(entry.facts.copies[tool]!.directory, 'SKILL.md') : join(rootOf(context, tool), folder, 'SKILL.md');
+  try { return { folder, name: nameAndDescription(await readFile(skillFile, 'utf8')).name || folder, skillFile }; } catch { return undefined; }
 }
 
 /** What stops every tool from using one tool's copy: differing copies Central Knot does not change, and tools with a copy that could not load this one. */
@@ -412,6 +420,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const problem = choiceProblem(entry, change.use, change.useHash, syncing);
       if (problem) { results.push({ item: entry.facts.name, outcome: 'held', message: problem }); continue; }
     }
+    // A Disable that can't be carried out changes nothing either: otherwise the copy would arrive enabled.
+    const cantDisable = change.disable?.find(tool => entry.facts.switchProblem?.[tool]);
+    if (cantDisable) { results.push({ item: entry.facts.name, harness: cantDisable, outcome: 'held', message: `${entry.facts.switchProblem![cantDisable]} Nothing was changed.` }); continue; }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     const wasOff = item.off ?? [];
@@ -776,12 +787,14 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const stoppedSync = taken.get(change.key);
     if (!entry || !item || !stoppedSync) continue;
     const name = entry.facts.name;
-    const removed: { tool: HarnessId; hash: string }[] = [];
+    const removed: { tool: HarnessId; hash: string; folder: string }[] = [];
+    // A removal that doesn't happen leaves the copy syncing as before, so it never quietly stops updating.
+    const keepSyncing = async (tool: HarnessId) => { if (stoppedSync.includes(tool)) { item.off = (item.off ?? []).filter(other => other !== tool); await save(); } };
     for (const tool of change.remove ?? []) {
       const copy = entry.facts.copies[tool];
       if (!copy) continue;
       const refusal = (copy.writable ? undefined : `${harnesses[tool].name} reads it at ${copy.directory}, which Central Knot does not change. Remove it there yourself.`) ?? await rootProblem(context, tool);
-      if (refusal) { results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); continue; }
+      if (refusal) { await keepSyncing(tool); results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); continue; }
       try {
         // Kept in the store and on record first, so Restore can always put it back.
         await importRevision(context, change.key, copy.directory, await readTree(copy.directory));
@@ -791,30 +804,30 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('fault:')) throw error;
         if (item.displaced) item.displaced = item.displaced.filter(entry => entry.hash !== copy.hash);
+        await keepSyncing(tool);
         results.push({ item: name, harness: tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: errorCode(error) === 'CK_CHANGED' ? `${harnesses[tool].name}’s copy changed just now, so it was kept.` : `Could not remove ${harnesses[tool].name}’s copy: ${plainError(error)}` });
         continue;
       }
       writes++;
-      removed.push({ tool, hash: copy.hash });
+      removed.push({ tool, hash: copy.hash, folder: copy.folder });
       results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${harnesses[tool].name}. Restore it from History.` });
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)) });
-    if (!change.disabled) continue;
-    const switched: { tool: HarnessId; disabled: boolean }[] = [];
-    for (const tool of tools) {
-      const disabled = change.disabled.includes(tool);
-      if (change.remove?.includes(tool) || disabled === !!entry.facts.disabled?.includes(tool)) continue;
-      const target = switchTarget(context, entry, tool, true)!;
-      // Disabling needs a copy there (one written just now counts); enabling clears the switch whatever is there.
-      if (disabled && !entry.facts.copies[tool] && !await exists(target.skillFile)) { results.push({ item: name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} has no copy to disable.` }); continue; }
-      try { await setDisabled(context, tool, target, disabled); }
+    // Only the tools this change names: a switch flipped in another tool meanwhile is that tool's own, and stays.
+    const switched: NonNullable<HistoryEvent['switched']> = [];
+    for (const [tool, disabled] of [...(change.disable ?? []).map(tool => [tool, true] as const), ...(change.enable ?? []).map(tool => [tool, false] as const)]) {
+      if (!tools.includes(tool) || change.remove?.includes(tool)) continue;
+      // Named as the copy is now: one this pass wrote or replaced may carry another name.
+      const target = await liveSwitchTarget(context, entry, tool);
+      if (!target) { if (disabled) results.push({ item: name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} has no copy to disable.` }); continue; }
+      let previous: string | undefined;
+      try { if (!(({ previous } = await setDisabled(context, tool, target, disabled)).changed)) continue; }
       catch (error) {
-        const reason = errorCode(error) && !errorCode(error).startsWith('CK_') ? plainError(error) : error instanceof Error ? error.message : plainError(error);
-        results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${harnesses[tool].name}: ${reason}` });
+        results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${harnesses[tool].name}: ${switchFailure(error)}` });
         continue;
       }
-      switched.push({ tool, disabled });
-      results.push({ item: name, harness: tool, outcome: 'switched', message: disabled ? `Disabled in ${harnesses[tool].name}: the copy stays, and ${harnesses[tool].name} doesn’t load it from its next session.` : `Enabled again in ${harnesses[tool].name} from its next session.` });
+      switched.push({ tool, disabled, ...(previous ? { before: previous } : {}) });
+      results.push({ item: name, harness: tool, outcome: 'switched', disabled, message: disabled ? `Disabled in ${harnesses[tool].name}: the copy stays, and ${harnesses[tool].name} doesn’t load it from its next session.` : `Enabled again in ${harnesses[tool].name} from its next session.` });
     }
     if (switched.length) event({ key: change.key, item: name, kind: 'switched', switched, losers: [], orderProved: true });
   }
@@ -1079,30 +1092,36 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
   return { results, harnessWrites: writes };
 }
 
-/** Undo of Disable or Enable: each tool's switch goes back. A new 'switched' event says so, and its own Undo flips them again. */
+/**
+ * Undo of Disable or Enable: each tool's switch goes back, a Claude Code override to what it held before. A new 'switched' event
+ * says so, and its own Undo flips them again. Until every tool is back, the event stays undoable, so a tool that failed can be retried.
+ */
 async function undoSwitched(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
   const entry = (await gather(context, await context.read())).get(past.key);
   const results: DestinationResult[] = [];
-  const back: { tool: HarnessId; disabled: boolean }[] = [];
-  for (const { tool, disabled } of past.switched ?? []) {
+  const back: NonNullable<HistoryEvent['switched']> = [];
+  let pending = false;
+  for (const { tool, disabled, before } of past.switched ?? []) {
     const target = entry && switchTarget(context, entry, tool);
     if (!target) { results.push({ item: past.item, harness: tool, outcome: 'stayed', message: `${harnesses[tool].name} has no copy of ${past.item} any more.` }); continue; }
-    try { await setDisabled(context, tool, target, !disabled); }
-    catch (error) { results.push({ item: past.item, harness: tool, outcome: 'failed', message: `Could not change it in ${harnesses[tool].name}: ${error instanceof Error && errorCode(error).startsWith('CK_') ? error.message : plainError(error)}` }); continue; }
-    back.push({ tool, disabled: !disabled });
-    results.push({ item: past.item, harness: tool, outcome: 'switched', message: `${disabled ? 'Enabled' : 'Disabled'} again in ${harnesses[tool].name}.` });
+    let previous: string | undefined;
+    try { ({ previous } = await setDisabled(context, tool, target, !disabled, before)); }
+    catch (error) { pending = true; results.push({ item: past.item, harness: tool, outcome: 'failed', message: `Could not change it in ${harnesses[tool].name}: ${switchFailure(error)}` }); continue; }
+    back.push({ tool, disabled: !disabled, ...(previous ? { before: previous } : {}) });
+    results.push({ item: past.item, harness: tool, outcome: 'switched', disabled: !disabled, message: `${disabled ? 'Enabled' : 'Disabled'} again in ${harnesses[tool].name}.` });
   }
   if (!back.length) return { stopped: results[0]?.message ?? 'Nothing to undo.', results, harnessWrites: 0 };
   const id = randomUUID();
-  past.undoneBy = id;
+  if (!pending) past.undoneBy = id;
   await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: past.item, kind: 'switched', switched: back, losers: [], orderProved: true }], clock(context));
   return { results, harnessWrites: 0 };
 }
 
 /**
- * Restore of a removal: each removed copy goes back in its own tool, from the store, unless that tool has a different copy by now.
- * A managed skill syncs there again, and the next pass catches the copy up if it is behind.
+ * Restore of a removal: each removed copy goes back in its own tool under its own folder name, from the store, unless that tool
+ * has a different copy by now. A managed skill syncs there again, and the next pass catches the copy up if it is behind. Until
+ * every copy is back, the removal stays restorable, so one that couldn't go back yet can be retried.
  */
 async function restoreRemoved(context: ShareContext, record: SyncRecord, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
   if (past.undoneBy) return { stopped: 'That copy was already put back.', results: [], harnessWrites: 0 };
@@ -1114,13 +1133,17 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
   let writes = 0;
   for (const loser of past.losers) {
     const here = entry?.facts.copies[loser.tool];
-    if (here) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: here.hash === loser.hash ? `${harnesses[loser.tool].name} has it already.` : `${harnesses[loser.tool].name} has a different “${item.name}” now. It stays.` }); if (here.hash === loser.hash) back.push(loser.tool); continue; }
+    if (here) {
+      if (here.hash === loser.hash) back.push(loser.tool);
+      results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: here.hash === loser.hash ? `${harnesses[loser.tool].name} has it already.` : `${harnesses[loser.tool].name} has a different “${item.name}” now. It stays.` });
+      continue;
+    }
     const late = await rootProblem(context, loser.tool);
     if (late) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: late }); continue; }
     const kept = storedRevision(context, past.key, loser.hash);
     try {
       const tree = await readTree(kept);
-      const directory = join(rootOf(context, loser.tool), item.name);
+      const directory = join(rootOf(context, loser.tool), loser.folder ?? item.name);
       await mkdir(dirname(directory), { recursive: true });
       await placeCopy(context, kept, { harness: loser.tool, directory, limits: [] }, tree);
     } catch (error) {
@@ -1132,11 +1155,12 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
     back.push(loser.tool);
     results.push({ item: item.name, harness: loser.tool, outcome: 'written', message: `Put back. ${harnesses[loser.tool].nextStep}` });
   }
-  if (!back.length) return { stopped: results[0]?.message ?? 'Nothing could be put back.', results, harnessWrites: 0 };
+  if (!writes) return { stopped: results.find(result => result.outcome !== 'held' || !/already/.test(result.message))?.message ?? results[0]?.message ?? 'Nothing could be put back.', results, harnessWrites: 0 };
   if (item.state === 'shared' && past.stoppedSync?.length) { item.off = (item.off ?? []).filter(tool => !(past.stoppedSync!.includes(tool) && back.includes(tool))); await saveRecord(context.home, record); }
   const id = randomUUID();
-  past.undoneBy = id;
-  await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: back[0], hash: past.losers.find(loser => loser.tool === back[0])!.hash }, losers: [], orderProved: true }], clock(context));
+  if (back.length === past.losers.length) past.undoneBy = id;
+  const first = past.losers.find(loser => back.includes(loser.tool))!;
+  await saveHistory(context.home, [...history, { id, at: new Date(clock(context)).toISOString(), key: past.key, item: item.name, kind: 'restored', winner: { tool: first.tool, hash: first.hash }, losers: [], orderProved: true }], clock(context));
   return { results, harnessWrites: writes };
 }
 

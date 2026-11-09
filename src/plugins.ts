@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
-import { configRoot, harnesses } from './harnesses.ts';
+import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
@@ -270,8 +270,6 @@ async function componentsOf(folder: string, entry: Record<string, unknown>, root
 
 // ---------- What each tool has ----------
 
-const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
-
 /** A tool's JSON record as an object; Copilot's config.json starts with `//` comment lines, which are dropped first. */
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try { return parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
@@ -296,7 +294,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
  * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
  */
 export async function registeredMarketplaces(context: PluginContext, tool: HarnessId): Promise<{ name: string; source: string }[]> {
-  const root = configRootOf(context, tool);
+  const root = toolConfigRoot(context, tool);
   if (tool === 'codex-cli') return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
   const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
   if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
@@ -327,7 +325,7 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
 export async function installState(context: PluginContext, tool: HarnessId, marketplace: string, plugin: string): Promise<InstallState> {
-  const root = configRootOf(context, tool);
+  const root = toolConfigRoot(context, tool);
   const id = `${plugin}@${marketplace}`;
   if (tool === 'claude-cli') {
     // Only the user scope counts: it is the one Central Knot installs to (--scope user) and the one `uninstall` removes.
@@ -366,7 +364,7 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
 
 /** Files a tool's plugin commands may change; their bytes are kept before and after each run (FIL-03). */
 const touched = (context: PluginContext, tool: HarnessId) => {
-  const root = configRootOf(context, tool);
+  const root = toolConfigRoot(context, tool);
   if (tool === 'claude-cli') return [join(root, 'settings.json'), join(root, 'plugins/installed_plugins.json'), join(root, 'plugins/known_marketplaces.json')];
   if (tool === 'copilot-cli') return [join(root, 'settings.json'), join(root, 'config.json')];
   return [join(root, 'config.toml')];
@@ -422,7 +420,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const already = await installState(context, tool, catalog.name, plugin);
   if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
   // Codex's CLI won't add a marketplace to a home whose .codex folder doesn't exist yet (a fresh Practice copy).
-  if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
+  if (tool === 'codex-cli') await mkdir(toolConfigRoot(context, tool), { recursive: true });
   const registered = await registeredSource(context, tool, catalog.name);
   if (!registered) {
     const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
