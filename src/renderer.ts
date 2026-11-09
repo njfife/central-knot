@@ -5,7 +5,8 @@ import packageInfo from '../package.json' with { type: 'json' };
 import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
+import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
+import { harnessesPage } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
@@ -14,7 +15,7 @@ import type { HomeMode, ManageView } from './types.ts';
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */
@@ -26,6 +27,7 @@ function applyLayout() {
   classes.toggle('rail', rail);
   classes.toggle('one-pane', contentWidth < 960);
   classes.toggle('page-skills', state.page === 'skills');
+  classes.toggle('page-harnesses', state.page === 'harnesses');
   return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
 }
 
@@ -64,6 +66,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 function renderSidebar() {
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
+    navRow('harnesses', 'Harnesses', 'boxes'),
     navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
     navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
     navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
@@ -71,7 +74,6 @@ function renderSidebar() {
     navRow('plugins', 'Plugins', 'puzzle'),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
-    navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
   );
   // This computer's home first: it is where a released app works. Only dev builds have the Practice copy.
@@ -102,7 +104,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.remove('has-item');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {

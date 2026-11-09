@@ -72,7 +72,7 @@ if (wanted('shell')) {
   await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance): the Overview, on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
   await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
-  await a.click('#nav-tools'); await shot(a, 'tools-page', 'Clicked "Tools": which tools were found and where their files are.');
+  await a.click('#nav-harnesses'); await shot(a, 'harnesses-page', 'Clicked "Harnesses": each tool found, with what it has.');
   await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
@@ -192,6 +192,38 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+}
+
+// ---------- Harnesses ----------
+if (wanted('harnesses')) {
+  begin('harnesses');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const sizes = async (name, caption) => { for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) { await size(width, height); await shot(a, `${name}-${width}`, `${caption} Window ${width}×${height}.`); } await size(1280, 800); };
+  await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
+  await shot(a, 'list-dark', 'Clicked "Harnesses" in the sidebar: one card per tool with what it has. Window 1280×800.');
+  await a.theme('light'); await shot(a, 'list-light', 'The same, light appearance.'); await a.theme('dark');
+  await sizes('list', 'The Harnesses list.');
+  await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
+  await sizes('claude-skills', 'Claude Code’s Skills tab.');
+  await a.click('#tool-claude-cli'); await shot(a, 'claude-add-menu', 'Clicked the Claude Code column header: its menu adds other tools’ skills here.');
+  if (await a.has('#menu-add-copilot-cli-claude-cli:not([disabled])')) { await a.click('#menu-add-copilot-cli-claude-cli'); await shot(a, 'claude-pending', 'Clicked "Add" on the Copilot CLI row: the changes wait for Apply all.'); }
+  if (await a.has('#apply:not([disabled])')) { await a.click('#apply'); await a.settle(); await shot(a, 'claude-applied', 'Clicked "Apply all".'); }
+  await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
+  await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
+  await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
+  await a.click('#harness-tab-instructions'); await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`); await shot(a, 'claude-instructions', 'Clicked the "Instructions" tab: Claude Code’s own file, editable here.');
+  // With the Plugins tour run first, install document-tools again so this tab has something to show.
+  if (wanted('plugins')) {
+    await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
+    if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+    await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
+  }
+  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');
+  await a.click('#harness-tab-about'); await shot(a, 'claude-about', 'Clicked the "About" tab: how it was found and where its files are.');
+  await sizes('claude-about', 'The About tab.');
+  await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
+  await a.theme('light'); await shot(a, 'copilot-skills-light', 'The same, light appearance.'); await a.theme('dark');
+  await a.click('#harness-back'); await shot(a, 'back', 'Clicked "Harnesses" in the page’s breadcrumb.');
 }
 
 a.quit();

@@ -1347,3 +1347,64 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .appearance-choice:disabled { opacity: .5; cursor: default; }
 .appearance-choice:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
 
+
+/* ---------- Harnesses ---------- */
+.harness-scroll { padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.harness-scroll > * { flex: none; }
+.harness-scroll > .tools-note { margin: 0; }
+.harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.harness-card { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; color: var(--ink); font: inherit; text-align: left; }
+button.harness-card { cursor: pointer; }
+button.harness-card:hover { border-color: var(--control-line); background: var(--hover); }
+button.harness-card:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-card-missing { color: var(--ink-soft); }
+.harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.harness-card-head > svg:last-child { margin-left: auto; flex: none; }
+.harness-card-name { font-size: 14px; line-height: 20px; font-weight: 600; }
+.harness-card-status { font-size: 12px; line-height: 16px; color: var(--ink-soft); margin-top: -6px; }
+.harness-counts { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
+.harness-count { display: contents; }
+.harness-count-label { color: var(--ink-soft); font-size: 12.5px; }
+.harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+.harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-card-attention { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warning); }
+.harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; }
+.harness-card-next { font-size: 12px; color: var(--ink-soft); }
+
+.harness-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 57px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.harness-head .pane-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-head .pane-title .mono { font-size: 12px; }
+.harness-crumb { display: flex; align-items: center; gap: 8px; flex: none; font-size: 13px; }
+.harness-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--hover); }
+.harness-switch-item { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
+.harness-switch-item:hover { color: var(--ink); }
+.harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
+.harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-tabs { flex: none; display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.harness-tab { all: unset; display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px 7px; font-size: 13px; color: var(--ink-soft); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.harness-tab:hover { color: var(--ink); }
+.harness-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+.harness-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
+.harness-tab-count { font-size: 12px; font-weight: 500; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.harness-page .harness-tab-body { flex: 1; min-height: 0; }
+.harness-plugins { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.harness-plugin { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 16px; border-bottom: 1px solid var(--line); min-height: 52px; }
+.harness-plugin:last-child { border-bottom: 0; }
+.harness-plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.harness-about { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 16px 32px; }
+.harness-about-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.harness-path .middle { min-width: 0; }
+/* Narrow: the switcher keeps only the marks (names stay in their tooltips), and the path leaves the title. */
+@media (max-width: 1180px) { .harness-switch-name { display: none; } }
+@media (max-width: 1000px) { .harness-head-path { display: none; } }
+/* A harness's page uses the window's width: the table, its toolbar and bands reach the edge, the name column takes the
+   free space (with the description), and the tool columns keep a steady width. */
+.page-harnesses #header { padding-right: 16px; }
+.harness-page .ov, .harness-page .legend, .harness-page .details { max-width: none; }
+.harness-page .ov { --ov-columns: minmax(220px, 1fr) 76px repeat(var(--tool-count, 3), 132px) 16px; }
+.harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
+.ov-name-desc { flex: 1 1 0; min-width: 0; margin-left: 4px; font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1100px) { .ov-name-desc { display: none; } }

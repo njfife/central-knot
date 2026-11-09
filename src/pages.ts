@@ -1,7 +1,7 @@
 import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, plural, skillCount, toolName } from './model.ts';
-import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
+import { plural, toolName } from './model.ts';
+import type { HarnessId, HomeView, Skill } from './types.ts';
 import { designMode } from './design.ts';
 import { realHomeName } from './renderer.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
@@ -22,7 +22,7 @@ const emptyBands = () => {
 };
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
   h('div.empty-actions', {},
-    button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
+    button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
 
@@ -179,72 +179,4 @@ export function copyButton(text: string, what: string, id: string, label?: strin
     }, () => announce('Could not copy. Select the text instead.')),
   });
   return glyphButton;
-}
-
-
-// ---------- Tools ----------
-
-/** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
-const dirname = (path: string) => path.replace(/^[A-Za-z]:\\/.test(path) ? /[/\\][^/\\]*$/ : /\/[^/]*$/, '');
-
-const discoveryLine = (snapshot: Snapshot) => ({
-  ready: plural(skillCount(snapshot), 'skill'),
-  empty: 'No standalone skills in this user-wide folder.',
-  missing: 'No skills folder found.',
-  restricted: 'Discovery needs attention. See the reason below.',
-  failed: 'Discovery needs attention. See the reason below.',
-})[snapshot.discovery];
-
-const count = (list: { copies: Record<string, unknown> }[] | undefined, tool: HarnessId) => (list ?? []).filter(fact => fact.copies[tool] !== undefined).length;
-
-function toolCard(snapshot: Snapshot, home: HomeView) {
-  const disclosed = home.manage.writes[snapshot.harness];
-  const roots = new Map(snapshot.skills.map(skill => [dirname(skill.directory), skill.rootLabel]));
-  const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
-  const path = (value: string) => pathText(shownPath(value), value);
-  return h('article.card.tool-card', { 'aria-label': fullToolName(snapshot) },
-    h('header.tool-head', {},
-      brandMark(snapshot.harness, 18),
-      h('h2.tool-title', {}, toolName(snapshot.harness) ?? fullToolName(snapshot)),
-      pathText(shownPath(snapshot.root), snapshot.root),
-      copyButton(snapshot.root, `folder for ${fullToolName(snapshot)}`, `copy-root-${snapshot.harness}`, 'Copy folder path')),
-    h('div.tool-body', {},
-      h('div.tool-column', {},
-        // Outside This Mac's home no app is checked (the note above says so), so the card shows only folders.
-        home.mode === 'actual' && section('Detection', h('dl.facts', {},
-          // The practice copy and another folder are folders, not this Mac: no app is looked for there, and that is no fault.
-          ...fact('Status', home.mode === 'actual' ? snapshot.detection : home.mode === 'fixture' ? 'Sample folder' : 'Folder only'),
-          ...(home.mode === 'actual' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
-          ...(snapshot.probe.detail.startsWith('ChatGPT desktop') ? fact('Found as', 'ChatGPT desktop’s own Codex; no Codex CLI found') : []))),
-        section('Files and folders', h('dl.facts', {},
-          ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
-          // One label for every tool; a second folder (shared .agents) keeps its own name.
-          ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
-          ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
-          // Where its MCP servers and agents live, read from what was found there.
-          ...fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '— (no MCP servers found)'); })()),
-          ...fact('Agents folder', (() => { const file = home.agents?.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '— (no agents found)'); })()),
-          ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
-      h('div.tool-column', {},
-        section('What it has',
-          h('div.link-row', {},
-            snapshot.skills.length ? button({ variant: 'link', size: 'micro', label: plural(skillCount(snapshot), 'skill'), id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('skills') })
-              : snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? h('span.link-quiet', { title: discoveryLine(snapshot) }, '0 skills') : h('span', {}, discoveryLine(snapshot)),
-            h('span.tone-faint', {}, ' · '),
-            count(home.mcp.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }) : h('span.link-quiet', {}, '0 MCP servers'),
-            h('span.tone-faint', {}, ' · '),
-            count(home.agents?.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.agents?.servers, snapshot.harness), 'agent'), id: `tool-agents-${snapshot.harness}`, onclick: () => showPage('agents') }) : h('span.link-quiet', {}, '0 agents'))),
-        disclosed && disclosed.alsoReadBy.length > 0 && section('Others that read its skills folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
-        issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));
-}
-
-export function toolsPage() {
-  const { home } = state;
-  if (!home) return h('div.page');
-  const done = outcomeBand();
-  return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
-    home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
-      button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    // A sample folder lists only the tools it has; this computer's home also lists tools that were not found, with how to fix that.
-    home.snapshots.filter(snapshot => home.mode === 'actual' || snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => toolCard(snapshot, home))));
 }

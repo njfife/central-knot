@@ -128,6 +128,14 @@ export function browse(patch: Partial<typeof market.nav>): void {
   document.getElementById('plugins-scroll')?.scrollTo(0, 0);
 }
 
+/** Another page's quiet look at what is installed where (Harnesses): read once, with no busy state and no reads ahead. */
+export function peekPlugins(): void {
+  if (market.view || peeking) return;
+  peeking = true;
+  void api().plugins(false).then(view => { if (view && !market.view) { market.view = view; rerender(); } }, () => undefined).finally(() => { peeking = false; });
+}
+let peeking = false;
+
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
 export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);

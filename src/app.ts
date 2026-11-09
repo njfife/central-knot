@@ -7,7 +7,9 @@ import { loadPlugins, resetMarket } from './pluginstate.ts';
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+export type Page = 'overview' | 'harnesses' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'settings';
+/** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
+export type HarnessTab = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'about';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -39,6 +41,9 @@ export const state = {
   undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
   seenNotices: new Set<string>(),
+  /** The harness whose page is open on Harnesses; none shows every harness. */
+  harness: undefined as HarnessId | undefined,
+  harnessTab: 'skills' as HarnessTab,
   /** The window chooses the sidebar shape until the person uses the toggle. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -184,6 +189,8 @@ export function showPage(page: Page) {
   if (page === 'settings') void loadSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
+  // The sidebar's Harnesses always opens the list of every harness, even from one harness's page.
+  if (page === 'harnesses') state.harness = undefined;
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -286,7 +293,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: state.page, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -297,7 +304,7 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
   state.instructions = (await api().instructions()) ?? state.instructions;
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
-  state.outcome = { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
+  state.outcome = { page: state.page, item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
   announce(state.outcome.text, true);
 });
 
@@ -398,7 +405,7 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
 let refreshing = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
-const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
+const pages: Page[] = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'settings'];
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
 api().onSyncChanged(async () => {

@@ -152,6 +152,40 @@ const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
+/** Harnesses: one tool's page manages its items with the same engine as the Skills page. */
+async function harnessFlow() {
+  const a = await launch(join(scratch, 'harness-data'));
+  const practice = await a.run(`document.querySelector('.status-home').title`);
+  await a.click('#nav-harnesses');
+  const list = await a.text('#harnesses-scroll') ?? '';
+  check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none managed'), list.slice(0, 400));
+  await a.click('#harness-copilot-cli');
+  check('a harness opens on its skills, its own column first', (await a.exists('#harness-tab-skills[aria-selected="true"]')) && (await a.text('.ov-head .ov-tool-head') ?? '').includes('Copilot CLI'), await a.text('.ov-head'));
+  const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
+  check('a skill only other tools have is under "Not in Copilot CLI"', away);
+  await a.click('#tool-copilot-cli');
+  check('its column menu brings things in', (await a.text('.tool-menu-label') ?? '').includes('Add to Copilot CLI from'), await a.text('.tool-menu'));
+  await a.click('#menu-add-claude-cli-copilot-cli');
+  same('Add queues a new copy here', await cellState(a, 'release-notes', 'copilot-cli'), 'will-sync');
+  check('nothing written before Apply all', !existsSync(join(practice, '.copilot/skills/release-notes')));
+  await a.shot('harness-pending');
+  await applyAll(a);
+  check('Apply all on a harness page writes the copy', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')));
+  check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
+  await a.click('#nav-skills');
+  same('the Skills page shows the same change', await switchOn(a, 'release-notes'), true);
+  await a.click('#nav-harnesses');
+  await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-instructions');
+  check('its instruction file is there to edit', await a.exists('#ins-edit-copilot-cli'), await a.text('.harness-page'));
+  await a.click('#harness-switch-codex-cli');
+  check('the switcher moves to another harness', (await a.text('.harness-head h2')) === 'Codex', await a.text('.harness-head'));
+  await a.click('#harness-back');
+  check('back returns to every harness', await a.exists('#harnesses-scroll'));
+  same('no page errors, harnesses', a.pageErrors, []);
+  await a.quit();
+}
+
 async function practiceFlow() {
   const a = await launch();
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
@@ -576,10 +610,13 @@ async function realHomeFlow() {
   await a.click('#nav-skills');
   same('the disposable HOME is what "this Mac" reads', await a.run(`document.querySelector('.status-home').title`), HOME);
   same('real home is never the machine’s own', HOME.startsWith(scratch), true);
-  await a.click('#nav-tools');
-  const tools = await a.text('#tools-scroll');
+  await a.click('#nav-harnesses');
+  const tools = await a.text('#harnesses-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
-  check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
+  await a.click('#harness-codex-cli');
+  await a.click('#harness-tab-about');
+  const codexAbout = await a.text('#harness-body');
+  check('Codex says where new copies go', codexAbout.includes('/.codex/skills'), codexAbout.slice(0, 600));
   await a.click('#nav-skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
@@ -712,6 +749,7 @@ const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 const started = Date.now();
 try {
   seedHome();
+  await harnessFlow();
   await practiceFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();

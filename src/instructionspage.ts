@@ -33,7 +33,7 @@ const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : '
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
-  if (event.key !== 'Escape' || state.page !== 'instructions' || edit?.stage !== 'review') return;
+  if (event.key !== 'Escape' || (state.page !== 'instructions' && state.page !== 'harnesses') || edit?.stage !== 'review') return;
   event.preventDefault();
   if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
   rerender();
@@ -119,9 +119,10 @@ function editor(file: InstructionFile) {
 const open = new Set<string>();
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
+const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
 
-function card(file: InstructionFile) {
+/** One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. */
+export function instructionCard(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
@@ -165,5 +166,5 @@ export function instructionsPage() {
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? files.map(card) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
+      files.length ? files.map(instructionCard) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }

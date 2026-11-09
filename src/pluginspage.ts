@@ -102,7 +102,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
-      button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') }))) : null,
+      button({ variant: 'link', size: 'micro', label: 'See Harnesses', id: `market-tools-${marketIndex}`, onclick: () => showPage('harnesses') }))) : null,
     shown.length
       ? withToolCount(h('div.ov.plugin-table', { role: 'table', 'aria-label': `Plugins in ${entry.name}` }, head, shown.map(plugin => pluginRow(view, entry, marketIndex, plugin))), view.tools.length)
       : h('p.market-empty', {}, entry.plugins.length ? 'No plugin matches.' : entry.problem ? '' : 'This marketplace lists no plugins.'),
