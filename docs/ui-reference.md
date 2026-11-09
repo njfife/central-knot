@@ -119,6 +119,35 @@ Thresholds follow the window width in rem, so they also trigger under text zoom.
 
 The header keeps its text-labelled button at all widths observed. The smallest window in the screenshots is 960×640; smaller was seen only through text zoom.
 
+## Resizing and space (core rule)
+
+Nathan set this as a core UI value on 2026-11-09. Every page, panel and toolbar is judged against it.
+
+1. **Nothing is ever cut off at any window size a person uses.** That means:
+   - the minimum window (860×560);
+   - laptop sizes (1280×800, 1440×900, 1512×982);
+   - laptop full screen (1728×1117);
+   - large displays up to 2560×1440, full screen.
+   A clipped button, label, column or control is a **failure**, not polish.
+2. **Space is used, not wasted.** Layout regions (tables, lists, cards, panels, toolbars, headers) grow with the
+   window. There is no fixed-width inner container that makes the content look like a smaller window inside the app
+   (a "hidden inner window" that doesn't expand when the app gets bigger). There is no large empty band beside content
+   that could use it.
+3. **Rows and columns fill the width sensibly.**
+   - The flexible column (name and description) takes the free space.
+   - Fixed columns (a tool's box) keep a steady width.
+   - Nothing stretches oddly: no control floats far from what it belongs to, and no column is absurdly wide.
+   - Where content can't usefully grow, it is placed on purpose (aligned, grouped). It never looks accidental.
+4. **Only reading measure is capped.** Running prose (descriptions, READMEs, notes) may stop at about 70–80 characters
+   per line. The region that holds it still spans the window, so a prose cap is not a layout cap.
+5. **Adapt, don't clip.** As the window narrows:
+   - things wrap, fold into one "More" menu, or go icon-only with tooltips, consistently within a toolbar;
+   - two-pane views stack or collapse.
+   Text truncates only with an ellipsis, with the full text available (a tooltip or a way to expand it).
+6. **Full screen looks intentional.** Margins are balanced, headers and toolbars span the full width, and there are no
+   odd gaps.
+7. **Check every page at 860×560, 1280×800, 1728×1117 and 2560×1440,** in both appearances.
+
 ## Icons
 
 Lucide only, stroke width 1.75 everywhere. Lucide renames icons between releases, so check each name against the installed version.
