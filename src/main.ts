@@ -266,7 +266,7 @@ async function view(explicit = false): Promise<HomeView> {
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
     ...(await (async () => {
       const notices = pendingMcpNotices.splice(0);
@@ -383,14 +383,23 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   } catch (error) { current = previous; throw error; }
 }
 
-/** At launch: the home last opened, else the practice copy. A remembered folder that is gone falls back to the practice copy. */
+/**
+ * The Practice copy (throwaway sample files) exists only in dev builds and tests. A released app works on this
+ * computer's own home, and other folders can still be opened.
+ */
+const practiceAvailable = () => !app.isPackaged || smoke;
+
+/**
+ * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
+ * Dev builds and tests start on the Practice copy instead, so a development run never syncs this machine's real tools.
+ */
 async function startHome(): Promise<HomeView | null> {
   // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.
   if (current) return view();
   const last = smoke ? undefined : appSettings.home;
   if (last?.mode === 'actual') return selectHome('actual');
   if (last?.mode === 'custom' && last.path) { try { await access(last.path); return await selectHome('custom', last.path); } catch { /* gone */ } }
-  return selectHome('fixture');
+  return selectHome(practiceAvailable() ? 'fixture' : 'actual');
 }
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
@@ -489,6 +498,7 @@ app.whenReady().then(async () => {
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
+    if (mode === 'fixture' && !practiceAvailable()) throw new Error('The practice copy is only in development builds.');
     return selectHome(mode as HomeMode);
   });
   handle('discovery:start', async () => startHome());

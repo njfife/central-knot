@@ -15,10 +15,11 @@ const findIdentity = () => {
     return /"(Developer ID Application: [^"]+)"/.exec(listed)?.[1];
   } catch { return undefined; }
 };
-const identity = process.env.CK_SIGN_IDENTITY || findIdentity();
+// CK_SIGN=0: a local ad hoc build even where a Developer ID is installed (over SSH its keychain is locked).
+const identity = process.env.CK_SIGN === '0' ? undefined : process.env.CK_SIGN_IDENTITY || findIdentity();
 const notaryProfile = process.env.CK_NOTARY_PROFILE || (identity ? 'central-knot-notary' : undefined);
 const notarize = !!identity && process.env.CK_NOTARIZE !== '0';
-if (release && !identity) throw new Error('No “Developer ID Application” certificate in this Mac’s keychain, so a release can’t be signed.');
+if (release && !identity) throw new Error('No “Developer ID Application” certificate in this Mac’s keychain (or CK_SIGN=0), so a release can’t be signed.');
 if (release && !notarize) throw new Error('A release must be notarized; CK_NOTARIZE=0 is only for local tries.');
 
 // The version is package.json's: a release bumps it there and nowhere else.

@@ -75,12 +75,13 @@ function renderSidebar() {
     navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
   );
-  region('homes').replaceChildren(
+  // This computer's home first: it is where a released app works. Only dev builds have the Practice copy.
+  region('homes').replaceChildren(...[
     h('p.homes-title', {}, 'Home'),
-    homeRow('fixture', 'Practice copy', 'flask-conical'),
-    homeRow('custom', 'Another folder…', 'folder-open'),
+    state.home?.practice ? homeRow('fixture', 'Practice copy', 'flask-conical') : null,
     homeRow('actual', realHomeName, 'laptop'),
-  );
+    homeRow('custom', 'Another folder…', 'folder-open'),
+  ].filter((row): row is HTMLElement => !!row));
 }
 
 function renderHeader(rail: boolean) {
