@@ -229,7 +229,8 @@ export async function writeFileChecked(path: string, text: string, expected: str
       // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
       if (errorCode(error) === 'EEXIST') {
-        if (parkedThere) { await rename(parked, `${path}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).then(() => { parkedThere = false; }, () => undefined); }
+        // Even if that rename fails, the original is never deleted here: it stays moved aside for the next pass to find.
+        if (parkedThere) { await rename(parked, `${path}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).catch(() => undefined); parkedThere = false; }
         throw expected === undefined ? occupiedError() : changedWhileSyncing();
       }
       // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
@@ -271,8 +272,12 @@ export async function recoverParked(folder: string) {
     const parked = /^\.(.+)\.ck-[0-9a-f-]{36}\.old$/.exec(name);
     if (parked) {
       const home = join(folder, parked[1]);
-      try { await link(join(folder, name), home); } catch (error) { if (errorCode(error) !== 'EEXIST') continue; }
-      await unlink(join(folder, name)).catch(() => undefined);
+      try { await link(join(folder, name), home); await unlink(join(folder, name)).catch(() => undefined); }
+      catch (error) {
+        if (errorCode(error) !== 'EEXIST') continue;
+        // Its place is taken (the write finished, or something else saved there): kept beside it as a visible backup, never deleted.
+        await rename(join(folder, name), `${home}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).catch(() => undefined);
+      }
       continue;
     }
     if (/^\..+\.ck-[0-9a-f-]{36}\.tmp$/.test(name)) await unlink(join(folder, name)).catch(() => undefined);

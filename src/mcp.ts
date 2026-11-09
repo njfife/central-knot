@@ -464,9 +464,11 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     else if (raced) {
       const id = event({ key, item: name, kind: 'kept-edit', winner: { tool: source.tool, hash: source.hash }, losers: [...raced.map(tool => ({ tool, hash: item.hash })), ...replaced], orderProved: false, previous: item.hash });
       notices.push({ key, item: name, kind: 'kept-edit', winner: source.tool, losers: raced, orderProved: false, history: id });
-    } else if (edited.length && replaced.length) {
+    } else if (edited.length && (replaced.length || (item.hash && item.hash !== source.hash))) {
+      // An edit that changed the synced content is History even when no copy could be written yet (Claude Code waiting for Write
+      // now): the version it replaces stays restorable after the catch-up overwrites it.
       const id = event({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
-      notices.push({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
+      if (replaced.length) notices.push({ key, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? edited.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
     // A copy not written (Claude waiting, a refusal) keeps what was recorded for it, so a change there is still seen as one. A copy
     // replaced by this choice that could not be written yet is recorded as it is, so it reads as behind.

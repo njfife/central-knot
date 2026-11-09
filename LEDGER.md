@@ -589,3 +589,19 @@ All sixth-check findings stayed fixed.
   - practice-home write guards for `~/.codex` and `~/.claude.json` (a practice home never writes there).
 
 **Validation.** 226 unit tests. Linux e2e 123/123.
+
+## Confirming checks (on cceda9e), November 9, 2026
+
+**Opus: "safe to hand to Nathan".**
+- All four final-check fixes confirmed. Each test fails with its fix reverted.
+- The per-pass keep writes nothing on idle passes.
+- Skipping displaced records for catch-up writes loses nothing.
+- Two minor points, now fixed:
+  - the node check for Claude Code matches only node running the package's CLI, never a shell that mentions it;
+  - a failed `.bak` rename never deletes the original.
+
+**Astra: "not yet"**, with two confirmed findings, now fixed. They are kept in `tests/confirm-check-astra.test.ts` (3 tests):
+1. **An edit that changed the synced content is History even when no copy could be written yet.** Two cases: Claude Code was the only other destination and waits for Write now, or a write failed and is caught up later. The catch-up then overwrites a version that History still names, so it can be restored. Applies to MCP, agents and skills (new skills test in `tests/twoway-recovery.test.ts`; it fails without the fix). A notice is shown only when something was written.
+2. **A moved-aside settings file is never deleted.** If its place is taken (a crash after the write, or another program's save), crash recovery keeps it as a visible `<file>.central-knot-<time>.bak`.
+
+**Validation.** 230 unit tests. Linux e2e 123/123.

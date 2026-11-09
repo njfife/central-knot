@@ -313,7 +313,8 @@ function claudeRunning(): Promise<boolean> {
   if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
   // The native `claude` binary, or Claude Code run through node (an npm install shows as node with its package in the command).
   const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
-  return found(['-x', 'claude']).then(native => native || found(['-f', '@anthropic-ai/claude-code']));
+  // Only node running the package's CLI counts, never a shell or search that merely mentions the package.
+  return found(['-x', 'claude']).then(native => native || found(['-f', '^[^ ]*node .*@anthropic-ai/claude-code/']));
 }
 
 /** A tool's own CLI, never an app's bundled copy (CD §3), searched as version probes are. */

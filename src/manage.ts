@@ -681,10 +681,12 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // What sync did on its own goes to History once, after it happened (CON-02).
       // A chosen copy that replaced others is History too, so its replaced content stays recoverable (and is never pruned).
       if (chosenLosers.length) event({ key, item: name, kind: 'chosen', winner: { tool: sourceTool, hash: target }, losers: chosenLosers, orderProved: true, previous: baselineBefore || undefined });
-      if (story && (replaced.length || story.deleted.length)) {
+      // An edit that changed the synced content is History even when no copy could be written yet (a failed write caught up later),
+      // so the version it replaces stays restorable and is never pruned.
+      if (story && (replaced.length || story.deleted.length || (baselineBefore && baselineBefore !== target))) {
         // Every overwritten copy is named, including a competing edit that lost while a deletion raced, so none is pruned.
         const id = event({ key, item: name, kind: story.kind, winner: { tool: sourceTool, hash: target }, losers: story.kind === 'kept-edit' ? [...story.deleted.map(tool => ({ tool, hash: baselineBefore })), ...losers] : losers, orderProved: story.orderProved, previous: baselineBefore });
-        notices.push({ key, item: name, kind: story.kind, winner: sourceTool, losers: story.kind === 'conflict' ? story.competitors : story.kind === 'kept-edit' ? story.deleted : replaced, orderProved: story.orderProved, history: id });
+        if (replaced.length || story.deleted.length) notices.push({ key, item: name, kind: story.kind, winner: sourceTool, losers: story.kind === 'conflict' ? story.competitors : story.kind === 'kept-edit' ? story.deleted : replaced, orderProved: story.orderProved, history: id });
       }
       const sourceSkill = entry.skills[sourceTool]?.find(skill => skill.directory === source.directory);
       for (const tool of syncing.filter(entryTool => !entry.locations.some(location => location.tool === entryTool))) {

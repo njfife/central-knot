@@ -261,3 +261,18 @@ test('An unfinished deletion stops when the skill is put back by hand in another
   assert.equal(await b.read(1), 'BASE', 'the kept identical copy is not removed');
   assert.equal(await b.read(0), 'BASE');
 }));
+
+test('An edit whose spread failed at first is still History, so the version it replaced can be restored after the catch-up', () => box(async b => {
+  await b.write(0, 'EDITED');
+  await chmod(b.path(1), 0o555);
+  await chmod(join(b.home, roots[1]), 0o555);
+  await chmod(b.path(2), 0o555);
+  await chmod(join(b.home, roots[2]), 0o555);
+  await b.pass();
+  for (const i of [1, 2]) { await chmod(join(b.home, roots[i]), 0o755); await chmod(b.path(i), 0o755); }
+  await b.pass();
+  assert.deepEqual(await b.copies(), ['EDITED', 'EDITED', 'EDITED']);
+  const edit = (await readHistory(b.home)).find(entry => entry.kind === 'edit');
+  assert.ok(edit, 'the edit is in History');
+  assert.ok((await b.stored()).includes('BASE'), 'and the version it replaced is kept');
+}));

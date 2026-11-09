@@ -436,9 +436,11 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     else if (raced) {
       const id = event({ key: historyKey, item: name, kind: 'kept-edit', winner: { tool: source.tool, hash: source.hash }, losers: [...raced.deleted.map(tool => ({ tool, hash: item.hash })), ...replaced], orderProved: false, previous: item.hash });
       notices.push({ key: historyKey, item: name, kind: 'kept-edit', winner: source.tool, losers: raced.deleted, orderProved: false, history: id });
-    } else if (changed.length && replaced.length) {
+    } else if (changed.length && (replaced.length || (item.hash && item.hash !== source.hash))) {
+      // An edit that changed the synced content is History even when no copy could be written yet (a failed write caught up
+      // later): the version it replaces stays restorable.
       const id = event({ key: historyKey, item: name, kind: competing ? 'conflict' : 'edit', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: !competing, previous: item.hash || undefined });
-      notices.push({ key: historyKey, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? changed.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
+      if (replaced.length) notices.push({ key: historyKey, item: name, kind: competing ? 'conflict' : 'edit', winner: source.tool, losers: competing ? changed.filter(entry => entry.hash !== source.hash).map(entry => entry.tool) : replaced.map(entry => entry.tool), orderProved: !competing, history: id });
     }
     item.name = source.name;
     item.hash = source.hash;
