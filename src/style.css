@@ -349,8 +349,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    full choice in its tooltip; the description stays in the name's tooltip. Four tools need it sooner (dom.ts data-tools). */
 @container table (width < 780px) { .ov { --narrow: 1; } }
 @container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
-.decided-short { display: none; }
+.decided-short, .decided-undo-icon { display: none; }
 @container style(--narrow: 1) {
+  .decided-undo-text { display: none; }
+  .decided-undo-icon { display: block; }
   .ov .ov-row { grid-template-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
   .ov-name-about, .decided-uses, .decided-what { display: none; }
   .decided-short { display: inline; }
@@ -496,7 +498,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .dock-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .dock-scroll { padding: 12px var(--pad-end) 16px 16px; }
 .dock .details { margin: 0; padding: 0; background: none; box-shadow: none; }
-.dock .details-tool-head { grid-template-columns: minmax(120px, 40%) minmax(0, 1fr); }
+/* The dock is narrow: each tool's name sits above what it says, instead of beside it. */
+.dock .details-tool-head:not(.details-mcp *) { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 
 /* ---------- A row's details, opened under it ---------- */
 .details { position: relative; display: flex; flex-direction: column; gap: 12px; margin: 0 0 1px; padding: 12px 16px 8px; background: var(--chrome); box-shadow: inset 3px 0 0 var(--control-line), inset 0 -1px 0 var(--line); }
@@ -902,8 +905,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- Settings: Central Knot's own preferences ---------- */
 .settings-scroll { container: cards / inline-size; padding: 20px var(--pad-end) 32px 16px; }
-.settings-section h2 { margin: 0 0 4px; font-size: 14px; font-weight: 650; }
-.settings-hint { margin: 0 0 12px; max-width: var(--measure); font-size: 12.5px; color: var(--ink-soft); }
+.settings-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; }
+.settings-card h2 { margin: 0; font-size: 14px; font-weight: 650; }
+.settings-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.settings-switch-label { font-weight: 500; }
+.settings-why { flex-basis: 100%; font-size: 12px; color: var(--ink-faint); }
+.settings-hint { margin: 0 0 6px; max-width: var(--measure); font-size: 12.5px; color: var(--ink-soft); }
 .appearance-choices { display: flex; flex-wrap: wrap; gap: 10px; }
 .appearance-choice { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 112px; padding: 14px 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink-soft); font-size: 13px; cursor: pointer; }
 .appearance-choice:hover { border-color: var(--control-line); color: var(--ink); }

@@ -228,7 +228,9 @@ async function everyPage(tag) {
   // notes, when there: a skill whose copies agree, so its details offer Files and contents.
   const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) {
-    await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at} (beside the table from 1600px of content).`);
+    await a.click(`#${first}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The skill's details did not open ${at}.`);
+    await shot(a, `${tag}-skills-details`, `Opened notes's details ${at} (beside the table from 1200px of content).`);
     const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
     if (files) {
       await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`);
@@ -246,12 +248,24 @@ async function everyPage(tag) {
     if (await a.has('#use-draft-copilot-cli')) { await a.click('#use-draft-copilot-cli'); await shot(a, `${tag}-skills-choice`, `Chose Copilot CLI's copy of draft, whose copies differ: the choice waits for Apply all ${at}.`); }
     if (await a.has('#discard')) await a.click('#discard');
   }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#separate-draft')) { await a.click('#separate-draft'); await shot(a, `${tag}-skills-separate`, `Chose to keep draft's differing copies separate: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
+  const off = await a.run(`document.querySelector('.ov-row[data-key] .cell-button.cell-on:not([disabled])')?.id ?? ''`);
+  if (off) { await a.click(`#${off}`); await shot(a, `${tag}-skills-pending-removal`, `Clicked a synced box: it stops syncing on Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
   const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
   if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
   await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
   await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
   const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
-  if (agent) { await a.click(`#${agent}`); await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at}.`); await a.click(`#${agent}`); }
+  if (agent) {
+    await a.click(`#${agent}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The agent's details did not open ${at}.`);
+    await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at} (beside the table from 1200px of content).`);
+    await a.click(`#${agent}`);
+  }
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `Instructions ${at}.`);
   await ensureMarket(); await shot(a, `${tag}-plugins`, `Plugins, the marketplace's list ${at}.`);
   if (await a.has('[id^="popen-0-"]')) {

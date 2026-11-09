@@ -84,7 +84,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint')),
-      h('span.kind-card-count', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed yet'}` : `No ${noun[1]}`)),
+      h('span.kind-card-count', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`)),
     !attention ? null : differs
       ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: 'Show only these', onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text, icon('arrow-right', 12))
       : h(`span.kind-card-state.${attention.tone}`, {}, icon(attention.glyph, 13), attention.text));
