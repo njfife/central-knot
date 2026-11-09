@@ -76,8 +76,8 @@ const pull = () => busy('Pulling from the repo…', async () => {
   const waiting = result.results.filter(entry => entry.harness === 'claude-cli' && /Write now/.test(entry.message)).map(entry => entry.item);
   if (waiting.length && state.outcome) {
     const names = [...new Set(waiting)];
-    state.outcome.text += ` ${andList(names)} ${names.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close it, then use Write to Claude Code on MCP servers.`;
-    state.outcome.act = { label: 'MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
+    state.outcome.text += ` ${andList(names)} ${names.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close Claude Code, then click Write to Claude Code on MCP servers.`;
+    state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
   }
 });
 
@@ -132,11 +132,10 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
 
 /** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
 function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, blocked?: string) {
-  // The count is what the button moves; items that can't move are counted beside it, so the two never disagree.
+  // The button carries the count of what moves; items that can't move are counted beside the title.
   const stuck = changes.filter(change => change.held && !change.retry).length;
   return h('section.repo-side', { 'aria-labelledby': id },
-    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title, h('span.eyebrow-count', {}, String(changes.filter(change => !change.held).length)),
-      stuck ? h('span.repo-stuck-count', {}, `· ${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null), action),
+    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title, stuck ? h('span.repo-stuck-count', {}, `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null), action),
     blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('info', 12), blocked) : null,
     changes.length ? h('ul.repo-list', {}, changes.map(change => changeRow(change, side))) : h('p.repo-empty-side', {}, empty));
 }
@@ -169,9 +168,9 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const retryable = view.incoming.filter(change => change.retry).length;
   // A newer commit that changes nothing here still has to be pulled before a push: Pull then just moves to it.
   const pullButton = pullable || retryable || view.pushBlocked ? button({ variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull', id: 'repo-pull', disabled: moving || !view.latest,
-    attrs: { title: view.problem ? WAITING : 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
+    attrs: view.problem ? { 'aria-describedby': 'repo-incoming-blocked' } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
   const pushButton = pushable ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: `Push ${pushable}`, id: 'repo-push', disabled: moving || !!view.pushBlocked,
-    attrs: view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
+    attrs: view.pushBlocked || view.problem ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   // Each part stays whole when the row wraps, so a narrow window breaks at a dot, never inside a time.
@@ -203,9 +202,9 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
       inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
         : h('div.repo-sides', {},
-          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
+          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullButton && view.problem ? WAITING : undefined),
           changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', !pushable ? undefined : view.problem ? WAITING : view.pushBlocked)),
-      h('p.repo-aside', {}, `Pull and Push use this computer’s git and the sign-in it already has. Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
+      h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 
 /** What stopped the last action (dismissable), or why the repo couldn't be reached (with Try again). */
