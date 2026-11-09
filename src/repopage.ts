@@ -210,7 +210,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
         button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: () => { repo.confirmDisconnect = false; rerender(); } })) : null,
-      problemBand(view.problem && !repo.problem && !repo.checking ? view.problem : undefined),
+      problemBand(view.problem && !repo.problem && !repo.checking ? `${view.problem} To use another address, Disconnect and connect again.` : undefined),
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },
@@ -274,6 +274,6 @@ export function repoPage(): HTMLElement {
       `Your Managed ${carried(view.withBase)} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
       h('div.repo-start', {}, connectForm(view.access.allowed),
         h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(view.withBase),
-          h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.',
-            ' ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.'))))));
+          h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
+          h('p.empty-aside', {}, 'What goes is what’s Managed now: ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'see your Managed skills'), '.'))))));
 }

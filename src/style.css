@@ -1406,7 +1406,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-aside { display: flex; align-items: baseline; gap: 6px; max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-aside > svg { flex: none; align-self: center; }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
-#repo-disconnect-confirm { border-color: currentColor; }
+#repo-disconnect-confirm { margin-left: auto; border-color: currentColor; }
 /* The start page begins at the top, as the connected page does, not floating mid-window. */
 .repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
 .repo-page > .scroll { container-type: inline-size; }
