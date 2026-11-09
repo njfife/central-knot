@@ -143,20 +143,20 @@ const readSummary = (view: HomeView) => {
   return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. Nothing changed.`;
 };
 
-export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {
+export const loadHome = (mode: HomeMode) => busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const view = await api().selectHome(mode);
   if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(/^Read /, 'Read ').replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
-export const startHome = () => busy('Reading user-wide skills…', async () => {
+export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
   const practiceNote = view?.mode === 'fixture' && (() => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } })();
   if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
-export const readAgain = () => busy('Reading user-wide skills…', async () => {
+export const readAgain = () => busy('Reading skills, MCP servers and agents…', async () => {
   const view = await api().refresh();
   if (!view) return;
   state.home = view;
@@ -206,15 +206,17 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
   const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
   const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
-  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
+  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', item: added?.name || undefined, text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
 export const refreshMarketplace = (source: string) => busy('Refreshing the marketplace…', async () => {
   state.plugins = (await api().refreshMarketplace(source)) ?? state.plugins;
   state.pluginResult = undefined;
-  state.outcome = { page: 'plugins', text: 'Marketplace read again. Nothing was installed.' };
-  announce('Marketplace read again. Nothing was installed.');
+  const entry = state.plugins?.marketplaces.find(candidate => candidate.source === source);
+  const text = entry ? `${entry.name || entry.source} read again: ${plural(entry.plugins.length, 'plugin')}. Nothing was installed.` : 'Marketplace read again. Nothing was installed.';
+  state.outcome = { page: 'plugins', item: entry?.name || undefined, text };
+  announce(text, true);
 });
 
 export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
@@ -222,7 +224,7 @@ export const forgetMarketplace = (source: string) => busy('Removing from the lis
   state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
   state.pluginResult = undefined;
   const name = before;
-  state.outcome = { page: 'plugins', text: `${name ? `${name} removed` : 'Removed'} from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.`, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } };
+  state.outcome = { page: 'plugins', item: name || undefined, text: `${name ? `${name} removed` : 'Removed'} from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.`, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } };
   announce('Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.');
 });
 
@@ -428,6 +430,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To take ${names.length === 1 ? names[0] : 'them'} back out of Claude Code, turn off ${names.length === 1 ? 'its' : 'their'} Claude Code box and Apply all.` };
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To take ${names.length === 1 ? names[0] : 'them'} back out of Claude Code, turn off the Claude Code box on ${names.length === 1 ? names[0] : 'each'}, Apply all, then remove ${names.length === 1 ? 'it' : 'them'} in Claude Code.` };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });

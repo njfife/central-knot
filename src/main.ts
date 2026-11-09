@@ -27,6 +27,7 @@ let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
 /** Whether the open home can be written; read with each view, so the menus can say "preview only" like the window. */
 let homeWritable = true;
+let lastManagedCount = 0;
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -129,7 +130,7 @@ function trayMenu() {
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
-    { label: !homeWritable && current ? `Preview only: nothing is written · ${where}` : unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}`, enabled: false },
+    { label: unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}`, enabled: false },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync now', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
@@ -159,7 +160,8 @@ async function fromTray(work: () => Promise<void>) {
  * icon. Edit and Window keep the standard shortcuts (copy, paste, close, minimise).
  */
 function appMenu() {
-  if (process.platform !== 'darwin') return;
+  // Off macOS the window has no menu bar: the tray icon carries these controls, and Electron's stock developer menus never show.
+  if (process.platform !== 'darwin') { Menu.setApplicationMenu(null); return; }
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: app.name, submenu: [
       { role: 'about' },
@@ -233,7 +235,7 @@ async function view(explicit = false): Promise<HomeView> {
   const snapshots = await read();
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
-  return {
+  const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
     ...(await (async () => {
@@ -244,6 +246,9 @@ async function view(explicit = false): Promise<HomeView> {
       };
     })()),
   };
+  // How many items are managed, so the first-close note says truthfully whether anything syncs.
+  lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
+  return made;
 }
 
 /** Background passes run through the same queue as the page's requests, one at a time, and tell the page when something changed. */
@@ -453,14 +458,21 @@ function createWindow(show: boolean) {
     event.preventDefault();
     const shown = window;
     shown.hide();
-    // The first time only: say where Central Knot went, and offer to quit instead, so a hidden window is never a mystery.
+    // The first time only: say where Central Knot went (truthfully: syncing only if something syncs), offer to quit instead, and
+    // show the sign-in start it turned on, so neither a hidden window nor a login item is a surprise.
     if (!appSettings.closeExplained && !smoke) {
       void saveAppSettings({ closeExplained: true });
+      const icon = process.platform === 'darwin' ? 'menu bar' : 'tray';
+      const syncing = syncOn && homeWritable && lastManagedCount > 0;
       void dialog.showMessageBox({
         type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
-        message: 'Central Knot keeps syncing in the background',
-        detail: `Open it again from its ${process.platform === 'darwin' ? 'menu bar' : 'tray'} icon. To stop syncing, choose Quit Central Knot there.`,
-      }).then(({ response }) => { if (response === 1) { quitting = true; app.quit(); } });
+        message: syncing ? 'Central Knot keeps syncing in the background' : 'Central Knot is still running',
+        detail: syncing ? `Open it again from its ${icon} icon. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon, or quit there.`,
+        ...(canStartAtSignIn() ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: startsAtSignIn() } : {}),
+      }).then(({ response, checkboxChecked }) => {
+        if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void saveAppSettings({ startAtSignIn: checkboxChecked }).then(() => { applySignIn(); refreshTray(); });
+        if (response === 1) { quitting = true; app.quit(); }
+      });
     }
   });
   window.on('closed', () => log('window closed'));

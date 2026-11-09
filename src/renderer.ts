@@ -37,6 +37,7 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
+const practiceNoteOpen = () => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } };
 const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents?.servers ?? [])].some(fact => fact.managed);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents?.notices ?? [] : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
@@ -53,7 +54,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   // A chosen folder shows its own name; choosing again picks another.
   const shown = mode === 'custom' && current && state.home ? `${state.home.home.split('/').filter(Boolean).pop() ?? 'Folder'} (folder)` : label;
   return h('button.home-row', {
-    type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': shown, title: mode === 'custom' && current ? `${state.home!.home}\nClick to choose another folder.` : homeHelp[mode],
+    type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': `Home: ${shown}`, title: mode === 'custom' && current ? `Home: ${state.home!.home}\nClick to choose another folder.` : `Home: ${homeHelp[mode]}`,
     disabled: !!state.busy, onclick: () => void loadHome(mode),
   }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: mode === 'custom' && current ? 'click to choose another' : 'a backup or another account' }[mode])));
 }
@@ -84,7 +85,8 @@ function renderHeader(rail: boolean) {
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
-    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
+    // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
+    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && !(state.page === 'overview' && practiceNoteOpen()) ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),

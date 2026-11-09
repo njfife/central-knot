@@ -176,7 +176,7 @@ async function practiceFlow() {
   same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2', false]);
   await a.click('#menu-conflicts-copilot-cli-claude-cli');
   const note = await a.text('#menu-conflicts-note-copilot-cli-claude-cli') ?? '';
-  check('opting in says whose copy is accepted and that the replaced one is kept', note.includes("You accept Copilot CLI's copy") && note.includes('Claude Code') && note.includes('store keeps'), note);
+  check('opting in says whose copy is accepted and that the replaced one is kept', note.includes('You accept Copilot CLI’s copy') && note.includes('Claude Code') && note.includes('store keeps'), note);
   same('and counts it', await a.text('#menu-add-copilot-cli-claude-cli'), 'Add 3');
   await a.click('#menu-add-copilot-cli-claude-cli');
   same('Add all queues all three as managed', await Promise.all(['notes', 'standup', 'review'].map(key => switchOn(a, key))), [true, true, true]);
@@ -327,7 +327,7 @@ async function practiceFlow() {
   await a.click('#separate-notes');
   same('keep both leaves it off', await switchOn(a, 'notes'), false);
   await a.click('#switch-notes');
-  check('turning it on drops keep both', !(await a.text('.ov-row[data-key="notes"]')).includes('Keeping both'), await a.text('.ov-row[data-key="notes"]'));
+  check('turning it on drops keep both', !(await a.text('.ov-row[data-key="notes"]')).includes('Keeping separate'), await a.text('.ov-row[data-key="notes"]'));
   same('and turning it on is a pending change', await a.exists('#discard'), true);
   await a.click('#discard');
   // Choosing a copy, then switching it off: the choice goes too.

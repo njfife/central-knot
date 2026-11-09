@@ -17,11 +17,11 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${list(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
-    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}'s.${order}`, action: 'Undo' };
+    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}’s.${order}`, action: 'Undo' };
     case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${list(event.losers.map(loser => loser.tool))}.${order}` };
     case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${list(event.losers.map(loser => loser.tool))}’s.`, action: 'Undo' };
-    case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all added copies to ${list(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all added copies to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
+    case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${list(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Remove and stop managing' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history?.find(other => other.undoneBy === event.id);
@@ -64,7 +64,7 @@ const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'add
 function actions(event: HistoryEvent, action?: string) {
   const options = choices(event);
   if (options.length > 1 || (event.kind === 'kept-edit' && options.length)) {
-    return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}'s`, name: `Use ${who(option.tool)}'s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
+    return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}’s`, name: `Use ${who(option.tool)}’s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
   }
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
@@ -74,7 +74,7 @@ function actions(event: HistoryEvent, action?: string) {
   const scope = !touched.length || touched.length >= (state.home?.snapshots.length ?? 3) ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
   const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
-  const control = button({ variant: 'outline', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
+  const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;
 }
@@ -82,7 +82,7 @@ function actions(event: HistoryEvent, action?: string) {
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'Edits that sync between tools, and copies Apply all replaces, show up here with Undo.', button({ variant: 'outline', label: 'Go to Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
+  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'Edits that sync between tools, and copies Apply all adds or replaces, show up here with Undo.', button({ variant: 'outline', label: 'Go to Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   // The row's own button redoes; the band only confirms.
   const done = state.outcome?.page === 'history' ? h('div.bands.history-bands', {}, outcomeBand(false)) : null;

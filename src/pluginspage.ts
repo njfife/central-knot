@@ -32,7 +32,7 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
     // Uninstalling takes a second click on the same cell; the band above says what it will do.
     const confirming = state.pluginConfirm === id;
     return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
-      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? A Reinstall link appears afterwards. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
+      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? You can reinstall it right after. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
       confirming ? h('span.cell-confirm-label', { 'aria-hidden': 'true' }, 'Uninstall?') : null);
   }
   if (why) return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-cannot', { type: 'button', id, title: why, 'aria-label': `${names[tool]}: ${why}`, disabled: true, 'data-state': 'cannot' }, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–')));
@@ -69,10 +69,10 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
       // Status on the heading; what installing would do under a label of its own.
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? '· Installed' : '· Not installed')),
-      h('p.plugin-when', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed:' : 'When installed:'),
+        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : 'Not installed')),
+      // One line per outcome, led by when it applies: "When installed: skills keep their own names."
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
+        h('span', {}, h('span.plugin-when', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed: ' : 'When installed: '), ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
 }
 
 // Escape takes back an armed uninstall, wherever focus is.
@@ -121,7 +121,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
   const fits = !entry.plugins.some(plugin => view.canWrite && view.tools.some(tool => !blocked(view, entry, tool) && entry.states[plugin.name]?.[tool]?.state !== 'installed'));
   return withTools(view, h(`section.market${fits ? '.market-fit' : ''}`, { 'aria-label': title },
     h('div.market-head', {},
-      h('div.market-title', {}, icon('puzzle', 16, 'tone-muted'), h('strong', {}, title), entry.origins.map(origin => h('span.market-origin', {}, originText(origin)))),
+      h('div.market-title', {}, icon('puzzle', 16, 'tone-muted'), h('strong', {}, title), entry.origins.map(origin => h('span.market-origin', { title: origin === 'central-knot' ? 'Added here. Remove from list takes it off this list only.' : `Added in ${names[origin]}. Remove it there to take it off.` }, originText(origin)))),
       h('span.market-source', { title: entry.source }, entry.kind === 'folder' ? shownPath(entry.source) : entry.source),
       h('div.market-actions', {},
         entry.fetchedAt ? h('span.market-when', { title: when(entry.fetchedAt) }, `Last ${entry.kind === 'folder' ? 'read' : 'fetched'} ${new Date(entry.fetchedAt).toDateString() === new Date().toDateString() ? new Date(entry.fetchedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : new Date(entry.fetchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`) : null,
@@ -140,7 +140,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       if (!cannot.length) return refusal ? h('div.market-hints', {}, how, refusal) : how;
       const orList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(' or '));
       return h('div.market-hints', {}, how, refusal, h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
-        h('span.hint-body', {}, `Can’t install: the command-line tool${cannot.length === 1 ? '' : 's'} for ${orList(cannot.map(tool => names[tool])).replace(/ or /, ' and ')} ${cannot.length === 1 ? 'wasn’t' : 'weren’t'} found. `,
+        h('span.hint-body', {}, `Can’t install: the command-line tool${cannot.length === 1 ? '' : 's'} for ${orList(cannot.map(tool => names[tool])).replace(/ or /, ' and ')} ${cannot.length === 1 ? 'wasn’t' : 'weren’t'} found, so ${cannot.length === 1 ? 'its boxes are' : 'their boxes are'} unavailable. `,
           button({ variant: 'link', size: 'micro', label: 'See Tools →', id: `market-tools-${index}`, onclick: () => showPage('tools') }))));
     })(),
     entry.plugins.length
@@ -166,7 +166,7 @@ function reverse(report: ActionReport) {
     // The same two-step confirm as the table's check: arm that cell and say what the next click does.
     const index = state.plugins?.marketplaces.findIndex(entry => entry.name === last.market) ?? -1;
     state.pluginConfirm = `pcell-${index}-${last.plugin}-${report.tool}`;
-    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? A Reinstall link appears afterwards. Esc cancels.`;
+    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? You can reinstall it right after. Esc cancels.`;
     rerender();
   } });
   if (report.outcome === 'uninstalled' && last.source) return button({ variant: 'link', size: 'micro', label: `Reinstall in ${names[report.tool]}`, id: `report-reinstall-${report.tool}`, disabled: !!state.busy, onclick: () => void installPlugin(last.source, last.plugin, [report.tool]) });
@@ -182,7 +182,7 @@ function reports() {
   return h('div.band.plugin-report', { role: 'status' },
     h('div.plugin-report-lines', {}, result.reports.map(report => h('p', {},
       icon(report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'check' : report.outcome === 'not-known' ? 'circle-question-mark' : 'triangle-alert', 14, report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'tone-success' : 'tone-warning'),
-      h('strong', {}, `${names[report.tool]}: `), report.message, reverse(report)))),
+      state.pluginLast ? h('strong.item-name', {}, `${state.pluginLast.plugin} · `) : null, h('strong', {}, `${names[report.tool]}: `), report.message, reverse(report)))),
     changed.length ? h('p.plugin-report-files', {}, `Changed by the tools’ own commands: ${[...new Set(changed)].map(path => shownPath(path)).join(', ')}. To reverse, use the link on each line above.`) : null,
     h('button.band-dismiss', { type: 'button', id: 'report-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.pluginResult = undefined; rerender(); } }, icon('x', 12)));
 }
@@ -198,13 +198,13 @@ export function pluginsPage() {
     h('div.toolbar', {},
       h('div.find.market-add', {}, icon('plus', 16, 'find-glyph'), input),
       button({ variant: 'primary', size: 'small', label: 'Add', id: 'add-marketplace', disabled: !!state.busy || !state.marketDraft.trim(), onclick: add }),
-      button({ variant: 'ghost', size: 'small', icon: 'folder-plus', label: 'Choose folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!state.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })),
+      view.marketplaces.length ? button({ variant: 'ghost', size: 'small', icon: 'folder-plus', label: 'Choose folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!state.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }) : null),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       state.pluginConfirm ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, state.pluginConfirmText ?? ''),
         h('button.text-action.text-danger', { type: 'button', id: 'plugin-confirm-go', onclick: () => (document.getElementById(state.pluginConfirm!) as HTMLButtonElement | null)?.click() }, 'Uninstall'),
         h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; rerender(); } }, 'Cancel')) : null,
-      state.busy && /^(Installing|Uninstalling)/.test(state.busy) ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, `${state.busy} This runs the tool’s own command and can take a few seconds.`)) : null,
+      state.busy && /^(Installing|Uninstalling|Reading the marketplace|Refreshing|Removing)/.test(state.busy) ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, /^(Installing|Uninstalling)/.test(state.busy) ? `${state.busy} This runs the tool’s own command and can take a few seconds.` : `${state.busy} Nothing is installed by this.`)) : null,
       outcomeBand(),
       reports()),
     h('div.scroll.matrix', { id: 'plugins-scroll' },

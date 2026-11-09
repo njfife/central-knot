@@ -958,3 +958,20 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-versions summary::-webkit-details-marker { display: none; }
 .ins-versions[open] summary svg { transform: rotate(90deg); }
 .ins-version { display: flex; gap: 10px; align-items: center; padding: 2px 0 2px 16px; }
+/* Round 8 */
+.tools-note { display: block; padding-left: 22px; text-indent: -22px; }
+.tools-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
+.page:not(.ov-page) > .bands > .band { padding-right: max(16px, calc(100% - 996px)); }
+.overview-lead, .overview-line { max-width: 760px; }
+.compare-title > span { flex: 1 1 auto; }
+.rail .homes-title { display: block !important; height: 0; padding: 0; margin: 4px 10px 8px; border-top: 1px solid var(--line); overflow: hidden; }
+.band-done > .text-action { margin-left: auto; }
+.band-done > .text-action + .band-dismiss { margin-left: 8px; }
+.plugin-when { color: var(--ink-faint); }
+.plugin-outcomes li { align-items: baseline; }
+.plugin-outcomes li > svg { align-self: flex-start; margin-top: 3px; }
+.plugin-card-state { margin-left: 2px; }
+.plugin-card-state::before { content: '·'; margin-right: 4px; color: var(--ink-faint); }
+.ov-cell { position: relative; }
+.cell-confirm-label { position: absolute; left: calc(50% + 22px); top: 50%; transform: translateY(-50%); margin-left: 0; pointer-events: none; }
+.plugin-table .ov-row:not(.ov-head):hover { background: var(--hover); cursor: pointer; }
