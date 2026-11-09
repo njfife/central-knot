@@ -229,7 +229,7 @@ export async function writeFileChecked(path: string, text: string, expected: str
       // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
       if (errorCode(error) === 'EEXIST') {
-        // Even if that rename fails, the original is never deleted here: it stays moved aside for the next pass to find.
+        // Even if no backup can be placed, the original is never deleted here: it stays moved aside for the next pass to find.
         if (parkedThere) { await keepAsBackup(parked, path); parkedThere = false; }
         throw expected === undefined ? occupiedError() : changedWhileSyncing();
       }

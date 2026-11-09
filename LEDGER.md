@@ -620,3 +620,17 @@ All sixth-check findings stayed fixed.
 Both new tests fail on b7b2ea9.
 
 **Validation.** 234 unit tests. Linux e2e 123/123.
+
+## Confirming checks (on ee5e9e8): both judges "safe to hand to Nathan", November 9, 2026
+
+- **Opus:**
+  - confirmed `keepAsBackup`, the agents displaced guard and the Claude process pattern;
+  - with the b7b2ea9 versions put back, the new tests fail;
+  - 234/234 pass;
+  - one comment nit, fixed.
+- **Astra:**
+  - 50 recovered originals stay distinct, and forced name collisions and path-taken races keep every original;
+  - the agent catch-up leaves exactly one edit, correctly attributed;
+  - 234/234 pass;
+  - no new findings.
+- **Mac:** unit tests, smoke and e2e 271/271 on ee5e9e8.
