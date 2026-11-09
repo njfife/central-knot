@@ -75,6 +75,7 @@ test('R4 symlink target recovers after death in the checked write', () => box(as
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).exists, true, `Broken link persists; dotfiles contains ${await fs.readdir(join(context.home, 'dotfiles'))}`);
+  assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml link replaced by a regular file');
 }));
 
 test('R5 historical native MCP fields are immutable per event', () => box(async (context, copilot, codex) => {
