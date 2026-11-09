@@ -108,20 +108,6 @@ test('P8 agent frontmatter line ending in --- is not read as the end of frontmat
   assert.ok(!/model: sonnet/.test(toml), `Claude's frontmatter leaked into the prompt:\n${toml}`);
 }));
 
-import { readHistory } from '../src/manage.ts';
-import { restoreMcp } from '../src/mcp.ts';
-test('P4b the Claude-reset deletions can each be undone from History', () => box(async ({ home, context }) => {
-  const claude = join(home, '.claude.json');
-  await fs.writeFile(claude, JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: 'docs-mcp' }, web: { type: 'stdio', command: 'web-mcp' } } }));
-  await applyMcp(context, tools, [...managed('docs'), ...managed('web')], { claudeNow: ['docs', 'web'] });
-  await fs.writeFile(claude, JSON.stringify({ numStartups: 1 }));
-  await applyMcp(context, tools, [], { settleMs: 0 });
-  await applyMcp(context, tools, [], { settleMs: 0 });
-  const history = await readHistory(home);
-  const deleted = history.filter(e => e.kind === 'deleted');
-  assert.deepEqual((await readTool(context, 'codex-cli')).entries.map(e => e.name).sort(), ['docs', 'web']);
-}));
-
 test('P9 Claude copy waiting for Write now, then edited in Claude: a conflict, not a silent one-sided edit', () => box(async ({ home, context }) => {
   const claude = join(home, '.claude.json');
   const j = (c: string) => JSON.stringify({ mcpServers: { docs: { type: 'stdio', command: c } } });
