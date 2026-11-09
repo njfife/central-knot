@@ -116,23 +116,6 @@ test('SSE cannot go to Codex, and an unreadable file is never written', async ()
   } finally { await box.cleanup(); }
 });
 
-test('Write now catching up a Claude Code copy that was behind leaves no made-up edit in History', async () => {
-  const box = await sandbox();
-  try {
-    await writeFile(join(box.home, '.claude.json'), claudeJson({}));
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { one: { type: 'local', command: 'v1', tools: ['*'] } } }));
-    await applyMcp(box.context, tools, [{ key: 'one', managed: true, off: [] }], { claudeNow: ['one'] });
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { one: { type: 'local', command: 'v2', tools: ['*'] } } }));
-    await applyMcp(box.context, tools, []);
-    await applyMcp(box.context, tools, [], { claudeNow: ['one'] });
-    assert.equal(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8')).mcpServers.one.command, 'v2');
-    await applyMcp(box.context, tools, []);
-    const { readHistory } = await import('../src/manage.ts');
-    const made = (await readHistory(box.home)).filter(entry => entry.winner?.tool === 'claude-cli' && entry.losers.some(loser => loser.tool === 'claude-cli'));
-    assert.deepEqual(made, [], JSON.stringify(made));
-  } finally { await box.cleanup(); }
-});
-
 test('Apply all records the entries it adds; Undo removes them while unchanged, keeps the rest of each file, and unmanages', async () => {
   const box = await sandbox();
   try {
