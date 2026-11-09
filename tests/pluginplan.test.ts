@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, describe, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { batches, describe, prune, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { andList } from '../src/words.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const names = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<HarnessId, string>;
@@ -38,14 +39,33 @@ test('Apply all runs each plugin’s installs as one command, then its removals 
 
 test('Undo reverses only what really changed, and the report names each plugin once', () => {
   const done: PluginDone[] = [
-    { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Installed.', runs: [] } },
+    { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Installed.', runs: [], changed: true } },
     { ...op('pdf', 'codex-cli'), report: { tool: 'codex-cli', outcome: 'failed', message: 'It stopped with exit code 1.', runs: [] } },
-    { ...op('docx', 'copilot-cli', 'remove'), report: { tool: 'copilot-cli', outcome: 'uninstalled', message: 'Uninstalled.', runs: [] } },
+    { ...op('docx', 'copilot-cli', 'remove'), report: { tool: 'copilot-cli', outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true } },
+    // Already installed before this run (the view was stale): Undo must not remove what the person already had.
+    { ...op('xlsx', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
   ];
   assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['pdf', 'claude-cli', 'remove'], ['docx', 'copilot-cli', 'install']]);
-  assert.deepEqual(describe(done, names), [
+  assert.deepEqual(describe(done, names, andList).slice(0, 3), [
     { plugin: 'pdf', ok: true, text: 'installed in Claude Code' },
     { plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.' },
     { plugin: 'docx', ok: true, text: 'uninstalled from Copilot CLI' },
   ]);
+});
+
+test('Two marketplaces may offer the same plugin name: their reports stay apart', () => {
+  const done: PluginDone[] = [
+    { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } },
+    { ...op('pdf', 'codex-cli'), source: 'other/market', report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true } },
+  ];
+  assert.equal(describe(done, names, andList).length, 2);
+});
+
+test('Choices for a plugin or marketplace no longer listed are dropped', () => {
+  const draft: PluginDraft = new Map();
+  toggle(draft, op('pdf', 'claude-cli'));
+  toggle(draft, op('gone', 'claude-cli'));
+  toggle(draft, { ...op('pdf', 'codex-cli'), source: 'removed/market' });
+  prune(draft, { home: '/h', tools: ['claude-cli'], clis: {}, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', plugins: [{ name: 'pdf', description: '', outcomes: {} }], states: {} }] });
+  assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['pdf']);
 });

@@ -14,7 +14,7 @@ export function writeMarket(root, name = 'team-tools') {
       { name: 'release-helper', source: './plugins/release-helper', version: '0.4.1', category: 'development', description: 'Release notes, a review agent and a check before each commit.' },
       { name: 'issue-tracker', source: './plugins/issue-tracker', version: '2.0.0', category: 'development', description: 'Look up and triage issues through an MCP server.', homepage: 'https://example.com/issue-tracker' },
       { name: 'starter-skills', source: './', strict: false, skills: ['./skills/hello'], category: 'productivity', description: 'One example skill from this repository’s own skills folder.' },
-      { name: 'remote-notes', source: { source: 'github', repo: 'example/remote-notes', path: 'plugin' }, category: 'productivity', description: 'Meeting notes, kept in another repository.' },
+      { name: 'spark', source: { source: 'github', repo: 'github/copilot-plugins', path: 'plugins/spark' }, category: 'development', description: 'GitHub Spark, kept in GitHub’s own plugins repository.' },
     ],
   }, null, 2));
   file(root, 'README.md', [

@@ -607,8 +607,6 @@ ul { list-style: none; }
 .market-add { flex: 1 1 360px; max-width: 560px; }
 .plugin-add .plugin-add-glyph { opacity: 0; }
 .plugin-add:hover .plugin-add-glyph, .plugin-add:focus-visible .plugin-add-glyph { opacity: 0.8; }
-.plugin-outcomes { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12.5px; }
-.plugin-outcomes li { display: flex; gap: 6px; align-items: flex-start; }
 .plugin-report { align-items: flex-start; }
 .plugin-report-lines p { margin: 0 0 4px; display: flex; gap: 6px; align-items: flex-start; }
 
@@ -727,8 +725,6 @@ ul { list-style: none; }
 /* Plugins */
 .market-hint { display: flex; align-items: center; gap: 6px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
 .plugin-add-glyph { opacity: 0.45 !important; }
-.plugin-outcome-grid { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)); gap: 8px; }
-.plugin-outcome-card { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); display: flex; flex-direction: column; gap: 6px; }
 .overview-line .btn { padding: 0 2px; height: auto; margin: 0 -2px; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -850,7 +846,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .decided-undo span { text-decoration: underline; }
 .band.plugin-report { flex-direction: column; align-items: stretch; position: relative; padding-right: 40px; }
 .band.plugin-report > .band-dismiss { position: absolute; top: 6px; right: 12px; }
-.plugin-outcome-card .details-tool-head { flex-wrap: wrap; row-gap: 2px; }
 /* UI round 6 */
 @keyframes row-flash { from { background: var(--selected-row); } to { background: transparent; } }
 .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 140px; }
@@ -870,7 +865,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .outcome-quiet-danger, #outcome-undo.text-danger { color: var(--ink-soft); }
 #outcome-undo.text-danger:hover, #outcome-undo.text-danger:focus-visible { color: var(--danger, #dc2626); }
 .notice-still-off { font-size: inherit; padding: 0; color: var(--ink-soft); text-decoration: underline dotted; }
-.plugin-when { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-faint); }
 .cannot-dash { color: var(--ink-faint); font-weight: 700; }
 .sync-notice .btn { height: 26px; padding: 0 10px; font-size: 12px; }
 .plugins-page .bands > .band { padding-right: max(16px, calc(100% - 980px)); }
@@ -885,7 +879,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .decided-undo span { text-decoration: none; color: var(--accent); }
 .legend-plain.cell-oneway .cell-oneway-mark { color: var(--ink-soft); }
 .sync-paused .sync-track { opacity: 0.6; }
-.plugin-outcome-card .details-tool-head strong { min-width: 0; }
 #add-marketplace:disabled { background: var(--control-line); color: var(--ink-faint); border-color: transparent; }
 .cannot-dash { color: var(--ink-soft); }
 @keyframes ck-spin { to { transform: rotate(360deg); } }
@@ -928,9 +921,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .rail .homes-title { display: block !important; height: 0; padding: 0; margin: 4px 10px 8px; border-top: 1px solid var(--line); overflow: hidden; }
 .band-done > .text-action { margin-left: auto; }
 .band-done > .text-action + .band-dismiss { margin-left: 8px; }
-.plugin-when { color: var(--ink-faint); }
-.plugin-outcomes li { align-items: baseline; }
-.plugin-outcomes li > svg { align-self: flex-start; margin-top: 3px; }
 .ov-cell { position: relative; }
 .plugin-table .ov-row:not(.ov-head):hover { background: var(--hover); cursor: pointer; }
 .convert-block { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
@@ -1007,7 +997,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-draft[hidden] { display: none; }
 
 /* Round 10: plugin cards — status on its own line with no stray separator; one caption over the grid */
-.plugin-outcome-card .details-tool-head { flex-wrap: wrap; }
 
 /* Round 10: Tools and Overview scroll the full width; their content stays capped; thin scrollbars */
 #tools-scroll, #overview-scroll { max-width: none; }
@@ -1294,12 +1283,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-id { font-size: 12px; color: var(--ink-faint); }
 .plugin-links { display: flex; gap: 12px; margin: 6px 0 0; }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
-.plugin-panel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 13px; font-weight: 650; }
-.plugin-panel-head .btn { margin-left: auto; }
-.plugin-tool-rows { display: flex; flex-direction: column; }
-.plugin-tool-row { display: grid; grid-template-columns: 44px 160px minmax(0, 1fr); align-items: center; min-height: 38px; }
-.plugin-tool-row .ov-cell { justify-content: flex-start; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .plugin-tool-state { font-size: 12.5px; color: var(--ink-soft); }
 .plugin-panel-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-faint); }
@@ -1334,3 +1318,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .band.plugin-report { flex-direction: row; align-items: flex-start; gap: 12px; }
 .band.plugin-report .plugin-report-lines { flex: 1 1 auto; min-width: 0; }
 .band.plugin-report > .btn { flex: none; align-self: center; margin-right: 24px; }
+
+/* Round 2: one line of tool boxes on a plugin's page; a chosen box is tinted, not only dashed */
+.plugin-panel h3 { margin: 0 0 8px; }
+.plugin-tool-rows { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.plugin-tool { display: flex; align-items: center; gap: 10px; }
+.plugin-tool .ov-cell { width: auto; }
+.plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
+.plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.plugin-tool-state { font-size: 11.5px; color: var(--ink-faint); }
+.plugin-panel-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; min-height: 26px; }
+.plugin-panel-foot .btn { margin-left: auto; }
+.plugin-panel-note { margin: 0; }
+.cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
+.plugin-meta .btn { font-size: 12px; }
+.md ul { list-style: disc; } .md ol { list-style: decimal; }
+.band.plugin-report > .btn { align-self: center; }

@@ -6,6 +6,8 @@ export interface ProbeResult {
   state: ProbeState;
   version?: string;
   detail: string;
+  /** Found only as an app's own bundled copy (ChatGPT desktop's Codex), which never counts as the CLI. */
+  bundled?: boolean;
 }
 
 export interface Skill {
@@ -86,13 +88,14 @@ export interface DesktopApi {
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
   showFile(path: string): Promise<void>;
   /** A marketplace's README (no plugin), or one plugin's contents and README. */
-  pluginDetail(source: string, plugin?: string): Promise<{ readme?: string } | PluginDetailView | null>;
+  pluginDetail(source: string, plugin?: string): Promise<{ readme?: string } | PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;
-  addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView }>;
+  /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
+  addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
@@ -247,7 +250,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[] }
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
 
 /** A catalog plugin with what each tool would get from it. */
 export interface PluginView extends CatalogPlugin { outcomes: Partial<Record<HarnessId, Outcome[]>> }
@@ -271,8 +274,25 @@ export interface MarketplaceView {
   page?: string;
 }
 
-/** A plugin's contents and README, read when its page opens (catalogdetail.ts). */
-export interface PluginDetailView { readme?: string; skills: { name: string; description: string }[]; commands: { name: string; description: string }[]; agents: { name: string; description: string }[]; hooks: string[]; mcpServers: { name: string; runs: string }[]; lspServers: string[] }
+/** One named part of a plugin (a skill, command or agent) with what it says it does. */
+export interface NamedPart { name: string; description: string }
+/** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
+export interface PluginContents {
+  skills: NamedPart[];
+  commands: NamedPart[];
+  agents: NamedPart[];
+  /** Hook events it listens to, such as PreToolUse. */
+  hooks: string[];
+  /** Each MCP server with what it runs or connects to. */
+  mcpServers: { name: string; runs: string }[];
+  /** Some server refers to ${CLAUDE_PLUGIN_ROOT}, which only Claude Code fills in. */
+  mcpUsesPluginRoot: boolean;
+  lspServers: string[];
+  /** A top-level bin/ folder (account routes refuse it). */
+  bin: boolean;
+}
+/** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
+export interface PluginDetail extends PluginContents { readme?: string; /** Where the files were read from, for a plugin outside the marketplace. */ readFrom?: string; problem?: string }
 
 export interface PluginsView {
   home: string;
@@ -282,6 +302,8 @@ export interface PluginsView {
   canWrite: boolean;
   reason?: string;
   marketplaces: MarketplaceView[];
+  /** Tools present only as a desktop app's bundled copy, with no CLI to run plugin commands. */
+  desktopOnly?: HarnessId[];
 }
 
 // ---------- MCP servers ----------

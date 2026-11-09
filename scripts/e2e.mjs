@@ -490,7 +490,7 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
-  check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="remote-notes"]')).includes('From GitHub · example/remote-notes/plugin'), await a.text('[data-plugin="remote-notes"]'));
+  check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="spark"]')).includes('From GitHub · github/copilot-plugins/plugins/spark'), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
@@ -504,15 +504,15 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   check('and shows the plugin’s own README and skill descriptions', (await a.text('.plugin-page')).includes('Two skills for everyday documents') && (await a.text('.plugin-page')).includes('Reads PDF files'), await a.text('.plugin-page'));
   await a.click('#pinstall-0-document-tools');
-  same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
+  same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
   check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   await a.click('#pcell-0-document-tools-codex-cli');
-  same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
+  same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
   await a.click('#pcell-0-document-tools-codex-cli');
   await a.click('#plugins-apply');
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
   await a.shot('practice-plugins');
-  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#plugin-back');
   await a.click('#forget-0');
   check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));

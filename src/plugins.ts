@@ -2,10 +2,11 @@
 // and install or uninstall through each tool's own commands, confirmed by reading the record that tool keeps (PLG-03).
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { listedPaths, sourceOf, type ListedPaths } from './catalogdetail.ts';
+import { inside, pluginContents, sourceOf } from './catalogdetail.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun, Outcome } from './types.ts';
 export type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, InstallState, NativeRun, Outcome } from './types.ts';
 
@@ -25,13 +26,14 @@ export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli
 
 // ---------- Sources and access ----------
 
-const isFolder = (source: string) => isAbsolute(source) && !/^[a-z]+:\/\//i.test(source);
+export const isFolder = (source: string) => isAbsolute(source) && !/^[a-z]+:\/\//i.test(source);
 
 /** One spelling for one repository, so the same marketplace is recognised however it was typed (MKT-07). */
 export function sameSource(first: string, second: string): boolean {
   const norm = (value: string) => {
     let text = value.trim();
-    if (isFolder(text)) return resolve(text);
+    // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
+    if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
     if (/^[\w.-]+\/[\w.-]+$/.test(text)) text = `https://github.com/${text}`;
     const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
     if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
@@ -84,6 +86,39 @@ export function classify(code: number | 'timeout' | 'missing', output: string): 
 
 const catalogFolder = (context: PluginContext, source: string) => join(context.dataDir, 'catalogs', createHash('sha256').update(fetchUrl(source)).digest('hex').slice(0, 24));
 
+/**
+ * A fresh shallow copy of a Git repository, with hooks and submodules off, swapped into `target` only once complete.
+ * Returns a problem to show (true: failed for no reason Git gave), or undefined when the copy is in place.
+ */
+async function shallowClone(context: PluginContext, url: string, target: string, ref?: string): Promise<string | true | undefined> {
+  const stage = `${target}.${randomUUID()}`;
+  await mkdir(dirname(target), { recursive: true });
+  const cloned = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), url, stage], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+  if (cloned.code !== 0) {
+    await rm(stage, { recursive: true, force: true });
+    const failure = classify(cloned.code, cloned.output);
+    return failure.state === 'ok' ? true : failure.message;
+  }
+  await rm(target, { recursive: true, force: true });
+  await rename(stage, target);
+  return undefined;
+}
+
+/**
+ * A plugin kept in its own repository, read so its page can show what it holds: a shallow copy kept with Central Knot's
+ * other copies, reused once made. Only https Git URLs are read. Nothing in it is run.
+ */
+export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string }): Promise<{ folder: string; root: string } | { problem: string }> {
+  const root = join(context.dataDir, 'plugins', createHash('sha256').update(`${remote.url}\u0000${remote.ref ?? ''}`).digest('hex').slice(0, 24));
+  const have = await stat(root).then(() => true, () => false);
+  if (!have) {
+    const problem = await shallowClone(context, remote.url, root, remote.ref);
+    if (problem) return { problem: problem === true ? 'Its repository could not be copied.' : problem };
+  }
+  const folder = resolve(root, remote.path || '.');
+  return (await inside(root, folder)) ? { folder, root } : { problem: 'Its folder is outside its repository.' };
+}
+
 /** Reads a marketplace: a folder directly, a Git source through a fresh shallow clone with hooks off. Nothing in it is run. */
 export async function readCatalog(context: PluginContext, source: string): Promise<Catalog> {
   const kind = isFolder(source) ? 'folder' : 'git';
@@ -92,16 +127,8 @@ export async function readCatalog(context: PluginContext, source: string): Promi
     const access = await checkAccess(source, context.timeoutMs);
     if (access.state !== 'ok') return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: access.message };
     const target = catalogFolder(context, source);
-    const stage = `${target}.${randomUUID()}`;
-    await mkdir(dirname(target), { recursive: true });
-    const cloned = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--no-recurse-submodules', '--quiet', fetchUrl(source), stage], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
-    if (cloned.code !== 0) {
-      await rm(stage, { recursive: true, force: true });
-      const failure = classify(cloned.code, cloned.output);
-      return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: failure.state === 'ok' ? 'The marketplace could not be copied.' : failure.message };
-    }
-    await rm(target, { recursive: true, force: true });
-    await rename(stage, target);
+    const problem = await shallowClone(context, fetchUrl(source), target);
+    if (problem) return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: problem === true ? 'The marketplace could not be copied.' : problem };
     root = target;
   }
   return parseCatalog(root, source, kind);
@@ -143,10 +170,10 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
     const where = item.source;
     if (typeof where === 'string') {
       const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
-      // A path outside the marketplace is not read.
-      if (!relative(root, folder).startsWith('..') && !isAbsolute(relative(root, folder))) {
+      // A path outside the marketplace, through a link or not, is not read.
+      if (await inside(root, folder)) {
         plugin.folder = folder;
-        plugin.components = await componentsOf(folder, listedPaths(item, folder));
+        plugin.components = await componentsOf(folder, item, root);
       }
     } else if (typeof where === 'object' && where !== null) {
       const kindOf = stringOr((where as Record<string, unknown>).source);
@@ -161,41 +188,11 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   return { name, source, kind, fetchedAt, root, owner: owner || undefined, description: about || undefined, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
 }
 
-const count = async (folder: string, test: (name: string, isDirectory: boolean) => Promise<boolean> | boolean) => {
-  try {
-    let total = 0;
-    for (const entry of await readdir(folder, { withFileTypes: true })) if (await test(entry.name, entry.isDirectory())) total++;
-    return total;
-  } catch { return 0; }
-};
-const exists = (path: string) => stat(path).then(() => true, () => false);
-const skillFolders = async (folder: string) => {
-  try {
-    const found: string[] = [];
-    for (const entry of await readdir(folder, { withFileTypes: true })) if (entry.isDirectory() && await exists(join(folder, entry.name, 'SKILL.md'))) found.push(entry.name);
-    return found.sort();
-  } catch { return []; }
-};
-
-/** What a plugin folder holds, read from its files. Nothing in it is run. */
-export async function componentsOf(folder: string, listed: ListedPaths = {}): Promise<Components> {
-  let manifest: Record<string, unknown> = {};
-  try { manifest = JSON.parse(await readFile(join(folder, '.claude-plugin/plugin.json'), 'utf8')); } catch { /* optional */ }
-  let servers: Record<string, unknown> = {};
-  try { servers = (JSON.parse(await readFile(join(folder, '.mcp.json'), 'utf8')).mcpServers ?? {}) as Record<string, unknown>; } catch { /* optional */ }
-  if (typeof manifest.mcpServers === 'object' && manifest.mcpServers !== null) servers = { ...servers, ...(manifest.mcpServers as Record<string, unknown>) };
-  const serverText = JSON.stringify(servers);
-  return {
-    // An entry that lists its skills ("strict": false) holds those, not every skill folder beside it.
-    skills: listed.skills ? (await Promise.all(listed.skills.map(path => exists(join(path, 'SKILL.md'))))).filter(Boolean).length : await count(join(folder, 'skills'), (name, isDirectory) => isDirectory && exists(join(folder, 'skills', name, 'SKILL.md'))),
-    commands: await count(join(folder, 'commands'), name => name.endsWith('.md')),
-    agents: await count(join(folder, 'agents'), name => name.endsWith('.md')),
-    hooks: (await exists(join(folder, 'hooks/hooks.json'))) || manifest.hooks !== undefined,
-    mcp: Object.keys(servers).length,
-    mcpRootVariable: serverText.includes('${CLAUDE_PLUGIN_ROOT}'),
-    bin: await exists(join(folder, 'bin')),
-    skillNames: listed.skills ? (await Promise.all(listed.skills.map(async path => (await exists(join(path, 'SKILL.md')) ? basename(path) : '')))).filter(Boolean).sort() : await skillFolders(join(folder, 'skills')),
-  };
+/** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
+export async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
+  const contents = await pluginContents(folder, entry, root);
+  return { skills: contents.skills.length, commands: contents.commands.length, agents: contents.agents.length, hooks: contents.hooks.length > 0, mcp: contents.mcpServers.length,
+    mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin, skillNames: contents.skills.map(skill => skill.name) };
 }
 
 /** What each component does on each tool (capability data, Appendix D, tested versions). */
@@ -212,16 +209,16 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'are called plugin:agent');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others are not tested yet');
+    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else {
     add(components.skills, 'Skills', 'works', 'are called plugin:skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others are not tested yet');
-    add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in ${CLAUDE_PLUGIN_ROOT}' : 'are not tested yet');
+    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others may not');
+    add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in ${CLAUDE_PLUGIN_ROOT}' : 'may not start: not confirmed in Codex');
   }
-  if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'is added to the path' : 'is not tested yet' });
+  if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'is added to the path' : 'may not be on the path: not confirmed here' });
   return list;
 }
 
@@ -362,7 +359,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const installed = await native(context, tool, args);
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed') return { tool, outcome: 'installed', message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder (nothing copied)' : ''}. ${nextStepFor(tool)}`.trim(), runs };
+  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder (nothing copied)' : ''}. ${nextStepFor(tool)}`.trim(), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   return { tool, outcome: 'failed', message: `Not installed. ${lastLines(installed.output)}`.trim(), runs };
 }
@@ -376,7 +373,7 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   const args = tool === 'codex-cli' ? ['plugin', 'remove', id, '--json'] : ['plugin', 'uninstall', id];
   const removed = await native(context, tool, args);
   const state = await installState(context, tool, marketplace, plugin);
-  if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed] };
+  if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed] };
   return { tool, outcome: 'failed', message: `Still installed. ${lastLines(removed.output)}`.trim(), runs: [removed] };
 }
 

@@ -34,7 +34,7 @@ async function marketplace(root: string, extra: unknown[] = []) {
   await put(join(full, 'skills/two/SKILL.md'), '---\nname: two\ndescription: Two.\n---\nB\n');
   await put(join(full, 'commands/go.md'), 'Go.\n');
   await put(join(full, 'agents/helper.md'), 'Helper.\n');
-  await put(join(full, 'hooks/hooks.json'), '{}');
+  await put(join(full, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
   await put(join(full, '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: '${CLAUDE_PLUGIN_ROOT}/server' } } }));
   await put(join(root, 'plugins/marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Marker.\n---\nReply ck-mk-1.\n');
 }
@@ -198,4 +198,17 @@ test('A CLI that is a script finds its interpreter beside it, even when the app 
     assert.ok(report.runs.length > 0, JSON.stringify(report));
     assert.doesNotMatch(report.runs[0]!.output, /No such file or directory/, report.runs[0]!.output);
   } finally { process.env.PATH = savedPath; await box.cleanup(); }
+});
+
+test('A folder marketplace named through a link is the same marketplace, so it is listed once', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const real = join(box.base, 'market');
+    await marketplace(real);
+    const { symlink } = await import('node:fs/promises');
+    await symlink(real, join(box.base, 'linked'));
+    assert.ok(sameSource(join(box.base, 'linked'), real));
+    assert.ok(sameSource(`${real}/`, real));
+    assert.ok(!sameSource(join(box.base, 'other'), real));
+  } finally { await box.cleanup(); }
 });

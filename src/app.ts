@@ -1,6 +1,6 @@
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginDetailView, PluginsView, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
-import { batches as pluginBatches, clear as clearPluginOp, describe as describePlugins, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { loadPlugins, resetMarket } from './pluginstate.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -21,30 +21,12 @@ export const state = {
   agentsResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
-  /** Marketplaces and what each tool has installed, read when the Plugins page opens. */
-  plugins: undefined as PluginsView | undefined,
-  /** What the last plugin action did, or why a marketplace could not be added. */
-  pluginResult: undefined as (PluginActionResult & { problem?: string }) | undefined,
-  /** The plugin whose details are open, as marketplace source and plugin name. */
-  pluginOpen: undefined as string | undefined,
-  /** Marketplace browsing: the one shown, its tab, an open plugin page, and the filter. */
-  market: { source: undefined as string | undefined, tab: 'plugins' as 'plugins' | 'about', plugin: undefined as string | undefined, find: '', category: undefined as string | undefined },
-  /** READMEs and plugin contents read so far, by marketplace source and plugin ('' for the marketplace's own README). */
-  marketDetail: new Map<string, { readme?: string } | PluginDetailView | null>(),
-  /** Plugin changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
-  pluginDraft: new Map() as PluginDraft,
-  /** What the last Apply all (or its Undo) did, tool by tool, so the band can say it and offer the way back. */
-  pluginDone: undefined as { done: PluginDone[]; undo: boolean } | undefined,
-  /** The plugin and tools a command is running for, so their boxes show it is working. */
-  pluginWorking: undefined as { plugin: string; tools: HarnessId[] } | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
   outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
-  /** What is typed in the marketplace box, kept through loading and errors. */
-  marketDraft: '',
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
@@ -80,7 +62,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
 const andText = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));
 
 /** One piece of work at a time: every mutating control is disabled while it runs. */
-async function busy(message: string, work: () => Promise<void>) {
+export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
   state.outcome = undefined;
   state.undoMoved = undefined;
@@ -102,9 +84,8 @@ function accept(view: HomeView) {
   state.home = view;
   state.applied = undefined;
   state.item = undefined;
-  state.plugins = undefined;
-  state.pluginResult = undefined;
   state.instructionEdit = undefined;
+  resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
 
@@ -194,11 +175,11 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
 export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
 
 export function showPage(page: Page) {
-  if (page === 'plugins' && state.page !== 'plugins') { state.pluginResult = undefined; void loadPlugins(); }
+  if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) { announce(''); state.pluginDone = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
@@ -223,87 +204,6 @@ export const shownPath = (path: string) => {
   if (!home || home.mode === 'custom' || (path !== home.home && !path.startsWith(`${home.home}/`))) return path;
   return `${home.mode === 'actual' ? '~' : '…'}${path.slice(home.home.length)}`;
 };
-
-// ---------- Plugins ----------
-
-export const loadPlugins = () => busy('Reading marketplaces…', async () => {
-  state.plugins = (await api().plugins()) ?? undefined;
-  announce('');
-  // With no marketplaces yet, the box to type one in is where the work starts.
-  if (state.plugins && !state.plugins.marketplaces.length) requestAnimationFrame(() => (document.getElementById('marketplace-source') as HTMLInputElement | null)?.focus());
-});
-
-export const addMarketplace = (source: string) => busy('Reading the marketplace…', async () => {
-  const result = await api().addMarketplace(source);
-  if (result.view) state.plugins = result.view;
-  state.pluginResult = result.problem ? { reports: [], problem: result.problem } : undefined;
-  // The click hint only when some tool can take an install here.
-  const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
-  const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
-  const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
-  if (!result.problem && added) state.market = { ...state.market, source: added.source, plugin: undefined, tab: 'plugins', find: '', category: undefined };
-  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', item: added?.name || undefined, text: canInstall ? `${named} Nothing was installed: choose plugins and tools below, then Apply all.` : `${named} Nothing was installed.` }; }
-  announce(result.problem ?? 'Marketplace added. Nothing was installed.');
-});
-
-export const refreshMarketplace = (source: string) => busy('Refreshing the marketplace…', async () => {
-  state.plugins = (await api().refreshMarketplace(source)) ?? state.plugins;
-  for (const key of [...state.marketDetail.keys()]) if (key.startsWith(`${source}\u0000`)) state.marketDetail.delete(key);
-  state.pluginResult = undefined;
-  const entry = state.plugins?.marketplaces.find(candidate => candidate.source === source);
-  const text = entry ? `${entry.name || entry.source} read again: ${plural(entry.plugins.length, 'plugin')}. Nothing was installed.` : 'Marketplace read again. Nothing was installed.';
-  state.outcome = { page: 'plugins', item: entry?.name || undefined, text };
-  announce(text, true);
-});
-
-export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
-  const before = state.plugins?.marketplaces.find(entry => entry.source === source)?.name;
-  state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
-  if (state.market.source === source) state.market = { ...state.market, source: undefined, plugin: undefined };
-  state.pluginResult = undefined;
-  const name = before;
-  state.outcome = { page: 'plugins', item: name || undefined, text: `${name ? `${name} removed` : 'Removed'} from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.`, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } };
-  announce('Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.');
-});
-
-export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
-
-/** Reads a marketplace's README or a plugin's contents once, in the background, then redraws. */
-export function loadMarketDetail(source: string, plugin = ''): void {
-  const key = `${source}\u0000${plugin}`;
-  if (state.marketDetail.has(key)) return;
-  state.marketDetail.set(key, null);
-  void api().pluginDetail(source, plugin || undefined).then(detail => { state.marketDetail.set(key, detail ?? { readme: undefined }); rerender(); }, () => { state.marketDetail.set(key, { readme: undefined }); rerender(); });
-}
-
-/** Opens an https link in the browser. */
-export const openLink = (url: string) => void api().openExternal(url);
-
-const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
-
-/** Runs plugin changes through each tool's own commands, in pluginplan's order, and keeps what each one did. */
-export const applyPluginOps = (ops: PluginOp[], undo = false) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
-  const done: PluginDone[] = [];
-  let stopped: string | undefined;
-  let view: PluginsView | undefined;
-  for (const batch of pluginBatches(ops)) {
-    state.pluginWorking = { plugin: batch.plugin, tools: batch.tools };
-    render();
-    const result = batch.action === 'install'
-      ? await api().installPlugin(batch.source, batch.plugin, batch.tools, state.home!.home)
-      : await api().uninstallPlugin(batch.market, batch.plugin, batch.tools[0]!, state.home!.home);
-    if (result.view) view = result.view;
-    for (const report of result.reports) done.push({ source: batch.source, market: batch.market, plugin: batch.plugin, tool: report.tool, action: batch.action, report });
-    if (result.stopped) { stopped = result.stopped; break; }
-  }
-  state.pluginWorking = undefined;
-  if (view) state.plugins = view;
-  // What ran leaves the draft; anything not reached stays chosen, so Apply all can carry on.
-  for (const entry of done) clearPluginOp(state.pluginDraft, entry);
-  state.pluginDone = { done, undo };
-  state.pluginResult = stopped ? { reports: [], stopped } : undefined;
-  announce(stopped ?? describePlugins(done, names).map(line => `${line.plugin}: ${line.text}`).join('. '));
-});
 
 // ---------- History ----------
 
@@ -562,7 +462,6 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const twoWay = managed.filter(server => !Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
-    const how = [...oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)} (↗)`), twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : ''].filter(Boolean).join('; ');
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));

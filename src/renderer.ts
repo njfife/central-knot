@@ -1,6 +1,7 @@
 import { designMode, sample } from './design.ts';
+import { loadPlugins } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, loadPlugins, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
