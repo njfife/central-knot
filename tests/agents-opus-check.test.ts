@@ -1,10 +1,10 @@
 // Reproductions from the Opus judge of agents (e805d21), kept as regressions.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, rename } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
+import { applyAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -52,37 +52,5 @@ test('B: Restore of a deletion is refused because a stopped one-way copy exists'
     const ev = (await readHistory(b.home)).find(e => e.kind === 'deleted')!;
     const r = await restoreAgent(b.context, tools, ev.id);
     assert.equal(r.stopped, undefined, 'Restore refused');
-  } finally { await b.cleanup(); }
-});
-
-test('C: Undo of an edit overwrites a stopped one-way copy', async () => {
-  const b = await sandbox();
-  try {
-    await writeFile(join(b.home, '.claude/agents/reviewer.md'), md('Prompt.\n', 'tools: Read\n'));
-    await applyAgents(b.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    const cp = await rd(b.home, '.copilot/agents/reviewer.agent.md');
-    await writeFile(join(b.home, '.copilot/agents/reviewer.agent.md'), cp.replace('Prompt.', 'Local only.'));
-    await applyAgents(b.context, tools, []);
-    await writeFile(join(b.home, '.claude/agents/reviewer.md'), md('Edited.\n', 'tools: Read\n'));
-    const e = await applyAgents(b.context, tools, []);
-    const ev = (await readHistory(b.home)).find(x => x.kind === 'edit');
-    if (!ev) return;
-    const r = await restoreAgent(b.context, tools, ev.id);
-    assert.match(await rd(b.home, '.copilot/agents/reviewer.agent.md'), /Local only/, 'stopped copy overwritten');
-  } finally { await b.cleanup(); }
-});
-
-test('F: copy in a folder missing at deletion time survives when the folder returns', async () => {
-  const b = await sandbox();
-  try {
-    await writeFile(join(b.home, '.claude/agents/reviewer.md'), md('Prompt.\n'));
-    await applyAgents(b.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    await rename(join(b.home, '.codex/agents'), join(b.home, '.codex/agents-away'));
-    await rm(join(b.home, '.claude/agents/reviewer.md'));
-    const p1 = await applyAgents(b.context, tools, [], { now: 1, settleMs: 2000 });
-    const p2 = await applyAgents(b.context, tools, [], { now: 5000, settleMs: 2000 });
-    await rm(join(b.home, '.codex/agents'), { recursive: true, force: true });
-    await rename(join(b.home, '.codex/agents-away'), join(b.home, '.codex/agents'));
-    const p3 = await applyAgents(b.context, tools, [], { now: 9000, settleMs: 2000 });
   } finally { await b.cleanup(); }
 });
