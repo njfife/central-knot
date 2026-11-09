@@ -54,19 +54,24 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
 /** The "added" or "removed" message has done its job once the person moves on or chooses something. */
 export function clearPluginOutcome(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
 
+/**
+ * Reads into a map in the background. The result is kept only while the map still holds this read's own placeholder: a
+ * Refresh or a home switch that cleared the map in the meantime wins, and the stale result is dropped.
+ */
+function readInto<T>(map: Map<string, Read<T>>, key: string, read: () => Promise<T>): void {
+  if (map.has(key)) return;
+  const placeholder: Read<T> = { reading: true };
+  map.set(key, placeholder);
+  void read().then(value => { if (map.get(key) === placeholder) { map.set(key, { reading: false, value }); rerender(); } });
+}
+
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {
   const source = current()?.entry.source;
   if (!source) return;
-  if (market.nav.plugin) {
-    const key = pluginKey(source, market.nav.plugin);
-    if (market.details.has(key)) return;
-    market.details.set(key, { reading: true });
-    void api().pluginDetail(source, market.nav.plugin).catch(() => null).then(detail => { market.details.set(key, { reading: false, value: detail }); rerender(); });
-  } else if (market.nav.tab === 'about' && !market.readmes.has(source)) {
-    market.readmes.set(source, { reading: true });
-    void api().marketplaceReadme(source).catch(() => null).then(text => { market.readmes.set(source, { reading: false, value: text ?? undefined }); rerender(); });
-  }
+  const plugin = market.nav.plugin;
+  if (plugin) readInto(market.details, pluginKey(source, plugin), () => api().pluginDetail(source, plugin).catch(() => null));
+  else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined));
 }
 
 /** Moves within the page and reads what the new place shows. */
@@ -82,7 +87,6 @@ export function browse(patch: Partial<typeof market.nav>): void {
 export const loadPlugins = (fresh = false) => act('reading', 'Reading marketplaces…', async () => {
   market.view = (await api().plugins(fresh)) ?? undefined;
   market.problem = undefined;
-  market.done = undefined;
   if (fresh) { market.readmes.clear(); market.details.clear(); }
   prune(market.draft, market.view);
   readShown();

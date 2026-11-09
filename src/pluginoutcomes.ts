@@ -21,11 +21,11 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   } else if (tool === 'copilot-cli') {
     add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
-    add(components.agents, 'Agents', 'works', 'are called', 'agent');
+    add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else {
-    add(components.skills, 'Skills', 'works', 'are called', 'skill');
+    add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others may not');

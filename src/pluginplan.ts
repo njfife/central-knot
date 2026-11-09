@@ -36,10 +36,18 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
   for (const op of ops) { if (all) draft.delete(opKey(op)); else draft.set(opKey(op), op); }
 }
 
-/** Drops choices for plugins or marketplaces no longer listed, so a stale choice never blocks the next Apply all. */
+/**
+ * Drops choices that no longer mean anything, so none is counted or run unseen: a plugin or marketplace no longer
+ * listed, a tool whose CLI is gone or that holds another marketplace of this name, an install already in place, and an
+ * uninstall of something no longer installed.
+ */
 export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
-  const listed = new Set(view?.marketplaces.flatMap(entry => entry.plugins.map(plugin => pluginKey(entry.source, plugin.name))) ?? []);
-  for (const [key, op] of draft) if (!listed.has(pluginKey(op.source, op.plugin))) draft.delete(key);
+  for (const [key, op] of draft) {
+    const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
+    const state = entry?.plugins.some(plugin => plugin.name === op.plugin) ? entry.states[op.plugin]?.[op.tool]?.state ?? 'not-installed' : undefined;
+    const stale = !state || !view?.clis[op.tool] || state === 'held' || (op.action === 'install' && state === 'installed') || (op.action === 'remove' && state !== 'installed');
+    if (stale) draft.delete(key);
+  }
 }
 
 /** Counts for the change bar. */
@@ -66,14 +74,18 @@ export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed)
   .map(({ report: _report, ...op }) => ({ ...op, action: op.action === 'install' ? 'remove' : 'install' }));
 
-/** One line per plugin and outcome, e.g. "document-tools: installed in Claude Code and Codex". */
+/**
+ * One line per plugin and outcome, e.g. "document-tools: installed in Claude Code and Codex". What a tool already had
+ * is said as such ("already in Codex"), never as a change this run made.
+ */
 export function describe(done: PluginDone[], names: Record<HarnessId, string>, andList: (items: string[]) => string): { plugin: string; ok: boolean; text: string }[] {
   const lines: { plugin: string; ok: boolean; text: string }[] = [];
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const plugin = mine[0]!.plugin;
-    const tools = (outcome: ActionReport['outcome']) => mine.filter(entry => entry.report.outcome === outcome).map(entry => names[entry.tool]);
-    const parts = [tools('installed').length ? `installed in ${andList(tools('installed'))}` : '', tools('uninstalled').length ? `uninstalled from ${andList(tools('uninstalled'))}` : ''].filter(Boolean);
+    const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
+    const phrase = (list: string[], text: string) => (list.length ? `${text} ${andList(list)}` : '');
+    const parts = [phrase(tools('installed', true), 'installed in'), phrase(tools('uninstalled', true), 'uninstalled from'), phrase(tools('installed', false), 'already in'), phrase(tools('uninstalled', false), 'wasn’t installed in')].filter(Boolean);
     if (parts.length) lines.push({ plugin, ok: true, text: parts.join('; ') });
     for (const entry of mine.filter(candidate => !['installed', 'uninstalled'].includes(candidate.report.outcome))) lines.push({ plugin, ok: false, text: `${names[entry.tool]}: ${entry.report.message}` });
   }

@@ -1235,7 +1235,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-add-input, .market-find { box-sizing: border-box; width: 100%; height: 30px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; }
 .market-add-input:focus, .market-find:focus { outline: 2px solid var(--focus, var(--accent)); outline-offset: -1px; }
 .market-add-actions { display: flex; gap: 6px; }
-.market-add-note { margin: 0; font-size: 11.5px; color: var(--ink-faint); }
 .market-main { padding: 18px 24px 32px; }
 .market-page, .plugin-page { max-width: 900px; }
 .market-page-title { display: flex; align-items: center; gap: 12px; }
@@ -1275,12 +1274,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-back:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 4px; }
 .plugin-head h2 { display: inline; margin-right: 8px; }
 .plugin-id { font-size: 12px; color: var(--ink-faint); }
-.plugin-links { display: flex; gap: 12px; margin: 6px 0 0; }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 13px; font-weight: 650; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .plugin-tool-state { font-size: 12.5px; color: var(--ink-soft); }
-.plugin-panel-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-faint); }
 .plugin-section { margin: 22px 0 0; }
 .plugin-group { margin: 10px 0 0; }
 .plugin-group h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
@@ -1318,9 +1315,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .plugin-tool-state { font-size: 11.5px; color: var(--ink-faint); }
-.plugin-panel-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; min-height: 26px; }
-.plugin-panel-foot .btn { margin-left: auto; }
-.plugin-panel-note { margin: 0; }
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .plugin-meta .btn { font-size: 12px; }
 .md ul { list-style: disc; } .md ol { list-style: decimal; }
@@ -1336,8 +1330,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-meta, .market-page-meta { display: flex; flex-wrap: wrap; align-items: center; }
 .plugin-tool-rows { align-items: center; }
 .plugin-tool-rows > .btn { margin-left: auto; }
-.plugin-panel-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-faint); }
 .plugin-part-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-readme h3 { margin-bottom: 8px; }
 .plugin-readme-body { padding-left: 14px; border-left: 3px solid var(--line); }
 .plugin-readme-body .md h3, .plugin-readme-body .md h4, .plugin-readme-body .md h5, .plugin-readme-body .md h6 { font-size: 13px; color: var(--ink-soft); }
+
+/* Round 4: results in the toolbar, steady panel, tidy meta lines */
+.toolbar-result { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 70%; font-size: 12.5px; color: var(--ink-soft); }
+.toolbar-result-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-result .band-dismiss { margin-left: 0; }
+.plugin-panel-note { margin: 8px 0 0; min-height: 16px; font-size: 12px; color: var(--ink-faint); }
+.plugin-tool-state:empty { display: none; }
+.plugin-meta .btn, .market-page-meta .btn { padding: 0; height: auto; min-height: 0; }
+.page.plugins-page > .bands > .band { padding-right: 16px; }
+.market-crumbs .crumb-link { display: inline-flex; align-items: center; gap: 6px; }

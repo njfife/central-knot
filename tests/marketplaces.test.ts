@@ -122,3 +122,18 @@ test('An install reads the tool’s records afresh: the read-sharing of a view n
     assert.equal(seenReads, undefined);
   } finally { await box.cleanup(); }
 });
+
+test('Refreshing a marketplace lets go of its plugins’ copies from other repositories, so they are read again', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'notes', source: { source: 'github', repo: 'example/notes', path: 'plugin' } }] }));
+    await box.markets.add(root);
+    const copy = engine.remoteCopyFolder({ home: box.home, dataDir: join(box.base, 'data', 'plugins'), binaries: {} }, { url: 'https://github.com/example/notes.git' });
+    await put(join(copy, 'plugin/README.md'), 'old');
+    await box.markets.view();
+    assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), true, 'a plain view keeps the copy');
+    await box.markets.refresh(root);
+    assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), false);
+  } finally { await box.cleanup(); }
+});

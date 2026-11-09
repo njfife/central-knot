@@ -1,15 +1,17 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
+import { brandMark } from './brand.ts';
+import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
-import { brands, type IconName } from './icons.ts';
+import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
-const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
+const names = toolNames as Record<Tool, string>;
 const ago = (iso: string) => {
   const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
   return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
@@ -173,18 +175,6 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
   cannot: { tone: 'cell-cannot', label: 'Cannot load it' },
 };
 
-export function brandMark(tool: Tool, size = 16): Element {
-  const holder = document.createElement('template');
-  const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool];
-  // Codex has no mark of its own here: a drawn terminal glyph, the same size and weight as the others, not a text placeholder.
-  if (!brand && tool === 'codex-cli') {
-    holder.innerHTML = `<svg class="brand-mark brand-codex" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="4"/><path d="m7.5 9.5 3 2.5-3 2.5"/><path d="M12.5 15h4"/></svg>`;
-    return holder.content.firstElementChild as SVGElement;
-  }
-  if (!brand) return h(`span.mono-mark.mono-${size}`, { 'aria-hidden': 'true' }, names[tool].slice(0, 2));
-  holder.innerHTML = `<svg class="brand-mark" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true" fill="${brand.color}"><path d="${brand.path}"/></svg>`;
-  return holder.content.firstElementChild as SVGElement;
-}
 
 function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
   return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
@@ -692,7 +682,6 @@ function send(from: Tool, to: Tool, list: SampleSkill[], conflicts = false) {
 }
 
 const skillNames = (list: SampleSkill[]) => list.slice(0, 12).map(skill => skill.name ?? skill.key).join(', ') + (list.length > 12 ? ` and ${list.length - 12} more` : '');
-const andList = (items: string[]) => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
 
 /** One count in a menu row, drawn with the cell the target's column shows for those skills today. */
 function addGroup(state: Cell, on: boolean, count: number, word: string, title: string, extra = '', who: string[] = []) {
@@ -822,6 +811,8 @@ function withToolCount(table: HTMLElement) {
 }
 
 /** What the last action did, where it was done, with History when there is something to undo. */
+export { brandMark };
+
 export function outcomeBand(withAction = true): HTMLElement | null {
   const outcome = state.outcome;
   // A result stands until something new is queued, the page changes, or it is dismissed.

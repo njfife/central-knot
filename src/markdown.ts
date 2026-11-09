@@ -28,12 +28,15 @@ const PATTERNS: [RegExp, (match: RegExpExecArray) => Inline[]][] = [
   [/(?<![^\s(])__([^_\n]{1,300}?)__(?![^\s),;:!?])/y, match => [{ kind: 'strong', children: inlineText(match[1]!) }]],
   [/\*([^*\s][^*\n]{0,300}?)\*/y, match => [{ kind: 'em', children: inlineText(match[1]!) }]],
   [/(?<![^\s(])_([^_\s][^_\n]{0,300}?)_(?![^\s),;:!?])/y, match => [{ kind: 'em', children: inlineText(match[1]!) }]],
+  [/\\([\\`*_{}[\]()#+\-.!|<>])/y, match => [{ kind: 'text', text: match[1]! }]],
+  // A badge: an image inside a link. Its label is the image's alt text.
+  [/\[!\[([^\]\n]{0,300})\]\([^)\s]{1,500}\)\]\(([^)\s]{1,500})\)/y, match => (match[1] ? linkOrText([{ kind: 'text', text: match[1] }], match[2]!) : [])],
   [/!\[([^\]\n]{0,300})\]\([^)\s]{1,500}(?:\s+"[^"\n]{0,300}")?\)/y, match => [{ kind: 'image', alt: match[1]! }]],
   [/\[([^\]\n]{1,300})\]\(([^)\s]{1,500})(?:\s+"[^"\n]{0,300}")?\)/y, match => linkOrText(inlineText(match[1]!), match[2]!)],
   [/<(https:\/\/[^>\s]{1,500})>/y, match => linkOrText([{ kind: 'text', text: match[1]! }], match[1]!)],
   [/https:\/\/[^\s<>()]{0,499}[^\s<>().,;:!?'"]/y, match => linkOrText([{ kind: 'text', text: match[0] }], match[0])],
 ];
-const STARTS = /[*_![<h]/g;
+const STARTS = /[*_![<h\\]/g;
 
 /** An https link stays a link; anything else (relative paths, other schemes) is just its label. */
 const linkOrText = (label: Inline[], url: string): Inline[] => (/^https:\/\/\S+$/.test(url) ? [{ kind: 'link', label, url }] : label);
@@ -44,8 +47,9 @@ function inlineText(text: string): Inline[] {
   const out: Inline[] = [];
   let from = 0;
   let last = 0;
-  STARTS.lastIndex = 0;
-  for (let start = STARTS.exec(plain); start; start = STARTS.exec(plain)) {
+  // Each call scans with its own copy: nested calls (emphasis inside a link) must not move this one's position.
+  const starts = new RegExp(STARTS.source, 'g');
+  for (let start = starts.exec(plain); start; start = starts.exec(plain)) {
     if (start.index < from) continue;
     for (const [pattern, build] of PATTERNS) {
       pattern.lastIndex = start.index;
@@ -54,7 +58,7 @@ function inlineText(text: string): Inline[] {
       if (match.index > last) out.push({ kind: 'text', text: plain.slice(last, match.index) });
       out.push(...build(match));
       last = from = match.index + match[0].length;
-      STARTS.lastIndex = from;
+      starts.lastIndex = from;
       break;
     }
   }
@@ -62,16 +66,20 @@ function inlineText(text: string): Inline[] {
   return out;
 }
 
-/** A line's inline content: code spans first, so what is inside them (`<plugin>@<marketplace>`) is kept exactly. */
+/**
+ * A line's inline content. Code spans are set aside first, so what is inside them (`<plugin>@<marketplace>`) is kept
+ * exactly and emphasis around them (**use `x` now**) still works; they go back in where they were.
+ */
 export function parseInline(text: string): Inline[] {
-  const out: Inline[] = [];
-  const parts = text.split(/(`[^`\n]{1,500}`)/);
-  for (const part of parts) {
-    if (!part) continue;
-    if (/^`[^`]+`$/.test(part)) out.push({ kind: 'code', text: part.slice(1, -1) });
-    else out.push(...inlineText(part));
-  }
-  return out;
+  const codes: string[] = [];
+  const marked = text.replace(/`([^`\n]{1,500})`/g, (_whole, code: string) => `\uE000${codes.push(code) - 1}\uE001`);
+  const restore = (parts: Inline[]): Inline[] => parts.flatMap((part): Inline[] => {
+    if (part.kind === 'text') return part.text.split(/\uE000(\d+)\uE001/).map((piece, at): Inline => (at % 2 ? { kind: 'code', text: codes[Number(piece)] ?? '' } : { kind: 'text', text: piece })).filter(piece => piece.kind === 'code' || (piece.kind === 'text' && !!piece.text));
+    if (part.kind === 'strong' || part.kind === 'em') return [{ ...part, children: restore(part.children) }];
+    if (part.kind === 'link') return [{ ...part, label: restore(part.label) }];
+    return [part];
+  });
+  return restore(inlineText(marked));
 }
 
 const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line);
@@ -115,7 +123,8 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
       for (; index < lines.length; index++) {
         const next = ITEM.exec(lines[index]!);
         if (next && /\d/.test(next[2]!) === ordered) items.push(parseInline(next[3]!.replace(/^\[[ xX]\]\s*/, '')));
-        else if (/^\s{2,}\S/.test(lines[index]!) && items.length) items.at(-1)!.push({ kind: 'text', text: ' ' }, ...parseInline(lines[index]!.trim()));
+        // A code block inside an item ends the list here and is shown as a block, not flattened into the item.
+        else if (/^\s{2,}\S/.test(lines[index]!) && items.length && !/^\s*(```|~~~)/.test(lines[index]!)) items.at(-1)!.push({ kind: 'text', text: ' ' }, ...parseInline(lines[index]!.trim()));
         else break;
       }
       blocks.push({ kind: 'list', ordered, items });
@@ -129,6 +138,9 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
       blocks.push({ kind: 'table', head, rows });
       continue;
     }
+    // Text underlined with === or --- is a heading (setext), when it starts a paragraph.
+    const underline = /^\s*(=+|-+)\s*$/.exec(lines[index + 1] ?? '');
+    if (underline && !paragraph.length && line.trim()) { blocks.push({ kind: 'heading', level: underline[1]!.startsWith('=') ? 1 : 2, content: parseInline(line.trim()) }); index += 2; continue; }
     // A blank line ends a paragraph; a line that is only HTML (a centred logo, a badge row) says nothing as text.
     if (!line.trim() || (/^\s*<(?!https:\/\/)/.test(line) && !line.replace(/<[^>]{0,300}>/g, '').trim())) { flush(); index++; continue; }
     paragraph.push(line.trim());

@@ -1,11 +1,13 @@
 // What a marketplace says about itself and about each plugin, read from its own files: READMEs, where each plugin comes
 // from, and what each plugin holds. Read only; nothing here runs a plugin, a hook or a server.
 // Every file read must resolve, links followed, to a path inside the marketplace (or the plugin's own repository).
-import { readdir, readFile, realpath } from 'node:fs/promises';
+import { open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
 
 const README_LIMIT = 60_000;
+/** No file from a repository is read past this; front matter and READMEs need far less. */
+const READ_LIMIT = 256 * 1024;
 const text = (value: unknown) => (typeof value === 'string' ? value : '');
 const strings = (value: unknown) => (typeof value === 'string' ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined);
 const record = (value: unknown) => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
@@ -19,9 +21,17 @@ export async function inside(root: string, path: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** A file's text, only if it resolves inside `root`. */
+/** The start of a file's text, at most READ_LIMIT bytes, only if it resolves inside `root`. */
 async function readInside(root: string, path: string): Promise<string | undefined> {
-  return (await inside(root, path)) ? readFile(path, 'utf8').catch(() => undefined) : undefined;
+  if (!(await inside(root, path))) return undefined;
+  try {
+    const file = await open(path, 'r');
+    try {
+      const buffer = Buffer.alloc(READ_LIMIT);
+      const { bytesRead } = await file.read(buffer, 0, READ_LIMIT, 0);
+      return buffer.subarray(0, bytesRead).toString('utf8');
+    } finally { await file.close(); }
+  } catch { return undefined; }
 }
 const jsonInside = async (root: string, path: string) => { const raw = await readInside(root, path); try { return raw === undefined ? undefined : record(JSON.parse(raw)); } catch { return undefined; } };
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
@@ -152,11 +162,11 @@ export function sourceOf(where: unknown): { label: string; url?: string } | unde
   if (remote) {
     const web = remote.url.replace(/\.git$/, '');
     const github = web.startsWith('https://github.com/');
-    const label = `${github ? `GitHub · ${web.slice('https://github.com/'.length)}` : web.slice('https://'.length)}${remote.path ? `/${remote.path}` : ''}`;
+    const label = `${github ? `GitHub: ${web.slice('https://github.com/'.length)}` : web.slice('https://'.length)}${remote.path ? `/${remote.path}` : ''}`;
     return { label, url: remote.path && github ? `${web}/tree/${remote.ref ?? 'HEAD'}/${remote.path}` : web };
   }
-  if (kind === 'npm' && /^(@[\w.-]+\/)?[\w.-]+$/.test(text(entry.package))) return { label: `npm · ${text(entry.package)}`, url: `https://www.npmjs.com/package/${text(entry.package)}` };
-  if (kind === 'pip' && text(entry.package)) return { label: `pip · ${text(entry.package)}` };
+  if (kind === 'npm' && /^(@[\w.-]+\/)?[\w.-]+$/.test(text(entry.package))) return { label: `npm: ${text(entry.package)}`, url: `https://www.npmjs.com/package/${text(entry.package)}` };
+  if (kind === 'pip' && text(entry.package)) return { label: `pip: ${text(entry.package)}` };
   if (kind === 'command' && text(entry.command)) return { label: `Found by running: ${text(entry.command)}` };
   if (text(entry.url)) return { label: text(entry.url) };
   return kind ? { label: kind } : undefined;

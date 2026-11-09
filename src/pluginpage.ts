@@ -2,7 +2,7 @@
 // and its README.
 import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
-import { brandMark } from './matrix.ts';
+import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { blocked, installed, missingTools, readme, toolBox } from './pluginparts.ts';
 import { pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
@@ -15,7 +15,7 @@ const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'c
 
 /** What installing does in each tool. Tools that behave the same share one line, so a real difference stands out. */
 function outcomesBlock(view: PluginsView, plugin: PluginView, components: Components) {
-  const byTool = Object.fromEntries(view.tools.map(tool => [tool, plugin.outcomes[tool] ?? outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
+  const byTool = Object.fromEntries(view.tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
   const groups = new Map<string, HarnessId[]>();
   for (const tool of view.tools) {
     const key = JSON.stringify(byTool[tool]);
@@ -37,25 +37,27 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const allChosen = ops.length > 0 && ops.every(op => queued(market.draft, op.source, op.plugin, op.tool) === 'install');
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
-    if (chosen) return chosen === 'install' ? 'Installs on Apply all' : 'Uninstalls on Apply all';
+    if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     if (installed(entry, plugin.name, tool)) return 'Installed';
-    return blocked(view, entry, tool) || entry.states[plugin.name]?.[tool]?.state === 'held' ? 'Not available' : 'Not installed';
+    // An empty box already says "not installed"; only what can't be chosen needs words.
+    return blocked(view, entry, tool) || entry.states[plugin.name]?.[tool]?.state === 'held' ? 'Not available' : '';
   };
   const anyChosen = view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool));
   const anyInstalled = view.tools.some(tool => installed(entry, plugin.name, tool));
-  const note = anyChosen ? 'Nothing runs until Apply all.' : anyInstalled ? 'To uninstall, click its check, then Apply all.' : '';
+  // The toolbar says what Apply all will do; this line only explains how to take a plugin out. It keeps its height either way.
+  const note = !anyChosen && anyInstalled ? 'To uninstall, click its check, then Apply all.' : '';
   const chooseAll = ops.length && view.canWrite
     ? button({ variant: allChosen ? 'ghost' : 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!app.busy,
       onclick: () => { toggleMany(market.draft, ops); clearPluginOutcome(); rerender(); } })
     : null;
-  return h('section.plugin-panel', { 'aria-label': 'Install in' },
-    h('h3', {}, 'Install in'),
+  return h('section.plugin-panel', { 'aria-label': 'Tools' },
+    h('h3', {}, 'Tools'),
     h('div.plugin-tool-rows', {},
       view.tools.map(tool => h('div.plugin-tool', {},
         toolBox(view, entry, plugin, tool, index),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: blocked(view, entry, tool) ?? '' }, status(tool))))),
       chooseAll),
-    note ? h('p.plugin-panel-note', {}, note) : null);
+    h('p.plugin-panel-note', {}, note));
 }
 
 /** One group of named parts, each description held to two lines (the whole of it on hover). */

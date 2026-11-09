@@ -6,7 +6,7 @@ import { markdown } from './markdown.ts';
 import { plural } from './model.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearPluginOutcome, market, openLink } from './pluginstate.ts';
-import type { HarnessId, InstallState, MarketplaceView, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
@@ -26,10 +26,8 @@ export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessI
 export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => !blocked(view, entry, tool) && ['not-installed', 'not-known'].includes(stateOf(entry, plugin, tool).state));
 
-/** "3 skills · 1 MCP server", from the counts read with the catalog; empty when contents aren't known before install. */
-export function contentsSummary(plugin: PluginView): string {
-  const parts = plugin.components;
-  if (!parts) return '';
+/** "3 skills · 1 MCP server", from a plugin's counts. */
+export function summaryOf(parts: Components): string {
   return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),
     parts.hooks && 'hooks', parts.mcp && plural(parts.mcp, 'MCP server'), parts.bin && 'a bin/ folder'].filter(Boolean).join(' · ');
 }

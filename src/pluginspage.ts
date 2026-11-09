@@ -3,12 +3,13 @@
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
 import { rerender, shownPath, showPage, state as app } from './app.ts';
 import { button, emptyState, h, icon } from './dom.ts';
-import { brandMark, outcomeBand } from './matrix.ts';
+import { brandMark } from './brand.ts';
 import { plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { cliMissing, contentsSummary, readme, stateOf, toolBox } from './pluginparts.ts';
-import { describe, queued, summary } from './pluginplan.ts';
-import { addMarketplace, applyPluginOps, browse, current, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, undoOps } from './pluginstate.ts';
+import { cliMissing, readme, stateOf, summaryOf, toolBox } from './pluginparts.ts';
+import { describe, pluginKey, queued, summary } from './pluginplan.ts';
+import { addMarketplace, applyPluginOps, browse, clearPluginOutcome, current, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, undoOps } from './pluginstate.ts';
+import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -48,7 +49,10 @@ function marketList(view: PluginsView, shown?: MarketplaceView) {
 
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
 function pluginRow(view: PluginsView, entry: MarketplaceView, index: number, plugin: PluginView) {
-  const holds = plugin.from ? `From ${plugin.from.label}` : contentsSummary(plugin);
+  // A plugin kept elsewhere says what it holds once its files have been read; until then, where it lives.
+  const read = market.details.get(pluginKey(entry.source, plugin.name));
+  const readContents = read && !read.reading && read.value && !read.value.problem ? summaryOf(componentsFrom(read.value)) : '';
+  const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
@@ -157,36 +161,57 @@ function withTools(view: PluginsView, table: HTMLElement) {
   return table;
 }
 
-/** What the last Apply all did, plugin by plugin, in the same band shape as every other result: text, Undo, then ×. */
-function report() {
-  const last = market.done;
-  if (!market.problem && !last?.done.length) return null;
-  const lines = last ? describe(last.done, names, andList) : [];
-  const back = undoOps();
-  const undo = back.length ? button({ variant: 'outline', size: 'small', label: 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) }) : null;
-  if (undo) undo.title = 'Reverses what changed, through each tool’s own command: uninstalls what was installed and reinstalls what was uninstalled.';
-  const allOk = lines.every(line => line.ok) && !market.problem;
-  return h('div.band.band-done.plugin-report', { role: 'status' }, icon(allOk ? 'check' : 'triangle-alert', 14, allOk ? 'tone-success' : 'tone-warning'),
-    h('span.band-text.band-lines', {},
-      lines.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}${line.ok ? '.' : ''}`, last?.undo && line.ok ? h('span.tone-faint', {}, ' (undone)') : null)),
-      market.problem ? h('span', {}, market.problem) : null),
-    undo,
-    h('button.band-dismiss', { type: 'button', id: 'report-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { market.problem = undefined; market.done = undefined; rerender(); } }, icon('x', 12)));
+/** What the last Apply all (or its Undo) changed, said in one line: "document-tools: installed in Claude Code and Codex". */
+function resultText(lines: ReturnType<typeof describe>, undo: boolean): string {
+  const ok = lines.filter(line => line.ok);
+  if (undo) return `Undone: ${ok.map(line => `${line.plugin} ${line.text.replace(/^uninstalled from/, 'removed from').replace(/^installed in/, 'put back in')}`).join('; ')}.`;
+  return `${ok.map(line => `${line.plugin}: ${line.text}`).join('; ')}.`;
 }
 
-/** Where the person is (Marketplaces › team-tools › document-tools), and once anything is chosen, Discard and Apply all. */
+/**
+ * The toolbar's right side: what is chosen (with Discard and Apply all), or else what just happened (with its Undo or
+ * other way back). Shown in place, so nothing on the page moves when it appears.
+ */
+function toolbarRight(): HTMLElement | null {
+  const counts = summary(market.draft);
+  if (counts.plugins) {
+    return h('div.apply', {},
+      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ')),
+      button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
+      button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
+  }
+  const dismiss = (onclick: () => void) => h('button.band-dismiss', { type: 'button', id: 'report-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { onclick(); rerender(); } }, icon('x', 12));
+  const last = market.done;
+  const lines = last ? describe(last.done, names, andList) : [];
+  if (last && lines.some(line => line.ok)) {
+    const text = resultText(lines, last.undo);
+    const back = undoOps();
+    const undo = back.length ? button({ variant: 'outline', size: 'small', label: 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) }) : null;
+    if (undo) undo.title = 'Reverses what changed, through each tool’s own command: uninstalls what was installed and reinstalls what was uninstalled.';
+    return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: text }, text), undo, dismiss(() => { market.done = undefined; }));
+  }
+  const outcome = app.outcome?.page === 'plugins' ? app.outcome : undefined;
+  if (!outcome) return null;
+  const action = outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() }) : null;
+  return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearPluginOutcome));
+}
+
+/** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
+function problemBand() {
+  const failures = market.done ? describe(market.done.done, names, andList).filter(line => !line.ok) : [];
+  if (!market.problem && !failures.length) return null;
+  return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),
+    h('button.band-dismiss', { type: 'button', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { market.problem = undefined; if (market.done) market.done = { ...market.done, done: market.done.done.filter(entry => ['installed', 'uninstalled'].includes(entry.report.outcome)) }; rerender(); } }, icon('x', 12)));
+}
+
+/** Where the person is, once inside a plugin (team-tools › document-tools, the marketplace a link back), then the right side. */
 function toolbar(shown?: MarketplaceView) {
   const plugin = shown && market.nav.plugin ? shown.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined;
-  const crumbs = h('nav.market-crumbs', { 'aria-label': 'You are here' },
-    h('span', {}, 'Marketplaces'),
-    shown ? [icon('chevron-right', 12, 'tone-faint'), plugin ? h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, titleOf(shown)) : h('span.crumb-here', {}, titleOf(shown))] : null,
-    plugin ? [icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, plugin.displayName ?? plugin.name)] : null);
-  const counts = summary(market.draft);
-  const changes = counts.plugins ? h('div.apply', {},
-    h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ')),
-    button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
-    button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) })) : null;
-  return h('div.toolbar', {}, crumbs, h('span.toolbar-spacer'), changes);
+  const crumbs = shown && plugin ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
+    h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), titleOf(shown)),
+    icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, plugin.displayName ?? plugin.name)) : null;
+  return h('div.toolbar', {}, crumbs, h('span.toolbar-spacer'), toolbarRight());
 }
 
 const activityText: Record<NonNullable<typeof market.activity>, string> = {
@@ -203,13 +228,12 @@ export function pluginsPage() {
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, activityText[market.activity])) : null,
-      outcomeBand(),
-      report()),
+      problemBand()),
     h('div.market-layout', {},
       marketList(view, shown?.entry),
       h('div.scroll.market-main', { id: 'plugins-scroll' },
         shown
           ? marketPage(view, shown.entry, shown.index)
-          : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Add one at the left: owner/repo, a Git URL or a folder. Adding reads its list and installs nothing.',
+          : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
             h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.')))));
 }

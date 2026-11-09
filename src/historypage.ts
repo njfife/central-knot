@@ -1,11 +1,12 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
+import { toolNames } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
-const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
+const names = toolNames as Record<string, string>;
 const who = (tool?: string) => (tool ? names[tool] ?? tool : 'Central Knot');
 const list = (tools: string[]) => {
   const all = [...new Set(tools)].map(who);

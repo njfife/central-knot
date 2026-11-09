@@ -1,13 +1,15 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
 import { loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { toolNames } from './words.ts';
+import { plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
-const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
+const names = toolNames as Record<string, string>;
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
@@ -21,7 +23,6 @@ function words(line: { kind: string; text: string }, diff: { kind: string; text:
   const keep = line.kind === 'removed' ? 'removed' : 'added';
   return parts.filter(part => part.kind === 'same' || part.kind === keep).map(part => part.kind === 'same' ? part.text : h('span.ins-word', {}, part.text));
 }
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const ago = (at: string) => {
   const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;

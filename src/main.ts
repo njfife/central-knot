@@ -461,7 +461,7 @@ app.whenReady().then(async () => {
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces(handle, {
     home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
-    tools: async () => (await manageView(context())).tools,
+    tools: async () => presentTools(latestSnapshots),
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },

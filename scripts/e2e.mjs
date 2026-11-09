@@ -490,7 +490,7 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
-  check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="spark"]')).includes('From GitHub · github/copilot-plugins/plugins/spark'), await a.text('[data-plugin="spark"]'));
+  check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="spark"]')).includes('From GitHub: github/copilot-plugins/plugins/spark'), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
@@ -510,7 +510,7 @@ async function practiceFlow() {
   same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
   await a.click('#pcell-0-document-tools-codex-cli');
   await a.click('#plugins-apply');
-  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
+  check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#plugin-back');

@@ -50,3 +50,15 @@ test('An opening title and lead that only repeat the page are left out', () => {
   assert.deepEqual(blocks.map(block => block.kind), ['heading', 'paragraph']);
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Use');
 });
+
+test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {
+  const badge = parseInline('[![CI](https://img.example/ci.svg)](https://example.com/ci) done');
+  assert.deepEqual(badge[0], { kind: 'link', label: [{ kind: 'text', text: 'CI' }], url: 'https://example.com/ci' });
+  const strong = parseInline('**use `x` now**');
+  assert.equal(strong.length, 1);
+  assert.equal(strong[0]!.kind, 'strong');
+  assert.deepEqual((strong[0] as { children: Inline[] }).children.map(part => part.kind), ['text', 'code', 'text']);
+  assert.equal(text(parseInline('2 \\* 3 and \\_x\\_')), '2 * 3 and _x_');
+  assert.deepEqual(parseMarkdown('1. Run:\n   ```\n   npm test\n   ```\n2. Done').map(block => block.kind), ['list', 'code', 'list']);
+  assert.deepEqual(parseMarkdown('Title\n=====\n\nSub\n---\n\nText').map(block => block.kind), ['heading', 'heading', 'paragraph']);
+});

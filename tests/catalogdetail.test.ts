@@ -66,7 +66,7 @@ test('Nothing outside the marketplace is read, through a listed path or a link',
 });
 
 test('Only https links come back for sources and pages', () => {
-  assert.deepEqual(sourceOf({ source: 'github', repo: 'example/notes', path: 'plugin' }), { label: 'GitHub · example/notes/plugin', url: 'https://github.com/example/notes/tree/HEAD/plugin' });
+  assert.deepEqual(sourceOf({ source: 'github', repo: 'example/notes', path: 'plugin' }), { label: 'GitHub: example/notes/plugin', url: 'https://github.com/example/notes/tree/HEAD/plugin' });
   assert.equal(sourceOf({ source: 'url', url: 'git@github.com:example/x.git' })?.url, undefined);
   assert.equal(sourceOf({ source: 'url', url: 'http://example.com/x.git' })?.url, undefined);
   assert.equal(remoteOf({ source: 'url', url: 'file:///etc' }), undefined);

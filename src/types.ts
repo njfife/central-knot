@@ -242,6 +242,10 @@ export interface CatalogPlugin {
   keywords?: string[];
   /** For a plugin outside the marketplace: where it comes from, in words, and a web link when there is one. */
   from?: { label: string; url?: string };
+  /** For a plugin outside the marketplace: the https Git repository to read it from (main process only). */
+  remote?: { url: string; path: string; ref?: string; sha?: string };
+  /** Its entry in marketplace.json as written, for the paths it lists (main process only; not sent to the page). */
+  entry?: Record<string, unknown>;
 }
 
 export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string }
@@ -258,7 +262,7 @@ export interface NativeRun { tool: HarnessId; command: string; ok: boolean; outp
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
 
 /** A catalog plugin with what each tool would get from it. */
-export interface PluginView extends CatalogPlugin { outcomes: Partial<Record<HarnessId, Outcome[]>> }
+export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
 
 export interface MarketplaceView {
   source: string;
@@ -297,7 +301,7 @@ export interface PluginContents {
   bin: boolean;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
-export interface PluginDetail extends PluginContents { readme?: string; /** Where the files were read from, for a plugin outside the marketplace. */ readFrom?: string; problem?: string }
+export interface PluginDetail extends PluginContents { readme?: string; problem?: string }
 
 export interface PluginsView {
   home: string;

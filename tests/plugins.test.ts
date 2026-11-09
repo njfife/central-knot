@@ -212,3 +212,23 @@ test('A folder marketplace named through a link is the same marketplace, so it i
     assert.ok(!sameSource(join(box.base, 'other'), real));
   } finally { await box.cleanup(); }
 });
+
+test('A plugin from another repository is copied once; a pinned commit that can’t be read leaves no copy behind', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const repo = join(box.base, 'repo');
+    await put(join(repo, 'plugin/skills/hello/SKILL.md'), '---\nname: hello\n---\n');
+    execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+    execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '.']);
+    execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'one']);
+    const { readRemotePlugin, remoteCopyFolder } = await import('../src/plugins.ts');
+    const remote = { url: `file://${repo}`, path: 'plugin' };
+    const [first, second] = await Promise.all([readRemotePlugin(box.context, remote), readRemotePlugin(box.context, remote)]);
+    assert.ok('folder' in first && 'folder' in second && first.folder === second.folder, JSON.stringify([first, second]));
+    const pinned = { ...remote, sha: 'deadbeefdeadbeef' };
+    const failed = await readRemotePlugin(box.context, pinned);
+    assert.ok('problem' in failed && /could not be read/.test(failed.problem), JSON.stringify(failed));
+    const { stat } = await import('node:fs/promises');
+    assert.equal(await stat(remoteCopyFolder(box.context, pinned)).then(() => true, () => false), false, 'the branch head is never kept in its place');
+  } finally { await box.cleanup(); }
+});

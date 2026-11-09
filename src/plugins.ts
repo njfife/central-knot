@@ -6,7 +6,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { inside, pluginContents, sourceOf } from './catalogdetail.ts';
+import { inside, pluginContents, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 export { outcomes } from './pluginoutcomes.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
@@ -77,7 +77,7 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
 /** MKT-05: failure is otherwise silent, so a Git source is checked with prompts off and a timeout, and each failure gets its class. */
 export async function checkAccess(source: string, timeoutMs = 20_000): Promise<AccessResult> {
   if (isFolder(source)) return { state: 'ok' };
-  const result = await run('git', ['ls-remote', '--heads', fetchUrl(source)], { env: gitEnv(), timeoutMs });
+  const result = await run('git', ['ls-remote', '--heads', '--', fetchUrl(source)], { env: gitEnv(), timeoutMs });
   if (result.code === 0) return { state: 'ok' };
   return classify(result.code, result.output);
 }
@@ -101,14 +101,21 @@ const catalogFolder = (context: PluginContext, source: string) => join(context.d
  * A fresh shallow copy of a Git repository, with hooks and submodules off, swapped into `target` only once complete.
  * Returns a problem to show (true: failed for no reason Git gave), or undefined when the copy is in place.
  */
-async function shallowClone(context: PluginContext, url: string, target: string, ref?: string): Promise<string | true | undefined> {
+async function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | true | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
-  const cloned = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+  const git = (args: string[]) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+  const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage]);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
     const failure = classify(cloned.code, cloned.output);
     return failure.state === 'ok' ? true : failure.message;
+  }
+  // A pinned commit is checked out in the stage too: the copy takes its place only when it is exactly what was asked for.
+  if (sha) {
+    const fetched = await git(['-C', stage, 'fetch', '--depth', '1', '--quiet', 'origin', sha]);
+    const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']) : fetched;
+    if (checked.code !== 0) { await rm(stage, { recursive: true, force: true }); return `The commit it names (${sha.slice(0, 12)}) could not be read.`; }
   }
   await rm(target, { recursive: true, force: true });
   await rename(stage, target);
@@ -123,19 +130,13 @@ const copying = new Map<string, Promise<string | true | undefined>>();
 
 /**
  * A plugin kept in its own repository, read so its page can show what it holds: a shallow copy kept with Central Knot's
- * other copies, made once and made again when its marketplace is refreshed (`fresh`). Only https Git URLs are read; a
- * pinned commit (`sha`) is checked out when the entry gives one. Nothing in it is run.
+ * other copies, made once and made again after its marketplace is refreshed (the copy is dropped then). Only https Git
+ * URLs reach here; a pinned commit (`sha`) is checked out before the copy is used. Nothing in it is run.
  */
-export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string; sha?: string }, fresh = false): Promise<{ folder: string; root: string } | { problem: string }> {
+export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string; sha?: string }): Promise<{ folder: string; root: string } | { problem: string }> {
   const root = remoteCopyFolder(context, remote);
-  if (fresh || !(await stat(root).then(() => true, () => false))) {
-    const pending = copying.get(root) ?? (async () => {
-      const problem = await shallowClone(context, remote.url, root, remote.ref);
-      if (problem || !remote.sha) return problem;
-      const fetched = await run('git', ['-C', root, '-c', 'core.hooksPath=/dev/null', 'fetch', '--depth', '1', '--quiet', 'origin', remote.sha], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
-      const checked = fetched.code === 0 ? await run('git', ['-C', root, '-c', 'core.hooksPath=/dev/null', 'checkout', '--quiet', '--detach', 'FETCH_HEAD'], { env: gitEnv(), timeoutMs: 30_000 }) : fetched;
-      return checked.code === 0 ? undefined : `The commit it names (${remote.sha.slice(0, 12)}) could not be read.`;
-    })().finally(() => copying.delete(root));
+  if (!(await stat(root).then(() => true, () => false))) {
+    const pending = copying.get(root) ?? shallowClone(context, remote.url, root, remote.ref, remote.sha).finally(() => copying.delete(root));
     copying.set(root, pending);
     const problem = await pending;
     if (problem) return { problem: problem === true ? 'Its repository could not be copied.' : problem };
@@ -171,6 +172,9 @@ export async function cachedCatalog(context: PluginContext, source: string): Pro
 
 const stringOr = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
 
+/** A marketplace or plugin name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
+const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
+
 export async function parseCatalog(root: string, source: string, kind: Catalog['kind']): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   let manifest: Record<string, unknown>;
@@ -185,17 +189,19 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   }
   const name = stringOr(manifest.name);
   if (!name) return { name: '', source, kind, fetchedAt, plugins: [], problem: 'Its marketplace.json has no name.' };
+  // Names reach each tool's command line as plugin@marketplace: anything that could read as an option is not offered.
+  if (!SAFE_NAME.test(name)) return { name: '', source, kind, fetchedAt, plugins: [], problem: `Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.` };
   const pluginRoot = stringOr((manifest.metadata as Record<string, unknown> | undefined)?.pluginRoot);
   const entries = Array.isArray(manifest.plugins) ? manifest.plugins : [];
   const plugins: CatalogPlugin[] = [];
   for (const entry of entries) {
-    if (typeof entry !== 'object' || entry === null || typeof (entry as Record<string, unknown>).name !== 'string') continue;
+    if (typeof entry !== 'object' || entry === null || !SAFE_NAME.test(String((entry as Record<string, unknown>).name))) continue;
     const item = entry as Record<string, unknown>;
     const author = typeof item.author === 'string' ? item.author : stringOr((item.author as Record<string, unknown> | undefined)?.name);
     const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
     const plugin: CatalogPlugin = { name: item.name as string, description: stringOr(item.description), version: typeof item.version === 'string' ? item.version : undefined,
       displayName: stringOr(item.displayName) || undefined, category: stringOr(item.category) || undefined, author: author || undefined, homepage: /^https:\/\//.test(stringOr(item.homepage)) ? stringOr(item.homepage) : undefined,
-      license: stringOr(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source) };
+      license: stringOr(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source), remote: remoteOf(item.source), entry: item };
     const where = item.source;
     if (typeof where === 'string') {
       const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
