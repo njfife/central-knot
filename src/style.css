@@ -1270,3 +1270,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-path-show { font-size: 12px; margin-left: 4px; }
 .details-path-bare { margin: 2px 0 0; }
 .details-tool > .details-path-bare { padding-left: calc(196px + 8px); }
+.notice-tail { flex-basis: 100%; padding-left: 22px; font-size: 12px; order: 3; }
+.notice-stacked > .notice-actions { margin-top: 6px; }
+.details-tool-actions .btn, .details-tool-actions button { height: 26px; font-size: 12px; }

@@ -40,7 +40,7 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
+  outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
   /** Each tool's instruction file, read when the Instructions page opens. */
@@ -588,16 +588,18 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
 });
 
 /** Write now: Claude Code's entries, once the person has quit Claude Code (MCP-02). */
-export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code…', async () => {
+export const writeClaudeNow = (names: string[]) => { const earlier = state.outcome?.page === state.page ? state.outcome?.act?.label : undefined; return busy('Writing to Claude Code…', async () => {
   const result = await api().writeClaude(names, state.home!.home);
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
   const written = result.claudeWritten ?? [];
   if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
+    // The result this replaces offered its own Undo: say where it went, so the way back from the bigger step is not lost.
+    note: earlier && earlier !== 'Undo write' ? `${earlier} is now in History.` : undefined,
     act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
-});
+}); };
 
 const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
   const result = await api().unwriteClaude(written, state.home!.home);
