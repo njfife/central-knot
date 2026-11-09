@@ -221,6 +221,7 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
   await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
   await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s chosen Codex switch (as Tab would): focus ring and waiting ring together.');
+  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.run(`document.activeElement?.blur()`);
   await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
@@ -238,6 +239,7 @@ if (wanted('plugin-skills')) {
   await a.click('#plugin-back'); await a.click('#refresh-0'); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
+  await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
 }
 
 // ---------- Instructions ----------
