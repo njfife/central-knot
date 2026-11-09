@@ -4,7 +4,7 @@ import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
 import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
-import { readInto, type Read } from './reads.ts';
+import { readInto, readState, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
 
 const api = () => window.centralKnot;
@@ -131,7 +131,7 @@ export function browse(patch: Partial<typeof market.nav>): void {
 
 /** The quiet read below: reading, then the view, or null when it failed. A home switch (resetMarket) clears it, so an old answer is dropped. */
 const peeks = new Map<'view', Read<PluginsView | null>>();
-export const peekState = (): 'reading' | 'failed' | undefined => { const read = peeks.get('view'); return read?.reading ? 'reading' : read && !read.value ? 'failed' : undefined; };
+export const peekState = () => readState(peeks.get('view'));
 /**
  * Another page's quiet look at what is installed where (Harnesses), with no busy state and no reads ahead. Reads once per home,
  * done or failed, unless `again` (Refresh, Try again); choices already made on Plugins are kept where they still apply.
@@ -148,6 +148,8 @@ export function peekPlugins(again = false): void {
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
 export const loadPlugins = (fresh = false) => act('reading', async () => {
+  // A quiet read still under way would land after this one and replace it: this read is the newer answer.
+  peeks.clear();
   const view = await api().plugins(fresh);
   market.problem = undefined;
   // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.

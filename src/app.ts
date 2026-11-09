@@ -1,9 +1,9 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
-import { plural } from './model.ts';
+import { fileName, plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { readInto, type Read } from './reads.ts';
+import { readInto, readState, type Read } from './reads.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -11,6 +11,10 @@ const api = () => window.centralKnot;
 export type Page = 'overview' | 'harnesses' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'settings';
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 export type HarnessTab = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'about';
+/** The tab of the harness page on screen, if one is (Harnesses with a harness open). */
+export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness ? state.harnessTab : undefined);
+/** The kind whose table is on screen on a harness's page, if one is. */
+export const harnessKindShown = (): 'skills' | 'mcp' | 'agents' | undefined => { const tab = harnessTabShown(); return tab === 'skills' || tab === 'mcp' || tab === 'agents' ? tab : undefined; };
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -32,7 +36,7 @@ export const state = {
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
   outcome: undefined as { page: Page; text: string; note?: string; item?: string; /** An instruction save or its Undo: which file, and whether the result offers Undo save on that file's card. */ instruction?: { path: string; saved: boolean }; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
-  /** Each tool's instruction file, read when the Instructions page opens. */
+  /** Each tool's instruction file, read quietly by the pages that show them (Instructions, Harnesses); cleared on a home switch. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
   instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
@@ -193,8 +197,9 @@ export function showPage(page: Page) {
   if (page === 'settings') void loadSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') readInstructionsQuietly(true);
-  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it started on.
-  if (page === 'harnesses' && !state.busy) state.harness = undefined;
+  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
+  // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
+  if (page === 'harnesses' && !state.busy && state.harness) { state.harness = undefined; state.outcome = undefined; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; announce(''); }
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -278,10 +283,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
 
 /** The instruction-file read per home: reading, then the files, or null when it failed (shown with Try again until asked again). */
 const instructionReads = new Map<string, Read<InstructionFile[] | null>>();
-export const instructionReadState = (): 'reading' | 'failed' | undefined => {
-  const read = state.home && instructionReads.get(state.home.home);
-  return read?.reading ? 'reading' : read && !read.value ? 'failed' : undefined;
-};
+export const instructionReadState = () => readState(state.home && instructionReads.get(state.home.home));
 /**
  * Reads the instruction files quietly, with no busy state, for the pages that show them (Instructions, Harnesses). A read
  * already made for this home, done or failed, is not repeated; `again` reads anew (opening Instructions, Refresh, Try again).
@@ -303,7 +305,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   const page = state.page;
   const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
   state.instructions = (await api().instructions()) ?? state.instructions;
-  const name = file.path.split(/[\\/]/).pop() ?? file.path;
+  const name = fileName(file.path);
   if (result.stopped) {
     state.outcome = undefined;
     const now = state.instructions?.find(entry => entry.tool === file.tool);
@@ -325,7 +327,7 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
   const page = state.page;
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
   state.instructions = (await api().instructions()) ?? state.instructions;
-  const name = file.path.split(/[\\/]/).pop() ?? file.path;
+  const name = fileName(file.path);
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
   state.outcome = { page, item: name, instruction: { path: file.path, saved: false }, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
   announce(state.outcome.text, true);

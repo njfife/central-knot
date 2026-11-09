@@ -2,14 +2,16 @@
 // tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
 import { announce, instructionReadState, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab } from './app.ts';
+import { installsIn, type MarketPlugin } from './pluginstatus.ts';
+import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { toolNames as names } from './words.ts';
-import type { HarnessId, HomeView, InstructionFile, MarketplaceView, PluginView, SkillFacts, Snapshot } from './types.ts';
+import type { HarnessId, HomeView, InstructionFile, SkillFacts, Snapshot } from './types.ts';
 import { brandMark, closeOpenRows, designOverview, differingIn, emptyKind, kindNoun, outcomeBand, showFiltered, type Kind } from './matrix.ts';
 import { fileName, instructionBands, instructionCard, instructionsNotRead, lineCount } from './instructionspage.ts';
 import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
-import { copyButton, fact } from './pages.ts';
+import { copyButton, fact, kindEmpty } from './pages.ts';
 import { realHomeName, titles } from './renderer.ts';
 
 const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
@@ -20,6 +22,9 @@ const tabLabel = (tab: HarnessTab) => (tab === 'about' ? 'About' : titles[tab]);
 
 /** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
 const dirname = (path: string) => path.replace(/^[A-Za-z]:\\/.test(path) ? /[/\\][^/\\]*$/ : /\/[^/]*$/, '');
+
+/** What could not be read in this tool's folders (a missing skills folder is not a problem). */
+const readProblems = (snapshot: Snapshot) => (snapshot.discovery === 'missing' ? [] : snapshot.issues);
 
 /** The harnesses this home shows: this computer's home lists every tool, found or not; a folder only the ones it has. */
 const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode === 'actual' || snapshot.detection !== 'Not found' || snapshot.skills.length > 0);
@@ -46,24 +51,16 @@ function tally(home: HomeView, kind: Kind, tool: HarnessId) {
 
 const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions?.find(file => file.tool === tool);
 
-type Installed = { entry: MarketplaceView; plugin: PluginView };
 /**
- * Plugins in this tool, from every marketplace Central Knot knows: `reading` or `failed` while the marketplaces are not read;
- * `none` when this tool takes no marketplace plugins (Pi); else what is installed, what could not be checked (with why) and
- * which marketplaces could not be read, so an incomplete answer never reads as "nothing installed".
+ * Plugins in this tool: `reading` or `failed` while the marketplaces are not read (the last good read is kept and shown), `unsupported`
+ * when this tool takes no marketplace plugins (Pi), else what installsIn found.
  */
-type PluginsHere = { state: 'reading' } | { state: 'failed' } | { state: 'none' } | { state: 'read'; installed: Installed[]; unknown: (Installed & { reason: string })[]; unreadable: string[] };
+type PluginsHere = { state: 'reading' } | { state: 'failed' } | { state: 'unsupported' } | ({ state: 'read' } & NonNullable<ReturnType<typeof installsIn>>);
 function pluginsIn(tool: HarnessId): PluginsHere {
   const view = market.view;
   if (!view) return peekState() === 'failed' ? { state: 'failed' } : { state: 'reading' };
-  if (!view.tools.includes(tool)) return { state: 'none' };
-  const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: entry.states[plugin.name]?.[tool] })));
-  return {
-    state: 'read',
-    installed: each.filter(({ install }) => install?.state === 'installed'),
-    unknown: each.flatMap(({ entry, plugin, install }) => (install?.state === 'not-known' ? [{ entry, plugin, reason: install.reason }] : [])),
-    unreadable: view.marketplaces.filter(entry => entry.problem && !entry.plugins.length).map(entry => entry.name),
-  };
+  const installs = installsIn(view, tool);
+  return installs ? { state: 'read', ...installs } : { state: 'unsupported' };
 }
 
 /** Header Refresh on Harnesses: instruction files and installs are read again along with the home. */
@@ -91,9 +88,8 @@ function kindCount({ supported, total, managed }: ReturnType<typeof tally>, tool
 }
 
 function instructionCount(tool: HarnessId): Count {
-  const read = instructionReadState();
-  if (read === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
-  if (!state.instructions) return { value: '…', faint: true };
+  // Files already read stay shown if a later read fails, here as on the Instructions tab.
+  if (!state.instructions) return instructionReadState() === 'failed' ? { value: '—', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
   // A file, not a number: its name and length, or that there is none yet.
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
@@ -105,7 +101,7 @@ function pluginCount(tool: HarnessId): Count {
   const plugins = pluginsIn(tool);
   if (plugins.state === 'reading') return { value: '…', faint: true };
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
-  if (plugins.state === 'none') return { value: '—', note: 'not handled here', faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', note: 'not handled here', faint: true };
   const unsure = plugins.unknown.length + plugins.unreadable.length > 0;
   return { value: String(plugins.installed.length), note: [plugins.installed.length ? 'installed' : '', unsure ? 'some not known' : ''].filter(Boolean).join(' · ') || undefined };
 }
@@ -113,13 +109,13 @@ function pluginCount(tool: HarnessId): Count {
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
 function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
   const tool = snapshot.harness;
-  const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
+  const issues = readProblems(snapshot);
   const link = (id: string, glyph: 'diff' | 'triangle-alert', text: string, open: () => void) =>
     h('button.harness-card-attention', { type: 'button', id, disabled: !!state.busy, onclick: open }, icon(glyph, 13), text, icon('arrow-right', 12));
   const links = [
     ...kinds.filter(({ differing }) => differing).map(({ kind, differing }) => link(`harness-${tool}-differ-${kind}`, 'diff', `${differing} ${kindNoun[kind][differing === 1 ? 0 : 1]} with different copies`,
-      () => { showFiltered(kind, 'attention'); openHarness(tool, kind); })),
-    ...(issues.length ? [link(`harness-${tool}-problems`, 'triangle-alert', plural(issues.length, 'read problem'), () => openHarness(tool, 'about'))] : []),
+      () => { goHarness(tool, kind); showFiltered(kind, 'attention'); rerender(); })),
+    ...(issues.length ? [link(`harness-${tool}-problems`, 'triangle-alert', plural(issues.length, 'read problem'), () => goHarness(tool, 'about'))] : []),
   ];
   return links.length ? h('div.harness-card-links', {}, links) : null;
 }
@@ -131,26 +127,35 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const body = [
     h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), found(home, tool) ? icon('arrow-right', 14, 'tone-faint') : null),
     h(`span.harness-card-status${snapshot.detection === 'Not found' && home.mode === 'actual' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)),
-    h('span.harness-counts', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool))), countRow('Instructions', instructionCount(tool)), countRow('Plugins', pluginCount(tool))),
+    h('span.harness-counts', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool))), countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool))),
   ];
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   if (!found(home, tool)) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
     h('div.harness-card-main', {}, body, h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`)), path);
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
-    h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => openHarness(tool) }, body),
+    h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
     attentionLinks(snapshot, kinds), path);
 }
 
-/** Opens one harness's page, on `tab` if given (else the tab last used), with its tables closed. */
-function openHarness(tool: HarnessId, tab?: HarnessTab) {
-  if (state.harness !== tool) closeOpenRows();
+/**
+ * The one way to move within Harnesses: to a harness's page (on `tab` if given, else the tab last used) or, with no harness,
+ * back to the list. The last action's result and what the last page showed stay behind; another harness starts with its
+ * tables closed and Copies differ filters off.
+ */
+export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab) {
+  const from = state.harness;
+  if (tool !== from) closeOpenRows();
   state.harness = tool;
   if (tab) state.harnessTab = tab;
   state.outcome = undefined;
+  state.applied = undefined;
+  state.mcpResult = undefined;
+  state.agentsResult = undefined;
   announce('');
   rerender();
-  document.getElementById('harness-body')?.scrollTo(0, 0);
+  if (tool) document.getElementById('harness-body')?.scrollTo(0, 0);
+  else if (from) document.getElementById(`harness-${from}`)?.focus();
 }
 
 function everyHarness(home: HomeView) {
@@ -169,20 +174,23 @@ function everyHarness(home: HomeView) {
 /** The tabs, each kind with its count. While an action runs they stay put, so its result lands on the tab it was started from. */
 function tabs(home: HomeView, tool: HarnessId) {
   // A count, a dash where the tool has none of its own (as on its card), or nothing (Instructions, About, still reading).
-  const count = (tab: HarnessTab): number | '—' | undefined => {
-    if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? plugins.installed.length : plugins.state === 'none' ? '—' : undefined; }
+  // Kinds count copies here and elsewhere directly: tabs redraw on every Find keystroke, so no differing-copies work here.
+  const count = (tab: HarnessTab): { shown: number | '—'; elsewhere: number } | undefined => {
+    if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? { shown: plugins.installed.length, elsewhere: 0 } : plugins.state === 'unsupported' ? { shown: '—', elsewhere: 0 } : undefined; }
     if (!isKind(tab)) return undefined;
-    return supports(home, tab, tool) ? tally(home, tab, tool).total : '—';
+    if (!supports(home, tab, tool)) return { shown: '—', elsewhere: 0 };
+    const facts = kindView(home, tab).facts;
+    const here = facts.filter(item => item.copies[tool] !== undefined).length;
+    return { shown: here, elsewhere: facts.length - here };
   };
-  const elsewhere = (tab: HarnessTab) => (isKind(tab) && supports(home, tab, tool) ? kindView(home, tab).facts.filter(item => item.copies[tool] === undefined).length : 0);
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },
     TABS.map(tab => {
-      const shown = count(tab);
+      const counted = count(tab);
       return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
-        title: shown === undefined ? undefined : shown === '—' ? `${names[tool]} has none of its own` : `${shown} in ${names[tool]}${elsewhere(tab) ? ` · ${elsewhere(tab)} only in other tools` : ''}`,
-        onclick: () => { state.harnessTab = tab; state.outcome = undefined; announce(''); rerender(); },
-      }, tabLabel(tab), shown === undefined ? null : h('span.harness-tab-count', {}, String(shown)));
+        title: !counted ? undefined : counted.shown === '—' ? `${names[tool]} has none of its own` : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
+        onclick: () => goHarness(tool, tab),
+      }, tabLabel(tab), counted ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
 }
 
@@ -192,7 +200,7 @@ function switcher(home: HomeView, tool: HarnessId) {
   if (others.length < 2) return null;
   return h('div.harness-switch', { role: 'group', 'aria-label': 'Other harnesses' }, others.map(other => h(`button.harness-switch-item${other === tool ? '.selected' : ''}`, {
     type: 'button', id: `harness-switch-${other}`, 'aria-pressed': String(other === tool), title: names[other], disabled: !!state.busy && other !== tool,
-    onclick: () => { if (other !== tool) openHarness(other); },
+    onclick: () => { if (other !== tool) goHarness(other); },
   }, brandMark(other, 14), h('span.harness-switch-name', {}, names[other]))));
 }
 
@@ -207,9 +215,8 @@ function unsupported(kind: Kind, tool: HarnessId) {
 function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
   if (kindView(home, kind).facts.length) return designOverview(kind, tool);
-  // Nothing of this kind anywhere: the empty state keeps the table's bands, so a file that could not be read still says why.
-  return emptyKind(kind, tool, emptyState(kind === 'skills' ? 'wand-sparkles' : kind === 'mcp' ? 'plug' : 'bot', `No ${kindNoun[kind][1]} yet`,
-    `None of your tools has ${kind === 'agents' ? 'an agent' : kind === 'mcp' ? 'an MCP server' : 'a skill'} in this home. Add one in ${names[tool]} or another tool, then Refresh.`));
+  // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
+  return emptyKind(kind, tool, emptyState(kindEmpty[kind].glyph, kindEmpty[kind].title, kindEmpty[kind].body));
 }
 
 /** This tool's instruction file, with the same card, bands and editor as the Instructions page. */
@@ -223,12 +230,12 @@ function instructionsTab(tool: HarnessId) {
 }
 
 /** One installed plugin: its name, version and marketplace, and Open, which shows it on the Plugins page. */
-function pluginRow({ entry, plugin }: Installed) {
+function pluginRow({ entry, plugin }: MarketPlugin) {
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
-      h('strong', {}, plugin.displayName ?? plugin.name, plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
+      h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
       h('span.harness-plugin-note', {}, [entry.name, plugin.description].filter(Boolean).join(' · '))),
-    button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${plugin.displayName ?? plugin.name} in Plugins`, id: `harness-plugin-${entry.name}-${plugin.name}`,
+    button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in Plugins`, id: `harness-plugin-${entry.name}-${plugin.name}`,
       onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined }); } }));
 }
 
@@ -237,9 +244,9 @@ function pluginsTab(tool: HarnessId) {
   const page = (...body: (Node | null)[]) => h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
   if (plugins.state === 'reading') return page(h('p.empty', {}, 'Reading marketplaces…'));
   if (plugins.state === 'failed') return page(emptyState('circle-alert', 'Marketplaces could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'harness-plugins-retry', onclick: () => peekPlugins(true) })));
-  if (plugins.state === 'none') return page(emptyState('puzzle', `${names[tool]} plugins aren’t handled here`, `Central Knot installs marketplace plugins into Claude Code, Copilot CLI and Codex. ${names[tool]}’s own packages stay as they are.`));
+  if (plugins.state === 'unsupported') return page(emptyState('puzzle', `${names[tool]} plugins aren’t handled here`, `Central Knot installs marketplace plugins into Claude Code, Copilot CLI and Codex. ${names[tool]}’s own packages stay as they are.`));
   // What could not be checked is said, so the list is never taken for everything installed.
-  const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${plugin.displayName ?? plugin.name}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
+  const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
   const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
     button({ variant: 'link', size: 'micro', label: 'Open Plugins', id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
   if (!plugins.installed.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
@@ -253,7 +260,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
   const tool = snapshot.harness;
   const disclosed = home.manage.writes[tool];
   const roots = new Map(snapshot.skills.map(skill => [dirname(skill.directory), skill.rootLabel]));
-  const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
+  const issues = readProblems(snapshot);
   // Every path can be copied.
   let copies = 0;
   const path = (value: string) => h('span.harness-path', {}, pathText(shownPath(value), value), copyButton(value, 'path', `copy-path-${tool}-${copies++}`));
@@ -297,8 +304,7 @@ export function harnessTitle(): Node[] | undefined {
   if (!snapshot || !state.home) return undefined;
   const tool = snapshot.harness;
   return [
-    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy,
-      onclick: () => { state.harness = undefined; state.outcome = undefined; announce(''); rerender(); document.getElementById(`harness-${tool}`)?.focus(); } }, icon('arrow-left', 14), 'Harnesses'),
+    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: () => goHarness(undefined) }, icon('arrow-left', 14), 'Harnesses'),
     h('span.crumb-sep', { 'aria-hidden': 'true' }, '/'),
     brandMark(tool, 16), h('span.title-harness', {}, names[tool]),
     h('span.title-note', { title: snapshot.root }, detectionLine(snapshot, state.home)),
@@ -311,7 +317,7 @@ export function harnessesPage() {
   // The summary's instruction files and installs, read quietly once per home (each read checks what it already has).
   readInstructionsQuietly();
   peekPlugins();
-  // A harness from another home, or one no longer found, falls back to the list.
+  // A harness not found in this home (another home without it, or no longer found) falls back to the list; one both homes have stays open.
   const snapshot = openSnapshot(home);
   if (!snapshot) state.harness = undefined;
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);

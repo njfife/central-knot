@@ -1,8 +1,9 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { instructionReadState, loadInstructionVersion, readInstructionsQuietly, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { harnessTabShown, instructionReadState, loadInstructionVersion, readInstructionsQuietly, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
-import { plural } from './model.ts';
+import { goHarness } from './harnesspage.ts';
+import { fileName, plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
@@ -13,8 +14,7 @@ const names = toolNames as Record<string, string>;
 /** How many lines a file's text has, a final newline not counting as one more. */
 export const lineCount = (text: string) => text.replace(/\n$/, '').split('\n').length;
 
-/** A path's last part: the file's own name. */
-export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+export { fileName } from './model.ts';
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
 function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
@@ -38,7 +38,7 @@ const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : '
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
   // Only where the editor is on screen: Instructions, or a harness's Instructions tab.
-  const shown = state.page === 'instructions' || (state.page === 'harnesses' && !!state.harness && state.harnessTab === 'instructions');
+  const shown = state.page === 'instructions' || harnessTabShown() === 'instructions';
   if (event.key !== 'Escape' || !shown || edit?.stage !== 'review') return;
   event.preventDefault();
   if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
@@ -127,8 +127,10 @@ const open = new Set<string>();
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
 const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && !!state.outcome.instruction?.saved && state.outcome.instruction.path === file.path;
 
-/** One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. */
-/** `titled`: false on a harness's page, where the header already names the tool, so the card leads with the file's path. */
+/**
+ * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
+ * page, where the header already names the tool, so the card leads with the file's path.
+ */
 export function instructionCard(file: InstructionFile, { titled = true } = {}) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
@@ -159,7 +161,7 @@ export function instructionCard(file: InstructionFile, { titled = true } = {}) {
           } }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy,
             // On a harness's page the other file's editor is on another harness's page: a link goes there.
-            otherDirty && state.page === 'harnesses' ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, onclick: () => { state.harness = other!.tool; state.harnessTab = 'instructions'; rerender(); } })] : null) : null)),
+            otherDirty && state.page === 'harnesses' ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, disabled: !!state.busy, onclick: () => goHarness(other!.tool, 'instructions') })] : null) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
         h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),

@@ -23,6 +23,23 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
 export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
 export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessId) => stateOf(entry, plugin, tool).state === 'installed';
 
+/** A plugin in a marketplace. */
+export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
+/**
+ * What one tool has from every marketplace read: plugins installed there, plugins whose state there could not be checked
+ * (with why), and marketplaces that could not be read at all, so an incomplete answer never reads as "nothing installed".
+ * Null when the tool takes no marketplace plugins (Pi).
+ */
+export function installsIn(view: PluginsView, tool: HarnessId): { installed: MarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
+  if (!view.tools.includes(tool)) return null;
+  const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
+  return {
+    installed: each.filter(({ install }) => install.state === 'installed').map(({ entry, plugin }) => ({ entry, plugin })),
+    unknown: each.flatMap(({ entry, plugin, install }) => (install.state === 'not-known' ? [{ entry, plugin, reason: install.reason }] : [])),
+    unreadable: view.marketplaces.filter(entry => entry.problem && !entry.plugins.length).map(entry => entry.name),
+  };
+}
+
 /**
  * Why this plugin can't be installed in this tool, if it can't: the tool holds another marketplace of this name, or the
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.

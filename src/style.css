@@ -1341,15 +1341,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 
 /* ---------- Harnesses ---------- */
-.harness-scroll { padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.harness-scroll { container-type: inline-size; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-.harness-card { display: flex; flex-direction: column; color: var(--ink); }
+.harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
 button.harness-card-main { cursor: pointer; }
 button.harness-card-main:disabled { cursor: default; }
-.harness-card-links:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
+.harness-card-links { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
 .harness-card-missing { color: var(--ink-soft); }
 .harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .harness-card-head > svg:last-child { margin-left: auto; flex: none; }
@@ -1373,14 +1373,14 @@ button.harness-card-main:disabled { cursor: default; }
 .title-harness { flex: none; }
 .title-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink-soft); margin-left: 4px; }
 .harness-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0; border-bottom: 1px solid var(--line); min-height: 44px; }
-.harness-bar > .harness-tabs { flex: 1; min-width: 0; border-bottom: 0; }
+.harness-bar > .harness-tabs { flex: 1; min-width: 0; }
 .harness-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--hover); }
 .harness-switch-item { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
 .harness-switch-item:hover:not(:disabled) { color: var(--ink); }
 .harness-switch-item:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
 .harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+.harness-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
 /* The tabs look like the marketplace tabs (shared rules above); here they are inline-flex for the count, and never wrap. */
 .harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .harness-tab:hover:not(:disabled) { color: var(--ink); }
@@ -1399,7 +1399,7 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-about-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .harness-path .middle { min-width: 0; }
-/* Narrow: the switcher keeps only the marks (names stay in their tooltips), and the path leaves the title. */
+/* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
 @media (max-width: 1180px) { .harness-switch-name { display: none; } }
 /* A harness's page uses the window's width: the table, its toolbar and bands reach the edge, the name column takes the
    free space (with the description), and the tool columns keep a steady width. */
@@ -1410,17 +1410,18 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-page .ov-row:not(.ov-head) { height: auto; min-height: 40px; }
 .ov-desc { display: block; padding: 8px 16px 8px 12px; font-size: 12px; line-height: 16px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
-/* The description shows only when its column has room (about 260px after the name, Managed and tool columns); otherwise it
-   stays in the row's details. Measured on the table's own width, per number of tool columns. */
+/* The description shows only when its column has room; otherwise it stays in the row's details. Measured on the table's own
+   width, per number of tool columns n: name 240 + Managed 76 + 132 per tool + 260 for the description = 576 + 132n
+   (keep in step with .harness-page .ov's --ov-columns). */
 @container (max-width: 708px) { .ov[data-tools="1"] .ov-desc { display: none; } }
 @container (max-width: 840px) { .ov[data-tools="2"] .ov-desc { display: none; } }
 @container (max-width: 972px) { .ov[data-tools="3"] .ov-desc { display: none; } }
 @container (max-width: 1104px) { .ov[data-tools="4"] .ov-desc { display: none; } }
 @container (max-width: 1236px) { .ov[data-tools="5"] .ov-desc { display: none; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
-/* The harness's own column is the page's subject: its header sits on a quiet fill. Its instruction card spans the pane. */
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
+/* Its instruction card spans the pane. */
 .harness-page .ins-card { max-width: none; }
 /* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
 .harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
@@ -1431,7 +1432,6 @@ button.harness-card-main:disabled { cursor: default; }
 .add-from { position: relative; }
 .add-from > .tool-menu { left: auto; right: 0; transform: none; top: calc(100% + 6px); }
 /* The whole card shows hover and focus, not just its upper part. */
-.harness-card { container-type: inline-size; }
 .harness-card:has(> .harness-card-main:hover) { background: var(--hover); }
 .harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 button.harness-card-main:focus-visible { outline: 0; }
@@ -1443,7 +1443,6 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-page .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 120px; }
 .tool-menu-empty { margin: 4px 0 8px; color: var(--ink-soft); }
 /* Four harnesses sit 2 × 2, or four across once each card can be 300px wide; never three and one. */
-.harness-scroll { container-type: inline-size; }
 .harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @container (min-width: 1260px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }

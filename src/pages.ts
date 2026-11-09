@@ -4,7 +4,7 @@ import { plural, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
 import { designMode } from './design.ts';
 import { realHomeName } from './renderer.ts';
-import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
+import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, type Kind } from './matrix.ts';
 
 // ---------- Overview ----------
 
@@ -24,7 +24,14 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
+/** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
+export const kindEmpty: Record<Kind, { glyph: Parameters<typeof emptyState>[0]; title: string; body: string }> = {
+  skills: { glyph: 'wand-sparkles', title: 'No skills here yet', body: 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
+  mcp: { glyph: 'plug', title: 'No MCP servers here yet', body: 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
+  agents: { glyph: 'bot', title: 'No agents here yet', body: 'None of your tools has an agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
+};
+const emptyKindPage = (which: Kind, id: string) => nothingHere(kindEmpty[which].glyph, kindEmpty[which].title, kindEmpty[which].body, id);
+const noSkills = (id: string) => emptyKindPage('skills', id);
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
@@ -104,7 +111,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
+  if (!state.home.mcp.servers.length) return emptyKindPage('mcp', 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -112,7 +119,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has an agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'agents-empty');
+  if (!state.home.agents?.servers.length) return emptyKindPage('agents', 'agents-empty');
   return designOverview('agents');
 }
 

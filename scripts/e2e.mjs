@@ -160,7 +160,15 @@ async function harnessFlow() {
   await a.click('#nav-harnesses');
   const list = await a.text('#harnesses-scroll') ?? '';
   check('Harnesses sums up each tool found', ['Claude Code', 'Copilot CLI', 'Codex'].every(name => list.includes(name)) && list.includes('none managed'), list.slice(0, 400));
+  // The card's count and the tab it opens agree; another harness starts with the filter off.
+  const cardDiffer = parseInt(await a.text('#harness-claude-cli-differ-skills') ?? '', 10);
+  await a.click('#harness-claude-cli-differ-skills');
+  same('a card’s different-copies count is the Copies differ count on the tab it opens', [cardDiffer, parseInt(await a.text('.chip-warn .chip-count') ?? '', 10), (await rowKeys(a)).length], [1, 1, 1]);
+  await a.click('#harness-switch-codex-cli');
+  check('another harness opens with every row, not an empty filter', (await a.text('.chip-on')) === 'All' && (await rowKeys(a)).length > 0, await a.text('.chips'));
+  await a.click('#harness-back');
   await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-skills');
   check('a harness opens on its skills, its own column first', (await a.exists('#harness-tab-skills[aria-selected="true"]')) && (await a.text('.ov-head .ov-tool-head') ?? '').includes('Copilot CLI'), await a.text('.ov-head'));
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
