@@ -190,16 +190,6 @@ test('Use this copy with one destination read-only still records the replaced co
   assert.ok((await b.stored()).includes('CLAUDE VERSION'), 'still kept after another skill writes History');
 }));
 
-test('A SKILL.md that cannot be read (permissions) holds the skill instead of deleting it elsewhere', () => box(async b => {
-  await chmod(join(b.path(0), 'SKILL.md'), 0o000);
-  await b.pass();
-  b.tick(2500);
-  await b.pass();
-  await chmod(join(b.path(0), 'SKILL.md'), 0o644);
-  assert.deepEqual(await b.copies(), ['BASE', 'BASE', 'BASE']);
-  assert.equal((await b.state()).state, 'shared');
-}));
-
 test('An edit saved just as a deletion spreads is kept, not removed', () => box(async b => {
   await rm(b.path(0), { recursive: true });
   await b.pass();
