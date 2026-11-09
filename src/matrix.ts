@@ -4,7 +4,7 @@
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, middle, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -175,11 +175,6 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
   cannot: { tone: 'cell-cannot', label: 'Cannot load it' },
 };
 
-
-function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
-    h('span.switch-knob'));
-}
 
 const smallAction = (label: string, id: string, onclick: () => void, extra = '') =>
   h(`button.text-action${extra}`, { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); onclick(); } }, label);

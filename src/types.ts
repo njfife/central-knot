@@ -79,6 +79,8 @@ export interface DesktopApi {
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
+  /** Turns starting at sign-in on or off. Returns the settings as saved, with the system's answer. */
+  setStartAtSignIn(on: boolean): Promise<AppPreferences>;
   /** Main saved a change to the settings, whoever made it (this page, a menu, a dialog). */
   onSettingsChanged(callback: () => void): void;
   /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
@@ -381,9 +383,10 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
+/** Whether Central Knot starts at sign-in, as the system has it now; `reason` says why it is off or can't be changed here. */
+export interface SignIn { on: boolean; available: boolean; reason?: string }
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance }
-/** What Show log file did: `failed` says why it couldn't; else whether the log was selected, and whether anything is logged yet. */
+export interface AppPreferences { appearance: Appearance; signIn: SignIn }
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
 export interface ShownLog { selected: boolean; logged: boolean }
 

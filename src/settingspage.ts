@@ -1,7 +1,7 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
 import { announce, rerender } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { AppPreferences, Appearance } from './types.ts';
 
@@ -78,6 +78,25 @@ function saveFailure(error: string, kept: string): string {
 const save = (row: string, change: () => Promise<AppPreferences>, kept: string) =>
   act(row, async () => { await showNewest(change()); return undefined; }, error => saveFailure(error, kept));
 
+const mac = navigator.userAgent.includes('Mac');
+/** What starting at sign-in does. A reason from main (why it's off, or can't be changed here) takes this line's place. */
+const signInHint = `Opens hidden in the ${mac ? 'menu bar' : 'system tray'} when you sign in, so sync keeps running without the window.`;
+/** The system kept its own answer to a change and gave no reason: where the person can look. */
+const signInUnchanged = `Your system didn’t change this. Check ${mac ? 'Login Items in System Settings' : 'Startup apps in Settings'}.`;
+
+/** Turns starting at sign-in on or off. The row then shows the system's answer, which has the last word. */
+async function chooseSignIn(on: boolean): Promise<void> {
+  const kept = current ? `Start at sign-in is still ${current.signIn.on ? 'on' : 'off'}.` : '';
+  await act('sign-in', async () => {
+    const saved = window.centralKnot.setStartAtSignIn(on);
+    await showNewest(saved);
+    // A reason the system gives (waiting for approval, say) already shows in the row; a change it ignored without one is said here.
+    const { signIn } = await saved;
+    if (signIn.on !== on && !signIn.reason) throw new Error(signInUnchanged);
+    return undefined;
+  }, error => error.endsWith(signInUnchanged) ? signInUnchanged : saveFailure(error, kept));
+}
+
 const appearances: { value: Appearance; label: string; glyph: IconName }[] = [
   { value: 'system', label: 'System', glyph: 'monitor' },
   { value: 'light', label: 'Light', glyph: 'sun' },
@@ -131,8 +150,12 @@ const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
 
 export function settingsPage(): HTMLElement {
   const chosen = current?.appearance;
+  const signIn = current?.signIn;
   return h('div.page', {}, h('div.scroll.settings-scroll', {},
     settingsSection('general', 'General',
+      // Off and unchangeable until main has said, so a click never acts on a guess.
+      settingRow('sign-in', 'Start at sign-in', signIn?.reason ?? signInHint,
+        toggle(!!signIn?.on, 'Start at sign-in', on => void chooseSignIn(on), !signIn?.available, 'start-at-sign-in', { 'aria-describedby': 'setting-sign-in-hint', title: null })),
       settingRow('appearance', 'Appearance', 'System follows your computer’s light or dark setting.',
         // Until the settings arrive, no card is chosen; the cards look as usual (not dimmed) and System holds the Tab stop.
         h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'setting-appearance-title', 'aria-describedby': 'setting-appearance-hint', 'aria-busy': String(!current), onkeydown: moveAppearance },

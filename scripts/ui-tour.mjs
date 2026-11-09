@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { mainProcess } from './main-process.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -27,7 +28,9 @@ async function launch() {
   const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
   const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -43,6 +46,7 @@ async function launch() {
   await settle();
   return {
     run, send, settle,
+    main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
@@ -206,7 +210,7 @@ if (wanted('settings')) {
   await a.click('#nav-settings');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await size(width, height);
-    await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark.`);
+    await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark. Start at sign-in is off and disabled in this dev build, its reason in the hint’s place.`);
     await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
   }
   await size(860, 560); await a.theme('dark');
@@ -240,7 +244,51 @@ if (wanted('settings')) {
   if (railed) await a.click('#sidebar-toggle');
   await shot(a, 'settings-narrow-stacked', 'Emulated: a 573×373 page (860×560 at 150% zoom, which the app does not offer) with the sidebar open, so each row is under 512px: the controls sit under their text, left-aligned.');
   if (railed) await a.click('#sidebar-toggle');
-  await size(860, 560); await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await size(860, 560);
+  // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,
+  // so main is given a stand-in system (its platform, an installed path, and the system's login-item answer) through the
+  // inspector, and the window is refocused so the page reads it again, as it does when someone comes back from System Settings.
+  if (a.main) {
+    // Opened afresh, so the earlier rows' notes are gone.
+    await a.click('#nav-skills'); await a.click('#nav-settings');
+    const main = await a.main();
+    await main.run(`globalThis.real = { platform: process.platform, getPath: electron.app.getPath, getLogin: electron.app.getLoginItemSettings, setLogin: electron.app.setLoginItemSettings, setMenu: electron.Menu.setApplicationMenu }`);
+    const system = async (platform, answer) => {
+      await main.run(`(() => {
+        Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)}, configurable: true });
+        Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true });
+        const exe = ${JSON.stringify(platform === 'darwin' ? '/Applications/Central Knot.app/Contents/MacOS/Central Knot' : 'C:\\Program Files\\Central Knot\\Central Knot.exe')};
+        electron.app.getPath = name => name === 'exe' ? exe : real.getPath.call(electron.app, name);
+        electron.app.getLoginItemSettings = () => ({ ...${JSON.stringify(answer)}, launchItems: (${JSON.stringify(answer.launchItems ?? [])}).map(item => ({ ...item, path: exe })) });
+        electron.app.setLoginItemSettings = () => {};
+        electron.Menu.setApplicationMenu = () => {};
+      })()`);
+      await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+      await a.settle();
+    };
+    await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: true }] });
+    await shot(a, 'settings-sign-in-on', 'Stand-in system: an installed app on Windows, starting at sign-in. The switch is on and the hint says what it does.');
+    await system('darwin', { openAtLogin: true, status: 'requires-approval' });
+    await shot(a, 'settings-sign-in-approval-dark', 'Stand-in system: an installed app on macOS that turned it on, with macOS waiting for approval. The switch shows Off (the system’s answer), and the hint’s place says how to finish.');
+    await a.theme('light'); await shot(a, 'settings-sign-in-approval-light', 'The same, light.'); await a.theme('dark');
+    await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: false }] });
+    await shot(a, 'settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Task Manager’s startup apps. Off, and the row says where it was turned off; the switch can turn it on again.');
+    await system('win32', { openAtLogin: false, launchItems: [] });
+    await a.click('#start-at-sign-in');
+    await shot(a, 'settings-sign-in-unchanged-dark', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says the system didn’t change it and where to look.');
+    await a.theme('light'); await shot(a, 'settings-sign-in-unchanged-light', 'The same, light.'); await a.theme('dark');
+    // Back to this Linux dev run: the row is off and disabled again, with its reason.
+    await main.run(`(() => {
+      Object.defineProperty(process, 'platform', { value: real.platform, configurable: true });
+      delete electron.app.isPackaged;
+      Object.assign(electron.app, { getPath: real.getPath, getLoginItemSettings: real.getLogin, setLoginItemSettings: real.setLogin });
+      electron.Menu.setApplicationMenu = real.setMenu;
+    })()`);
+    await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+    await a.settle();
+    main.close();
+  }
+  await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
   await size(1280, 800);
 }
 

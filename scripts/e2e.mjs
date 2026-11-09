@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { mainProcess } from './main-process.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -108,7 +109,9 @@ async function launch(userData = join(scratch, 'data')) {
   const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
     await wait(200);
@@ -137,6 +140,7 @@ async function launch(userData = join(scratch, 'data')) {
   const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
+    main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
@@ -591,6 +595,37 @@ async function practiceFlow() {
     for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
     same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
+  }
+  // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
+  // in its hint's place. Main refuses a change too, and nothing about it is saved.
+  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+  const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
+  same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
+    await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
+    await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
+    refused.includes(signInReason), 'startAtSignIn' in savedSettings()], [['false', true], signInReason, true, false]);
+  if (a.main) {
+    // Main keeps every menu it builds from here on, and the first-close dialog answers OK without showing.
+    const main = await a.main();
+    await main.run(`(globalThis.ck = { menus: [], dialogs: [] }, ((build, show) => {
+      electron.Menu.buildFromTemplate = template => (ck.menus.push(template), build.call(electron.Menu, template));
+      electron.dialog.showMessageBox = options => (ck.dialogs.push(options), Promise.resolve({ response: 0, checkboxChecked: true }));
+    })(electron.Menu.buildFromTemplate, electron.dialog.showMessageBox))`);
+    // As an installed app on Linux (a stand-in answer from main, put back after): coming back to the window reads it again.
+    await main.run(`Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true })`);
+    await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+    let reread = false;
+    for (let tries = 0; tries < 20 && !reread; tries++) { await wait(100); reread = await a.text('#setting-sign-in-hint') === 'Not available on Linux yet.'; }
+    const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
+    // The first close explains where the app went; on Linux it offers no start at sign-in.
+    await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
+    for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
+    const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
+    await main.run(`(delete electron.app.isPackaged, electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available, and nothing is saved',
+      [reread, menuItem, dialogs, 'startAtSignIn' in savedSettings()],
+      [true, { label: 'Start at sign-in (not available on Linux yet)', visible: false, enabled: false, checked: false }, [false], false]);
+    main.close();
   }
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);

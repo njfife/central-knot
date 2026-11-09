@@ -62,6 +62,12 @@ export const pathText = (text: string, full = text) => {
   return node;
 };
 
+/** An on/off switch. `attrs` adds to its accessible name and description (Settings ties it to its row's hint). */
+export function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string, attrs: Props = {}) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+    h('span.switch-knob'));
+}
+
 export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
   return h('label.tick', {},
     h('input.hidden-input', {
