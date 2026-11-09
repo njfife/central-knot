@@ -1,8 +1,8 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
-// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (every page at 860×560, 1280×800, 1728×1117 and
-// 2560×1440 in dark, and at 860×560 in light) and missing
-// (a home with only Claude Code and Codex, so Copilot CLI and Pi must appear nowhere as options).
+// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
+// sidebar as a rail and open, 1280×800, 1728×1117 and 2560×1440 in dark, and at 860×560 and 2560×1440 in light) and missing
+// (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -74,7 +74,7 @@ async function shot(a, name, caption) {
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
 
-const a = await launch();
+let a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
 
 // ---------- First run, homes and navigation ----------
@@ -231,9 +231,12 @@ async function everyPage(tag) {
     if (files) { await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`); await a.click('#skills-table'); }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
-  const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
-  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the first tool column's menu ${at}.`); await a.click(`#${head}`); }
-  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}.`);
+  // The last column's menu: the one most likely to run past the window's edge.
+  const head = await a.run(`[...document.querySelectorAll('.tool-head-button')].at(-1)?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the last tool column's menu ${at}.`); await a.click(`#${head}`); }
+  const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+  if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
   await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
   const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (agent) { await a.click(`#${agent}`); await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at}.`); await a.click(`#${agent}`); }
@@ -248,25 +251,63 @@ async function everyPage(tag) {
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
 
+/** An edit to Copilot CLI's MCP settings made outside the app, so the MCP page shows its notice and actions. */
+async function editMcpOutside() {
+  edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
+  await a.click('#nav-mcp');
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
+}
+
 if (wanted('sizes')) {
   begin('sizes');
-  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}`); }
-  await a.theme('light'); await a.size(860, 560); await everyPage('860-light');
+  // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
+  cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
+  await a.click('#nav-skills'); await a.click('#header-refresh');
+  await editMcpOutside();
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.size(width, height);
+    await everyPage(`${width}`);
+    // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
+    if (width === 860) { await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle'); }
+  }
+  await a.theme('light');
+  for (const [width, height] of [[860, 560], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
   await a.theme('dark'); await a.size(1280, 800);
 }
 
 // ---------- A home with only some tools ----------
-// The tour's HOME gets the practice copy's Claude Code and Codex folders only. The tour's PATH has no Copilot CLI or Pi,
-// so neither is detected: they must not appear as a column, box, menu entry, filter or choice anywhere.
+// Copilot CLI's column, its header menu entry, its Plugins box and its Instructions card, shown first in the practice copy
+// and then gone in a folder that holds only Claude Code's and Codex's folders. A folder home looks for no installed apps,
+// so this holds on any machine. The app starts again with that folder remembered, as choosing one opens a system dialog.
+/** The views where a tool can appear as an option, each shot once; `tag` says which home. */
+async function toolViews(tag, home) {
+  await a.click('#nav-skills');
+  const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+}
+
 if (wanted('missing')) {
   begin('missing');
+  await a.click('#home-fixture');
+  await toolViews('before', 'The practice copy, with every tool');
+  // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
-  await a.click('#home-actual');
-  await shot(a, 'opened', 'Put only Claude Code and Codex folders in the tour\'s home, then clicked "This Mac\'s home". A tool whose CLI is installed in a standard place (such as /opt/homebrew/bin) is still detected, so it stays.');
-  await everyPage('1280');
+  await a.click('#home-actual'); await a.click('#nav-tools');
+  await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
+  const folder = join(scratch, 'two-tools');
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await toolViews('after', 'A folder with only Claude Code and Codex');
+  await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(860, 560);
-  await a.click('#nav-tools'); await shot(a, '860-tools', 'Tools at 860×560 in the same home.');
-  await a.click('#nav-skills'); await shot(a, '860-skills', 'Skills at 860×560 in the same home.');
+  await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
   await a.size(1280, 800);
 }
 
