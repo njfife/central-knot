@@ -395,7 +395,8 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
 export function startInstructionEdit(file: InstructionFile) {
-  state.outcome = undefined;
+  // A save on another card keeps its Undo there; any other result belongs to the last task.
+  if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
   state.instructionEdit = { tool: file.tool, text: file.text, hash: file.hash, stage: 'edit' };
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
@@ -527,7 +528,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undoable = addedNow.length > 0 && !replacedAny;
-    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
+    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andText(to)}` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });

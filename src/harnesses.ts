@@ -25,7 +25,7 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
   'claude-cli': {
     id: 'claude-cli', name: 'Claude Code', surface: 'CLI', binary: 'claude',
     configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: '.claude', reservedSkills: ['synced'], loadsDotFolders: true,
-    otherReaders: ['Claude desktop Code tab', 'OpenCode', 'VS Code'],
+    otherReaders: ['Claude desktop (Code tab)', 'OpenCode', 'VS Code'],
     nextStep: 'Written. In Claude Code, run /reload-skills or start a new session to use it.',
     skillRoots: config => [{ path: join(config, 'skills'), label: 'Claude Code skills' }],
   },

@@ -219,7 +219,8 @@ function changeBar(bulk = true) {
   const word = (n: number) => (kind === 'mcp' ? (n === 1 ? 'MCP server' : 'MCP servers') : n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
   const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : `Manage all ${ready.length}`, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
-  const choiceNote = bulk && needChoice && !count && firstChoice && view.comparing !== firstChoice.key ? smallAction(needChoice === 1 ? `${firstChoice.name ?? firstChoice.key}: choose which copy…` : `${needChoice} have different copies: choose…`, 'choose-copy', () => { view.comparing = undefined; openRow(firstChoice.key); }) : null;
+  // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
+  const choiceNote: HTMLElement | null = null;
   const label = resumeNeeded() ? 'Resume and apply all' : 'Apply all';
   if (count) return h('div.apply', {}, manageAll,
     h('span.apply-count.apply-quiet', { title: 'Nothing is written until Apply all' }, (() => {
@@ -263,6 +264,13 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
         onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, source); view.comparing = skill.key; rerender(); } },
         cellLook.differs.glyph ? icon(cellLook.differs.glyph, 16) : null));
   }
+  // Queued: the stopped copy is replaced on Apply all, so it shows the replace mark like any copy a choice overwrites.
+  if (source && skill.stopped?.includes(tool) && view.draft.get(skill.key)?.resolve === source && !skill.off.includes(tool)) {
+    const text = `${names[tool]}: its edited copy is replaced by ${names[source]}’s on Apply all (kept in History). Click to cancel.`;
+    return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
+      h(`button.cell-button.${cellLook['will-sync'].tone}.cell-on.cell-pending-edit`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: text, 'aria-label': text, 'data-state': 'replace',
+        onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); rerender(); } }, icon('refresh-cw', 14)));
+  }
   const state = cellOf(skill, tool);
   const on = skill.managed && !skill.off.includes(tool);
   const wasOn = base.managed && !base.off.includes(tool);
@@ -289,7 +297,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
 const toolLine = (skill: SampleSkill, tool: Tool): string => {
   if (skill.stopped?.includes(tool)) {
     const chosen = view.draft.get(skill.key)?.resolve;
-    return chosen && chosen !== 'separate' ? `Its edited copy is replaced by ${names[chosen]}’s on Apply all (kept in History); it then receives updates again.` : 'Edited here, so it stopped updating: this tool gets the agent one-way. Click its amber box to use the source’s copy again.';
+    return chosen && chosen !== 'separate' ? `Its edited copy is replaced by ${names[chosen]}’s on Apply all (kept in History); it then receives updates again.` : 'You edited this copy, so it stopped receiving updates. Click its amber box to use the source’s copy again, or leave it to keep your edit.';
   }
   if (skill.waits?.includes(tool) && skill.managed) return 'Waits for Write to Claude Code: quit Claude Code, then click Write to Claude Code above. Claude Code rewrites its settings file (~/.claude.json) while it runs.';
   if (skill.edited?.length && skill.managed) return skill.edited.includes(tool) ? 'Edited here. It spreads to the other tools when sync runs.' : `Gets the edit from ${andList(skill.edited.map(entry => names[entry]))} when sync runs.`;
@@ -299,7 +307,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
   const version = skill.versions?.[tool];
   if (skill.cannot?.[tool]) return skill.cannot[tool]!;
   const chosen = view.draft.get(skill.key)?.resolve;
-  if (chosen && chosen !== 'separate' && base.copies[tool] !== undefined) return chosen === tool ? 'Its copy will be used by every tool when you Apply all.' : replacedOnApply(skill, tool) ? `Its copy will be replaced with ${names[chosen]}’s when you Apply all. The replaced copy is kept in Central Knot's store.` : `Already has ${names[chosen]}’s copy; nothing changes here.`;
+  if (chosen && chosen !== 'separate' && base.copies[tool] !== undefined) return chosen === tool ? 'Its copy will be used by every tool when you Apply all.' : replacedOnApply(skill, tool) ? `Its copy will be replaced with ${names[chosen]}’s when you Apply all. The replaced copy is kept in Central Knot’s store.` : `Already has ${names[chosen]}’s copy; nothing changes here.`;
   if (state === 'synced' && skill.limits?.[tool] && skill.managed) return `Receives from ${oneWaySource(skill) ? names[oneWaySource(skill)!] : 'the source'}: name, description and prompt only.`;
   if (state === 'synced' && kind === 'agents' && skill.managed && Object.keys(skill.limits ?? {}).length) return skill.kept?.length ? `Edit the agent here. ${andList(skill.kept).replace(/^./, first => first.toUpperCase())} stay in ${names[tool]} only.` : `Edit the agent here. Its ${limitedFields(skill).replace(' or ', ' and ')} settings stay in ${names[tool]}.`;
   if (state === 'synced') return was === 'synced' ? `Synced. Same copy as the other ${toolList().length > 2 ? 'tools' : 'tool'}.` : 'Will be synced when you Apply all. It already has the same copy, so nothing needs copying.';
@@ -325,6 +333,8 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
   const chosen = view.draft.get(skill.key)?.resolve;
   if (!chosen || chosen === 'separate' || chosen === tool || skill.off.includes(tool)) return false;
   const base = committedOf(skill.key);
+  // A stopped one-way copy counts as replaced: it holds the person's edit, though the table draws it like the source.
+  if (kind === 'agents' && base.stopped?.includes(tool)) return true;
   return base.copies[tool] !== undefined && base.copies[tool] !== base.copies[chosen];
 }
 
@@ -352,7 +362,7 @@ function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
   const byLine = new Map<string, Tool[]>();
   for (const tool of toolList()) { const line = toolLine(skill, tool); byLine.set(line, [...(byLine.get(line) ?? []), tool]); }
   return [...byLine].map(([line, tools]) => tools.length === 1 ? toolRow(tools[0])
-    : h('div.details-tool', {}, h('div.details-tool-head', {}, ...tools.map(tool => brandMark(tool, 14)), h('strong', {}, andList(tools.map(tool => names[tool]))), h('span.details-tool-line', {}, line))));
+    : h('div.details-tool', {}, h('div.details-tool-head', {}, h('span.details-tool-label', {}, ...tools.map(tool => brandMark(tool, 14)), h('strong', {}, andList(tools.map(tool => names[tool])))), h('span.details-tool-line', {}, line))));
 }
 
 /** Where each copy lives, folded away: paths matter less than what each tool has. */
@@ -392,7 +402,7 @@ function oneWayNote(skill: SampleSkill) {
   if (!receiving.length || !source) return null;
   const fields = /setting for [^']+'s (.+?), so it gets/.exec(skill.limits![receiving[0]]!)?.[1] ?? 'some settings';
   return h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-muted'),
-    `If you edit it in ${receiving.length === 1 ? names[receiving[0]] : andList(receiving.map(tool => names[tool])).replace(' and ', ' or ')}, that copy keeps your edit and stops updating; its box turns amber (Copies differ). To resume, click that box and choose ${names[source]}’s copy.`);
+    `If you edit it in ${receiving.length === 1 ? names[receiving[0]] : andList(receiving.map(tool => names[tool])).replace(' and ', ' or ')}, that copy keeps your edit and stops updating; its box turns amber. To use ${names[source]}’s copy there again, click that box, then Apply all.`);
 }
 
 /** Everything about one item, opened in place under its row. Differing copies put the choice first. */
@@ -401,14 +411,14 @@ function details(skill: SampleSkill, closable = true) {
   const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Each tool keeps its own copy.' : skill.managed
-    ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source · one-way to ${andList(Object.keys(skill.limits ?? {}).filter(tool => !skill.off.includes(tool as Tool)).map(tool => names[tool as Tool]))}${skill.stopped?.length && !view.draft.get(skill.key)?.resolve ? ` · stopped updating in ${andList(skill.stopped.map(tool => names[tool]))}: click its amber box to use ${names[oneWaySource(skill)!]}’s copy again` : ''}`
+    ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source · one-way to ${andList(Object.keys(skill.limits ?? {}).filter(tool => !skill.off.includes(tool as Tool)).map(tool => names[tool as Tool]))}${skill.stopped?.length && !view.draft.get(skill.key)?.resolve ? ` · ${andList(skill.stopped.map(tool => names[tool]))} stopped updating` : ''}`
       : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)}` : 'Managed · syncing to no tool')
     : differs ? 'Not managed yet. Its copies differ.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   const allSame = skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
   const paused = '';
   const toolRow = (tool: Tool) => h('div.details-tool', {},
-    h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
+    h('div.details-tool-head', {}, h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
       h('span.details-tool-line', {}, toolLine(skill, tool))),
     // One-way limits are said once, under the rows (oneWayNote); other kinds keep a per-tool line.
     kind !== 'agents' && skill.limits?.[tool] && !skill.stopped?.includes(tool) ? h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-warning'), skill.limits[tool]!) : null);
@@ -624,11 +634,11 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
       unavailable.length > 20 ? h('li', {}, `and ${unavailable.length - 20} more`) : null) : null,
     plan.differ.length ? h('div.add-conflict', {},
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}’s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
-        swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: copies differ; uses this copy if included` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
+        swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ${names[from]}’s copy would replace this one` : `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: added from ${names[from]}’s copy; ${andList(plan.differ[0].replaced.map(tool => `${names[tool]}’s`))} is replaced too` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
       toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
-      h('span', {}, `You accept ${names[from]}’s copy: on Apply all, every tool ${plan.differ.length === 1 ? 'it syncs' : `these ${plan.differ.length} sync`} to uses it. The differing ${replaced.length === 1 && plan.differ.length === 1 ? 'copy' : 'copies'} in ${andList(replaced.map(tool => names[tool]))} ${replaced.length === 1 && plan.differ.length === 1 ? 'is' : 'are'} replaced; Central Knot's store keeps ${replaced.length === 1 && plan.differ.length === 1 ? 'it' : 'them'}.`)) : null);
+      h('span', {}, `You accept ${names[from]}’s copy: on Apply all, every tool ${plan.differ.length === 1 ? 'it syncs' : `these ${plan.differ.length} sync`} to uses it. The differing ${replaced.length === 1 && plan.differ.length === 1 ? 'copy' : 'copies'} in ${andList(replaced.map(tool => names[tool]))} ${replaced.length === 1 && plan.differ.length === 1 ? 'is' : 'are'} replaced; Central Knot’s store keeps ${replaced.length === 1 && plan.differ.length === 1 ? 'it' : 'them'}.`)) : null);
 }
 
 /** Option B: a tool's header opens a menu offering to use all its skills in each other tool. It grows by one line per tool. */
@@ -695,9 +705,9 @@ function section(label: string, list: SampleSkill[], after: number) {
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
           : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} become Managed on Apply all`) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
-        managing && view.draft.size ? (() => {
+        managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
-          return waiting.length && after < list.length ? h('span.ov-section-after', {}, '· ', smallAction(waiting.length === 1 ? `${waiting[0].name ?? waiting[0].key} needs a copy choice` : `${waiting.length} need a copy choice`, 'section-choose', () => openRow(waiting[0].key))) : null;
+          return waiting.length && (after < list.length || waiting.length < list.length) ? h('span.ov-section-after', {}, '· ', smallAction(waiting.length === 1 ? `${waiting[0].name ?? waiting[0].key} needs a copy choice` : `${waiting.length} need a copy choice`, 'section-choose', () => openRow(waiting[0].key))) : null;
         })() : null),
       variant === 'a' && target.length ? h('div.ov-section-action', {}, smallAction(managing ? `Manage all ${target.length}` : `Unmanage all ${target.length}`, `group-${managing ? 'manage' : 'unmanage'}`, () => setManaged(target.map(skill => skill.key), managing))) : null),
     sorted.flatMap(row));
@@ -728,7 +738,7 @@ export function outcomeBand(withAction = true): HTMLElement | null {
   }
   return h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text),
     !withAction ? null : outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
-      : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), outcome.undo.label.startsWith('Delete') ? '.text-danger' : undefined)
+      : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
       : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
     h('button.band-dismiss', { type: 'button', id: 'outcome-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.outcome = undefined; rerender(); } }, icon('x', 12)));
 }
@@ -782,12 +792,12 @@ function mcpNotices() {
     const servers = rest.length === 1 ? 'server' : 'servers';
     const what = missing.length === rest.length ? ['Claude Code doesn’t have the ', ...nameList(rest), ` ${servers} yet.`] : [`Claude Code has ${rest.length === 1 ? 'an older copy' : 'older copies'} of the `, ...nameList(rest), ` ${servers}.`];
     bands.push(h('div.band.band-write-now', { role: 'status' }, icon('clock', 14, 'tone-warning'),
-      h('span.band-text', {}, ...what, ' Quit it, then write.'),
+      h('span.band-text', {}, ...what, ' Quit Claude Code first.'),
       button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', attrs: { title: 'Claude Code rewrites ~/.claude.json while it is open, so Central Knot writes it only when Claude Code is closed.' }, onclick: () => void writeClaudeNow(mcp.claudePending) })));
   }
   // Before Apply all: say that Claude Code takes a second step, so it is no surprise after.
   if (kind === 'mcp' && [...view.draft].some(([, draft]) => draft.managed && !draft.off.includes('claude-cli')) && toolList().includes('claude-cli'))
-    bands.push(h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, 'Apply all writes Copilot CLI and Codex. For Claude Code, quit it and then click Write to Claude Code.')));
+    bands.push(h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, 'Apply all writes Copilot CLI and Codex now. After that, Claude Code needs one more step: quit Claude Code, then click Write to Claude Code.')));
   const applied = result;
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
   const problems = (applied?.results ?? []).filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/Copies differ|Write now/.test(result.message)));
@@ -892,19 +902,26 @@ function ghostRows() {
   return h('div', { role: 'rowgroup' }, gone.map(notice => h('div.ov-row.ov-ghost', { role: 'row', 'data-ghost': notice.item },
     h('div.ov-name', { role: 'cell' }, h('span.row-open-spacer'), h('s.ov-name-text', {}, notice.item), h('span.ov-ghost-why', {}, `deleted in ${names[notice.winner] ?? notice.winner}`)),
     h('div.ov-ghost-text', { role: 'cell' }, h('span'),
-      button({ variant: 'link', size: 'small', label: 'Restore', id: `ghost-restore-${notice.history}`, attrs: { title: `Put ${notice.item} back in every tool it synced to` }, onclick: () => void restoreEvent(notice.history) })))));
+      button({ variant: 'link', size: 'small', label: 'Restore in all tools', id: `ghost-restore-${notice.history}`, attrs: { title: `Put ${notice.item} back in every tool it synced to` }, onclick: () => void restoreEvent(notice.history) })))));
 }
 
 /** Notices stay until read: each read brings only what is new, so the page keeps earlier ones until × or Undo, or another home. */
-const keptNotices = new Map<Kind, Map<string, SyncNotice>>();
-function toldNotices(): SyncNotice[] {
+type Told = SyncNotice & { once?: boolean };
+const keptNotices = new Map<Kind, Map<string, Told>>();
+const keptSync = new Map<Kind, boolean>();
+function toldNotices(): Told[] {
   if (!state.home) return [];
   const fresh = kind === 'skills' ? [...state.home.manage.notices, ...(state.applied?.notices ?? [])] : [...(listView()?.notices ?? []), ...((kind === 'agents' ? state.agentsResult : state.mcpResult)?.notices ?? [])];
   let kept = keptNotices.get(kind);
   if (!kept) keptNotices.set(kind, kept = new Map());
-  for (const notice of fresh) kept.set(notice.history || notice.item, notice);
+  // A newer event, or turning sync on or off, retires what was said before: it stays in History.
+  const news = fresh.filter(notice => !kept!.has(notice.history || notice.item));
+  if (news.length || keptSync.get(kind) !== state.home.syncOn) for (const key of [...kept.keys()]) if (!fresh.some(notice => (notice.history || notice.item) === key)) kept.delete(key);
+  keptSync.set(kind, state.home.syncOn);
+  // The wording is fixed when the notice first shows: a Sync once stays "Synced once" after sync is turned on.
+  for (const notice of fresh) { const key = notice.history || notice.item; if (!kept.has(key)) kept.set(key, { ...notice, once: !state.home.syncOn }); }
   for (const key of [...kept.keys()]) if (state.dismissed.has(key)) kept.delete(key);
-  return [...kept.values()];
+  return [...kept.values()].reverse();
 }
 
 function visibleNotices() {
@@ -914,7 +931,8 @@ function visibleNotices() {
 }
 
 /** Notices stay until read; a quiet × clears them. */
-const dismissNotices = (list: SyncNotice[]) => h('button.band-dismiss', { type: 'button', id: 'notices-dismiss', 'aria-label': 'Dismiss these notices', title: 'Dismiss', onclick: () => { for (const notice of list) state.dismissed.add(notice.history || notice.item); rerender(); } }, icon('x', 12));
+// Each notice has its own ×; with three or more, one more control dismisses them all.
+const dismissNotices = (list: SyncNotice[]) => list.length < 3 ? null : smallAction('Dismiss all', 'notices-dismiss', () => { for (const notice of list) state.dismissed.add(notice.history || notice.item); rerender(); });
 
 /** When Central Knot first showed each notice, so a notice left up says how old it is. */
 const firstShown = new Map<string, number>();
@@ -931,7 +949,7 @@ const age = (key: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ago`;
 };
 
-function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
+function syncNotice(notice: Told, writeClaude?: () => void) {
   const who = (tool: string) => names[tool] ?? tool;
   const list = (tools: string[]) => andList(tools.map(who));
   const order = notice.orderProved ? '' : ' The order could not be proved, so the fixed tool order decided.';
@@ -940,7 +958,7 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const scope = involved.length >= toolList().length ? 'in all tools' : `in ${list(involved)}`;
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
   const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: `Undo ${notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
-  const offNow = !!state.home && !state.home.syncOn;
+  const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
   const [glyph, tone, text, action] = ({
     edit: ['check', 'tone-success', offNow ? `${notice.item} copied from ${who(notice.winner)} to ${list(notice.losers)}.` : `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
     conflict: ['diff', 'tone-warning', `${notice.item}: ${who(notice.winner)}’s edit won over ${list(notice.losers)}’s.${order}`, undo(`Use ${list(notice.losers)}’s version of ${notice.item} instead, in every tool it syncs to`)],
@@ -953,9 +971,11 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const noticeKey = notice.history || `${notice.kind}:${notice.item}`;
   state.seenNotices.add(notice.history || notice.item);
   if (rowKey && !firstShown.has(noticeKey)) flashed.set(rowKey, Date.now());
-  const shownRow = !notice.item || !rowKey || view.comparing === rowKey ? null
-    : h('button.text-action.notice-open', { type: 'button', id: `notice-open-${notice.history || notice.item}`, onclick: (event: Event) => { event.stopPropagation(); const key = committedList().find(skill => skill.name === notice.item || skill.key === notice.item.toLowerCase())!.key; view.comparing = undefined; openRow(key); } }, 'Details');
-  const said = notice.item && text.startsWith(notice.item) ? [h('strong.item-name', {}, notice.item), text.slice(notice.item.length)] : [text];
+  // The item's name opens its row: one click from "what changed" to the item, with no separate Details link.
+  const name = rowKey && view.comparing !== rowKey
+    ? h('button.item-name.notice-name', { type: 'button', id: `notice-open-${notice.history || notice.item}`, title: `Show ${notice.item}’s details`, onclick: (event: Event) => { event.stopPropagation(); view.comparing = undefined; openRow(rowKey); } }, notice.item)
+    : h('strong.item-name', {}, notice.item);
+  const said = notice.item && text.startsWith(notice.item) ? [name, text.slice(notice.item.length)] : [text];
   // With sync off, a notice can only come from Sync now: say sync stays off, and offer to turn it on.
   const off = state.home && !state.home.syncOn && notice.kind !== 'reset';
   const history = !off && (notice.kind === 'deleted' || notice.kind === 'edit' || notice.kind === 'conflict') ? smallAction('History', `notice-history-${notice.history}`, () => showPage('history')) : null;
@@ -963,16 +983,19 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const quiet = off;
   // Waiting for Claude Code: the sentence takes the full width, and the actions sit on their own line, Write first.
   return h(`p.sync-notice${writeClaude ? '.notice-stacked' : ''}`, { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
-    h('span.notice-text', {}, off && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy. Quit it, then write.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
+    h('span.notice-text', {}, offNow && notice.kind !== 'deleted' && notice.kind !== 'reset' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy. Quit Claude Code first.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     writeClaude ? (() => {
       const row = committedList().find(skill => skill.name === notice.item || skill.key === notice.item);
       const before = row?.versions?.['claude-cli']?.text, after = row?.versions?.[notice.winner as Tool]?.text;
-      return before && after && before !== after ? h('span.notice-change', {}, h('span.mono', {}, before), ' → ', h('span.mono', {}, after)) : null;
+      if (!before || !after || before === after) return null;
+      const bare = (summary: string) => summary.replace(/^[^·]+·\s*/, '');
+      return h('span.notice-change', {}, h('span.notice-change-row', {}, h('span.tone-faint', {}, 'Claude Code has '), h('code', {}, bare(before))), h('span.notice-change-row', {}, h('span.tone-faint', {}, 'Write changes it to '), h('code.notice-change-new', {}, bare(after))));
     })() : null,
     h('span.notice-actions', {},
       writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
-      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : shownRow),
+      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : null),
+    h('button.band-dismiss.notice-dismiss', { type: 'button', id: `notice-dismiss-${notice.history || notice.item}`, 'aria-label': `Dismiss this notice about ${notice.item || 'the reset'}`, title: 'Dismiss', onclick: (event: Event) => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); } }, icon('x', 12)),
     notice.history ? changePanel(notice.history) : null);
 }
 

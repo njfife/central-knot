@@ -69,14 +69,17 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
     h('div.details-head', {}, plugin.description && plugin.description.length > 70 ? h('p.details-description', {}, plugin.description) : null,
       h('p.details-status', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : h('span', {}, `Contains ${summary}`, ...(skillList ? [': ', ...skillNames.slice(0, 2).flatMap((skill, index) => [index ? ', ' : '', h('code.plugin-name', {}, skill)]), skillNames.length > 2 ? ` +${skillNames.length - 2} more` : ''] : [])))),
     // One caption for the grid: what each tool does with it once installed (a card already installed says so on its heading).
-    parts ? h('p.plugin-grid-caption', {}, 'What each tool does with it, once installed:') : null,
+    parts ? h('p.plugin-grid-caption', {}, onlyNaming(plugin, skillNames) ? 'Skill name in each tool, once installed:' : 'What each tool does with it, once installed:') : null,
     parts ? outcomesBlock(view, plugin, entry, skillNames, firstSkill) : null);
 }
+
+/** A plugin whose only outcome per tool is its one skill's name: the caption says so, and rows show just the name. */
+const onlyNaming = (plugin: PluginView, skillNames: string[]) => skillNames.length === 1 && Object.values(plugin.outcomes).every(list => (list ?? []).length === 1 && list![0].component === 'Skills' && list![0].result === 'works');
 
 /** What installing does in each tool. Tools that behave the same share one line, so the one real difference stands out. */
 function outcomesBlock(view: PluginsView, plugin: PluginView, entry: MarketplaceView, skillNames: string[], firstSkill: string | undefined) {
   const line = (outcome: Outcome) => outcome.component === 'Skills' && skillNames.length === 1
-    ? ['Skill name: ', h('code.plugin-name', { title: /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill }, /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill)]
+    ? [onlyNaming(plugin, skillNames) ? '' : 'Skill name: ', h('code.plugin-name', { title: /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill }, /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill)]
     : namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill);
   // A naming fact needs no tick; ticks and marks stay for outcomes that are limited, ignored or fail.
   const mark = (outcome: Outcome) => outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]);
@@ -202,7 +205,7 @@ function reports() {
     h('div.plugin-report-lines', {}, result.reports.map(report => h('p', {},
       icon(report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'check' : report.outcome === 'not-known' ? 'circle-question-mark' : 'triangle-alert', 14, report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'tone-success' : 'tone-warning'),
       state.pluginLast ? h('strong.item-name', {}, `${state.pluginLast.plugin} · `) : null, h('strong', {}, `${names[report.tool]}: `), report.message, reverse(report)))),
-    changed.length || installedHere.length > 1 ? h('p.plugin-report-files', {}, changed.length ? `Changed by the tools’ own commands: ${[...new Set(changed)].map(path => shownPath(path)).join(', ')}. ` : '',
+    changed.length || installedHere.length > 1 ? h('p.plugin-report-files', {}, changed.length ? h('span', { title: [...new Set(changed)].map(path => shownPath(path)).join('\n') }, `Done through each tool’s own command (${[...new Set(changed)].length} ${[...new Set(changed)].length === 1 ? 'file' : 'files'} changed). `) : '',
       // One click installed it in several tools: one way back, through the same confirm.
       installedHere.length > 1 && state.pluginLast ? button({ variant: 'outline', size: 'small', label: `Uninstall from all ${installedHere.length}`, id: 'report-uninstall-all', disabled: !!state.busy, onclick: () => {
         state.pluginConfirm = 'all'; state.pluginConfirmAll = installedHere;
@@ -238,6 +241,7 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Type owner/repo or a Git URL in the box above, or choose a folder; adding one installs nothing. Marketplaces you added in Claude Code, Copilot CLI or Codex appear here automatically.',
-          button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }))));
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Add one in the box above, or choose a folder. Adding installs nothing.',
+          h('div.empty-actions', {}, button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }),
+            h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.')))));
 }

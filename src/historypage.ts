@@ -82,7 +82,7 @@ function actions(event: HistoryEvent, action?: string) {
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
-  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'Edits that sync between tools, and copies Apply all adds or replaces, show up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
+  if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   // The row's own button redoes; the band only confirms.
   // The new top row says what happened (and the announcement reads it out); a band repeating it would say it twice.
@@ -90,7 +90,9 @@ export function historyPage() {
   return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
-    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}`, { 'data-kind': event.kind },
+    // The newest row, made by a click just now, gets the same brief highlight the tables use.
+    const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
+    return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
       event.undoneBy ? h('span.history-done', {}, 'Undone') : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),

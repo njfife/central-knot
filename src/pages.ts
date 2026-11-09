@@ -11,7 +11,7 @@ import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } f
 const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
 /** Nothing of this kind in this home: what was looked for, and somewhere useful to go next. */
 /** The preview-only reason without its own "Preview only:" prefix or final stop, to sit inside a sentence. */
-export const previewReason = (reason?: string) => (reason ?? 'nothing is written here').replace(/^Preview only:\s*/i, '').replace(/\.\s*$/, '');
+export const previewReason = (reason?: string) => (reason ?? 'nothing is written here').replace(/^Preview only:\s*/i, '').replace(/\s*You can look around; nothing is written\.?\s*$/, '').replace(/\.\s*$/, '');
 
 /** Bands an empty page still needs: what the last action did, and why nothing can be written here. */
 const emptyBands = () => {

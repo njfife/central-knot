@@ -89,7 +89,7 @@ function editor(file: InstructionFile) {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== file.text) { event.preventDefault(); edit.stage = 'review'; rerender(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
-  area.rows = Math.min(30, Math.max(8, edit.text.split('\n').length + 3));
+  area.rows = edit.text ? Math.min(30, Math.max(8, edit.text.split('\n').length + 3)) : 6;
   if (!file.text) area.classList.add('ins-text-new');
   const dirty = () => edit.text !== file.text;
   const actions = edit.confirmDiscard
@@ -109,6 +109,9 @@ function editor(file: InstructionFile) {
 /** Cards whose whole file is shown, for reading without editing. */
 const open = new Set<string>();
 
+/** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
+const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
+
 function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
@@ -120,7 +123,8 @@ function card(file: InstructionFile) {
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
-      !editing && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text) ? h('span.ins-missing.ins-saved', {}, 'Saved just now') : null,
+      savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved just now'),
+        state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === file.text }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
@@ -146,11 +150,11 @@ function card(file: InstructionFile) {
 export function instructionsPage() {
   const files = state.instructions;
   if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading instruction files…' : 'Instruction files could not be read.')));
-  const done = outcomeBand();
+  const done = state.outcome && /^Saved /.test(state.outcome.text) ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. You review every change before saving, and earlier versions are kept. Automatic sync does not touch these files.'),
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept. Automatic sync leaves these files alone.'),
       files.length ? files.map(card) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }
