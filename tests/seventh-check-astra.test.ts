@@ -75,7 +75,7 @@ test('R4 symlink target recovers after death in the checked write', () => box(as
   const script = `import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {applyMcp} from './src/mcp.ts';
     const original=fs.link;fs.link=async(from,to)=>{if(String(to)===process.env.CK_TARGET)process.exit(73);return original(from,to);};syncBuiltinESMExports();
     const context=JSON.parse(process.env.CK_CONTEXT);context.read=async()=>[];await applyMcp(context,['copilot-cli','codex-cli'],[]);`;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: target, CK_CONTEXT: JSON.stringify(context) }, encoding: 'utf8' });
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: process.cwd(), env: { ...process.env, CK_TARGET: await fs.realpath(target), CK_CONTEXT: JSON.stringify(context) }, encoding: 'utf8' });
   assert.equal(child.status, 73, child.stderr);
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
