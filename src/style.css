@@ -1073,3 +1073,13 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .history-row > .change-panel { margin-left: 0; }
 .ins-fold-static { display: block; color: var(--ink-faint); }
 .see-change { color: var(--ink-soft); }
+
+/* Round 11: file names keep their case; Files view top gap; agent detail rows share a text column; pending source dot neutral */
+.eyebrow-file { text-transform: none; letter-spacing: 0; }
+.detail-scroll > .details { padding-top: 4px; }
+.detail-scroll .details-where-row { margin-right: 18px; }
+.details-tool-head > strong { flex: none; min-width: 150px; }
+.cell-pending-edit .cell-source-mark, .cell-will-sync .cell-source-mark, .ov-row.changed .cell-source-mark { background: var(--ink-faint); }
+.see-change { color: var(--accent-ink); }
+
+.ov-ghost-text { justify-content: space-between; padding-right: 16px; }

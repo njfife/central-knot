@@ -143,7 +143,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
   const firstApply = !readFlag('ck-applied-once');
   writeFlag('ck-applied-once');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' From now on, an edit in one tool spreads to the others.' : ''), item: singleName,
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' From now on, an edit in one tool spreads to the others.' : ''), item: singleName, items: newItems,
     act: addedNow.length ? addedUndo(addedNow) : chosenNow.length ? choiceUndo(chosenNow) : undefined };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
@@ -414,15 +414,15 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => bus
 function addedUndo(addedNow: HistoryEvent[]) {
   const copies = addedNow.reduce((sum, event) => sum + event.losers.length, 0);
   const items = addedNow.length === 1 ? addedNow[0].item : addedNow.length === 2 ? 'both' : `all ${addedNow.length}`;
-  return { label: `Undo: remove ${copies === 1 ? 'the new copy' : `${copies} new copies`} and stop managing`, id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'copy' : 'copies'} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
+  return { label: 'Undo Apply all', id: 'outcome-undo-added', title: `Removes the ${copies === 1 ? 'new copy' : `${copies} new copies`} Apply all added (only while unchanged) and stops managing ${items}. Your original copies stay.`, run: () => void undoAdded(addedNow.map(event => event.id)) };
 }
 
 /** The Undo a copy choice offers: it names the copies it puts back. */
 function choiceUndo(chosenNow: HistoryEvent[]) {
   const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
   const back = [...new Set(chosenNow.flatMap(event => event.losers.map(loser => toolNames[loser.tool])))];
-  return { label: back.length === 1 ? `Undo: put back ${back[0]}’s copy` : 'Undo: put back the replaced copies', id: 'outcome-undo-choice',
-    title: 'Puts each replaced copy back in its own tool, removes copies this choice added, and stops managing it again. Nothing is undone if a copy changed since.',
+  return { label: 'Undo choice', id: 'outcome-undo-choice',
+    title: `Puts ${back.length === 1 ? `${back[0]}’s copy` : 'each replaced copy'} back, removes copies this choice added, and stops managing it again. Nothing is undone if a copy changed since.`,
     run: () => void undoChoices(chosenNow.map(event => event.id)) };
 }
 

@@ -279,7 +279,7 @@ async function practiceFlow() {
   // Details open under a row.
   await a.click('#open-release-notes');
   check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in Claude Code, Copilot CLI and Codex'), await a.text('.details'));
-  await a.click('#close-release-notes');
+  await a.click('#open-release-notes');
 
   // Choose which copy to use.
   await a.click('#decide-review');
@@ -446,7 +446,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', /Only Claude Code keeps tools \(.*model \(/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the details name the limits', /Tools \(.*model \(.*stay in Claude Code only/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
   await a.click('#nav-skills');
 
@@ -531,7 +531,7 @@ async function realHomeFlow() {
   const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);
   check('a very long name stays on screen at 960', fits.page <= fits.window, fits);
   await a.send('Emulation.clearDeviceMetricsOverride');
-  await a.click(`[id="close-very-long-${'n'.repeat(150)}"]`);
+  await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
   await a.shot('real-overview');
   if (!canWriteRealHome) {
     same('Apply all is off here', await a.run(`(() => { document.querySelector('#manage-all').click(); return document.querySelector('#apply').disabled; })()`), true);
