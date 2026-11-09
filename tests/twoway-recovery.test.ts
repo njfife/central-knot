@@ -141,6 +141,7 @@ async function failedDeletion(b: Awaited<ReturnType<typeof setup>>) {
   b.tick(2500);
   await b.pass();
   assert.equal((await b.state()).copies.find(copy => copy.harness === 'copilot-cli')?.status, 'removing');
+  assert.equal(await b.read(2), null, 'the others still go');
 }
 
 test('An unfinished deletion never removes a copy installed again in a folder made again', () => box(async b => {
