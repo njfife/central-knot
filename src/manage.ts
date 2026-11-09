@@ -118,12 +118,12 @@ function blocksFor(entry: Gathered, source: HarnessId): { tool: HarnessId; reaso
 }
 
 /** Why a choice cannot be carried out for the tools it syncs to, if it cannot. */
-function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): string | undefined {
+function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): Pick<DestinationResult, 'message' | 'chooseAgain'> | undefined {
   const copy = entry.facts.copies[use];
-  if (!copy) return `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`;
-  if (hash !== undefined && copy.hash !== hash) return `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`;
+  if (!copy) return { message: `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`, chooseAgain: true };
+  if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
   const block = entry.facts.choiceBlocks[use]?.find(entry => syncing.includes(entry.tool));
-  return block ? `${block.reason} Nothing was changed.` : undefined;
+  return block ? { message: `${block.reason} Nothing was changed.` } : undefined;
 }
 
 const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[tool], context.home, context.overrides?.[tool]);
@@ -387,7 +387,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
       const problem = choiceProblem(entry, change.use, change.useHash, syncing);
-      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', message: problem }); continue; }
+      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', ...problem }); continue; }
     }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
@@ -442,7 +442,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (item.use) {
       // A choice recorded before a crash is finished only if it still holds.
       const problem = choiceProblem(entry, item.use.tool, item.use.hash, syncing.filter(tool => !entry.facts.cannot[tool]));
-      if (problem) { results.push({ item: name, outcome: 'held', message: problem }); delete item.use; continue; }
+      if (problem) { results.push({ item: name, outcome: 'held', ...problem }); delete item.use; continue; }
     }
     // ---- Two-way: once a skill has a synced baseline, edits and deletions spread on their own (8b) ----
     // A copy is tracked only in its tool's current folders: one left behind by a moved CLAUDE_CONFIG_DIR, COPILOT_HOME or CODEX_HOME
@@ -629,7 +629,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           inSync.add(location.copy.directory);
           replaced.push(location.tool);
           losers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
         }
       } else if ((hashes.size > 1 || !hashes.has(item.hash)) && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))
         && (active.some(location => location.copy.hash === item.hash) || await exists(storedRevision(context, key, item.hash)))) {
@@ -655,7 +655,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Caught up. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
         }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
@@ -683,7 +683,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           writes++;
           inSync.add(location.copy.directory);
           chosenLosers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
         }
       } else for (const location of active) inSync.add(location.copy.directory);
       delete item.use;

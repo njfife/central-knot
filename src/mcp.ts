@@ -348,7 +348,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const slot = byName.get(change.key);
     if (!slot) continue;
     // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
-    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.` }); continue; }
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true }); continue; }
     const item: McpRecordItem = record.items[change.key] ?? { state: 'dont-share', off: [], hash: '', copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
@@ -468,7 +468,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       else if (newlyManaged.has(name)) addedHere.push({ tool, hash: source.hash });
       if (tool === 'claude-cli') claudeWritten.push({ name, before: claudeBefore, after: source.hash });
-      results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
+      results.push({ item: name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
     if (addedHere.length) event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash });
