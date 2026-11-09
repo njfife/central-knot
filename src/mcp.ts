@@ -302,11 +302,11 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
  */
-export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
+export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; resume?: boolean } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !options.resume)) return { stopped: gate.reason, results: [], writes: 0 };
   // The sync record is the one place ownership lives: make it now if this is the first thing Central Knot manages.
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };

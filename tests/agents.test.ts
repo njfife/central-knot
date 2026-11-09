@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
@@ -276,5 +276,27 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Newer\./);
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+  } finally { await box.cleanup(); }
+});
+
+test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const generation = (await readRecord(box.home)).record!.generation;
+    await rm(join(box.base, 'settings.json'));
+    await writeFile(join(box.home, '.claude/agents/writer.md'), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const blocked = await applyAgents(box.context, tools, [{ key: 'writer', managed: true, off: [] }]);
+    assert.match(blocked.stopped ?? '', /no memory/);
+    assert.equal(blocked.writes, 0);
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const resumed = await applyAgents(box.context, tools, [{ key: 'writer', managed: true, off: [] }], { resume: true });
+    assert.equal(resumed.stopped, undefined);
+    assert.equal(resumed.writes, 2, JSON.stringify(resumed.results));
+    assert.match(await read(box.home, '.copilot/agents/writer.agent.md'), /You write docs\./);
+    assert.equal((await readRecord(box.home)).record!.generation, generation);
+    assert.equal((await syncGate(box.context)).state, 'ready');
   } finally { await box.cleanup(); }
 });
