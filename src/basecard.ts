@@ -5,7 +5,7 @@ import { applyBaseChange, baseDraftChanged, loadBaseVersion, ownText, rerender, 
 import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, pathText } from './dom.ts';
-import { changeCounts, diffView, discardConfirm, keys, versionsList } from './instructionspage.ts';
+import { changeCounts, diffView, discardConfirm, keys, previewBlock, versionsList } from './instructionspage.ts';
 import { brandMark } from './matrix.ts';
 import { andList, fileName, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -205,7 +205,6 @@ export function baseCard(files: InstructionFile[]) {
   const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
   const others = files.filter(file => !file.base?.chosen);
   const edited = chosen.filter(file => file.base!.state === 'edited');
-  const preview = base.text.replace(/\n$/, '').split('\n');
   const hasBase = !!base.text.trim();
   const starts = files.filter(file => ownText(file).trim());
 
@@ -236,8 +235,7 @@ export function baseCard(files: InstructionFile[]) {
           others.length && chosen.length ? h('p.ins-empty', {}, `Not added to ${andList(others.map(file => names[file.tool]))}.`) : null),
         h('div.base-column', {},
           edited.length ? h('p.base-subhead', {}, 'The base instructions') : null,
-          h('pre.ins-preview', { tabindex: '0', 'aria-label': 'Base instructions' }, shown.has('base-all') ? preview.join('\n') : preview.slice(0, 14).join('\n')),
-          preview.length > 14 ? button({ variant: 'link', size: 'micro', label: shown.has('base-all') ? 'Show less' : `Show all ${preview.length} lines`, id: 'base-more', onclick: () => toggle('base-all') }) : null)),
+          previewBlock(base.text, 'base', 'Base instructions', 'base-more'))),
       h('div.ins-actions', {},
         button({ variant: 'outline', size: 'small', label: 'Edit text or tools', id: 'base-edit', disabled: locked, attrs: lockAttrs, onclick: () => startBaseEdit({ text: base.text, tools: base.tools }) }),
         behind.length ? button({ variant: 'outline', size: 'small', label: `Update ${behind.length === 1 ? fileName(behind[0].path) : `${behind.length} files`}…`, id: 'base-update', disabled: locked, attrs: lockAttrs ?? { title: 'Review writing the base instructions as they are now into these files' },

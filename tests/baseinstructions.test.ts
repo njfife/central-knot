@@ -57,6 +57,15 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     assert.ok(stopped.changed && !(await readFile(codex, 'utf8')).includes('Other.') && (await baseView(box.context)).text === 'Be brief.\n');
     await writeFile(claude, (await readFile(claude, 'utf8')).replace('Typed after the review.\n', ''));
 
+    // base.md edited outside Central Knot: a save reviewed before that writes nothing, and an Undo of an older save is refused.
+    const baseFile = join(box.home, '.central-knot/instructions/base.md');
+    const reviewedHash = (await baseView(box.context)).hash;
+    await writeFile(baseFile, 'Edited in base.md.\n');
+    assert.ok((await applyBase(box.context, await box.snapshots(), { text: 'Other.\n', expected: reviewedHash, seen: await box.seen(), tools })).changed);
+    assert.equal((await undoBase(box.context, await box.snapshots(), first.undo!)).written.length, 0);
+    assert.equal(await readFile(baseFile, 'utf8'), 'Edited in base.md.\n');
+    await writeFile(baseFile, 'Be brief.\n');
+
     // An edit inside Codex's copy: the next base edit leaves Codex alone and says so.
     await writeFile(codex, (await readFile(codex, 'utf8')).replace('Be brief.', 'Be very brief.'));
     let files = await instructionsView(box.context, await box.snapshots());

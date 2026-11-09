@@ -425,7 +425,12 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     state.outcome = undefined;
     announce(result.stopped);
     // Changed since the review: the draft stays, now against the base and files as they are, and the review is shown again.
-    if (state.baseEdit && result.changed) Object.assign(state.baseEdit, { hash: state.base?.hash ?? '', stage: 'review', conflict: result.stopped });
+    if (state.baseEdit && result.changed) {
+      Object.assign(state.baseEdit, { hash: state.base?.hash ?? '', stage: 'review', conflict: result.stopped });
+      // Putting the base back or updating files writes the base as it is: never an older text the base has since moved on from.
+      const kind = state.baseEdit.source?.kind;
+      if (state.base && (kind === 'putBack' || kind === 'update')) Object.assign(state.baseEdit, { text: state.base.text, tools: state.base.tools });
+    }
     return;
   }
   state.baseEdit = undefined;

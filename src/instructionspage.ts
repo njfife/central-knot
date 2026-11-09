@@ -154,6 +154,14 @@ function editor(file: InstructionFile) {
 /** Cards whose whole file is shown, for reading without editing. */
 const open = new Set<string>();
 
+/** A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). */
+export function previewBlock(text: string, key: string, label: string, moreId: string) {
+  const lines = text.replace(/\n$/, '').split('\n');
+  const all = open.has(key);
+  return [h('pre.ins-preview', { tabindex: '0', 'aria-label': label }, (all ? lines : lines.slice(0, 14)).join('\n')),
+    lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
+}
+
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
 const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
 
@@ -165,7 +173,6 @@ function card(file: InstructionFile) {
   const readOnly = !!state.home && !state.home.manage.access.allowed;
   const lockedWhy = readOnly ? 'Saving is off in this home.' : baseDirty() ? 'Finish or cancel the base instructions edit first.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const own = ownText(file);
-  const preview = own.replace(/\n$/, '').split('\n');
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
@@ -176,8 +183,7 @@ function card(file: InstructionFile) {
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
     editing ? [editor(file), baseStrip(file)]
       : h('div.ins-body', {},
-        file.exists && own.trim() ? [h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, open.has(file.tool) ? preview.join('\n') : preview.slice(0, 14).join('\n')),
-          preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
+        file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
           : file.base?.copy !== undefined ? h('p.ins-empty', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         baseStrip(file),

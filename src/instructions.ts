@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, plainError, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
@@ -163,6 +163,10 @@ async function storeBaseText(home: string, text: string, seen: string | undefine
   await writeFileChecked(basePath(home), text, seen);
 }
 
+/** A base.md write that failed: changed meanwhile (the review is shown again), or could not be written at all. */
+const storeFailed = (error: unknown, changed: BaseResult): BaseResult => (['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error)) ? changed
+  : { stopped: `The base instructions could not be saved: ${plainError(error)} Nothing was changed.`, written: [], left: [] });
+
 /**
  * Sets the base instructions and which tools get them, then updates exactly the files the review showed (`request.seen`), each
  * only if it still holds what the review saw: its block is added or replaced, or taken out for a tool taken off the list. Each
@@ -184,7 +188,7 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     if (hashOf(current) !== request.seen[snapshot.harness]) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
     files.push({ tool: snapshot.harness, path, current });
   }
-  try { await storeBaseText(context.home, request.text, stored.raw); } catch { return baseChanged; }
+  try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailed(error, baseChanged); }
   const leftPlain: BaseList['leftPlain'] = Object.fromEntries(Object.entries(stored.list.leftPlain).filter(([tool]) => !tools.includes(tool as HarnessId)));
   const result: BaseResult = { written: [], left: [], undo: { text: stored.text, tools: stored.list.tools, leftPlain: stored.list.leftPlain, baseHash: sha(request.text), files: [] } };
   for (const { tool, path, current } of files) {
@@ -215,7 +219,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const baseChanged = { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
   const seenBase = await readText(basePath(context.home));
   if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
-  try { await storeBaseText(context.home, undo.text, seenBase); } catch { return baseChanged; }
+  try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailed(error, baseChanged); }
   await writeBaseList(context.home, { tools: undo.tools, leftPlain: undo.leftPlain });
   const result: BaseResult = { written: [], left: [] };
   for (const file of undo.files) {
