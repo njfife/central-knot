@@ -8,6 +8,8 @@ const packages = await packager({
   dir: '.', out: 'release', name: 'Central Knot', executableName: 'Central Knot',
   appBundleId: 'com.centralknot.firstlook', appVersion: '0.3.0', platform: 'darwin', arch: 'arm64',
   asar: true, overwrite: true, prune: true,
+  // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
+  ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
   ignore: [/^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/, /^\/release(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/],
 });
 const bundle = `${packages[0]}/Central Knot.app`;
