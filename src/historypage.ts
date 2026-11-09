@@ -5,7 +5,7 @@ import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
-const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 const who = (tool?: string) => (tool ? names[tool] ?? tool : 'Central Knot');
 const list = (tools: string[]) => {
   const all = [...new Set(tools)].map(who);

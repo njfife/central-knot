@@ -5,7 +5,7 @@ import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
 
-const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** A line diff, small and exact: unchanged, removed and added lines in order (longest common subsequence). */

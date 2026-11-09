@@ -1512,3 +1512,20 @@ test('A skill already managed gets no added event when a background pass copies 
     assert.equal((await readHistory(box.home)).filter(event => event.kind === 'added' && event.key === 'steady').length, 1, 'only the first Apply all told it');
   } finally { await box.cleanup(); }
 });
+
+test('Pi: a managed skill reaches Pi’s own skills folder; one Pi would not load is held with the reason', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const withPi: HarnessId[] = ['claude-cli', 'pi-cli'];
+    const piCtx = ctx(box, { read: () => Promise.all(withPi.map(harness => discover({ home: box.home, mode: 'custom', harness }))) });
+    await skill(box.home, CLAUDE, 'good');
+    await skill(box.home, CLAUDE, 'bare', '---\nname: bare\n---\n\nNo description.\n');
+    const result = await applyChanges(piCtx, [manage('good'), manage('bare')]);
+    assert.equal(await readFile(join(box.home, '.pi/agent/skills/good/SKILL.md'), 'utf8'), text('good'));
+    assert.equal(await exists(join(box.home, '.pi/agent/skills/bare')), false);
+    assert.ok(result.results.every(entry => !(entry.item === 'bare' && entry.outcome === 'written')));
+    const bare = (await manageView(piCtx)).skills.find(item => item.key === 'bare')!;
+    assert.match(bare.cannot['pi-cli'] ?? '', /Pi will not load it: it has no description text/);
+  } finally { await box.cleanup(); }
+});

@@ -91,6 +91,15 @@ export function codexProblem(content: string, folder: string): string | undefine
   return undefined;
 }
 
+/** What Pi 1.5.0 drops silently (CD §4): no frontmatter, unreadable YAML, or no description. A missing name uses the folder. */
+export function piProblem(content: string): string | undefined {
+  let fields: Record<string, unknown> | null;
+  try { fields = frontmatter(content); } catch { return 'its YAML frontmatter can’t be read'; }
+  if (!fields) return 'it has no YAML frontmatter';
+  if (typeof fields.description !== 'string' || !fields.description.trim()) return 'it has no description text';
+  return undefined;
+}
+
 export async function discover(options: {
   home: string;
   mode: HomeMode;
@@ -170,7 +179,7 @@ export async function discover(options: {
         seen.add(entry.name);
         snapshot.skills.push({
           id, folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
-          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name), codexProblem: codexProblem(content, entry.name),
+          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name), codexProblem: codexProblem(content, entry.name), piProblem: piProblem(content),
         });
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;

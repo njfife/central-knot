@@ -1,5 +1,5 @@
 export type HomeMode = 'fixture' | 'custom' | 'actual';
-export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli';
+export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
 
 export interface ProbeResult {
@@ -25,6 +25,8 @@ export interface Skill {
   copilotProblem?: string;
   /** Why Codex would refuse this skill, by the rules measured on Codex 0.142.3. */
   codexProblem?: string;
+  /** Why Pi would not load it: Pi 1.5.0 silently drops a skill with no frontmatter, invalid YAML or no description (CD §4). */
+  piProblem?: string;
   content: string;
   notes: string[];
   status: string;

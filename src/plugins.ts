@@ -391,5 +391,6 @@ const nextStepFor = (tool: HarnessId) => ({
   'claude-cli': 'Start a new Claude Code session, or run /reload-plugins, to use it.',
   'copilot-cli': 'Start a new Copilot CLI session to use it.',
   'codex-cli': 'Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
-})[tool];
+  'pi-cli': 'Start a new Pi session to use it.',
+} as Record<HarnessId, string>)[tool];
 

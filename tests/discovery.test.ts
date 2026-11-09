@@ -183,3 +183,23 @@ test('metadata parsing retains original values without interpreting Markdown as 
   const content = '---\nname: "<script>unchanged</script>"\ndescription: "  Original spacing  "\n---\nBody';
   assert.deepEqual(parseSkill(content, 'fallback'), { name: '<script>unchanged</script>', description: '  Original spacing  ', notes: [], hasFrontmatter: true, metadataKeys: [] });
 });
+
+test('Pi: its own skills folder and the shared .agents folder are read; it drops a skill with no description', async () => {
+  const { mkdtemp, mkdir, writeFile, rm, realpath } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { discover, piProblem } = await import('../src/discovery.ts');
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'ck-pi-')));
+  try {
+    await mkdir(join(home, '.pi/agent/skills/notes'), { recursive: true });
+    await writeFile(join(home, '.pi/agent/skills/notes/SKILL.md'), '---\nname: notes\ndescription: Notes.\n---\n\nBody.\n');
+    const snapshot = await discover({ home, mode: 'custom', harness: 'pi-cli' });
+    assert.equal(snapshot.root, join(home, '.pi/agent'));
+    assert.deepEqual(snapshot.skills.map(skill => skill.folder), ['notes']);
+    assert.equal(piProblem('---\nname: x\n---\n\nNo description.\n'), 'it has no description text');
+    assert.equal(piProblem('No frontmatter at all.\n'), 'it has no YAML frontmatter');
+    assert.equal(piProblem('---\nname: x\ndescription: Fine.\n---\n'), undefined);
+    const absent = await discover({ home: join(home, 'nobody'), mode: 'custom', harness: 'pi-cli' });
+    assert.equal(absent.detection, 'Not found');
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

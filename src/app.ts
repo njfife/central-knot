@@ -117,7 +117,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   // History holds what Apply all replaced (a chosen copy); new copies are undone by turning Managed off, which leaves them in place.
   const replacedSome = result.results.some(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message));
   // Say what was added and what was replaced, apart: only a replacement is kept in History.
-  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
   const order = Object.values(toolNames);
   const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const added = writtenTo(false), replacedIn = writtenTo(true);
@@ -230,7 +230,7 @@ export const forgetMarketplace = (source: string) => busy('Removing from the lis
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 
-const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
 export const installPlugin = (source: string, plugin: string, tools: HarnessId[]) => busy(`Installing ${plugin}…`, async () => {
   const market = state.plugins?.marketplaces.find(entry => entry.source === source)?.name ?? '';
@@ -270,7 +270,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   state.history = await api().history();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
-  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
   const where = [...new Set(restored.map(entry => toolNames[entry.harness ?? ''] ?? entry.harness ?? ''))].filter(Boolean);
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
@@ -383,7 +383,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   state.mcpResult = result;
   if (!result.stopped) { onDone(); retireTip('mcp'); }
   if (!result.stopped) {
-    const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+    const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
     const managed = changes.filter(change => change.managed).length;
     // The write band right below says what waits for Claude Code; the result names what was written, and where.

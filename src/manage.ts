@@ -119,7 +119,7 @@ const mark = (directory: string) => { let seen = evidence.get(directory); if (!s
 const clock = (context: ShareContext) => context.now?.() ?? Date.now();
 
 /** The fixed tie-break when order is unknown (D-04): each location ranks by its highest-ordered reader in SPEC §5.1, then by path. */
-const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2 };
+const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3 };
 const byRank = (first: Location, second: Location) => surfaceRank[first.tool] - surfaceRank[second.tool] || first.copy.directory.localeCompare(second.copy.directory);
 
 /** Revision A is proved older than B when B's location was still read at the baseline after A's change was already seen. */
