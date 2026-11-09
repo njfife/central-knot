@@ -110,8 +110,9 @@ test('Codex reads its own folder and the shared .agents folder, and leaves its .
     const snapshot = await discover({ home: base, mode: 'custom', harness: 'codex-cli' });
     assert.deepEqual(snapshot.skills.map(skill => `${skill.folder}:${skill.rootLabel}`), ['own:Codex skills', 'shared:Shared .agents skills']);
     assert.equal(snapshot.detection, 'Config found but app not detected');
+    await write('elsewhere/skills/relocated', '---\nname: relocated\ndescription: Relocated.\n---\nB\n');
     const moved = await discover({ home: base, mode: 'custom', harness: 'codex-cli', configOverride: join(base, 'elsewhere') });
-    assert.deepEqual(moved.skills.map(skill => skill.folder), ['shared'], 'CODEX_HOME moves its own folder, not .agents');
+    assert.deepEqual(moved.skills.map(skill => skill.folder), ['relocated', 'shared'], 'CODEX_HOME moves its own folder, not .agents');
   } finally { await rm(base, { recursive: true, force: true }); }
 });
 
