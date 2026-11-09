@@ -30,7 +30,7 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
     // Uninstalling takes a second click on the same cell; the band above says what it will do.
     const confirming = state.pluginConfirm === id;
     return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
-      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? Central Knot keeps a copy of the changed files. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
+      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? You can reinstall afterwards from the result line. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
       confirming ? h('span.cell-confirm-label', { 'aria-hidden': 'true' }, 'Uninstall?') : null);
   }
   if (why) return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-cannot', { type: 'button', id, title: why, 'aria-label': `${names[tool]}: ${why}`, disabled: true, 'data-state': 'cannot' }, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–')));
@@ -75,6 +75,12 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
 
 // Escape takes back an armed uninstall, wherever focus is.
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && state.pluginConfirm) { state.pluginConfirm = undefined; rerender(); } });
+// So does a click anywhere but the armed box or its band.
+document.addEventListener('click', event => {
+  const target = event.target as HTMLElement | null;
+  if (!state.pluginConfirm || target?.closest(`#${CSS.escape(state.pluginConfirm)}, #plugin-confirm-go, #plugin-confirm-cancel, [id^="report-uninstall-"]`)) return;
+  state.pluginConfirm = undefined; rerender();
+});
 
 /** What the boxes mean, only for the kinds on screen. */
 function boxKey(view: PluginsView, entry: MarketplaceView) {
@@ -104,7 +110,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
           plugin.description ? h('span.plugin-desc', {}, plugin.description) : null),
         view.tools.map(tool => cell(view, entry, plugin, tool, index)),
         h('div.plugin-actions', { role: 'cell' }, missing.length && view.canWrite
-          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : `Install in ${missing.map(tool => names[tool]).join(' + ')}`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
+          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : `Install in ${missing.map(tool => names[tool]).join(' + ')}`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: (event: Event) => { event.stopPropagation(); void installPlugin(entry.source, plugin.name, missing); } })
           : null),
         h('div.ov-fill')),
       open ? details(view, plugin, entry) : null,
@@ -158,7 +164,7 @@ function reverse(report: ActionReport) {
     // The same two-step confirm as the table's check: arm that cell and say what the next click does.
     const index = state.plugins?.marketplaces.findIndex(entry => entry.name === last.market) ?? -1;
     state.pluginConfirm = `pcell-${index}-${last.plugin}-${report.tool}`;
-    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? Central Knot keeps a copy of the changed files. Esc cancels.`;
+    state.pluginConfirmText = `Uninstall ${last.plugin} from ${names[report.tool]}? You can reinstall afterwards from the result line. Esc cancels.`;
     rerender();
   } });
   if (report.outcome === 'uninstalled' && last.source) return button({ variant: 'link', size: 'micro', label: `Reinstall in ${names[report.tool]}`, id: `report-reinstall-${report.tool}`, disabled: !!state.busy, onclick: () => void installPlugin(last.source, last.plugin, [report.tool]) });
@@ -201,6 +207,6 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins: a Git repository or folder with .claude-plugin/marketplace.json. Add one above by its Git address or owner/repo (for example, owner/plugins), or choose a folder. Adding reads its catalog and installs nothing.',
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins: a Git repository or folder with .claude-plugin/marketplace.json. Add one above by its Git address or owner/repo (for example, owner/plugins), or choose a folder. Adding reads its catalog and installs nothing. Marketplaces you already added in Claude Code, Copilot CLI or Codex show up here by themselves.',
           button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }))));
 }

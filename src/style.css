@@ -911,3 +911,4 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugin-card-state { flex-basis: auto; padding-left: 0; margin-left: 4px; }
 .cannot-dash { color: var(--ink-faint); font-weight: 700; }
 .sync-notice .btn { height: 26px; padding: 0 10px; font-size: 12px; }
+.plugins-page .bands > .band { padding-right: max(16px, calc(100% - 980px)); }
