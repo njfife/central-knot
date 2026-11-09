@@ -3,8 +3,9 @@ import { designMode, sample } from './design.ts';
 import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { loadHome, readAgain, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { button, fitToolbars, h, icon } from './dom.ts';
+import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
+import { realHomeName } from './words.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
@@ -12,23 +13,23 @@ import { instructionsPage } from './instructionspage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-/** The real home is named for the machine it is on. */
-export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-/** The machine, inside a sentence: "not found on this Mac". */
-export const thisMachine = navigator.userAgent.includes('Mac') ? 'this Mac' : 'this computer';
 const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
+/** From this content width, an open row's details dock beside its table (matrix.ts) instead of opening under the row. */
+const DOCK_FROM = 1600;
 
 /**
- * The window decides the frame: the sidebar or its rail. Inside the content area, style.css adapts to the content's own
- * width (narrow tables, stacked two-pane pages) and fitToolbars shortens a toolbar only when it overflows, so a resize
- * redraws only when the rail changes.
+ * The window decides the frame: the sidebar or its rail, and whether the content is wide enough to dock details (.wide).
+ * Inside the content area, style.css adapts to the content's own width (narrow tables, stacked two-pane pages) and
+ * fitBars shortens a bar only when it overflows, so a resize redraws only when one of these two changes.
  */
-function applyLayout() {
+function applyLayout(): { rail: boolean; wide: boolean } {
   const rail = state.sidebar ? state.sidebar === 'rail' : window.innerWidth < RAIL_BELOW;
   document.body.classList.toggle('rail', rail);
-  return { rail };
+  const wide = document.getElementById('main')!.clientWidth >= DOCK_FROM;
+  document.body.classList.toggle('wide', wide);
+  return { rail, wide };
 }
 
 function navRow(page: Page, label: string, glyph: IconName, count?: number) {
@@ -98,7 +99,7 @@ function renderHeader(rail: boolean) {
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
     h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
-      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
+      onclick: () => void readAgain() })),
   );
 }
 
@@ -120,11 +121,12 @@ function renderStatus() {
       ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one.
+    // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one. With sync on
+    // and nothing managed yet, the grey switch says Waiting; its tooltip says what it waits for.
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))
     : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
       title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'On · starts when something is managed') : 'Off')) : '',
+      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'Waiting') : 'Off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
   // The result band already says what just happened; the status bar does not say it twice.
@@ -142,7 +144,7 @@ function render() {
   renderHeader(rail);
   renderPage();
   renderStatus();
-  fitToolbars();
+  fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   if (focused) document.getElementById(focused)?.focus();
   if (state.home) document.body.dataset.ready = 'true';
@@ -150,20 +152,25 @@ function render() {
 
 setRenderer(render);
 
-// Overlay scrollbars reserve nothing, so scrolled content keeps the last 16 clear itself.
+// The width a scroll area's scrollbar takes (0 for overlay scrollbars): padded scroll areas give it back from their
+// right padding (style.css --scrollbar), so their content ends where the header's and the tables' do.
 const probe = h('div.scroll', {});
 document.body.append(probe);
-if (probe.offsetWidth === probe.clientWidth) document.documentElement.style.setProperty('--overlay-gutter', '16px');
+document.documentElement.style.setProperty('--scrollbar', `${probe.offsetWidth - probe.clientWidth}px`);
 probe.remove();
 
 let narrowWindow = window.innerWidth < RAIL_BELOW;
 window.addEventListener('resize', () => {
   // A toggled shape holds at the size it was chosen; crossing the breakpoint hands the choice back to the window.
   if ((window.innerWidth < RAIL_BELOW) !== narrowWindow) { narrowWindow = !narrowWindow; state.sidebar = undefined; }
-  const wasRail = document.body.classList.contains('rail');
-  if (applyLayout().rail !== wasRail) render();
-  else fitToolbars();
+  const before = ['rail', 'wide'].map(name => document.body.classList.contains(name));
+  const { rail, wide } = applyLayout();
+  if (rail !== before[0] || wide !== before[1]) render();
 });
+
+// Bars refit whenever the content area changes width (a resize, the sidebar's shape) and once the fonts have loaded.
+new ResizeObserver(fitBars).observe(document.getElementById('main')!);
+void document.fonts.ready.then(fitBars);
 
 document.addEventListener('keydown', event => {
   const typing = event.target instanceof HTMLInputElement && event.target.type === 'text';
@@ -171,7 +178,7 @@ document.addEventListener('keydown', event => {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
-  // Escape leaves the Files and contents view for the table; in a find box it clears the box first (matrix.ts).
+  // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts).
   if (event.key === 'Escape' && !typing && state.page === 'skills' && state.skillsView === 'files') showSkillsTable();
 });
 

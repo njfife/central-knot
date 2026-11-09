@@ -226,7 +226,7 @@ const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugin
  */
 function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
   const right = toolbarRight(lines);
-  if (!shown) return right ? h('div.toolbar.plugins-toolbar', {}, h('span.toolbar-spacer'), right) : null;
+  if (!shown) return right ? h('div.toolbar.plugins-toolbar.fit-bar', {}, h('span.toolbar-spacer'), right) : null;
   const plugin = openPlugin(shown);
   const left = plugin
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
@@ -234,7 +234,7 @@ function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : market.nav.tab === 'plugins' ? filters(shown) : null;
   // An empty toolbar keeps its height (nothing below moves) but loses its rule, so it reads as margin.
-  return h(`div.toolbar.plugins-toolbar.plugins-toolbar-aligned${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
+  return h(`div.toolbar.plugins-toolbar.plugins-toolbar-aligned.fit-bar${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */
@@ -244,6 +244,9 @@ const EXAMPLES = ['anthropics/skills', 'github/copilot-plugins'];
 export function pluginsPage() {
   const view = market.view;
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.activity ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
+  // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
+  if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Tools shows what this home has.',
+    button({ variant: 'outline', label: 'See Tools', id: 'plugins-no-tools', onclick: () => showPage('tools') })));
   const shown = current();
   const lines = market.lastRun ? resultLines(market.lastRun.done, market.lastRun.undo) : [];
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.

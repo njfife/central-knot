@@ -3,6 +3,12 @@ import type { HarnessId } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
+/** The real home is named for the machine it is on. */
+export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
+
+/** The machine, inside a sentence: "not found on this Mac". */
+export const thisMachine = navigator.userAgent.includes('Mac') ? 'this Mac' : 'this computer';
+
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;
 
@@ -14,7 +20,6 @@ export const andList = (items: string[]) => joined(items, 'and');
 
 /** "a", "a or b", "a, b or c": for choices, such as where something can be added. */
 export const orList = (items: string[]) => joined(items, 'or');
-
 
 /**
  * The tools an action touched, as a sentence names them: "all 3 tools" when they are exactly the home's tools and there

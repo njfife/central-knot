@@ -3,7 +3,7 @@
 import { loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
-import { button, emptyState, h, icon, pathText } from './dom.ts';
+import { button, cardGrid, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -165,5 +165,5 @@ export function instructionsPage() {
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? files.map(card) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
+      files.length ? cardGrid(files.map(card)) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }

@@ -381,13 +381,13 @@ function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
     : h('div.details-tool', {}, h('div.details-tool-head', {}, h('span.details-tool-label', {}, ...tools.map(tool => brandMark(tool, 14)), h('strong', {}, andList(tools.map(tool => names[tool])))), h('span.details-tool-line', {}, line))));
 }
 
-/** Where each copy lives, folded away: paths matter less than what each tool has. */
-function wherePaths(skill: SampleSkill) {
+/** Where each copy lives, folded away: paths matter less than what each tool has. `extra` folds in more about them (Files view). */
+function wherePaths(skill: SampleSkill, extra: Node[] = []) {
   const shown = toolList().filter(tool => skill.paths?.[tool]);
-  if (!shown.length) return null;
+  if (!shown.length && !extra.length) return null;
   // MCP: the settings files are where a server is changed, so they show open; skills and agents fold them away.
   return h('details.details-paths', kind === 'mcp' ? { open: true } : {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), kind === 'mcp' ? 'Settings files' : 'Where each copy is'),
-    shown.map(tool => pathLine(tool, skill.paths![tool]!)));
+    shown.map(tool => pathLine(tool, skill.paths![tool]!)), extra);
 }
 
 /** One file: the tool's name, its path in full, and a way to find it in the file manager. */
@@ -460,7 +460,7 @@ function oneWayStatus(skill: SampleSkill): string {
 }
 
 /** Everything about one item, opened in place under its row. Differing copies put the choice first. */
-function details(skill: SampleSkill, closable = true) {
+function details(skill: SampleSkill, closable = true, where: Node[] = []) {
   const draft = view.draft.get(skill.key);
   const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
@@ -505,8 +505,8 @@ function details(skill: SampleSkill, closable = true) {
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     allSame
-      ? (!closable ? h('div.details-where-row', {}, wherePaths(skill), deleteAction(skill)) : wherePaths(skill))
-      : differs && !draft ? wherePaths(skill) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : wherePaths(skill)],
+      ? (!closable ? h('div.details-where-row', {}, wherePaths(skill, where), deleteAction(skill)) : wherePaths(skill, where))
+      : differs && !draft ? wherePaths(skill, where) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : wherePaths(skill, where)],
     kind === 'agents' ? convertBlock(skill) : null,
     kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     // Only skills have foot actions (Files, Delete everywhere); other kinds end at the last line, with no empty foot.
@@ -559,12 +559,29 @@ function compareChoices(skill: SampleSkill) {
       ': each tool keeps its own, nothing is copied, and Central Knot stops flagging ', h('strong.item-name', {}, skill.name ?? skill.key), '.'));
 }
 
+/** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets .wide). */
+const docked = () => document.body.classList.contains('wide');
+
+/**
+ * The open row's details in a panel beside the table: its name and a close button, then everything the inline details
+ * show, so the item's actions sit with it and a wide window's width is used.
+ */
+function itemDock(skill: SampleSkill) {
+  const name = skill.name ?? skill.key;
+  return h('aside.dock', { 'aria-label': `Details for ${name}` },
+    h('header.dock-head', {},
+      h('div.dock-title', {}, h('h2', {}, middle(name)), h('p', {}, nouns[kind][0])),
+      closeButton(() => { view.comparing = undefined; rerender(); }, { id: 'dock-close', label: `Close details for ${name}`, title: 'Close' })),
+    h('div.scroll.dock-scroll', { id: 'dock-scroll' }, details(skill)));
+}
+
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
 function openRow(key: string) {
   view.comparing = view.comparing === key ? undefined : key;
   rerender();
-  // Bring the details into view without losing the row (its name and close button) under the sticky header.
-  if (view.comparing) requestAnimationFrame(() => {
+  // Bring the details into view without losing the row (its name and close button) under the sticky header. Docked
+  // details sit beside the table and are always in view.
+  if (view.comparing && !docked()) requestAnimationFrame(() => {
     const rowEl = document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`);
     const details = rowEl?.nextElementSibling;
     const box = rowEl?.closest('.scroll')?.getBoundingClientRect();
@@ -591,13 +608,13 @@ function row(skill: SampleSkill) {
         decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping separate copies, on Apply all' : `Every tool will use ${names[decided]}’s copy, on Apply all` },
           decided === 'separate' ? h('span', {}, 'Keeping separate')
             : resumeOnly ? h('span', {}, 'Resumes on Apply all')
-            : [h('span.decided-uses', {}, 'Uses'), brandMark(decided, 12), h('span', {}, `${names[decided]}’s copy`)],
+            : [h('span.decided-uses', {}, 'Uses'), brandMark(decided, 12), h('span.decided-what', {}, `${names[decided]}’s copy`)],
           h('button.decided-undo', { type: 'button', id: `undo-${skill.key}`, 'aria-label': resumeOnly ? 'Cancel this' : 'Change this choice', title: resumeOnly ? 'Cancel: keep the edited copy' : 'Change this choice', onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); view.comparing = resumeOnly ? view.comparing : skill.key; rerender(); } }, h('span', {}, resumeOnly ? 'Cancel' : 'Change'))) : null,
         // The description fills the row's spare width and gives way first when the window narrows.
         skill.description ? h('span.ov-name-about', {}, skill.description) : null),
       h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => { if (on && attention && !decided && !skill.managed) { view.comparing = undefined; openRow(skill.key); return; } setManaged([skill.key], on); }, !!skill.held, `switch-${skill.key}`)),
       toolList().map(tool => cell(skill, tool))),
-    view.comparing === skill.key ? details(skill) : null,
+    view.comparing === skill.key && !docked() ? details(skill) : null,
   ];
 }
 
@@ -1131,8 +1148,9 @@ export function designOverview(which: Kind = 'skills') {
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
   const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
     oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
-  return h('div.page.ov-page', { 'data-variant': variant },
-    h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
+  const open = docked() ? all.find(skill => skill.key === view.comparing) : undefined;
+  const table = [
+    h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
@@ -1145,7 +1163,9 @@ export function designOverview(which: Kind = 'skills') {
         section('Managed', shown.filter(skill => committedOf(skill.key).managed), shown.filter(skill => skill.managed).length),
         section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length),
         ghostRows()), toolList().length),
-      legend(all)));
+      legend(all))];
+  return open ? h('div.page.ov-page.docked', { 'data-variant': variant }, h('div.dock-main', {}, table), itemDock(open))
+    : h('div.page.ov-page', { 'data-variant': variant }, table);
 }
 
 
@@ -1161,8 +1181,20 @@ const miniCell = (skill: SampleSkill, tool: Tool) => {
   return h(`span.legend-cell.mini-cell.${look.tone}${on ? '.cell-on' : ''}`, { title: `${names[tool]}: ${look.label}` }, look.glyph ? icon(look.glyph, state === 'present' ? 9 : 11, state === 'present' ? 'glyph-fill' : '') : null);
 };
 
+/** The skill whose row was last scrolled into view, so the list moves only when the selection changes. */
+let revealed: string | undefined;
+
+/** Scrolls the skills list just enough to show the selected row (a short stacked list can hide it), moving nothing else. */
+function revealSelected() {
+  const list = document.getElementById('skills-list'), row = list?.querySelector('.list-row.selected');
+  if (!list || !row) return;
+  const area = list.getBoundingClientRect(), box = row.getBoundingClientRect();
+  if (box.top < area.top) list.scrollTop -= area.top - box.top;
+  else if (box.bottom > area.bottom) list.scrollTop += box.bottom - area.bottom;
+}
+
 /** A list of every skill beside (or, in narrow content, above) one skill's details: the same choices as the table, and the same Apply all. `more` adds files and contents. */
-export function skillsBrowser(more: (key: string) => (Node | null | false)[], select: (key: string | undefined) => void) {
+export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
   kind = 'skills';
   view = views.skills;
   forgetOtherHomes();
@@ -1186,13 +1218,17 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);
   const skill = shownDetail;
   const draft = view.draft.get(skill.key);
+  if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }
+  const { where, contents } = more(skill.key);
   return h('div.page.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
-      h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
-      h('div.scroll.list-scroll', { id: 'skills-list' }, list)),
+      // The header rides inside the list's scroll area, so it has the rows' exact width, gutter and columns.
+      h('div.scroll.list-scroll', { id: 'skills-list' },
+        h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
+        list)),
     h('section.detail-column', { 'aria-label': 'Skill details' },
-      h('div.pane-header', {},
+      h('div.pane-header.fit-bar', {},
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Not applied yet')
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}` : skill.managed ? 'Managed' : 'Unmanaged')),
         h('div.detail-actions', {},
@@ -1200,7 +1236,7 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
           toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
           changeBar(false))),
       notices(),
-      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false), ...more(skill.key))));
+      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false, where), ...contents)));
 }
 
 // Escape in a find box clears it.

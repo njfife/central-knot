@@ -34,7 +34,7 @@ interface ButtonOptions {
   name?: string;
   id?: string;
   disabled?: boolean;
-  /** A toolbar button with an icon and a label: when its toolbar can't fit (fitToolbars), only the icon shows, the label as its tooltip. */
+  /** A bar button with an icon and a label: when its bar can't fit (fitBars), only the icon shows, the label as its tooltip. */
   collapse?: boolean;
   onclick: (event: MouseEvent) => void;
   attrs?: Props;
@@ -60,10 +60,14 @@ export function middle(text: string, tailLength = 12, extraClass = ''): HTMLElem
     tail && h('span.middle-tail', {}, tail));
 }
 
-export const pathText = (text: string, full = text) => {
-  const node = middle(text, 26, 'mono');
-  node.title = full;
-  return node;
+/**
+ * A path that fits the space it has: its folders give way first, with an ellipsis, then its last name; the full path is
+ * the tooltip. No character count decides where it is cut.
+ */
+export const pathText = (text: string, full = text): HTMLElement => {
+  const cut = Math.max(text.lastIndexOf('/'), text.lastIndexOf('\\'));
+  return h('span.middle.mono.path-text', { title: full },
+    h('span.middle-head', {}, cut > 0 ? text.slice(0, cut) : text), cut > 0 ? h('span.middle-tail', {}, text.slice(cut)) : null);
 };
 
 export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
@@ -83,52 +87,74 @@ export function emptyState(glyph: IconName, title: string, body: string | undefi
 export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, text, count === undefined ? null : h('span.eyebrow-count', {}, String(count)));
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
+/** Stops fitting the popover fitted last: one popover is open at a time, so a new one, or its removal, ends the old watch. */
+let stopFitting = () => {};
+
 /**
- * Keeps an open popover inside the scrolling area it opens in, now and whenever that area changes size (a window resize
- * included). It opens below its anchor, or above when there is more room there (.popover-above), with the height that
- * side really has (--fit-height), and moves sideways rather than run past an edge (--fit-shift). Values go through the
- * style object: the page's security policy refuses inline style attributes.
+ * Keeps an open popover inside the scrolling area it opens in, now and whenever that area resizes (a window resize
+ * included) or scrolls. It opens below its anchor, or above when there is more room there (.popover-above), with the
+ * height that side really has (--fit-height), and moves sideways rather than run past an edge (--fit-shift). Values go
+ * through the style object: the page's security policy refuses inline style attributes.
  */
 export function fitInView(popover: HTMLElement): HTMLElement {
-  const fit = () => {
-    const frame = popover.closest('.scroll'), anchor = popover.parentElement;
-    if (!popover.isConnected || !frame || !anchor) { watcher.disconnect(); return; }
-    // The area's inside, without its scrollbar gutter: a popover over the gutter would make the area scroll sideways.
-    const outer = frame.getBoundingClientRect(), around = anchor.getBoundingClientRect();
-    const area = { left: outer.left + frame.clientLeft, right: outer.left + frame.clientLeft + frame.clientWidth, top: outer.top + frame.clientTop, bottom: outer.top + frame.clientTop + frame.clientHeight };
-    const below = area.bottom - around.bottom, above = around.top - area.top;
-    popover.classList.toggle('popover-above', above > below);
-    popover.style.setProperty('--fit-height', `${Math.max(0, Math.max(above, below) - 8)}px`);
-    popover.style.setProperty('--fit-shift', '0px');
-    const box = popover.getBoundingClientRect();
-    popover.style.setProperty('--fit-shift', `${Math.min(0, area.right - 8 - box.right) + Math.max(0, area.left + 8 - box.left)}px`);
-  };
-  const watcher = new ResizeObserver(fit);
-  // Observed once drawn; the first observation fits it.
-  requestAnimationFrame(() => { const frame = popover.closest('.scroll'); if (frame) watcher.observe(frame); });
+  requestAnimationFrame(() => {
+    stopFitting();
+    const frame = popover.closest<HTMLElement>('.scroll'), anchor = popover.parentElement;
+    if (!frame || !anchor) return;
+    const fit = () => {
+      if (!popover.isConnected) { stop(); return; }
+      // The area's inside, without its scrollbar gutter: a popover over the gutter would make the area scroll sideways.
+      const outer = frame.getBoundingClientRect(), around = anchor.getBoundingClientRect();
+      const area = { left: outer.left + frame.clientLeft, right: outer.left + frame.clientLeft + frame.clientWidth, top: outer.top + frame.clientTop, bottom: outer.top + frame.clientTop + frame.clientHeight };
+      const below = area.bottom - around.bottom, above = around.top - area.top;
+      popover.classList.toggle('popover-above', above > below);
+      popover.style.setProperty('--fit-height', `${Math.max(0, Math.max(above, below) - 8)}px`);
+      popover.style.setProperty('--fit-shift', '0px');
+      const box = popover.getBoundingClientRect();
+      popover.style.setProperty('--fit-shift', `${Math.min(0, area.right - 8 - box.right) + Math.max(0, area.left + 8 - box.left)}px`);
+    };
+    const watcher = new ResizeObserver(fit);
+    const stop = () => { watcher.disconnect(); frame.removeEventListener('scroll', fit); if (stopFitting === stop) stopFitting = () => {}; };
+    watcher.observe(frame);
+    frame.addEventListener('scroll', fit, { passive: true });
+    stopFitting = stop;
+  });
   return popover;
 }
 
-/** A pending-change count that shortens first in a crowded toolbar (fitToolbars): `short` replaces `full`, which stays its tooltip. */
+/** A pending-change count that shortens first in a crowded bar (fitBars): `short` replaces `full`, which stays its tooltip. */
 export const pendingCount = (full: string, short: string): HTMLElement =>
   h('span.apply-count.apply-quiet', { title: full }, h('span.count-full', {}, full), h('span.count-short', {}, short));
 
-/** What a crowded toolbar gives up, in order, until it fits: long pending counts, then button labels, then its single line. */
-const TOOLBAR_STEPS = ['toolbar-short', 'toolbar-icons', 'toolbar-wrap'];
+/** What a crowded bar gives up, in order, until it fits: long pending counts, then button labels, then its single line. */
+const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
+
+/** Whether anything in a bar reaches past its content box, into its padding or beyond. */
+function overflows(bar: HTMLElement): boolean {
+  const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
+  return [...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5);
+}
 
 /**
- * Fits each toolbar to its width. A step applies only while the toolbar still overflows without it, so every label stays
- * as long as there is room for it. The renderer calls this after each draw and on every resize.
+ * Fits each bar marked .fit-bar (toolbars, the Files view's header) to its width. A step applies only while the bar still
+ * overflows without it, so every label stays as long as there is room. The renderer calls this after each draw and
+ * whenever the content area resizes.
  */
-export function fitToolbars(): void {
-  for (const bar of document.querySelectorAll<HTMLElement>('.toolbar')) {
-    bar.classList.remove(...TOOLBAR_STEPS);
-    for (const step of TOOLBAR_STEPS) {
-      if (bar.scrollWidth <= bar.clientWidth) break;
+export function fitBars(): void {
+  for (const bar of document.querySelectorAll<HTMLElement>('.fit-bar')) {
+    bar.classList.remove(...FIT_STEPS);
+    for (const step of FIT_STEPS) {
+      if (!overflows(bar)) break;
       bar.classList.add(step);
     }
   }
 }
+
+/**
+ * Cards side by side: the grid knows how many it holds (data-count), so style.css chooses the columns from the count and
+ * the width, and no card is left alone in a mostly empty row.
+ */
+export const cardGrid = (cards: Node[]): HTMLElement => h('div.card-grid', { 'data-count': String(cards.length) }, cards);
 
 /** Sets a table's column count (--tool-count) through the style object: the page's security policy refuses inline style attributes. */
 export function withToolCount(table: HTMLElement, count: number): HTMLElement {

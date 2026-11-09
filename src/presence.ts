@@ -13,4 +13,4 @@ export const isPresent = (snapshot: Snapshot): boolean => snapshot.detection !==
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 
 /** The tools looked for and not found here, in discovery order: only the Tools page names them, as information. */
-export const missingTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);
+export const absentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);

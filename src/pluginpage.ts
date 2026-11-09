@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, limitNote, missingTools, removableTools, unavailable } from './pluginstatus.ts';
+import { installed, limitNote, removableTools, toolsWithoutPlugin, unavailable } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -41,7 +41,7 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
  * once every tool has it, choose to uninstall it from all of them.
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, components?: Components) {
-  const missing = missingTools(view, entry, plugin.name);
+  const missing = toolsWithoutPlugin(view, entry, plugin.name);
   const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
   // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
   const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);

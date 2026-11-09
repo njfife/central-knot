@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { missingTools, presentTools } from '../src/presence.ts';
+import { absentTools, presentTools } from '../src/presence.ts';
 import type { ShareContext } from '../src/share.ts';
 
 const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nBody.\n`;
@@ -33,7 +33,7 @@ test('a tool is present when its own folder exists; the others are missing', asy
   try {
     const snapshots = await box.read();
     assert.deepEqual(presentTools(snapshots), ['claude-cli', 'codex-cli']);
-    assert.deepEqual(missingTools(snapshots), ['copilot-cli', 'pi-cli']);
+    assert.deepEqual(absentTools(snapshots), ['copilot-cli', 'pi-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -57,5 +57,24 @@ test('Apply writes only to present tools, never creating a folder for a missing 
     assert.ok(await exists(join(box.path, '.codex/skills/brief/SKILL.md')));
     assert.deepEqual([await exists(join(box.path, '.copilot')), await exists(join(box.path, '.pi'))], [false, false]);
     assert.equal(await exists(join(box.path, '.agents/skills/brief')), false);
+  } finally { await box.cleanup(); }
+});
+
+test('a tool that appears gets the managed copies; when it disappears again, nothing reads as a deletion', async () => {
+  const box = await home({ '.claude/skills': ['brief'] });
+  try {
+    await applyChanges(box.context, [{ key: 'brief', managed: true, off: [] }]);
+    // Codex's folder appears: a read finds the tool, and the next pass brings it the managed copy.
+    await mkdir(join(box.path, '.codex'), { recursive: true });
+    assert.deepEqual((await manageView(box.context)).tools, ['claude-cli', 'codex-cli']);
+    await applyChanges({ ...box.context, settleMs: 0 }, []);
+    assert.ok(await exists(join(box.path, '.codex/skills/brief/SKILL.md')));
+    // The whole folder goes again: Codex is no longer in the home, so its copy's absence is no deletion to spread.
+    await rm(join(box.path, '.codex'), { recursive: true, force: true });
+    assert.deepEqual((await manageView(box.context)).tools, ['claude-cli']);
+    const pass = await applyChanges({ ...box.context, settleMs: 0 }, []);
+    assert.deepEqual(pass.notices ?? [], []);
+    assert.ok(await exists(join(box.path, '.claude/skills/brief/SKILL.md')), 'Claude Code keeps its copy');
+    assert.equal((await manageView(box.context)).skills.find(skill => skill.key === 'brief')?.managed, true);
   } finally { await box.cleanup(); }
 });

@@ -1,12 +1,11 @@
-import { announce, homeToolNames, loadHome, rerender, selectItem, shownPath, showPage, startHome, state, syncNow } from './app.ts';
-import { button, emptyState, h, icon, pathText, section } from './dom.ts';
+import { announce, homeToolNames, homeTools, loadHome, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { realHomeName, thisMachine } from './renderer.ts';
-import { isPresent, missingTools } from './presence.ts';
+import { absentTools, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
-import { andList, orList } from './words.ts';
+import { andList, orList, realHomeName, thisMachine } from './words.ts';
 
 // ---------- Overview ----------
 
@@ -37,11 +36,15 @@ function addHint(able: HarnessId[], noun: string) {
 }
 const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint(state.home?.manage.tools ?? [], 'skills')}`, id);
 
-/** The Overview's first sentence: what Central Knot keeps the same, between this home's tools only. */
-function leadSentence(tools: string[]) {
-  if (tools.length > 1) return `Central Knot keeps the skills, MCP servers and agents you choose the same in ${andList(tools)}.`;
-  const why = tools.length ? `Only ${tools[0]} is in this home, so there is nothing to keep in step yet.` : 'No tools were found in this home.';
-  return `Central Knot keeps the skills, MCP servers and agents you choose the same between your tools. ${why}`;
+/**
+ * The Overview's first sentence: what Central Knot keeps the same, between this home's tools only (`tools`, ids).
+ * `agentTools` are those that also hold agents, so a home with Pi says agents leave it out.
+ */
+function leadSentence(tools: HarnessId[], agentTools: HarnessId[]) {
+  const named = andList(tools.map(toolName));
+  if (tools.length < 2) return `Central Knot keeps the skills, MCP servers and agents you choose the same between your tools. ${tools.length ? `Only ${named} is in this home, so there is nothing to keep in step yet.` : 'No tools were found in this home.'}`;
+  const without = tools.filter(tool => !agentTools.includes(tool)).map(toolName);
+  return without.length ? `Central Knot keeps the skills and MCP servers you choose the same in ${named}, and the agents in all of them but ${andList(without)}.` : `Central Knot keeps the skills, MCP servers and agents you choose the same in ${named}.`;
 }
 
 /** Shown before any home has been read, or when reading failed. */
@@ -99,7 +102,7 @@ export function overviewPage() {
     done ? h('div.bands', {}, done) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      h('p.overview-lead', {}, leadSentence(homeToolNames()),
+      h('p.overview-lead', {}, leadSentence(homeTools(), home.agents.tools),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         !home.manage.skills.length && !home.mcp.servers.length && !(home.agents?.servers.length) ? ' Nothing found in this home yet.' : nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : ''),
       h('div.kind-cards', {},
@@ -140,8 +143,8 @@ const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd',
 
 interface Found { tool: HarnessId; skill: Skill }
 
-/** Every copy of one skill that the tools read, from what discovery found. */
-const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.flatMap(snapshot => snapshot.skills
+/** Every copy of one skill that this home's tools read (presence.ts), from what discovery found. */
+const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.filter(isPresent).flatMap(snapshot => snapshot.skills
   .filter(skill => skill.folder.normalize('NFC').toLowerCase() === key)
   .map(skill => ({ tool: snapshot.harness, skill })));
 
@@ -175,15 +178,17 @@ export function skillsPage() {
   // The table is the Skills page; "Files" opens one skill's files and contents beside the list.
   if (state.skillsView !== 'files') return designOverview('skills');
   return skillsBrowser(key => {
-    if (!home || designMode) return [];
+    if (!home || designMode) return { where: [], contents: [] };
     const copies = copiesOf(home, key);
     const notes = [...new Set(copies.flatMap(copy => copy.skill.notes))];
-    return [
-      // Each tool's box above already names its folder; a card here only adds what it does not show.
-      copies.some(extraFacts) && section('Files', h('div.stack', {}, copies.filter(extraFacts).map((copy, index) => fileCard(key, copy, index)))),
-      notes.length > 0 && section('Notes', notes.map(note => h('p', {}, note))),
-      h('section.section', {}, h('h3.eyebrow.eyebrow-file', {}, 'SKILL.md'), contents(key, copies)),
-    ];
+    return {
+      // A copy's real folder and fields of note fold under "Where each copy is", so the contents come first.
+      where: copies.some(extraFacts) ? [h('div.stack.where-cards', {}, copies.filter(extraFacts).map((copy, index) => fileCard(key, copy, index)))] : [],
+      contents: [
+        notes.length > 0 && section('Notes', notes.map(note => h('p', {}, note))),
+        h('section.section', {}, h('h3.eyebrow.eyebrow-file', {}, 'SKILL.md'), contents(key, copies)),
+      ],
+    };
   }, selectItem);
 }
 
@@ -215,7 +220,18 @@ const discoveryLine = (snapshot: Snapshot) => ({
 
 const count = (list: { copies: Record<string, unknown> }[] | undefined, tool: HarnessId) => (list ?? []).filter(fact => fact.copies[tool] !== undefined).length;
 
+/** What a tool's card says it has, one link per kind it can hold: its skills, then MCP servers and agents if it holds them. */
+function holdings(snapshot: Snapshot, home: HomeView, holdsMcp: boolean, holdsAgents: boolean): (Node | string)[] {
+  const link = (count: number, noun: string, page: Page) => count
+    ? button({ variant: 'link', size: 'micro', label: plural(count, noun), id: `tool-${page === 'skills' ? 'overview' : page}-${snapshot.harness}`, onclick: () => showPage(page) })
+    : h('span.link-quiet', {}, plural(0, noun));
+  const skills = snapshot.skills.length || snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? link(skillCount(snapshot), 'skill', 'skills') : h('span', {}, discoveryLine(snapshot));
+  const parts = [skills, holdsMcp ? link(count(home.mcp.servers, snapshot.harness), 'MCP server', 'mcp') : null, holdsAgents ? link(count(home.agents.servers, snapshot.harness), 'agent', 'agents') : null];
+  return parts.filter((part): part is HTMLElement => !!part).flatMap((part, index) => (index ? [h('span.tone-faint', {}, ' · '), part] : [part]));
+}
+
 function toolCard(snapshot: Snapshot, home: HomeView) {
+  const holdsMcp = home.mcp.tools.includes(snapshot.harness), holdsAgents = home.agents.tools.includes(snapshot.harness);
   const disclosed = home.manage.writes[snapshot.harness];
   const roots = new Map(snapshot.skills.map(skill => [dirname(skill.directory), skill.rootLabel]));
   const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
@@ -230,35 +246,27 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
       h('div.tool-column', {},
         // Outside This Mac's home no app is checked (the note above says so), so the card shows only folders.
         home.mode === 'actual' && section('Detection', h('dl.facts', {},
-          // The practice copy and another folder are folders, not this Mac: no app is looked for there, and that is no fault.
-          ...fact('Status', home.mode === 'actual' ? snapshot.detection : home.mode === 'fixture' ? 'Sample folder' : 'Folder only'),
-          ...(home.mode === 'actual' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
+          ...fact('Status', snapshot.detection),
+          ...fact('Version', snapshot.probe.version ?? snapshot.probe.detail),
           ...(snapshot.probe.detail.startsWith('ChatGPT desktop') ? fact('Found as', 'ChatGPT desktop’s own Codex; no Codex CLI found') : []))),
         section('Files and folders', h('dl.facts', {},
           ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
           // One label for every tool; a second folder (shared .agents) keeps its own name.
           ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
           ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
-          // Where its MCP servers and agents live, read from what was found there.
-          ...fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '— (no MCP servers found)'); })()),
-          ...fact('Agents folder', (() => { const file = home.agents?.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '— (no agents found)'); })()),
+          // Where its MCP servers and agents live, read from what was found there; a kind the tool can't hold is left out.
+          ...(holdsMcp ? fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '— (no MCP servers found)'); })()) : []),
+          ...(holdsAgents ? fact('Agents folder', (() => { const file = home.agents.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '— (no agents found)'); })()) : []),
           ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
-        section('What it has',
-          h('div.link-row', {},
-            snapshot.skills.length ? button({ variant: 'link', size: 'micro', label: plural(skillCount(snapshot), 'skill'), id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('skills') })
-              : snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? h('span.link-quiet', { title: discoveryLine(snapshot) }, '0 skills') : h('span', {}, discoveryLine(snapshot)),
-            h('span.tone-faint', {}, ' · '),
-            count(home.mcp.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }) : h('span.link-quiet', {}, '0 MCP servers'),
-            h('span.tone-faint', {}, ' · '),
-            count(home.agents?.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.agents?.servers, snapshot.harness), 'agent'), id: `tool-agents-${snapshot.harness}`, onclick: () => showPage('agents') }) : h('span.link-quiet', {}, '0 agents'))),
+        section('What it has', h('div.link-row', {}, holdings(snapshot, home, holdsMcp, holdsAgents))),
         disclosed && disclosed.alsoReadBy.length > 0 && section('Others that read its skills folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
         issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));
 }
 
 /** On This Mac's home, the tools that were looked for and not found: said once, as information, never as a card to act on. */
 function notFoundLine(home: HomeView) {
-  const missing = missingTools(home.snapshots).map(toolName);
+  const missing = absentTools(home.snapshots).map(toolName);
   if (home.mode !== 'actual' || !missing.length) return null;
   return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'),
     `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`);
@@ -268,9 +276,11 @@ export function toolsPage() {
   const { home } = state;
   if (!home) return h('div.page');
   const done = outcomeBand();
+  const present = home.snapshots.filter(isPresent);
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    home.snapshots.filter(isPresent).map(snapshot => toolCard(snapshot, home)),
+    present.length ? cardGrid(present.map(snapshot => toolCard(snapshot, home)))
+      : home.mode === 'actual' ? null : emptyState('boxes', 'No tool folders here', `No tool folders were found in ${home.label}. Choose another home at the bottom left.`),
     notFoundLine(home)));
 }

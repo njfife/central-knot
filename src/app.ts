@@ -164,13 +164,28 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
   if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
-export const readAgain = () => busy('Reading skills, MCP servers and agents…', async () => {
-  const view = await api().refresh();
-  if (!view) return;
-  state.home = view;
-  state.applied = undefined;
-  announce(readSummary(view));
-});
+/** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
+export async function readAgain() {
+  await busy('Reading skills, MCP servers and agents…', async () => {
+    const view = await api().refresh();
+    if (!view) return;
+    state.home = view;
+    state.applied = undefined;
+    announce(readSummary(view));
+  });
+  await loadPageData(state.page, true);
+}
+
+/**
+ * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins. An unsaved Instructions
+ * draft stays, still checked against the file it was opened from. `fresh` reads each marketplace anew.
+ */
+function loadPageData(page: Page, fresh = false): Promise<void> | undefined {
+  if (page === 'history') return loadHistory();
+  if (page === 'settings') return loadSettings();
+  if (page === 'instructions') return loadInstructions();
+  if (page === 'plugins') return loadPlugins(fresh);
+}
 
 /** The open home's tools (presence.ts), for page wording: the Overview and empty pages name them, and "all tools" counts them. */
 export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.home.snapshots) : []);
@@ -178,19 +193,17 @@ export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.hom
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
 
-/** The tools an action touched (ids), named for a sentence against the open home's tools: "all 3 tools" or their names. */
-export const whichTools = (touched: string[]): string => toolsPhrase(touched, homeTools());
+/** The tools an action touched (ids), as a sentence names them in the open home: "all 3 tools" or their names. */
+export const touchedToolsPhrase = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
 export function showPage(page: Page) {
-  if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
+  // Plugins keep what they read while the person stays on them; every other page reads its data each time it opens.
+  const stays = page === 'plugins' && state.page === 'plugins';
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
-  if (page === 'history') void loadHistory();
-  if (page === 'settings') void loadSettings();
-  // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
-  if (page === 'instructions') void loadInstructions();
+  if (!stays) void loadPageData(page);
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -210,13 +223,16 @@ export function selectItem(key: string | undefined) {
   document.getElementById('detail-scroll')?.scrollTo(0, 0);
 }
 
-/** Shorter on screen only: the real home becomes ~, and the throwaway practice folder is elided. Copying gives the full path. */
 /** Reveals a file in the system file manager; nothing is opened or changed. */
 export const showFile = (path: string) => void api().showFile?.(path);
 
+/**
+ * A path as the page shows it, shorter on screen only: inside the real home it starts at ~, inside the practice copy or a
+ * chosen folder at "…". Copying and tooltips give the full path.
+ */
 export const shownPath = (path: string) => {
   const home = state.home;
-  if (!home || home.mode === 'custom' || (path !== home.home && !path.startsWith(`${home.home}/`))) return path;
+  if (!home || (path !== home.home && !path.startsWith(`${home.home}/`))) return path;
   return `${home.mode === 'actual' ? '~' : '…'}${path.slice(home.home.length)}`;
 };
 
@@ -242,7 +258,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
-  const everywhere = whichTools(where);
+  const everywhere = touchedToolsPhrase(where);
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   if (past?.kind === 'added') {
