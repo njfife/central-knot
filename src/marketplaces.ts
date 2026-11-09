@@ -289,9 +289,9 @@ export function registerMarketplaces({ handle, handleRead }: { handle: Handle; h
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && ids.length ? markets.uninstall(source, marketplace, plugin, ids[0]!, home) : refused(tool);
   });
-  // A skill's name reaches Copilot CLI's command line as plugin:skill, so it must be a name too, never an option.
+  // A skill keeps its own name (Codex writes it into config.toml as a string); the engine refuses one Copilot CLI's command line can't take.
   handle('plugins:skill', async (source, marketplace, plugin, skill, tool, on, home) => {
     const ids = toolIds([tool]);
-    return open() && isText(source) && isName(marketplace) && isName(plugin) && isName(skill) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
+    return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
 }

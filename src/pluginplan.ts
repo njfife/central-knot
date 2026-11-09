@@ -1,7 +1,7 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
 import { cantSwitchSkill, cantUninstall, installed, skillOff, unavailable } from './pluginstatus.ts';
-import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
+import type { ActionReport, HarnessId, MarketplaceView, PluginActionResult, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
 /** Install or uninstall a plugin, or turn one of its skills off or back on (ENB-06), in one tool. */
@@ -78,14 +78,29 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
     const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
     // A marketplace whose catalog now gives another name is another plugin@name to the tools: the choice no longer means it.
-    const off = (skill: string) => skillOff(entry!, op.plugin, op.tool, skill);
     const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
       : op.action === 'remove' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool)
-      : !op.skill || !installed(entry, op.plugin, op.tool) || !!cantSwitchSkill(view, op.tool, op.skill) || (op.action === 'skill-off' ? !!off(op.skill) : !off(op.skill) || !!off(op.skill)?.held));
+      : skillChoiceStale(view, entry, op));
     if (stale) draft.delete(key);
   }
 }
+
+/**
+ * Whether a skill switch choice means nothing now: the tool can't switch that skill here (pluginstatus.cantSwitchSkill:
+ * not installed, no switch, not in the installed copy…), it is already as chosen, or, to turn it on, it is held off by a
+ * switch that isn't the plugin's own.
+ */
+function skillChoiceStale(view: PluginsView, entry: MarketplaceView, op: PluginOp): boolean {
+  if (!op.skill || cantSwitchSkill(view, entry, op.plugin, op.tool, op.skill)) return true;
+  const off = skillOff(entry, op.plugin, op.tool, op.skill);
+  if (op.action === 'skill-off') return !!off;
+  return !off || !!off.held;
+}
+
+/** The skill switches chosen for one plugin, optionally only in one tool or for one skill. */
+export const skillChoices = (draft: PluginDraft, source: string, plugin: string, { tool, skill }: { tool?: HarnessId; skill?: string } = {}) =>
+  [...draft.values()].filter(op => op.skill && op.source === source && op.plugin === plugin && (!tool || op.tool === tool) && (!skill || op.skill === skill));
 
 /**
  * Counts for the change bar: plugins to install or uninstall and how many of each, and for skill switches how many
@@ -99,7 +114,7 @@ export function summary(draft: PluginDraft) {
     return { skills: new Set(mine.map(op => `${pluginKey(op.source, op.plugin)}\u0000${op.skill}`)).size, tools: new Set(mine.map(op => op.tool)).size };
   };
   const plugins = new Set(ops.filter(op => !op.skill).map(op => pluginKey(op.source, op.plugin))).size;
-  return { any: ops.length > 0, plugins, installs: count('install'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on') };
+  return { plugins, installs: count('install'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on') };
 }
 
 /** One step of a run: one tool command, apart from an install, which runs for every tool chosen at once. */

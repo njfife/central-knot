@@ -54,14 +54,24 @@ export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
   'claude-cli': 'Claude Code has no switch for a single skill of a plugin.',
 };
 
+/** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
+export const offByBareName = (skill: string) => `Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: copilot skill enable ${skill}`;
+/** Why a skill the marketplace lists can't be switched where the installed copy (an older or newer version) lacks it. */
+export const notInCopy = (tool: HarnessId, skill: string) => `The copy ${names[tool]} has installed has no skill named “${skill}”.`;
+/** Why Copilot CLI's switch isn't offered for a skill whose name could not go safely on its command line. */
+export const UNSAFE_SKILL_NAME = 'Its name has characters Central Knot doesn’t pass to Copilot CLI’s command.';
+
 /**
- * Why one skill of this plugin can't be turned off or on in this tool here, if it can't (only asked where the plugin is
- * installed): the tool has no such switch, the skill's name can't go on a command line, Copilot CLI's command is missing,
- * or writing isn't allowed in this home.
+ * Why one skill of this plugin can't be turned off or on in this tool here, if it can't: the tool has no such switch, the
+ * plugin isn't installed there or its installed copy lacks the skill, its name can't go on Copilot CLI's command line,
+ * Copilot CLI's command is missing, or writing isn't allowed in this home.
  */
-export function cantSwitchSkill(view: PluginsView, tool: HarnessId, skill: string): string | undefined {
+export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string): string | undefined {
   if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
-  if (!SAFE_NAME.test(skill)) return 'Its name has characters Central Knot doesn’t pass to a tool’s command.';
+  const state = stateOf(entry, plugin, tool);
+  if (state.state !== 'installed') return `It isn’t installed in ${names[tool]}.`;
+  if (state.skills && !state.skills.includes(skill)) return notInCopy(tool, skill);
+  if (tool === 'copilot-cli' && !SAFE_NAME.test(skill)) return UNSAFE_SKILL_NAME;
   if (!view.canWrite) return PREVIEW_ONLY;
   return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
 }

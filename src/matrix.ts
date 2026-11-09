@@ -175,8 +175,6 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
   cannot: { tone: 'cell-cannot', label: 'Cannot load it' },
 };
 
-
-
 const smallAction = (label: string, id: string, onclick: () => void, extra = '') =>
   h(`button.text-action${extra}`, { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); onclick(); } }, label);
 

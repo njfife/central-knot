@@ -176,7 +176,7 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  */
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
-  if (counts.any) {
+  if (market.draft.size) {
     // "1 skill to turn off in 2 tools": a skill is counted once, however many tools it changes in.
     const switches = ({ skills, tools }: { skills: number; tools: number }, verb: string) => (skills ? `${plural(skills, 'skill')} to turn ${verb}${tools > 1 ? ` in ${tools} tools` : ''}` : '');
     return h('div.apply', {},

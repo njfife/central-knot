@@ -275,7 +275,9 @@ export interface Catalog {
  */
 export interface SkillOff { skill: string; held?: string }
 
-export type InstallState = { state: 'installed'; path: string; live?: boolean; /** Its skills this tool has turned off. */ skillsOff?: SkillOff[] } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+export type InstallState = { state: 'installed'; path: string; live?: boolean;
+  /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */
+  skills?: string[]; skillsOff?: SkillOff[] } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 

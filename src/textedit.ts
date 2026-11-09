@@ -333,9 +333,9 @@ function ownEnd(text: string, table: TomlTable): number {
 
 /**
  * Takes `tables` (read from `text`) out, with `replacement` in place of the first when given. Everything else stays byte
- * for byte, apart from the one blank line appendToml put before a table that ended the document.
+ * for byte, apart from, with `endGap`, the one blank line appendToml puts before a table that ended the document.
  */
-function cutTables(text: string, tables: TomlTable[], replacement?: string): string {
+function cutTables(text: string, tables: TomlTable[], replacement?: string, { endGap = false } = {}): string {
   let out = '';
   let cursor = 0;
   tables.forEach((table, index) => {
@@ -344,7 +344,7 @@ function cutTables(text: string, tables: TomlTable[], replacement?: string): str
     cursor = ownEnd(text, table);
   });
   const rest = text.slice(cursor);
-  return replacement === undefined && rest === '' && out.endsWith('\n\n') ? out.slice(0, -1) : out + rest;
+  return endGap && replacement === undefined && rest === '' && out.endsWith('\n\n') ? out.slice(0, -1) : out + rest;
 }
 
 /**
@@ -362,12 +362,13 @@ export function setTomlTable(text: string, prefix: string[], name: string, body:
 /**
  * Removes the `[[path]]` blocks `drop` picks and, with `add`, appends one more `[[path]]` block holding those entries.
  * Other blocks, comments and tables stay byte for byte (the order of blocks matters to their readers: Codex lets the last
- * `[[skills.config]]` that matches a skill decide).
+ * `[[skills.config]]` that matches a skill decide), so a block added and then dropped leaves the file as it was, apart
+ * from a final newline the file lacked. A block's own subtables (`[path.sub]`) are not handled; Codex writes none.
  */
 export function editTomlArray(text: string, path: string[], drop: (table: TomlTable) => boolean, add?: Record<string, TomlValue>): string {
   const blocks = readTomlTables(text).filter(table => table.array && table.path.length === path.length && table.path.every((part, index) => part === path[index]));
   const dropped = blocks.filter(drop);
-  const kept = dropped.length ? cutTables(text, dropped) : text;
+  const kept = dropped.length ? cutTables(text, dropped, undefined, { endGap: true }) : text;
   if (!add) return kept;
   return appendToml(kept, `[[${path.map(bareKey).join('.')}]]\n${Object.entries(add).map(([key, value]) => `${bareKey(key)} = ${tomlValue(value)}\n`).join('')}`);
 }

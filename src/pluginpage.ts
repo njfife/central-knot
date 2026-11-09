@@ -5,7 +5,7 @@ import { button, h, icon, switchControl } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
-import { allQueued, pluginKey, queued, toggle, toggleMany, type PluginOp } from './pluginplan.ts';
+import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginOp } from './pluginplan.ts';
 import { NO_SKILL_SWITCH, cantSwitchSkill, installed, limitNote, missingTools, removableTools, skillOff, stateOf, unavailable } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -51,7 +51,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     const state = stateOf(entry, plugin.name, tool);
     if (state.state === 'installed') {
-      const switching = (action: PluginOp['action']) => [...market.draft.values()].filter(op => op.source === entry.source && op.plugin === plugin.name && op.tool === tool && op.action === action).length;
+      const switching = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { tool }).filter(op => op.action === action).length;
       const willOff = switching('skill-off'), willOn = switching('skill-on');
       return ['Installed', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
         willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : ''].filter(Boolean).join(' · ');
@@ -104,7 +104,7 @@ function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const off = skillOff(entry, plugin.name, tool, skill);
   const chosen = queued(market.draft, entry.source, plugin.name, tool, skill);
   const on = chosen ? chosen === 'skill-on' : !off;
-  const why = off?.held ?? cantSwitchSkill(view, tool, skill);
+  const why = off?.held ?? cantSwitchSkill(view, entry, plugin.name, tool, skill);
   const where = `${skill} in ${names[tool]}`;
   const label = chosen ? `${where}: turned ${on ? 'on' : 'off'} on Apply all. Click to leave it ${on ? 'off' : 'on'}.`
     : `${where}: ${on ? 'on' : 'off'}. ${why ?? `Click to turn it ${on ? 'off' : 'on'} on Apply all.`}`;
@@ -128,7 +128,7 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const switches = (skill: string) => h('span.skill-switches', {}, switchable.map(tool => skillSwitch(view, entry, plugin, tool, skill, marketIndex)));
   // What a row's switches are waiting to do, and why one is held off, in words on the row, not only in hover text.
   const rowNote = (skill: string) => {
-    const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, skill) === action).map(tool => names[tool]);
+    const chosen = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { skill }).filter(op => op.action === action).map(op => names[op.tool]);
     const held = [...new Set(switchable.map(tool => skillOff(entry, plugin.name, tool, skill)?.held).filter((why): why is string => !!why))];
     const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...held];
     return notes.filter(Boolean).join(' ') || undefined;

@@ -62,14 +62,16 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
+/** A skill's name as the tools read it: its SKILL.md's `name`, else its folder's. */
+export const skillName = (body: string, dir: string) => nameAndDescription(body).name || basename(dir);
+
 /** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
 async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
     const body = await textInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
-    const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
+    found.push({ name: skillName(body, dir), description: nameAndDescription(body).description ?? '' });
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
@@ -112,6 +114,12 @@ async function section(root: string, folder: string, named: unknown, key: string
   const paths = typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : [];
   const parts = [await fromFile(defaultFile), ...(await Promise.all(paths.map(fromFile))), unwrap(record(named))];
   return Object.assign({}, ...parts);
+}
+
+/** The skills an installed copy of a plugin holds, by name: those its plugin.json lists, else its skills folder. */
+export async function skillNamesIn(folder: string): Promise<string[]> {
+  const listed = strings((await jsonInside(folder, join(folder, '.claude-plugin/plugin.json')))?.skills)?.map(path => resolve(folder, path));
+  return (await skillsIn(folder, listed ?? [join(folder, 'skills')])).map(part => part.name);
 }
 
 /**

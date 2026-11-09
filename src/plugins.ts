@@ -6,11 +6,10 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
-import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
-import { nameAndDescription } from './discovery.ts';
+import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, skillName, skillNamesIn, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
-import { NO_SKILL_SWITCH, heldReason, noCli } from './pluginstatus.ts';
+import { NO_SKILL_SWITCH, UNSAFE_SKILL_NAME, heldReason, noCli, notInCopy, offByBareName } from './pluginstatus.ts';
 import { errorCode, writeFileChecked } from './share.ts';
 import { SAFE_NAME, githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
@@ -194,7 +193,6 @@ export async function cachedCatalog(context: PluginContext, source: string): Pro
   return { ...(await parseCatalog(target, source, 'git')), fetchedAt: fetched.mtime.toISOString() };
 }
 
-
 /** Why Copilot CLI would refuse a whole marketplace because of this one entry's source (MKT-06), if it would. */
 function copilotRefusal(name: string, where: unknown): string | undefined {
   const source = record(where);
@@ -278,17 +276,31 @@ async function readJson(path: string): Promise<Record<string, unknown> | undefin
 }
 const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
 /**
- * One `[[skills.config]]` block of Codex's config.toml: a skill picked by `name` (a plugin's as `plugin:skill`) or by the
- * `path` of its SKILL.md, turned off by `enabled = false`. Where several pick one skill, Codex lets the last decide.
+ * One entry of Codex's `skills.config` list in config.toml: a skill picked by `name` (a plugin's as `plugin:skill`) or by
+ * the `path` of its SKILL.md, turned off by `enabled = false`. Where several pick one skill, Codex lets the last decide.
  */
-interface CodexSkillSwitch { name?: string; path?: string; enabled: boolean; /** Where its block starts in the file, to tell blocks apart. */ start: number }
-/** The `[[skills.config]]` blocks of a Codex config.toml, in file order. Throws when it isn't TOML this reader can follow. */
-const codexSkillSwitches = (text: string): CodexSkillSwitch[] => readTomlTables(text)
-  .filter(table => table.array && table.path.join('.') === 'skills.config')
-  .map(table => {
-    const value = (key: string) => table.entries.find(entry => entry.key === key)?.value;
-    return { name: typeof value('name') === 'string' ? value('name') as string : undefined, path: typeof value('path') === 'string' ? value('path') as string : undefined, enabled: value('enabled') !== false, start: table.start };
-  });
+interface CodexSkillSwitch { name?: string; path?: string; enabled: boolean; /** Where its `[[skills.config]]` block starts in the file; undefined for one written inline (`skills.config = [...]`), which Central Knot reads but never edits. */ start?: number }
+/**
+ * Codex's skill switches in a config.toml, in file order, and whether the list is written as a value (`inline`), even an
+ * empty one, where a `[[skills.config]]` block can't be added. Throws when it isn't TOML this reader can follow.
+ */
+function codexSkillSwitches(text: string): { switches: CodexSkillSwitch[]; inline: boolean } {
+  const switchOf = (fields: Record<string, TomlValue>, start?: number): CodexSkillSwitch =>
+    ({ name: typeof fields.name === 'string' ? fields.name : undefined, path: typeof fields.path === 'string' ? fields.path : undefined, enabled: fields.enabled !== false, start });
+  const found: CodexSkillSwitch[] = [];
+  let inline = false;
+  for (const table of readTomlTables(text)) {
+    if (table.array && table.path.join('.') === 'skills.config') { found.push(switchOf(Object.fromEntries(table.entries.map(entry => [entry.key, entry.value])), table.start)); continue; }
+    if (table.array) continue;
+    // The same list written as a value: `skills.config = [{ … }]` at the top, or `config = [{ … }]` under `[skills]`.
+    for (const entry of table.entries) {
+      if ([...table.path, ...entry.keys].join('.') !== 'skills.config') continue;
+      inline = true;
+      for (const item of Array.isArray(entry.value) ? entry.value : []) if (item && typeof item === 'object' && !Array.isArray(item)) found.push(switchOf(item));
+    }
+  }
+  return { switches: found, inline };
+}
 type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[] };
 /** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name, and its skill switches. Empty when it can't be read. */
 const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
@@ -299,7 +311,7 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
       const [kind, name, ...deeper] = table.path;
       if ((kind === 'marketplaces' || kind === 'plugins') && name && !deeper.length && !table.array) found[kind][name] = Object.fromEntries(table.entries.map(entry => [entry.key, entry.value]));
     }
-    found.skills = codexSkillSwitches(text);
+    found.skills = codexSkillSwitches(text).switches;
   } catch { /* missing, or not TOML this reader can follow: nothing registered */ }
   return found;
 });
@@ -357,7 +369,7 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
     const entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
     const cache = text(entry?.cache_path);
-    if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache, skillsOff: copilotSkillsOff(await settingsOf(), plugin) } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+    if (cache) return (await hasFiles(cache)) ? withSkills(cache, false, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
     // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
     const settings = await settingsOf();
     const enabled = record(settings?.enabledPlugins)?.[id] === true;
@@ -366,16 +378,44 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     if (enabled && source?.source === 'directory' && folderPath) {
       const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
       const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
-      return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true, skillsOff: copilotSkillsOff(settings, plugin) } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+      return folder && (await hasFiles(folder)) ? withSkills(folder, true, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
     }
     return { state: 'not-installed' };
   }
   const tables = await codexTables(context, root);
   if (!tables.plugins[id]) return { state: 'not-installed' };
   const cache = join(root, 'plugins/cache', marketplace, plugin);
-  const versions = await readdir(cache).catch(() => [] as string[]);
-  for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version), skillsOff: await codexSkillsOff(tables.skills, plugin, join(cache, version)) };
+  const version = activeCodexVersion(await readdir(cache).catch(() => [] as string[]));
+  const folder = version && join(cache, version);
+  if (folder && (await hasFiles(folder))) return withSkills(folder, false, skills => codexSkillsOff(tables.skills, plugin, folder, skills));
   return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
+}
+
+/** Orders two plugin versions as Codex does: as semantic versions when both are, otherwise as text. */
+function compareVersions(first: string, second: string): number {
+  const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
+  const [a, b] = [parse(first), parse(second)];
+  if (!a || !b) return first < second ? -1 : first > second ? 1 : 0;
+  for (const part of [1, 2, 3]) { const diff = Number(a[part]) - Number(b[part]); if (diff) return diff; }
+  // A pre-release comes before its release; pre-releases compare part by part, numbers as numbers and below words.
+  if (a[4] === b[4]) return 0;
+  if (!a[4] || !b[4]) return a[4] ? -1 : 1;
+  const [left, right] = [a[4].split('.'), b[4].split('.')];
+  for (let at = 0; at < Math.min(left.length, right.length); at++) {
+    const [x, y] = [left[at]!, right[at]!];
+    if (x === y) continue;
+    const [xn, yn] = [/^\d+$/.test(x), /^\d+$/.test(y)];
+    if (xn && yn) return Number(x) - Number(y);
+    if (xn !== yn) return xn ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return left.length - right.length;
+}
+
+/** The version folder Codex loads of a cached plugin: `local` when there is one, otherwise the highest version. */
+function activeCodexVersion(versions: string[]): string | undefined {
+  const valid = versions.filter(version => /^[A-Za-z0-9._+-]+$/.test(version) && version !== '.' && version !== '..');
+  return valid.includes('local') ? 'local' : valid.sort(compareVersions).at(-1);
 }
 
 // ---------- One skill of an installed plugin (ENB-06) ----------
@@ -383,80 +423,120 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
 // by its SKILL.md name (its folder's when it gives none). Neither touches the plugin's files, and both outlive an update.
 
 const qualified = (plugin: string, skill: string) => `${plugin}:${skill}`;
+/** The skill a `plugin:skill` name picks, if it names one of this plugin's. */
+const skillOf = (plugin: string, name: string) => (name.startsWith(`${plugin}:`) ? name.slice(plugin.length + 1) : undefined);
 
-/** Copilot CLI's `disabledSkills` (settings.json) for this plugin. A bare name turns off every skill of that name, so it is held. */
-function copilotSkillsOff(settings: Record<string, unknown> | undefined, plugin: string): SkillOff[] {
+/** An installed copy in `folder`, with the skills it holds and, of those, the ones `offs` says the tool has turned off. */
+async function withSkills(folder: string, live: boolean, offs: (skills: string[]) => Promise<SkillOff[]>): Promise<InstallState> {
+  const skills = await skillNamesIn(folder);
+  return { state: 'installed', path: folder, ...(live ? { live } : {}), skills, skillsOff: await offs(skills) };
+}
+
+/** Of `skills`, those Copilot CLI's `disabledSkills` (settings.json) turns off. A bare name turns off every skill so named: held. */
+function copilotSkillsOff(settings: Record<string, unknown> | undefined, plugin: string, skills: string[]): SkillOff[] {
   const off = new Map<string, SkillOff>();
   for (const name of strings(settings?.disabledSkills) ?? []) {
-    if (name.startsWith(`${plugin}:`)) { const skill = name.slice(plugin.length + 1); if (!off.has(skill)) off.set(skill, { skill }); }
-    else if (!name.includes(':')) off.set(name, { skill: name, held: `Copilot CLI has every skill named “${name}” turned off, not only this plugin’s. To turn them all on: copilot skill enable ${name}` });
+    const skill = skillOf(plugin, name);
+    if (skill && skills.includes(skill) && !off.has(skill)) off.set(skill, { skill });
+    else if (!name.includes(':') && skills.includes(name)) off.set(name, { skill: name, held: offByBareName(name) });
   }
   return [...off.values()];
 }
 
 /** The skill of the plugin in `folder` that a Codex switch picks, if it picks one: by `plugin:skill`, or by a SKILL.md path inside that copy. */
 async function codexSwitchSkill(entry: CodexSkillSwitch, plugin: string, folder: string): Promise<string | undefined> {
-  if (entry.name) return entry.name.startsWith(`${plugin}:`) ? entry.name.slice(plugin.length + 1) : undefined;
+  if (entry.name) return skillOf(plugin, entry.name);
   if (!entry.path) return undefined;
   // Codex's own /skills toggle writes the path, which names one version's copy: an update leaves it behind.
   const file = basename(entry.path) === 'SKILL.md' ? resolve(entry.path) : join(resolve(entry.path), 'SKILL.md');
   if (!(await inside(folder, file))) return undefined;
   const body = await readFile(file, 'utf8').catch(() => undefined);
-  return body === undefined ? undefined : nameAndDescription(body).name || basename(dirname(file));
+  return body === undefined ? undefined : skillName(body, dirname(file));
 }
 
-/** The plugin's skills Codex has turned off: for each skill, the last switch that picks it decides. */
-async function codexSkillsOff(switches: CodexSkillSwitch[], plugin: string, folder: string): Promise<SkillOff[]> {
+/** Of `skills` (the copy in `folder`), those Codex has turned off: for each skill, the last switch that picks it decides. */
+async function codexSkillsOff(switches: CodexSkillSwitch[], plugin: string, folder: string, skills: string[]): Promise<SkillOff[]> {
   const enabled = new Map<string, boolean>();
-  for (const entry of switches) { const skill = await codexSwitchSkill(entry, plugin, folder); if (skill) enabled.set(skill, entry.enabled); }
+  for (const entry of switches) { const skill = await codexSwitchSkill(entry, plugin, folder); if (skill && skills.includes(skill)) enabled.set(skill, entry.enabled); }
   return [...enabled].filter(([, on]) => !on).map(([skill]) => ({ skill }));
 }
 
 /**
+ * Each Codex skill switch written this session, by config.toml and `plugin:skill`: the file before and after, and which
+ * way. Switching that skill back while the file is still exactly as written gives the earlier bytes back whole (a block
+ * the person had for the skill, a path-form one, a missing final newline), which is what makes an Undo exact.
+ */
+const codexWrites = new Map<string, { before: string | null; after: string; on: boolean }>();
+
+/**
  * Codex's switch for one skill of the plugin in `folder`, in config.toml: every `[[skills.config]]` block that picks it is
- * taken out, and to turn it off one block naming it is added (by name, never by path, so an update keeps it off). Only
- * that changes; a file changed meanwhile is left alone. Returns a problem, or undefined once written.
+ * taken out, and to turn it off one block naming it is added (by name, never by path, so an update keeps it off); or, to
+ * switch back what this session just wrote, the file as it was before (see codexWrites). A file changed meanwhile, or one
+ * that writes the list as a value (where a `[[skills.config]]` block would make the file invalid), is left alone.
+ * Returns a problem, or undefined once written.
  */
 async function switchCodexSkill(context: PluginContext, plugin: string, skill: string, on: boolean, folder: string): Promise<string | undefined> {
   const path = join(configRootOf(context, 'codex-cli'), 'config.toml');
+  const key = `${path}\u0000${qualified(plugin, skill)}`;
   const before = await readOrNull(path);
-  let after: string;
-  try {
-    const picks = new Set<number>();
-    for (const entry of codexSkillSwitches(before ?? '')) if ((await codexSwitchSkill(entry, plugin, folder)) === skill) picks.add(entry.start);
-    after = editTomlArray(before ?? '', ['skills', 'config'], block => picks.has(block.start), on ? undefined : { name: qualified(plugin, skill), enabled: false });
-  } catch { return 'Codex’s config.toml couldn’t be read, so it was left as it is.'; }
+  const last = codexWrites.get(key);
+  const edit = last && last.on !== on && last.before !== null && before === last.after ? { text: last.before } : await codexConfigWith(before ?? '', plugin, skill, on, folder);
+  if ('problem' in edit) return edit.problem;
+  const after = edit.text;
   if (after === before) return undefined;
   try { await writeFileChecked(path, after, before ?? undefined); }
   catch (error) { return errorCode(error) === 'CK_CHANGED' ? 'Codex’s config.toml changed just then, so it was left as it is. Try again.' : `Codex’s config.toml couldn’t be written: ${error instanceof Error ? error.message : String(error)}`; }
+  codexWrites.set(key, { before, after, on });
   await keepRecord(context, 'codex-cli', `config.toml [[skills.config]] name = "${qualified(plugin, skill)}"${on ? ' removed' : ' enabled = false'}`, '', [{ path, before, after }]).catch(() => undefined);
   return undefined;
 }
 
 /**
+ * Codex's config.toml `text` with every block that picks this skill of the plugin in `folder` taken out and, to turn it
+ * off, one block naming it added; or why it can't be edited: not TOML this reader follows, or the list written as a value.
+ */
+async function codexConfigWith(text: string, plugin: string, skill: string, on: boolean, folder: string): Promise<{ text: string } | { problem: string }> {
+  let read: ReturnType<typeof codexSkillSwitches>;
+  try { read = codexSkillSwitches(text); } catch { return { problem: 'Codex’s config.toml couldn’t be read, so it was left as it is.' }; }
+  const { switches, inline } = read;
+  if (inline) return { problem: 'Codex’s config.toml writes skills.config as a value, a form Central Knot doesn’t edit, so it was left as it is.' };
+  const picks = new Set<number>();
+  for (const entry of switches) if ((await codexSwitchSkill(entry, plugin, folder)) === skill) picks.add(entry.start!);
+  return { text: editTomlArray(text, ['skills', 'config'], block => picks.has(block.start), on ? undefined : { name: qualified(plugin, skill), enabled: false }) };
+}
+
+/**
  * Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch, then reads
  * the switch again: only what the tool then records counts (Copilot CLI's commands exit 0 even on a name they don't know).
- * The plugin's files are never touched. A tool with no such switch, or a skill held off by a switch that isn't this
- * plugin's own, fails with the reason and nothing changes.
+ * The plugin's files are never touched. A tool with no such switch, a skill the installed copy lacks, or one held off by a
+ * switch that isn't this plugin's own fails with the reason, and nothing changes.
  */
 export async function setSkill(context: PluginContext, marketplace: string, plugin: string, skill: string, tool: HarnessId, on: boolean, source: string): Promise<ActionReport> {
   const name = toolNames[tool];
   const outcome = on ? 'skill-on' : 'skill-off';
   const fail = (message: string, runs: NativeRun[] = []): ActionReport => ({ tool, outcome: 'failed', message, runs });
   if (NO_SKILL_SWITCH[tool]) return fail(NO_SKILL_SWITCH[tool]);
+  if (tool === 'copilot-cli' && !SAFE_NAME.test(skill)) return fail(UNSAFE_SKILL_NAME);
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
-  const offNow = async () => { const state = await installState(context, tool, marketplace, plugin); return state.state === 'installed' ? { path: state.path, off: state.skillsOff?.find(entry => entry.skill === skill) } : undefined; };
-  const before = await offNow();
+  /** The skill in the installed copy as the tool's switch has it now: on or off, and why it is held off if it is. */
+  const now = async () => {
+    const state = await installState(context, tool, marketplace, plugin);
+    if (state.state !== 'installed') return undefined;
+    const off = state.skillsOff?.find(entry => entry.skill === skill);
+    return { path: state.path, has: !!state.skills?.includes(skill), on: !off, held: off?.held };
+  };
+  const before = await now();
   if (!before) return fail(`It isn’t installed in ${name} now.`);
-  if (!before.off === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
-  if (on && before.off?.held) return fail(before.off.held);
+  if (!before.has) return fail(notInCopy(tool, skill));
+  if (before.on === on) return { tool, outcome, message: `Already ${on ? 'on' : 'off'} in ${name}.`, runs: [] };
+  if (on && before.held) return fail(before.held);
   const runs: NativeRun[] = [];
   if (tool === 'codex-cli') { const problem = await switchCodexSkill(context, plugin, skill, on, before.path); if (problem) return fail(problem); }
   else runs.push(await native(context, tool, ['skill', on ? 'enable' : 'disable', qualified(plugin, skill)]));
-  const after = await offNow();
-  if (after && !after.off === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs };
-  return fail(`Still ${on ? 'off' : 'on'} in ${name}. ${after?.off?.held ?? lastLines(runs[0]?.output ?? '')}`.trim(), runs);
+  const after = await now();
+  if (after?.on === on) return { tool, outcome, changed: true, message: `Turned ${on ? 'on' : 'off'} in ${name}. ${nextStepFor(tool, 'for this to take effect')}`.trim(), runs };
+  return fail(`Still ${on ? 'off' : 'on'} in ${name}. ${after?.held ?? lastLines(runs[0]?.output ?? '')}`.trim(), runs);
 }
 
 // ---------- Install and uninstall ----------
