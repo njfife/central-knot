@@ -228,7 +228,7 @@ async function everyPage(tag) {
   // notes, when there: a skill whose copies agree, so its details offer Files and contents.
   const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) {
-    await a.click(`#${first}`);
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${first}`);
     if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The skill's details did not open ${at}.`);
     await shot(a, `${tag}-skills-details`, `Opened notes's details ${at} (beside the table from 1200px of content).`);
     const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
@@ -261,7 +261,8 @@ async function everyPage(tag) {
   await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
   const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (agent) {
-    await a.click(`#${agent}`);
+    // An earlier step may have left the row open: a click would close it, so it is clicked only while closed.
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${agent}`);
     if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The agent's details did not open ${at}.`);
     await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at} (beside the table from 1200px of content).`);
     await a.click(`#${agent}`);
