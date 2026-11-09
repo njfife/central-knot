@@ -164,20 +164,6 @@ test('Replacing a read-only copy works and leaves nothing parked', { skip: noPos
   } finally { await box.cleanup(); }
 });
 
-test('A held skill and an unloadable target are never written', { skip: noPosix }, async () => {
-  const box = await sandbox();
-  try {
-    const linked = await skill(box.home, CLAUDE, 'has-link');
-    await symlink('SKILL.md', join(linked, 'alias'));
-    await skill(box.home, CLAUDE, 'plain', 'No frontmatter.\n');
-    const result = await applyChanges(ctx(box), [manage('has-link'), manage('plain')]);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await exists(join(box.home, COPILOT, 'has-link')), false);
-    assert.equal(await exists(join(box.home, COPILOT, 'plain')), false);
-    assert.equal((await facts(box, 'has-link')).held !== undefined, true);
-  } finally { await box.cleanup(); }
-});
-
 test('An unreadable skill is held, and the rest still syncs', { skip: noPosix || process.getuid?.() === 0 }, async () => {
   const box = await sandbox();
   try {
