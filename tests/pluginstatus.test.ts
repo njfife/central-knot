@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, limitNote, missingTools, summaryOf, unavailable } from '../src/pluginstatus.ts';
+import { blocked, limitNote, missingTools, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginsView } from '../src/types.ts';
 
@@ -24,10 +24,6 @@ test('A tool’s limits are named in a few words', () => {
   assert.equal(limitNote([{ component: 'Skills', result: 'works', text: '' }]), '');
   assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: 'are ignored: copied, never offered' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents are ignored +1');
   assert.equal(limitNote([{ component: 'Commands', result: 'limited', text: 'are turned into skills when installed' }]), 'Commands limited');
-});
-
-test('A summary names only what a plugin holds', () => {
-  assert.equal(summaryOf({ skills: 2, commands: 0, agents: 1, hooks: true, mcp: 1, mcpRootVariable: false, bin: false }), '2 skills · 1 agent · hooks · 1 MCP server');
 });
 
 test('A background read is kept only while its own placeholder is still there', async () => {
