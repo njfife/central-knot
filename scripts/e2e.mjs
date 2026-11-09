@@ -163,14 +163,14 @@ async function harnessFlow() {
   check('a harness opens on its skills, its own column first', (await a.exists('#harness-tab-skills[aria-selected="true"]')) && (await a.text('.ov-head .ov-tool-head') ?? '').includes('Copilot CLI'), await a.text('.ov-head'));
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
-  await a.click('#tool-copilot-cli');
-  check('its column menu brings things in', (await a.text('.tool-menu-label') ?? '').includes('Add to Copilot CLI from'), await a.text('.tool-menu'));
+  await a.click('#harness-add-from');
+  check('Add from… opens its column menu, which brings things in', (await a.text('.tool-menu-label') ?? '').includes('Add to Copilot CLI from'), await a.text('.tool-menu'));
   await a.click('#menu-add-claude-cli-copilot-cli');
   same('Add queues a new copy here', await cellState(a, 'release-notes', 'copilot-cli'), 'will-sync');
   check('nothing written before Apply all', !existsSync(join(practice, '.copilot/skills/release-notes')));
   await a.shot('harness-pending');
   await applyAll(a);
-  check('Apply all on a harness page writes the copy', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')));
+  check('Apply all on a harness page writes the copy, and only where the menu said', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')) && !existsSync(join(practice, '.codex/skills/release-notes')));
   check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
   await a.click('#nav-skills');
   same('the Skills page shows the same change', await switchOn(a, 'release-notes'), true);

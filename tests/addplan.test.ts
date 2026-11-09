@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planAdd } from '../src/addplan.ts';
+import { planAdd, withBoth } from '../src/addplan.ts';
 import type { SampleSkill } from '../src/design.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -45,4 +45,16 @@ test('Blocked conflicts, held skills, unloadable tools and kept-separate skills 
   assert.match(plan.blocked[0].reason, /different copy elsewhere/);
   assert.deepEqual(plan.skip.map(entry => entry.skill.key), ['held', 'dot', 'separate']);
   assert.deepEqual(plan.differ.map(entry => entry.skill.key), ['block-off'], 'a block on a tool it would not sync to does not count');
+});
+
+test('Adding to one harness from its own page enrols only the two tools named', () => {
+  const plan = planAdd([
+    skill('fresh', { 'copilot-cli': 'a' }),
+    skill('third-differs', { 'copilot-cli': 'b', 'codex-cli': 'b2' }),
+    skill('managed', { 'copilot-cli': 'c' }, { managed: true, off: ['claude-cli'] }),
+  ], 'copilot-cli', 'claude-cli', tools, true);
+  assert.deepEqual(keys(plan.fresh), ['fresh', 'third-differs'], 'a third tool is left out, so its different copy is no conflict');
+  assert.deepEqual(keys(plan.resume), ['managed']);
+  assert.deepEqual(withBoth(skill('fresh', { 'copilot-cli': 'a' }), 'copilot-cli', 'claude-cli', tools).off, ['codex-cli']);
+  assert.deepEqual(withBoth(skill('managed', {}, { managed: true, off: ['claude-cli'] }), 'copilot-cli', 'claude-cli', tools).off, [], 'a managed skill keeps the tools it syncs to');
 });

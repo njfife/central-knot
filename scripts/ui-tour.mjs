@@ -198,20 +198,26 @@ if (wanted('instructions')) {
 if (wanted('harnesses')) {
   begin('harnesses');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
-  const sizes = async (name, caption) => { for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) { await size(width, height); await shot(a, `${name}-${width}`, `${caption} Window ${width}×${height}.`); } await size(1280, 800); };
+  const sizes = async (name, caption) => {
+    for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) for (const theme of ['dark', 'light']) { await size(width, height); await a.theme(theme); await shot(a, `${name}-${width}-${theme}`, `${caption} Window ${width}×${height}, ${theme} appearance.`); }
+    await a.theme('dark'); await size(1280, 800);
+  };
   await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
   await shot(a, 'list-dark', 'Clicked "Harnesses" in the sidebar: one card per tool with what it has. Window 1280×800.');
   await a.theme('light'); await shot(a, 'list-light', 'The same, light appearance.'); await a.theme('dark');
   await sizes('list', 'The Harnesses list.');
+  if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
   await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
   await sizes('claude-skills', 'Claude Code’s Skills tab.');
-  await a.click('#tool-claude-cli'); await shot(a, 'claude-add-menu', 'Clicked the Claude Code column header: its menu adds other tools’ skills here.');
+  await a.click('#harness-add-from'); await shot(a, 'claude-add-menu', 'Clicked "Add from…" in the toolbar (the Claude Code column header opens the same menu): it adds other tools’ skills here.');
   if (await a.has('#menu-add-copilot-cli-claude-cli:not([disabled])')) { await a.click('#menu-add-copilot-cli-claude-cli'); await shot(a, 'claude-pending', 'Clicked "Add" on the Copilot CLI row: the changes wait for Apply all.'); }
   if (await a.has('#apply:not([disabled])')) { await a.click('#apply'); await a.settle(); await shot(a, 'claude-applied', 'Clicked "Apply all".'); }
   await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
   await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
   await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
   await a.click('#harness-tab-instructions'); await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`); await shot(a, 'claude-instructions', 'Clicked the "Instructions" tab: Claude Code’s own file, editable here.');
+  await sizes('claude-instructions', 'The Instructions tab.');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'claude-instructions-editing', 'Clicked Edit.'); if (await a.has('#ins-cancel-claude-cli')) await a.click('#ins-cancel-claude-cli');
   // With the Plugins tour run first, install document-tools again so this tab has something to show.
   if (wanted('plugins')) {
     await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);

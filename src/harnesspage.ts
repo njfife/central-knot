@@ -6,7 +6,7 @@ import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural } from './model.ts';
 import { toolNames } from './words.ts';
 import type { HarnessId, HomeView, InstructionFile, McpView, SkillFacts, Snapshot } from './types.ts';
-import { brandMark, designOverview, outcomeBand } from './matrix.ts';
+import { brandMark, closeOpenRows, designOverview, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionCard } from './instructionspage.ts';
 import { browse, market, peekPlugins } from './pluginstate.ts';
 import { copyButton } from './pages.ts';
@@ -73,26 +73,36 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const file = instructionOf(tool);
   const plugins = pluginsIn(tool);
   const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
-  const differ = kinds.reduce((sum, { kind }) => sum + kindView(home, kind).facts.filter(fact => fact.copies[tool] && !fact.managed && !fact.separate && new Set(Object.values(fact.copies).map(copy => copy!.hash)).size > 1).length, 0);
+  // Unmanaged items whose copies differ, by kind: each line opens this harness's table showing only those.
+  const differing = kinds.map(({ kind }) => ({ kind, count: kindView(home, kind).facts.filter(fact => fact.copies[tool] && !fact.managed && !fact.separate && new Set(Object.values(fact.copies).map(copy => copy!.hash)).size > 1).length })).filter(({ count }) => count);
+  const managedNote = (total: number, managed: number) => !total ? undefined : managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged`;
   const body = [
     h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), open ? icon('arrow-right', 14, 'tone-faint') : null),
     h(`span.harness-card-status${snapshot.detection === 'Not found' && home.mode === 'actual' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)),
     h('span.harness-counts', {},
-      kinds.map(({ kind, supported, total, managed }) => countRow(kindWords[kind][1].replace(/^./, first => first.toUpperCase()), supported ? String(total) : '—', !supported ? `${names[tool]} has none of its own` : !total ? undefined : managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged`, supported ? '' : '.tone-faint')),
-      countRow('Instructions', file ? (file.exists ? fileName(file.path) : 'No file yet') : '…', file?.exists && file.text.trim() ? plural(lineCount(file.text), 'line') : undefined, file?.exists ? '' : '.tone-faint'),
-      countRow('Plugins', plugins === undefined ? '…' : plugins === null ? '—' : String(plugins.length), plugins === null ? 'Not handled here' : plugins?.length ? 'installed' : undefined, plugins ? '' : '.tone-faint')),
-    issues.length || differ ? h('span.harness-card-attention', {}, icon('triangle-alert', 13, 'tone-warning'), [differ ? `${differ} with different copies` : '', issues.length ? plural(issues.length, 'read problem') : ''].filter(Boolean).join(' · ')) : null,
-    h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root))),
+      kinds.map(({ kind, supported, total, managed }) => countRow(kindWords[kind][1].replace(/^./, first => first.toUpperCase()), supported ? String(total) : '—', supported ? managedNote(total, managed) : `${names[tool]} has none of its own`, supported ? '' : '.tone-faint')),
+      countRow('Instructions', !file ? '…' : file.exists ? '1' : '0', !file ? undefined : file.exists ? [fileName(file.path), file.text.trim() ? plural(lineCount(file.text), 'line') : 'empty'].join(' · ') : 'no file yet', file?.exists ? '' : '.tone-faint'),
+      countRow('Plugins', plugins === undefined ? '…' : plugins === null ? '—' : String(plugins.length), plugins === null ? 'not handled here' : plugins?.length ? 'installed' : undefined, plugins ? '' : '.tone-faint')),
+  ];
+  const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
+  const attention = [
+    ...differing.map(({ kind, count }) => h('button.harness-card-attention', { type: 'button', id: `harness-${tool}-differ-${kind}`, title: 'Show only these',
+      onclick: () => { showFiltered(kind, 'attention'); openHarness(tool, kind); } }, icon('diff', 13), `${count} ${kindWords[kind][count === 1 ? 0 : 1]} with different copies`, icon('arrow-right', 12))),
+    issues.length ? h('button.harness-card-attention', { type: 'button', id: `harness-${tool}-problems`, onclick: () => openHarness(tool, 'about') }, icon('triangle-alert', 13), plural(issues.length, 'read problem'), icon('arrow-right', 12)) : null,
   ];
   // A tool that was not found has nothing to manage: its card says so and does not open.
   return open
-    ? h('button.card.harness-card', { type: 'button', id: `harness-${tool}`, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => openHarness(tool) }, body)
-    : h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` }, body,
-      h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`));
+    ? h('div.card.harness-card', {}, h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => openHarness(tool) }, body),
+      attention.some(Boolean) ? h('div.harness-card-links', {}, attention) : null, path)
+    : h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` }, h('div.harness-card-main', {}, body,
+      h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`)), path);
 }
 
-function openHarness(tool: HarnessId) {
+/** Opens one harness's page, on `tab` if given (else the tab last used), with its tables closed. */
+function openHarness(tool: HarnessId, tab?: HarnessTab) {
+  if (state.harness !== tool) closeOpenRows();
   state.harness = tool;
+  if (tab) state.harnessTab = tab;
   state.outcome = undefined;
   announce('');
   rerender();
@@ -104,9 +114,9 @@ function everyHarness(home: HomeView) {
   return h('div.page', {}, done ? h('div.bands', {}, done) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
-        home.mode === 'actual' ? 'Each AI coding tool Central Knot found on this computer, and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
-          : [home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
-            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.']),
+        h('span', {}, 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.',
+          home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' This is the practice copy, so installed apps aren’t looked for; ' : ' This is a folder, not this computer, so installed apps aren’t looked for; ',
+            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows them with their versions.'])),
       h('div.harness-cards', {}, listed(home).map(snapshot => summaryCard(snapshot, home)))));
 }
 
@@ -214,8 +224,8 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   return h('div.page.harness-page', {},
     h('div.harness-head', {},
       h('div.harness-crumb', {},
-        h('button.crumb-link', { type: 'button', id: 'harness-back', title: 'Every harness', onclick: () => { state.harness = undefined; state.outcome = undefined; rerender(); document.getElementById(`harness-${tool}`)?.focus(); } }, icon('arrow-left', 14), 'Harnesses'),
-        h('span.crumb-sep', { 'aria-hidden': 'true' }, '/')),
+        // The header above already says Harnesses: the way back is the arrow alone.
+        button({ variant: 'ghost', size: 'small', icon: 'arrow-left', name: 'Back to every harness', id: 'harness-back', onclick: () => { state.harness = undefined; state.outcome = undefined; announce(''); rerender(); document.getElementById(`harness-${tool}`)?.focus(); } })),
       brandMark(tool, 18),
       h('div.pane-title', {}, h('h2', {}, names[tool]), h('p', {}, detectionLine(snapshot, home), h('span.harness-head-path', {}, ' · ', h('span.mono', { title: snapshot.root }, shownPath(snapshot.root))))),
       switcher(home, tool)),

@@ -1353,22 +1353,26 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
-.harness-card { display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; color: var(--ink); font: inherit; text-align: left; }
-button.harness-card { cursor: pointer; }
-button.harness-card:hover { border-color: var(--control-line); background: var(--hover); }
-button.harness-card:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-card { display: flex; flex-direction: column; color: var(--ink); }
+.harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
+button.harness-card-main { cursor: pointer; }
+button.harness-card-main:hover { background: var(--hover); }
+button.harness-card-main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-card-links:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
 .harness-card-missing { color: var(--ink-soft); }
 .harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .harness-card-head > svg:last-child { margin-left: auto; flex: none; }
 .harness-card-name { font-size: 14px; line-height: 20px; font-weight: 600; }
 .harness-card-status { font-size: 12px; line-height: 16px; color: var(--ink-soft); margin-top: -6px; }
-.harness-counts { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
+.harness-counts { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; padding-top: 10px; border-top: 1px solid var(--line); }
 .harness-count { display: contents; }
 .harness-count-label { color: var(--ink-soft); font-size: 12.5px; }
 .harness-count-value { font-weight: 600; font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
-.harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.harness-card-attention { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warning); }
-.harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; }
+.harness-count-note { color: var(--ink-soft); font-size: 12px; min-width: 0; overflow-wrap: anywhere; }
+.harness-card-attention { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--warning); cursor: pointer; }
+.harness-card-attention:hover { background: var(--hover); text-decoration: underline; }
+.harness-card-attention:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; color: var(--ink-soft); }
 
 .harness-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 57px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
@@ -1408,3 +1412,9 @@ button.harness-card:focus-visible { outline: 2px solid var(--focus); outline-off
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
 .ov-name-desc { flex: 1 1 0; min-width: 0; margin-left: 4px; font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1100px) { .ov-name-desc { display: none; } }
+/* The harness's own column is the page's subject: its header sits on a quiet fill. Its instruction card spans the pane. */
+.tool-head-focus .tool-head-button { background: var(--hover); }
+.harness-page .ins-card { max-width: none; }
+/* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
+.harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
+.harness-page .toolbar-end { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }

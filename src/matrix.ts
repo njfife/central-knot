@@ -219,7 +219,9 @@ function changeBar(bulk = true) {
   // Unmanaged items whose copies differ need a choice first, so Manage leaves them out and says so.
   const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
   const word = (n: number) => (kind === 'mcp' ? (n === 1 ? 'MCP server' : 'MCP servers') : n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
-  const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  // On a harness's page the count names what it covers: only what that harness has.
+  const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
+  const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
@@ -669,7 +671,9 @@ function legend(list: SampleSkill[]) {
 
 // ---------- What differs between the options ----------
 
-const planAdd = (from: Tool, to: Tool, list: SampleSkill[]) => planAddPure(list.map(effective), from, to, toolList());
+// On a harness's page, adding to that harness enrols only the source and that harness, as its menu says.
+const pairOnly = (to: Tool) => (to === focus ? toolList() : undefined);
+const planAdd = (from: Tool, to: Tool, list: SampleSkill[]) => planAddPure(list.map(effective), from, to, toolList(), !!pairOnly(to));
 
 /** Skills one tool can add to another without deciding between differing copies. */
 const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => { const plan = planAdd(from, to, list); return [...plan.fresh, ...plan.same, ...plan.resume]; };
@@ -680,9 +684,9 @@ const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => { const plan = p
  */
 function send(from: Tool, to: Tool, list: SampleSkill[], conflicts = false) {
   const plan = planAdd(from, to, list);
-  for (const skill of [...plan.fresh, ...plan.same, ...plan.resume]) edit(skill.key, (now, draft) => ({ managed: true, off: withBoth(now, from, to).off, ...keepChoice(keepResolve(true, draft?.resolve), draft) }));
+  for (const skill of [...plan.fresh, ...plan.same, ...plan.resume]) edit(skill.key, (now, draft) => ({ managed: true, off: withBoth(now, from, to, pairOnly(to)).off, ...keepChoice(keepResolve(true, draft?.resolve), draft) }));
   if (conflicts) for (const { skill } of plan.differ) edit(skill.key, (now, draft) => ({
-    managed: true, off: withBoth(now, from, to).off, resolve: from,
+    managed: true, off: withBoth(now, from, to, pairOnly(to)).off, resolve: from,
     // As choosing a copy by hand: undoing the choice puts Managed back as it was.
     prior: draft?.resolve ? draft.prior ?? committedOf(skill.key).managed : now.managed,
     seen: committedOf(skill.key).hashes?.[from],
@@ -759,12 +763,21 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
       button({ variant: 'ghost', size: 'small', label: 'Stop syncing here', name: `Stop syncing all ${syncingHere.length} ${noun(syncingHere.length)} to ${names[tool]}`, id: `menu-stop-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })));
 }
 
+/** A harness's page: the same menu as its column header, from the toolbar, so bringing items in is never hidden. */
+function addFromButton(tool: Tool) {
+  return button({ variant: 'outline', size: 'small', icon: 'plus', label: 'Add from…', name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from', attrs: { 'aria-expanded': String(view.toolMenu === tool), 'aria-haspopup': 'dialog' },
+    onclick: event => { event.stopPropagation(); view.toolMenu = view.toolMenu === tool ? undefined : tool; view.addConflicts.clear(); view.addReasons.clear(); rerender(); } });
+}
+
+/** Moving to another harness starts its tables closed: no row details or menu carried over from the last one. */
+export function closeOpenRows() { for (const each of Object.values(views)) { each.comparing = undefined; each.toolMenu = undefined; } }
+
 /** Option A: the actions sit in the headers. A tool's header adds everything the other tool has; a group header manages the group. */
 function toolHead(tool: Tool, list: SampleSkill[]) {
   const count = sendable(other(tool), tool, list).length;
   if (variant === 'b') {
     const open = view.toolMenu === tool;
-    return h('div.ov-cell.ov-tool-head.tool-head-b', { role: 'columnheader' },
+    return h(`div.ov-cell.ov-tool-head.tool-head-b${tool === focus ? '.tool-head-focus' : ''}`, { role: 'columnheader' },
       h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: tool === focus ? `Options for ${names[tool]}: add other tools’ ${nouns[kind][1].toLowerCase()} here, or stop syncing here` : `Options for ${names[tool]}: copy its ${nouns[kind][1].toLowerCase()} to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; view.addConflicts.clear(); view.addReasons.clear(); rerender(); } },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
       open ? toolMenu(tool, list) : null);
@@ -1153,7 +1166,7 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
     oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
   return h('div.page.ov-page', { 'data-variant': variant },
-    h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
+    h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus) : null, changeBar())),
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
