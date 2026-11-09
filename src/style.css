@@ -1273,3 +1273,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .notice-tail { flex-basis: 100%; padding-left: 22px; font-size: 12px; order: 3; }
 .notice-stacked > .notice-actions { margin-top: 6px; }
 .details-tool-actions .btn, .details-tool-actions button { height: 26px; font-size: 12px; }
+/* Round 21: MCP details, one row per tool with status, file and action on one line */
+.details-tool-line > .details-path-bare { display: inline-flex; margin: 0 0 0 10px; vertical-align: baseline; }
+.details-tool > .details-path-bare { padding-left: 0; }
+.notice-quit { margin-left: 4px; }
+.details-mcp .details-tool-head { grid-template-columns: 150px minmax(0, 1fr); }
+.sync-notice.notice-stacked > .notice-dismiss { right: 4px; }
