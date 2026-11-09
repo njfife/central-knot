@@ -14,7 +14,7 @@ function blocked(view: PluginsView, market: MarketplaceView, tool: HarnessId): s
   if (!view.clis[tool]) {
     return tool === 'codex-cli' && state.home?.snapshots.find(snapshot => snapshot.harness === 'codex-cli')?.probe.detail.startsWith('ChatGPT desktop')
       ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.'
-      : `${names[tool]}’s own CLI was not found, so its plugin commands can’t run.`;
+      : `${names[tool]}’s command-line tool wasn’t found, so its plugin commands can’t run.`;
   }
   if (tool === 'copilot-cli') return market.plugins.find(plugin => plugin.copilotRefuses)?.copilotRefuses;
   return undefined;
@@ -27,18 +27,20 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
   const why = blocked(view, market, tool);
   const busy = !!state.busy || !view.canWrite;
   const id = `pcell-${index}-${plugin.name}-${tool}`;
+  // A box that can't be clicked says why, never "Click to …".
+  const cantWhy = !view.canWrite ? 'Preview only: nothing can be installed or uninstalled in this home.' : !view.clis[tool] ? `${names[tool]}’s command-line tool wasn’t found.` : '';
   if (status.state === 'installed') {
     const text = `${names[tool]}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
     // Uninstalling takes a second click on the same cell; the band above says what it will do.
     const confirming = state.pluginConfirm === id;
-    return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
+    return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : cantWhy ? `${text}. Can’t uninstall here: ${cantWhy}` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
       onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Uninstall ${plugin.name} from ${names[tool]}? You can reinstall it right after. Esc cancels.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)),
       confirming ? h('span.cell-confirm-label', { 'aria-hidden': 'true' }, 'Uninstall?') : null);
   }
   if (why) return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-cannot', { type: 'button', id, title: why, 'aria-label': `${names[tool]}: ${why}`, disabled: true, 'data-state': 'cannot' }, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–')));
-  if (status.state === 'not-known') return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-differs', { type: 'button', id, title: `${status.reason} Click to install again.`, 'aria-label': `${names[tool]}: not known yet. ${status.reason} Install again`, disabled: busy, 'data-state': 'not-known',
+  if (status.state === 'not-known') return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-differs', { type: 'button', id, title: cantWhy ? `${status.reason} ${cantWhy}` : `${status.reason} Click to install again.`, 'aria-label': `${names[tool]}: not known yet. ${status.reason} Install again`, disabled: busy, 'data-state': 'not-known',
     onclick: (event: Event) => { event.stopPropagation(); void installPlugin(market.source, plugin.name, [tool]); } }, icon('circle-question-mark', 16)));
-  return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-absent.plugin-add', { type: 'button', id, title: `Not installed in ${names[tool]}. Click to install.`, 'aria-label': `${names[tool]}: not installed. Install`, disabled: busy, 'data-state': 'absent',
+  return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-absent.plugin-add', { type: 'button', id, title: cantWhy ? `Not installed in ${names[tool]}. ${cantWhy}` : `Not installed in ${names[tool]}. Click to install.`, 'aria-label': `${names[tool]}: not installed. Install`, disabled: busy, 'data-state': 'absent',
     onclick: (event: Event) => { event.stopPropagation(); void installPlugin(market.source, plugin.name, [tool]); } }, icon('plus', 14, 'plugin-add-glyph')));
 }
 
@@ -66,13 +68,15 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
     // The row already shows a short description; the details repeat it only when the row has to cut it.
     h('div.details-head', {}, plugin.description && plugin.description.length > 70 ? h('p.details-description', {}, plugin.description) : null,
       h('p.details-status', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : h('span', {}, `Contains ${summary}`, ...(skillList ? [': ', ...skillNames.slice(0, 2).flatMap((skill, index) => [index ? ', ' : '', h('code.plugin-name', {}, skill)]), skillNames.length > 2 ? ` +${skillNames.length - 2} more` : ''] : [])))),
+    // One caption for the grid: what each tool does with it once installed (a card already installed says so on its heading).
+    parts ? h('p.plugin-grid-caption', {}, 'What each tool does with it, once installed:') : null,
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
       // Status on the heading; what installing would do under a label of its own.
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : view.clis[tool] ? 'Not installed' : 'Not installed · unavailable')),
+        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : view.clis[tool] || view.tools.every(other => !view.clis[other]) ? 'Not installed' : 'Not installed · command-line tool not found')),
       // One line per outcome, led by when it applies: "When installed: skills keep their own names."
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, h('span.plugin-when', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed: ' : 'When installed: '), ...namedText(`${outcome.component.replace(/^[A-Z](?![A-Z])/, first => first.toLowerCase())} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
+        h('span', {}, ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
 }
 
 // Escape takes back an armed uninstall, wherever focus is.
@@ -90,8 +94,8 @@ function boxKey(view: PluginsView, entry: MarketplaceView) {
   const item = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     states.includes('not-installed') ? item('Not installed: click to install', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
-    states.includes('installed') ? item('Installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
-    states.includes('not-known') ? item('Not confirmed yet', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
+    states.includes('installed') ? item('Installed: click to uninstall', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
+    states.includes('not-known') ? item('Not confirmed: click to install again', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Unavailable: command-line tool not found' : 'Can’t install here: see the note above', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
@@ -135,7 +139,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       const someCan = view.tools.some(tool => view.clis[tool]) && view.canWrite;
       const anyInstalled = entry.plugins.some(plugin => view.tools.some(tool => entry.states[plugin.name]?.[tool]?.state === 'installed'));
       const installable = someCan && entry.plugins.some(plugin => view.tools.some(tool => view.clis[tool] && !blocked(view, entry, tool) && entry.states[plugin.name]?.[tool]?.state !== 'installed'));
-      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, installable ? `Click a box to install the plugin in that tool. It runs at once, through the tool’s own command; there is no Apply all here.${anyInstalled ? ' Click a check to uninstall.' : ''}` : 'Click a check to uninstall. It runs at once, through the tool’s own command.')) : null;
+      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, installable ? `Click a box to install in that tool. It installs right away, using that tool’s own command.${anyInstalled ? ' Click a check to uninstall.' : ''}` : 'Click a check to uninstall. It runs at once, through the tool’s own command.')) : null;
       const refused = entry.plugins.filter(plugin => plugin.copilotRefuses);
       const refusal = refused.length && view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'), h('span.hint-body', {}, `Copilot CLI can’t take this marketplace: ${refused[0].copilotRefuses}`)) : null;
       if (!cannot.length) return refusal ? h('div.market-hints', {}, how, refusal) : how;

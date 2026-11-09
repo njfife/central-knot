@@ -971,7 +971,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugin-outcomes li { align-items: baseline; }
 .plugin-outcomes li > svg { align-self: flex-start; margin-top: 3px; }
 .plugin-card-state { margin-left: 2px; }
-.plugin-card-state::before { content: '·'; margin-right: 4px; color: var(--ink-faint); }
 .ov-cell { position: relative; }
 .cell-confirm-label { position: absolute; left: calc(50% + 22px); top: 50%; transform: translateY(-50%); margin-left: 0; pointer-events: none; }
 .plugin-table .ov-row:not(.ov-head):hover { background: var(--hover); cursor: pointer; }
@@ -1049,3 +1048,16 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-fold { display: block; width: 100%; text-align: left; border: 0; background: var(--hover); color: var(--ink-soft); font: inherit; padding: 1px 6px; margin: 2px 0; border-radius: 4px; cursor: pointer; }
 .ins-preview { font-size: 12.5px; max-height: none; }
 .ins-draft[hidden] { display: none; }
+
+/* Round 10: plugin cards — status on its own line with no stray separator; one caption over the grid */
+.plugin-outcome-card .details-tool-head { flex-wrap: wrap; }
+.plugin-card-state { flex-basis: 100%; margin-left: 0; padding-left: 22px; white-space: normal; }
+.plugin-grid-caption { margin: 0 0 -4px; font-size: 12px; color: var(--ink-faint); }
+
+/* Round 10: Tools and Overview scroll the full width; their content stays capped; thin scrollbars */
+#tools-scroll, #overview-scroll { max-width: none; }
+#tools-scroll > *, #instructions-scroll > * { max-width: 948px; }
+.scroll { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--ink-faint) 55%, transparent) transparent; }
+.market-hint > svg { align-self: center; margin-top: 0; }
+.market-hint .btn { padding-top: 0; padding-bottom: 0; height: auto; line-height: inherit; }
+#overview-scroll > * { max-width: 932px; }
