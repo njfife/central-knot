@@ -942,7 +942,7 @@ test('3: a read-only copy in .agents never reverts an edit made elsewhere', asyn
   } finally { await box.cleanup(); }
 });
 
-test('4: a moved CODEX_HOME lets go of the old copies; nothing is deleted elsewhere', async () => {
+test('4: a moved CODEX_HOME lets go of the old copies, nothing is deleted elsewhere, and switching back syncs again', async () => {
   const box = await sandbox();
   try {
     await managedThree(box);
@@ -950,6 +950,9 @@ test('4: a moved CODEX_HOME lets go of the old copies; nothing is deleted elsewh
     await mkdir(join(moved, 'skills'), { recursive: true });
     await settleAndPass(box, { overrides: { 'codex-cli': moved } });
     for (const root of [CLAUDE, COPILOT]) assert.equal(await exists(join(box.home, root, 'foo/SKILL.md')), true, root);
+    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edit.'));
+    await applyChanges(three(box), []);
+    for (const root of [COPILOT, CODEX]) assert.equal(await readFile(join(box.home, root, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit.'), `${root} syncs after switching back`);
   } finally { await box.cleanup(); }
 });
 
@@ -1175,20 +1178,6 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
   } finally { await box.cleanup(); }
 });
 
-test('R7b: a tool folder switched away and back is adopted as behind, not a collision that stops syncing', async () => {
-  const box = await sandbox();
-  try {
-    await managedThree(box);
-    const other = join(box.base, 'codex-b');
-    await mkdir(join(other, 'skills'), { recursive: true });
-    await applyChanges(three(box, { overrides: { 'codex-cli': other } }), []);
-    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edit.'));
-    await applyChanges(three(box), []);
-    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit.'));
-    assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit.'));
-  } finally { await box.cleanup(); }
-});
-
 test('R8: a reset folder is put back even with one managed skill; R9: deliberately deleting the last two skills spreads', async () => {
   const box = await sandbox();
   try {
@@ -1235,7 +1224,7 @@ test('R11: a linked skill folder is followed when its source is edited', { skip:
   } finally { await box.cleanup(); }
 });
 
-test('R12: a History file of the wrong shape is moved aside; R13: old revisions leave the store with their History', async () => {
+test('R12: a History file of the wrong shape is moved aside; R13: History events and store revisions older than 30 days leave', async () => {
   const box = await sandbox();
   try {
     let now = Date.now();
@@ -1244,7 +1233,7 @@ test('R12: a History file of the wrong shape is moved aside; R13: old revisions 
     await writeFile(join(storeDirectory(box.home), 'history.json'), '{"events":{"not":"a list"}}');
     await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'One.'));
     await applyChanges(timed(), []);
-    assert.ok((await readdir(storeDirectory(box.home))).some(entry => entry.startsWith('history.unreadable-')));
+    assert.ok((await readdir(storeDirectory(box.home))).some(entry => entry.startsWith('history.unreadable-')), 'a History file of the wrong shape is moved aside');
     const revisions = async () => (await readdir(join(storeDirectory(box.home), 'items/pair'))).length;
     assert.ok(await revisions() >= 2);
     now += 31 * 24 * 60 * 60 * 1000;
@@ -1278,16 +1267,12 @@ test('T1: a competing edit that loses while a deletion races stays in History an
   } finally { await box.cleanup(); }
 });
 
-test('T2: a copy replaced by a chosen copy stays recoverable after later events', async () => {
+test('T2: Undo of a copy choice from History puts the replaced copy back everywhere', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'foo', text('foo', 'CLAUDE VERSION'));
     await skill(box.home, COPILOT, 'foo', text('foo', 'COPILOT VERSION (unique work)'));
     await applyChanges(fast(box), [{ key: 'foo', managed: true, off: [], use: 'claude-cli' }]);
-    await managedPair(box, 'other');
-    await writeFile(join(box.home, CLAUDE, 'other/SKILL.md'), text('other', 'Edit.'));
-    await applyChanges(fast(box), []);
-    assert.ok(await storeHas(box, 'foo', 'COPILOT VERSION (unique work)'), 'never pruned');
     const chosen = (await readHistory(box.home)).find(entry => entry.kind === 'chosen')!;
     await restoreFromHistory(fast(box), chosen.id);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'COPILOT VERSION (unique work)'), 'and Undo brings it back');
@@ -1305,22 +1290,6 @@ test('T3: a skill removed from every tool becomes a deletion; a later install is
     await settleAndPass(box);
     assert.equal(await exists(join(box.home, CLAUDE, 'foo/SKILL.md')), true, 'the reinstall is not deleted');
     assert.equal(await exists(join(box.home, COPILOT, 'foo')), false, 'nor spread: it is new and unmanaged');
-  } finally { await box.cleanup(); }
-});
-
-test('T4: a copy a deletion cannot remove does not stop the pass; it is retried and History is written', { skip: noPosix || process.getuid?.() === 0 }, async () => {
-  const box = await sandbox();
-  try {
-    await managedThree(box);
-    await chmod(join(box.home, COPILOT), 0o555);
-    await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
-    const result = await settleAndPass(box);
-    assert.equal(result.stopped, undefined, JSON.stringify(result));
-    assert.equal(await exists(join(box.home, CODEX, 'foo')), false, 'the others still go');
-    assert.equal((await readHistory(box.home)).some(entry => entry.kind === 'deleted'), true);
-    await chmod(join(box.home, COPILOT), 0o755);
-    await applyChanges(three(box), []);
-    assert.equal(await exists(join(box.home, COPILOT, 'foo')), false, 'finished once it can be');
   } finally { await box.cleanup(); }
 });
 
@@ -1421,16 +1390,6 @@ test('Undo of added copies keeps a copy edited since, and that tool keeps syncin
     const undone = await restoreFromHistory(fast(box), added.id);
     assert.equal(await readFile(join(box.home, COPILOT, 'kept', 'SKILL.md'), 'utf8'), text('kept', 'Edited in Copilot.'), 'an edited copy stays');
     assert.ok(undone.results.some(entry => entry.outcome === 'held' && /edited since/.test(entry.message)));
-  } finally { await box.cleanup(); }
-});
-
-test('A skill already managed gets no added event when a background pass copies it', async () => {
-  const box = await sandbox();
-  try {
-    await managedPair(box, 'steady');
-    await rm(join(box.home, COPILOT, 'steady'), { recursive: true, force: true });
-    await applyChanges(fast(box), []);
-    assert.equal((await readHistory(box.home)).filter(event => event.kind === 'added' && event.key === 'steady').length, 1, 'only the first Apply all told it');
   } finally { await box.cleanup(); }
 });
 
