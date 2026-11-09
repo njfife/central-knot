@@ -37,7 +37,7 @@ export interface McpRecordItem { state: 'shared' | 'dont-share'; off: HarnessId[
   displaced?: { tool: HarnessId; hash: string }[] }
 export interface McpRecord { formatVersion: number; items: Record<string, McpRecordItem> }
 
-export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 
 // ---------- Files ----------
 
@@ -47,6 +47,8 @@ const configRoot = (context: ShareContext, tool: HarnessId) => context.overrides
 export function mcpFile(context: ShareContext, tool: HarnessId): string {
   if (tool === 'claude-cli') return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
   if (tool === 'copilot-cli') return join(configRoot(context, tool), 'mcp-config.json');
+  // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
+  if (tool === 'pi-cli') return join(configRoot(context, tool), 'mcp.json');
   return join(configRoot(context, tool), 'config.toml');
 }
 
@@ -140,6 +142,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */
 export function cannotHold(tool: HarnessId, server: NeutralServer): string | undefined {
   if (tool === 'codex-cli' && server.transport === 'sse') return 'Codex has no documented SSE transport.';
+  if (tool === 'pi-cli' && server.transport === 'sse') return 'Pi has no SSE transport.';
   if (server.transport === 'stdio' && !server.command) return 'It has no command to run.';
   if (server.transport !== 'stdio' && !server.url) return 'It has no URL.';
   return undefined;
@@ -429,7 +432,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       for (const copy of missing) recorded.delete(copy.tool);
     }
     // Which content wins: a one-sided edit; competing edits by the fixed tool order (Copilot, Claude, Codex); else the baseline.
-    const order: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli'];
+    const order: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli', 'pi-cli'];
     const source = [...edited].sort((first, second) => order.indexOf(first.tool) - order.indexOf(second.tool))[0]
       ?? entries.find(entry => entry.hash === item.hash) ?? (entries.length && new Set(entries.map(entry => entry.hash)).size === 1 ? entries[0] : undefined);
     if (!source) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }

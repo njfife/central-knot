@@ -182,3 +182,19 @@ test('Apply all records the entries it adds; Undo removes them while unchanged, 
     assert.equal((await mcpView(box.context, tools)).servers.find(server => server.key === 'massive')?.managed, false);
   } finally { await box.cleanup(); }
 });
+
+test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape; an SSE server is not available there', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    const withPi: HarnessId[] = ['claude-cli', 'pi-cli'];
+    const sse = { type: 'sse', url: 'https://events.example.test/sse' };
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ massive, stream: sse }));
+    await applyMcp(box.context, withPi, [{ key: 'massive', managed: true, off: [] }, { key: 'stream', managed: true, off: [] }]);
+    const pi = JSON.parse(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8')).mcpServers;
+    assert.deepEqual(pi.massive, { type: 'stdio', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' } });
+    assert.equal(pi.stream, undefined);
+    const view = await mcpView(box.context, withPi);
+    assert.match(view.servers.find(server => server.key === 'stream')!.cannot['pi-cli'] ?? '', /Pi has no SSE transport/);
+  } finally { await box.cleanup(); }
+});
