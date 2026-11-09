@@ -34,11 +34,10 @@ export const loadSettings = () => showNewest(window.centralKnot.getSettings());
 /** Opens the page fresh: what the rows said last time (a failure since put right elsewhere, say) belongs to that visit. */
 export function openSettings() {
   messages.clear();
+  // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row.
+  attempts.clear();
   void loadSettings();
 }
-
-/** The reason without Electron's "Error invoking remote method '…': Error:" wrapping. */
-const reason = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']*': (\w*Error: )?/, '');
 
 /**
  * Runs one row's action (a save, Show log file) and shows its outcome in that row: `work` returns a note to show (or nothing),
@@ -51,7 +50,7 @@ async function act(row: string, work: () => Promise<string | undefined>, failure
   try {
     const note = await work();
     if (note) message = { text: note, failed: false };
-  } catch (error) { message = { text: failure(reason(error)), failed: true }; }
+  } catch (error) { message = { text: failure(String(error)), failed: true }; }
   if (attempts.get(row) === mine && JSON.stringify(message) !== JSON.stringify(messages.get(row))) {
     if (message) messages.set(row, message); else messages.delete(row);
     rerender();
@@ -107,22 +106,24 @@ function moveAppearance(event: KeyboardEvent) {
 /** Shows the log in the file manager. Where it could only open the folder, the row says so and names the file to look for. */
 const showLog = () => act('log', async () => {
   const shown = await window.centralKnot.showLog();
-  if (shown.failed) throw new Error(shown.failed);
   if (shown.selected) return undefined;
-  return shown.logged ? 'Opened its folder. The log is central-knot.log.' : 'Opened its folder. Nothing has been logged yet.';
+  return shown.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.';
 }, () => 'Couldn’t open the log’s folder. Try again.');
 
-/** One setting: its name and hint at the left, its control at the right (under them on a narrow page), and what its last action said. */
+/**
+ * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and what its last
+ * action said on a line of its own beneath both, so the control never moves when a message comes or goes.
+ */
 function settingRow(id: string, title: string, hint: string, control: HTMLElement): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
       h('div.setting-title', { id: `setting-${id}-title` }, title),
-      h('p.setting-hint', { id: `setting-${id}-hint` }, hint),
-      message && (message.failed
-        ? h('p.setting-message.setting-failure', { role: 'alert' }, icon('circle-alert', 14), h('span', {}, message.text))
-        : h('p.setting-message.setting-note', { role: 'status' }, icon('folder-open', 14), h('span', {}, message.text)))),
-    h('div.setting-control', {}, control));
+      h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
+    h('div.setting-control', {}, control),
+    message && (message.failed
+      ? h('p.setting-message.setting-failure', { role: 'alert' }, icon('circle-alert', 14), h('span', {}, message.text))
+      : h('p.setting-message.setting-note', { role: 'status' }, icon('folder-open', 14), h('span', {}, message.text))));
 }
 
 const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>

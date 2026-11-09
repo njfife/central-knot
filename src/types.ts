@@ -384,5 +384,6 @@ export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
 /** What Show log file did: `failed` says why it couldn't; else whether the log was selected, and whether anything is logged yet. */
-export interface ShownLog { failed?: string; selected?: boolean; logged?: boolean }
+/** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
+export interface ShownLog { selected: boolean; logged: boolean }
 

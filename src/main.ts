@@ -134,8 +134,8 @@ async function showLog(): Promise<ShownLog> {
   const logged = await access(logPath()).then(() => true, () => false);
   if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return { selected: true, logged }; }
   const failed = await shell.openPath(app.getPath('userData'));
-  if (failed) log(`showing the log failed: ${failed}`);
-  return failed ? { failed } : { selected: false, logged };
+  if (failed) throw new Error(failed);
+  return { selected: false, logged };
 }
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
@@ -439,13 +439,16 @@ async function startHome(): Promise<HomeView | null> {
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
+/** Keeps a failed request's error for a problem report; the page says what happened in plain words. */
+const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
     const next = queue.then(() => work(...args));
-    queue = next.catch(error => { log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`); });
+    queue = next.catch(error => { logFailure(channel, error); });
     return next;
   });
 }
@@ -457,11 +460,7 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
 function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    return work(...args).catch(error => {
-      // The page says what happened in plain words; the error itself is kept here, for a problem report.
-      log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-      throw error;
-    });
+    return work(...args).catch(error => { logFailure(channel, error); throw error; });
   });
 }
 

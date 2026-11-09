@@ -577,7 +577,7 @@ async function practiceFlow() {
   await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
   let followed = false;
   for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-light[aria-checked="true"]'); }
-  check('settings saved at once land in order beside the other settings, and the open page follows', followed && savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
+  check('settings saved at once keep the other settings, and the open page follows the last', followed && savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
   chmodSync(appSettings, 0o444);
   await a.click('#appearance-dark');
   check('a save that fails says why in plain words in its row, and the saved choice stays', await dark() === false && await a.exists('#appearance-light[aria-checked="true"]')
@@ -590,7 +590,7 @@ async function practiceFlow() {
     await a.click('#show-log');
     for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
     same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
-      [join(scratch, 'data'), 'Opened its folder. The log is central-knot.log.']);
+      [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);

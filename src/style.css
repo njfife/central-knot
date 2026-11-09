@@ -1345,7 +1345,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .setting-row:hover { background: var(--hover); }
 .setting-title { font-weight: 500; }
 .setting-hint, .setting-message { max-width: 72ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.setting-message { display: flex; align-items: flex-start; gap: 6px; margin-top: 4px; }
+.setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-failure { color: var(--danger); }
 /* The sidebar takes width, so the row's own width decides when the control moves under its text. */
