@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,6 +31,7 @@ model = "o3"
 `;
 const massive = { type: 'stdio', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' } };
 const copilotOf = async (home: string) => JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
+const copilotOne = (command: string) => JSON.stringify({ mcpServers: { tool: { type: 'local', command, tools: ['*'] } } });
 
 test('A managed Claude server reaches Copilot and Codex with values as-is; other bytes stay; ChatGPT desktop entries are never offered', async () => {
   const box = await sandbox();
@@ -113,6 +116,53 @@ test('SSE cannot go to Codex, and an unreadable file is never written', async ()
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), 'broken = [\n');
     await writeFile(join(box.home, '.codex/config.toml'), '');
     assert.match((await mcpView(box.context, tools)).servers[0].cannot['codex-cli'] ?? '', /SSE/);
+  } finally { await box.cleanup(); }
+});
+
+test("With Sync off, Apply all for a server holds that server's own pending edit", async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('edited'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }], { only: new Set(['tool']) });
+    assert.ok(!(await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('edited'));
+  } finally { await box.cleanup(); }
+});
+
+test('An MCP edit saved while a pass is writing is not overwritten, and wins the next pass', async () => {
+  const box = await sandbox();
+  const copilotPath = join(box.home, '.copilot/mcp-config.json');
+  const codexPath = join(box.home, '.codex/config.toml');
+  const original = fsp.readFile;
+  try {
+    await writeFile(copilotPath, copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    await writeFile(codexPath, (await readFile(codexPath, 'utf8')).replace('command = "a"', 'command = "b"'));
+    let reads = 0;
+    (fsp as any).readFile = async (path: any, ...rest: any[]) => {
+      if (String(path) === copilotPath && ++reads === 2) await fsp.writeFile(copilotPath, copilotOne('USER-EDIT'));
+      return (original as any).call(fsp, path, ...rest);
+    };
+    syncBuiltinESMExports();
+    await applyMcp(box.context, tools, []);
+    (fsp as any).readFile = original; syncBuiltinESMExports();
+    await applyMcp(box.context, tools, []);
+    assert.equal((await copilotOf(box.home)).tool.command, 'USER-EDIT');
+  } finally { (fsp as any).readFile = original; syncBuiltinESMExports(); await box.cleanup(); }
+});
+
+test('A tool turned off forgets its copy: turned back on with an emptied file, it gets the entry back and nothing is deleted', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli', 'codex-cli'] }]);
+    await writeFile(join(box.home, '.codex/config.toml'), '');
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }], { settleMs: 0 });
+    await applyMcp(box.context, tools, [], { settleMs: 0 });
+    assert.equal((await copilotOf(box.home)).tool.command, 'a');
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /command = "a"/);
   } finally { await box.cleanup(); }
 });
 
