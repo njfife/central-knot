@@ -226,6 +226,9 @@ if (wanted('repo')) {
   await sizes('repo-start', 'The not-connected page.');
   await a.run(`(() => { const input = document.querySelector('#repo-url'); input.value = ${JSON.stringify(remote)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await shot(a, 'repo-address-typed', 'Typed the repo’s address (a local repo in this tour; an https or ssh address works the same).');
+  const tab = async times => { for (let i = 0; i < times; i++) { await a.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); await a.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 }); } await wait(150); };
+  await a.run(`document.querySelector('#repo-url').focus()`); await tab(2);
+  await shot(a, 'repo-keyboard-connect', 'With the keyboard: from the address field, Tab twice (past Branch) reaches Connect, with its focus ring.');
   await a.click('#repo-connect');
   await waitFor(a, `!!document.querySelector('#repo-state') && !/Checking/.test(document.querySelector('#repo-state').textContent)`, 20000); await a.settle();
   await shot(a, 'repo-connected-dark', 'Clicked "Connect". The repo’s skill, MCP server and agent wait under "From the repo"; this computer’s Managed items wait under "From this computer". Nothing in the tools changed.');
@@ -268,6 +271,8 @@ if (wanted('repo')) {
   await a.click('#header-refresh');
   await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '') && document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'repo-unreachable', 'The repo couldn’t be reached when Refresh checked it.');
+  await a.run(`document.querySelector('#repo-try-again')?.focus()`); await tab(0);
+  await shot(a, 'repo-keyboard-try-again', 'Keyboard focus on Try again in the band.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await shot(a, 'repo-unreachable-860', 'The same at 860×560.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
@@ -280,6 +285,8 @@ if (wanted('repo')) {
   await a.click('#nav-history'); await shot(a, 'repo-history', 'Clicked "History": what Pull brought in, each with Undo.');
   await a.click('#nav-repo'); await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
   await a.click('#repo-disconnect'); await shot(a, 'repo-disconnect-confirm', 'Clicked "Disconnect…": it asks once, saying what stays.');
+  await tab(1); await shot(a, 'repo-keyboard-cancel', 'Pressed Tab: focus moves from Disconnect to Cancel.');
+  await a.run(`document.querySelector('#repo-disconnect-confirm').focus()`);
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await shot(a, 'repo-disconnect-confirm-860', 'The same at 860×560.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
