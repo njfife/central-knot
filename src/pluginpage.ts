@@ -118,12 +118,8 @@ function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | und
   return [...byName.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** Who holds one text, each version after the last holder that has it: "Marketplace and Codex (1.2.0)", "Marketplace, Codex (1.2.0) and Claude Code (1.1.0)". */
-function holdersLine(holders: FileCopy[]): string {
-  const byVersion = new Map<string, string[]>();
-  for (const holder of holders) byVersion.set(holder.version ?? '', [...(byVersion.get(holder.version ?? '') ?? []), holder.who]);
-  return andList([...byVersion].flatMap(([version, who]) => who.map((name, at) => (version && at === who.length - 1 ? `${name} (${version})` : name))));
-}
+/** Who holds one text, each with its version: "Marketplace (1.2.0), Codex (1.2.0) and Claude Code (1.1.0)". */
+const holdersLine = (holders: FileCopy[]) => andList(holders.map(holder => (holder.version ? `${holder.who} (${holder.version})` : holder.who)));
 
 /** The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's isn't known). */
 function differsIn(part: FilePart): FileCopy[] {
