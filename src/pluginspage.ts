@@ -67,8 +67,10 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         h('span.plugin-row-title', { title: pluginTitle(plugin) }, pluginTitle(plugin)), plugin.version ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, plugin.version) : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
-      holds || others.length ? h('span.plugin-row-holds', {}, holds, holds && others.length ? ' · ' : null, others.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12),
-        others.map(({ tool, version }) => `${names[tool]} has ${version}`).join(', ')) : null) : null),
+      holds ? h('span.plugin-row-holds', {}, holds) : null,
+      // On its own line under what it holds; each tool stays with its version, and between tools the line may wrap.
+      others.length ? h('span.plugin-row-holds.plugin-version-differs', {}, icon('circle-alert', 12),
+        others.map(({ tool, version }, at) => h('span.nowrap', {}, `${names[tool]} has ${version}${at < others.length - 1 ? ',' : ''}`))) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }

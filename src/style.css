@@ -1265,7 +1265,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-row-open { all: unset; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%; cursor: pointer; }
 .plugin-row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .plugin-chip { font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-faint); }
-.plugin-row-about { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-row-about { font-size: 12.5px; color: var(--ink-soft); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .plugin-row-holds { font-size: 11.5px; color: var(--ink-faint); }
 .plugin-row-go { display: grid; place-items: center; }
 /* A tool that can still take the plugin: a plus that reads as a control, brighter than the dash of one that can't */
@@ -1280,13 +1280,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-head h2 { display: inline; margin-right: 8px; }
 .plugin-id { font-size: 12px; color: var(--ink-faint); }
 .plugin-name { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: inline-block; vertical-align: bottom; }
-.plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+/* Hugs the tools it lists (no empty band on a wide window); wraps them on a narrow one */
+.plugin-panel { width: fit-content; min-width: min(100%, 420px); max-width: 100%; margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel-head .btn { margin-left: auto; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-/* The tools sit side by side, packed together, and wrap as the window narrows */
-.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 40px; }
-.plugin-tool { display: flex; align-items: center; gap: 10px; }
+/* The tools sit side by side, packed together; on a narrow page they stack as one list */
+.plugin-page { container: plugin-page / inline-size; }
+.plugin-tool-rows { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; align-items: start; gap: 10px 40px; }
+@container plugin-page (max-width: 639px) { .plugin-tool-rows { grid-auto-flow: row; } }
+.plugin-tool { display: flex; align-items: flex-start; gap: 10px; }
 .plugin-tool .ov-cell { width: auto; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -1318,15 +1321,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-part-what.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
 /* A skill, command or agent: the whole row opens its file, shown as the Skills page shows a skill's SKILL.md */
 .plugin-parts li.open { margin-bottom: 6px; }
-.plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; margin: 0 -6px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+.plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: 3px 0; border-radius: 6px; cursor: pointer; }
 .plugin-file-toggle:hover { background: var(--hover); }
 .plugin-file-toggle:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: -2px; }
 .plugin-file-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink); }
 .plugin-file-name .icon { flex: none; color: var(--ink-soft); }
 .plugin-file { grid-column: 1 / -1; margin: 6px 0 4px 17px; min-width: 0; }
+/* A row that opens nothing starts its name where an opening row's name starts, after the chevron */
+.plugin-parts > li > .plugin-name:first-child { margin-left: 17px; }
 /* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
 .plugin-row-version, .plugin-meta-version { font-size: 12px; font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
-.plugin-version-differs { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); white-space: nowrap; }
+.plugin-version-differs, .plugin-row-holds.plugin-version-differs { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; color: var(--warning); }
+.plugin-version-differs .nowrap { white-space: nowrap; }
 .plugin-muted { color: var(--ink-faint); font-size: 12.5px; margin: 6px 0 0; }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* README text */

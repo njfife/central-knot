@@ -118,24 +118,24 @@ function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | und
   return [...byName.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** Who holds one text, by version: "Marketplace and Codex · 1.2.0", or "Claude Code · 1.1.0, Codex · 1.0.0". */
+/** Who holds one text, by version: "Marketplace and Codex (1.2.0)", "Claude Code (1.1.0) and Codex (1.0.0)". */
 function holdersLine(holders: FileCopy[]): string {
   const byVersion = new Map<string, string[]>();
   for (const holder of holders) byVersion.set(holder.version ?? '', [...(byVersion.get(holder.version ?? '') ?? []), holder.who]);
-  return [...byVersion].map(([version, who]) => `${andList(who)}${version ? ` · ${version}` : ''}`).join(', ');
+  return andList([...byVersion].map(([version, who]) => `${andList(who)}${version ? ` (${version})` : ''}`));
 }
 
-/** The tools whose copy of a part's file differs from the marketplace's (none when the marketplace's isn't known). */
-function differsIn(part: FilePart): string[] {
+/** The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's isn't known). */
+function differsIn(part: FilePart): FileCopy[] {
   const offered = part.copies.find(copy => copy.marketplace);
-  return offered ? part.copies.filter(copy => !copy.marketplace && copy.text !== offered.text).map(copy => copy.who) : [];
+  return offered ? part.copies.filter(copy => !copy.marketplace && copy.text !== offered.text) : [];
 }
 
 const fileNames: Record<FileKind, string> = { skills: 'SKILL.md', commands: 'command file', agents: 'agent file' };
 
 /**
  * One group of skills, commands or agents. A row opens its file as written, in the view the Skills page gives a
- * standalone SKILL.md, each text named by who holds it; a closed row says which tools have a different text. A
+ * standalone SKILL.md, each text named by who holds it; a closed row says which tools have different text. A
  * description stays at two lines, since the file holds it whole. `id` prefixes each part's ids.
  */
 function fileGroup(owner: string, id: string, title: string, kind: FileKind, parts: FilePart[]) {
@@ -145,14 +145,16 @@ function fileGroup(owner: string, id: string, title: string, kind: FileKind, par
     const open = market.opened.has(key);
     const file = `${part.name} ${fileNames[kind]}`;
     const differs = differsIn(part);
-    const body = h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', {}, part.description) : null,
-      differs.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Differs in ${andList(differs)}`) : null);
+    const body = h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null,
+      differs.length ? h('span.plugin-version-differs', {}, icon('circle-alert', 12), `${holdersLine(differs)} ${differs.length > 1 ? 'have' : 'has'} different text`) : null);
     if (!part.copies.length) return h('li', {}, h('code.plugin-name', {}, part.name), body);
     return h(`li${open ? '.open' : ''}`, {},
       h('button.plugin-file-toggle', { type: 'button', id: `${id}-${kind}-${part.name}`, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${file}`,
         onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } },
         h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)), body),
-      open ? h('div.plugin-file', {}, fileText(`${id}-${kind}-${part.name}-text`, file, part.copies, holdersLine,
+      open ? h('div.plugin-file', {}, fileText(`${id}-${kind}-${part.name}-text`, file, part.copies,
+        // Named as a file, like the Skills page's SKILL.md heading; one text everywhere says so.
+        (holders, distinct) => `${fileNames[kind].replace(/^./, first => first.toUpperCase())} · ${distinct === 1 && holders.length > 1 ? 'the same in ' : ''}${holdersLine(holders)}`,
         { named: true, warn: holders => differs.length > 0 && !holders.some(holder => holder.marketplace) })) : null);
   })));
 }

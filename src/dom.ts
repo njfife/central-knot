@@ -91,15 +91,15 @@ export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dism
 
 /**
  * A file's text as written, one block per distinct text, for any kind of copy (a skill in each tool, a plugin's copy in
- * the marketplace and in each tool). `name` says who holds a block; it shows above each block when the copies differ, or
- * always with `named`. `warn` marks a block whose holders are the odd ones out. Ids are `${id}-0`, `-1`….
+ * the marketplace and in each tool). `name` says who holds a block (given how many distinct texts there are); it shows
+ * above each block when the copies differ, or always with `named`. `warn` marks a block whose holders are the odd ones out. Ids are `${id}-0`, `-1`….
  */
-export function fileText<Copy extends { text: string }>(id: string, label: string, copies: Copy[], name: (holders: Copy[]) => string,
+export function fileText<Copy extends { text: string }>(id: string, label: string, copies: Copy[], name: (holders: Copy[], distinct: number) => string,
   { named = false, warn }: { named?: boolean; warn?: (holders: Copy[]) => boolean } = {}): HTMLElement[] {
   const distinct = new Map<string, Copy[]>();
   for (const copy of copies) distinct.set(copy.text, [...(distinct.get(copy.text) ?? []), copy]);
   return [...distinct].map(([text, holders], index) => {
-    const who = name(holders);
+    const who = name(holders, distinct.size);
     const odd = warn?.(holders) ?? false;
     return h('div.content-block', {},
       (named || distinct.size > 1) && h(`p.content-owner${odd ? '.tone-warning' : ''}`, {}, odd ? icon('circle-alert', 12) : null, who),

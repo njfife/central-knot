@@ -504,9 +504,9 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
   await a.click('#pfile-0-skills-triage');
-  check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Differs in Claude Code'), await a.text('#pfile-0-skills-triage'));
+  check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Claude Code (1.9.0) has different text'), await a.text('#pfile-0-skills-triage'));
   same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent.trim().split("\\n").pop()]'),
-    [['Marketplace · 2.0.0', 'Follow the steps.'], ['Claude Code · 1.9.0', 'The old steps.']]);
+    [['SKILL.md · Marketplace (2.0.0)', 'Follow the steps.'], ['SKILL.md · Claude Code (1.9.0)', 'The old steps.']]);
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);

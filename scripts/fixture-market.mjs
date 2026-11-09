@@ -1,6 +1,6 @@
 // A realistic marketplace folder for the e2e run and the UI tour: a README, plugins with skills, commands, agents, hooks
 // and an MCP server, a root-level entry that lists its own skills ("strict": false), and one whose files live on GitHub.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
@@ -75,5 +75,7 @@ export function writeMarket(root, name = 'team-tools') {
 export function writeClaudeInstall(home, marketName, plugin, version, files) {
   const installPath = join(home, '.claude/plugins/cache', marketName, plugin, version);
   for (const [path, text] of Object.entries(files)) file(installPath, path, text);
-  file(home, '.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { [`${plugin}@${marketName}`]: [{ scope: 'user', installPath, version }] } }, null, 2));
+  const record = join(home, '.claude/plugins/installed_plugins.json');
+  const plugins = existsSync(record) ? JSON.parse(readFileSync(record, 'utf8')).plugins : {};
+  file(home, '.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { ...plugins, [`${plugin}@${marketName}`]: [{ scope: 'user', installPath, version }] } }, null, 2));
 }
