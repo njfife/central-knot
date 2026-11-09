@@ -7,7 +7,7 @@ import { withoutBom } from './values.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { harnesses } from './harnesses.ts';
+import { harnessIds, harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
@@ -38,7 +38,7 @@ export interface McpRecordItem { state: 'shared' | 'dont-share'; off: HarnessId[
   displaced?: { tool: HarnessId; hash: string }[] }
 export interface McpRecord { formatVersion: number; items: Record<string, McpRecordItem> }
 
-export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+export const mcpTools: HarnessId[] = harnessIds;
 
 // ---------- Files ----------
 
@@ -46,11 +46,13 @@ const configRoot = (context: ShareContext, tool: HarnessId) => context.overrides
 
 /** Where each tool keeps user-wide MCP servers. Claude Code's moves with CLAUDE_CONFIG_DIR. */
 export function mcpFile(context: ShareContext, tool: HarnessId): string {
-  if (tool === 'claude-cli') return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
-  if (tool === 'copilot-cli') return join(configRoot(context, tool), 'mcp-config.json');
-  // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
-  if (tool === 'pi-cli') return join(configRoot(context, tool), 'mcp.json');
-  return join(configRoot(context, tool), 'config.toml');
+  switch (tool) {
+    case 'claude-cli': return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
+    case 'copilot-cli': return join(configRoot(context, tool), 'mcp-config.json');
+    // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
+    case 'pi-cli': return join(configRoot(context, tool), 'mcp.json');
+    case 'codex-cli': return join(configRoot(context, tool), 'config.toml');
+  }
 }
 
 const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);

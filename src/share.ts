@@ -125,23 +125,23 @@ const copilotLosses: Record<string, string> = {
 };
 
 export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
-  if (harness === 'copilot-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
-    if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
-    if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
-    return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+  switch (harness) {
+    case 'copilot-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
+      if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
+      return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+    case 'codex-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+      if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'pi-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
+      if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'claude-cli':
+      return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }
-  if (harness === 'codex-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
-    if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  if (harness === 'pi-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
-    if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
 }
 
 // ---------- State ----------
