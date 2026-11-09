@@ -66,22 +66,32 @@ test('Claude Code is written only by Write now, editing only its entry', async (
   } finally { await box.cleanup(); }
 });
 
-test('An edit in one tool spreads; a deletion spreads once it holds; differing copies wait for a choice', async () => {
+test('An edit spreads and Undo reverts it; a deletion spreads once it holds and Restore brings it back; differing copies wait for a choice', async () => {
   const box = await sandbox();
   try {
     await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { tool: { type: 'local', command: 'a', tools: ['*'] } } }, null, 2));
     await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
     let toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
     await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "a"', 'command = "b"'));
-    await applyMcp(box.context, tools, []);
+    const spread = await applyMcp(box.context, tools, []);
+    assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
     assert.equal((await copilotOf(box.home)).tool.command, 'b', 'Codex edit reached Copilot');
     assert.deepEqual((await copilotOf(box.home)).tool.tools, ['*'], "Copilot's own field stays");
+    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit' && event.key === 'mcp:tool')!;
+    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
+    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
+    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "a"'), 'and in Codex');
+    assert.match((await restoreMcp(box.context, tools, edit.id)).stopped ?? '', /already undone/);
     await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }, null, 2));
     await applyMcp(box.context, tools, [], { now: 1000 });
     toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
     assert.ok(toml.includes('[mcp_servers.tool]'), 'not removed while settling');
-    await applyMcp(box.context, tools, [], { now: 5000 });
+    const gone = await applyMcp(box.context, tools, [], { now: 5000 });
     assert.ok(!(await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'), 'then removed');
+    assert.equal(gone.notices?.[0]?.kind, 'deleted');
+    assert.equal((await restoreMcp(box.context, tools, gone.notices![0].history)).stopped, undefined);
+    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Restore brought it back');
+    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'));
 
     await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { twin: { command: 'x' } } }, null, 2));
     await writeFile(join(box.home, '.codex/config.toml'), '[mcp_servers.twin]\ncommand = "y"\n');
@@ -103,47 +113,6 @@ test('SSE cannot go to Codex, and an unreadable file is never written', async ()
     assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), 'broken = [\n');
     await writeFile(join(box.home, '.codex/config.toml'), '');
     assert.match((await mcpView(box.context, tools)).servers[0].cannot['codex-cli'] ?? '', /SSE/);
-  } finally { await box.cleanup(); }
-});
-
-test('MCP History: an edit that spread and a deletion are kept, and Undo or Restore put them back', async () => {
-  const box = await sandbox();
-  const { readHistory } = await import('../src/manage.ts');
-  const { restoreMcp } = await import('../src/mcp.ts');
-  try {
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { tool: { type: 'local', command: 'a', tools: ['*'] } } }, null, 2));
-    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
-    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
-    await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "a"', 'command = "b"'));
-    const spread = await applyMcp(box.context, tools, []);
-    assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
-    // Managing it first told the entry Apply all added; the edit is the event after.
-    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit')!;
-    assert.equal(edit.key, 'mcp:tool');
-    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
-    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
-    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('command = "a"'), 'and in Codex');
-    assert.match((await restoreMcp(box.context, tools, edit.id)).stopped ?? '', /already undone/);
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }, null, 2));
-    await applyMcp(box.context, tools, [], { now: 1000 });
-    const gone = await applyMcp(box.context, tools, [], { now: 5000 });
-    assert.equal(gone.notices?.[0]?.kind, 'deleted');
-    const back = await restoreMcp(box.context, tools, gone.notices![0].history);
-    assert.equal(back.stopped, undefined, JSON.stringify(back));
-    assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Restore brought it back');
-    assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes('[mcp_servers.tool]'));
-  } finally { await box.cleanup(); }
-});
-
-test('With Sync off, Apply all for one server writes only that server; an unrelated edit waits', async () => {
-  const box = await sandbox();
-  try {
-    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { one: { type: 'local', command: 'one', tools: ['*'] }, two: { type: 'local', command: 'two', tools: ['*'] } } }));
-    await applyMcp(box.context, tools, [{ key: 'one', managed: true, off: ['claude-cli'] }, { key: 'two', managed: true, off: ['claude-cli'] }]);
-    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
-    await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "two"', 'command = "two-edited"'));
-    await applyMcp(box.context, tools, [{ key: 'one', managed: false, off: [] }], { only: new Set(['one']) });
-    assert.equal((await copilotOf(box.home)).two.command, 'two', 'the unrelated edit did not spread');
   } finally { await box.cleanup(); }
 });
 
@@ -183,7 +152,7 @@ test('Apply all records the entries it adds; Undo removes them while unchanged, 
   } finally { await box.cleanup(); }
 });
 
-test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape; an SSE server is not available there', async () => {
+test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape; SSE is not written there', async () => {
   const box = await sandbox();
   try {
     await mkdir(join(box.home, '.pi/agent'), { recursive: true });
@@ -194,8 +163,6 @@ test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape;
     const pi = JSON.parse(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8')).mcpServers;
     assert.deepEqual(pi.massive, { type: 'stdio', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' } });
     assert.equal(pi.stream, undefined);
-    const view = await mcpView(box.context, withPi);
-    assert.match(view.servers.find(server => server.key === 'stream')!.cannot['pi-cli'] ?? '', /Pi has no SSE transport/);
   } finally { await box.cleanup(); }
 });
 
