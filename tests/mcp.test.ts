@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applyMcp, mcpView } from '../src/mcp.ts';
+import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
+import { readHistory } from '../src/manage.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -116,7 +117,8 @@ test('MCP History: an edit that spread and a deletion are kept, and Undo or Rest
     await writeFile(join(box.home, '.codex/config.toml'), toml.replace('command = "a"', 'command = "b"'));
     const spread = await applyMcp(box.context, tools, []);
     assert.deepEqual(spread.notices?.map(notice => [notice.kind, notice.winner, notice.losers]), [['edit', 'codex-cli', ['copilot-cli']]]);
-    const [edit] = await readHistory(box.home);
+    // Managing it first told the entry Apply all added; the edit is the event after.
+    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit')!;
     assert.equal(edit.key, 'mcp:tool');
     assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
     assert.equal((await copilotOf(box.home)).tool.command, 'a', 'Undo put the old command back in Copilot');
@@ -159,5 +161,24 @@ test('Write now catching up a Claude Code copy that was behind leaves no made-up
     const { readHistory } = await import('../src/manage.ts');
     const made = (await readHistory(box.home)).filter(entry => entry.winner?.tool === 'claude-cli' && entry.losers.some(loser => loser.tool === 'claude-cli'));
     assert.deepEqual(made, [], JSON.stringify(made));
+  } finally { await box.cleanup(); }
+});
+
+test('Apply all records the entries it adds; Undo removes them while unchanged, keeps the rest of each file, and unmanages', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
+    await writeFile(join(box.home, '.codex/config.toml'), codexToml);
+    await applyMcp(box.context, tools, [{ key: 'massive', managed: true, off: [] }]);
+    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'mcp:massive')!;
+    assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
+    const undone = await restoreMcp(box.context, tools, added.id);
+    assert.equal(undone.stopped, undefined, JSON.stringify(undone));
+    assert.equal((await copilotOf(box.home)).massive, undefined, 'the added Copilot entry is gone');
+    const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
+    assert.ok(!toml.includes('[mcp_servers.massive]'), 'the added Codex entry is gone');
+    assert.ok(toml.includes('model = "gpt-6"'), 'the rest of config.toml stays');
+    assert.match(await readFile(join(box.home, '.claude.json'), 'utf8'), /secret-value-123/, 'the original entry is untouched');
+    assert.equal((await mcpView(box.context, tools)).servers.find(server => server.key === 'massive')?.managed, false);
   } finally { await box.cleanup(); }
 });

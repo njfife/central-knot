@@ -337,12 +337,15 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const undisplace = (item: McpRecordItem, tool: HarnessId, hash: string) => { if (!item.displaced) return; item.displaced = item.displaced.filter(entry => !(entry.tool === tool && entry.hash === hash)); if (!item.displaced.length) delete item.displaced; };
   // Servers whose copy the person chose in this Apply all: the chosen copy replaces the others.
   const chosenNow = new Set<string>();
+  // Servers this Apply all makes Managed: the entries it adds for them are told in History as 'added', so Undo can take them back.
+  const newlyManaged = new Set<string>();
   for (const change of changes) {
     const slot = byName.get(change.key);
     if (!slot) continue;
     // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
     if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.` }); continue; }
     const item: McpRecordItem = record.items[change.key] ?? { state: 'dont-share', off: [], hash: '', copies: [] };
+    if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
     item.off = change.off;
     item.separate = change.use === 'separate' ? true : undefined;
@@ -438,6 +441,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const replaced: { tool: HarnessId; hash: string; kept?: string }[] = [];
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();
+    const addedHere: { tool: HarnessId; hash: string }[] = [];
     await keep(context, name, source.server, source);
     for (const tool of live) {
       const here = slot[tool];
@@ -456,9 +460,11 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       writes++;
       holds.set(tool, source.hash);
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
+      else if (newlyManaged.has(name)) addedHere.push({ tool, hash: source.hash });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
+    if (addedHere.length) event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash });
     // A chosen copy that replaced others, an edit kept over a deletion, and an edit that spread are History, with what each replaced kept (CON-02).
     if (chosenNow.has(name) && replaced.length) event({ key, item: name, kind: 'chosen', winner: { tool: source.tool, hash: source.hash }, losers: replaced, orderProved: true, previous: undefined });
     else if (raced) {
@@ -541,6 +547,38 @@ function restorable(past: HistoryEvent): string | undefined {
  * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
  * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
  */
+/**
+ * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
+ * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
+ */
+async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
+  const name = past.key.replace(/^mcp:/, '');
+  const record = await readMcpRecord(context.home);
+  const item = record.items[name];
+  if (!item || item.state !== 'shared') return { stopped: `${name} is not managed any more, so there is nothing to undo here.`, results: [], writes: 0 };
+  const results: DestinationResult[] = [];
+  const stayed: HarnessId[] = [];
+  let writes = 0;
+  for (const loser of past.losers) {
+    const entry = (await readTool(context, loser.tool)).entries.find(candidate => candidate.name === name);
+    if (!entry) { results.push({ item: name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s entry is already gone.` }); continue; }
+    if (entry.hash !== loser.hash) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s entry was edited since, so it stays.` }); continue; }
+    await keep(context, name, entry.server, entry);
+    const problem = await editEntry(context, loser.tool, name, entry.hash, undefined);
+    if (problem) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: problem }); continue; }
+    item.copies = item.copies.filter(copy => copy.tool !== loser.tool);
+    writes++;
+    results.push({ item: name, harness: loser.tool, outcome: 'removed', message: 'Removed the entry Apply all added.' });
+  }
+  if (!stayed.length) { item.state = 'dont-share'; item.copies = []; }
+  else item.off = [...new Set([...item.off, ...past.losers.map(loser => loser.tool).filter(tool => !stayed.includes(tool))])];
+  await saveMcpRecord(context.home, record);
+  past.undoneBy = randomUUID();
+  await replaceHistory(context, history);
+  return { results, writes };
+}
+
 export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
@@ -549,6 +587,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
+  if (past?.kind === 'added') return undoAddedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');
   const hash = past && restorable(past);
   if (!past || !name || !hash) return { stopped: 'That change can’t be restored.', results: [], writes: 0 };

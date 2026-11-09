@@ -222,3 +222,34 @@ test('An agent catch-up after a failed write leaves exactly one edit in History,
     assert.equal(edits.length, 1, JSON.stringify(edits));
   } finally { await box.cleanup(); }
 });
+
+test('Apply all records the agent files it adds; Undo removes them while unchanged and unmanages the agent', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'agent:reviewer')!;
+    assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
+    // An edit in Codex since: that file stays, and Codex keeps syncing; Copilot's untouched file goes.
+    const codex = join(box.home, '.codex/agents/reviewer.toml');
+    await writeFile(codex, (await readFile(codex, 'utf8')).replace('Be brief.', 'Be thorough.'));
+    const undone = await restoreAgent(box.context, tools, added.id);
+    assert.equal(undone.stopped, undefined);
+    assert.deepEqual((await readdir(join(box.home, '.copilot/agents'))), [], 'the untouched added file is gone');
+    assert.match(await readFile(codex, 'utf8'), /Be thorough/, 'an edited file stays');
+    assert.equal(await read(box.home, '.claude/agents/reviewer.md'), claudeAgent(), 'the original is untouched');
+    assert.match((await restoreAgent(box.context, tools, added.id)).stopped ?? '', /already undone/);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of an agent Apply all with nothing edited unmanages it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const added = (await readHistory(box.home)).find(event => event.kind === 'added')!;
+    await restoreAgent(box.context, tools, added.id);
+    assert.equal((await agentsView(box.context, tools)).servers.find(server => server.key === 'reviewer')?.managed, false);
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+  } finally { await box.cleanup(); }
+});

@@ -356,7 +356,11 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     // The write band right below says what waits for Claude Code; the result names what was written, and where.
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
     const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
-    state.outcome = { page: state.page, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}. To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.` };
+    // New entries are in History as 'added': one Undo removes them again (while unchanged) and unmanages those servers.
+    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
+    const undoable = addedNow.length > 0 && !replacedAny;
+    state.outcome = { page: state.page, act: undoable ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -377,7 +381,12 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
     const how = [...oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)} (↗)`), twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : ''].filter(Boolean).join('; ');
-    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}${result.writes ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}` };
+    // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
+    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
+    const undo = addedNow.length && !replacedAny;
+    state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${oneWay.length ? ` ${oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)}`).join('; ')}.` : ''}${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
+      act: undo ? { label: addedNow.length === 1 ? 'Undo' : `Undo all ${addedNow.length}`, id: 'outcome-undo-added', run: () => void undoAdded(addedNow.map(event => event.id)) } : undefined };
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
