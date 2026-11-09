@@ -405,16 +405,18 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
-const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && value.every(tool => typeof tool === 'string');
+const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && ids(value).length === value.length;
+const isTool = (value: unknown): value is HarnessId => isTools([value]);
 const isBaseApply = (value: unknown): value is BaseApply => {
   const request = value as BaseApply;
   return !!request && typeof request.text === 'string' && typeof request.expected === 'string' && isTools(request.tools)
-    && (request.adopt === undefined || typeof request.adopt === 'string') && (request.overwrite === undefined || isTools(request.overwrite));
+    && !!request.seen && typeof request.seen === 'object' && isTools(Object.keys(request.seen)) && Object.values(request.seen).every(hash => typeof hash === 'string')
+    && (request.adopt === undefined || isTool(request.adopt)) && (request.overwrite === undefined || isTools(request.overwrite));
 };
 const isBaseUndo = (value: unknown): value is BaseUndo => {
   const undo = value as BaseUndo;
-  return !!undo && typeof undo.text === 'string' && isTools(undo.tools) && Array.isArray(undo.files)
-    && undo.files.every(file => typeof file?.tool === 'string' && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
+  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && isTools(undo.tools) && Array.isArray(undo.files)
+    && undo.files.every(file => isTool(file?.tool) && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
 };
 
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {

@@ -1,5 +1,6 @@
 // Base instructions inside a tool's own instruction file: one marked block, after that tool's own text.
 // Everything outside the block is the tool's own text and is never rewritten here; only the block is added, replaced or taken out.
+// (Adding a block after own text that has no final line break gives it one, so the block starts on its own line.)
 
 const START = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->';
 const END = '<!-- Central Knot base instructions: end -->';
@@ -47,8 +48,7 @@ export function withBase(text: string, base: string): string {
 export function withOwn(text: string, own: string): string {
   const found = locate(text);
   if (!found) return own;
-  const block = `${START}\n${found.copy}${found.copy && !found.copy.endsWith('\n') ? '\n' : ''}${END}\n`;
-  return own.trim() ? `${asLines(own)}\n${block}` : block;
+  return own.trim() ? `${asLines(own)}\n${markedBlock(found.copy)}` : markedBlock(found.copy);
 }
 
 /** The file without the block. If nothing of its own would be left, the base text stays as plain text, so the file is never emptied. */
@@ -60,13 +60,13 @@ export function withoutBase(text: string): string {
 
 /**
  * What one tool's file becomes when the base is saved: the block added or replaced (`chosen`), or taken out (not chosen).
- * A copy edited in the file is left as it is (`edited`) unless `overwrite`; `known` says the copy is the current or an earlier
- * base, so replacing it loses nothing. `adopt`: this file's own text became the base, so it moves into the block.
- * The renderer previews with this and the main process writes with it, so the review always shows what is written.
+ * A copy edited in the file is left as it is (`edited`), whether chosen or not, unless `overwrite`. `copyIsABase`: the file's copy is the current or an
+ * earlier base text, so replacing it loses nothing someone wrote. `adopt`: this file's own text became the base, so it moves
+ * into the block. The renderer previews with this and the main process writes with it, so the review shows what is written.
  */
-export function baseWrite(text: string, { base, chosen, known, adopt = false, overwrite = false }: { base: string; chosen: boolean; known: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
-  if (!chosen || !base.trim()) return { next: withoutBase(text) };
+export function baseWrite(text: string, { base, chosen, copyIsABase, adopt = false, overwrite = false }: { base: string; chosen: boolean; copyIsABase: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
   const { copy } = splitBase(text);
-  if (copy !== undefined && !sameBase(copy, base) && !known && !overwrite) return { edited: true };
+  if (copy !== undefined && !sameBase(copy, base) && !copyIsABase && !overwrite) return { edited: true };
+  if (!chosen || !base.trim()) return { next: withoutBase(text) };
   return { next: withBase(adopt ? withOwn(text, '') : text, base) };
 }

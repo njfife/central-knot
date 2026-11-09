@@ -544,6 +544,7 @@ async function practiceFlow() {
   const baseClaude0 = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8'), baseCodex0 = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
   await a.click('#base-write');
   await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = '- Shared by every tool.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  check('typing the first base enables Review at once', await a.run(`!document.querySelector('#base-review').disabled`));
   await a.click('#base-tool-copilot-cli');
   await a.click('#base-review');
   check('the base review says what happens to each chosen file', (await a.text('.base-plan')).includes('CLAUDE.md') && (await a.text('.base-plan')).includes('AGENTS.md') && !(await a.text('.base-plan')).includes('copilot-instructions'), await a.text('#base-card'));

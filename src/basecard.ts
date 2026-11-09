@@ -1,13 +1,13 @@
 // Base instructions (INS-03, INS-04): one text, written once, that Central Knot keeps in each chosen tool's own instruction file,
 // in a marked block after that tool's own instructions. A tool's own text is never rewritten. A copy edited in a tool's file is
 // shown, never overwritten by itself: the person uses it as the base or puts the base back. Every save shows each file's change first.
-import { applyBaseChange, loadBaseVersion, ownText, rerender, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
+import { applyBaseChange, baseDraftChanged, loadBaseVersion, ownText, rerender, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
 import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, pathText } from './dom.ts';
-import { changeCounts, diffView, fileName } from './instructionspage.ts';
+import { changeCounts, diffView, keys, versionsList } from './instructionspage.ts';
 import { brandMark } from './matrix.ts';
-import { andList, toolNames } from './words.ts';
+import { andList, fileName, toolNames } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 
@@ -15,7 +15,6 @@ const names = toolNames as Record<string, string>;
 /** Tool rows whose difference or file change is open. */
 const shown = new Set<string>();
 const toggle = (key: string) => { if (shown.has(key)) shown.delete(key); else shown.add(key); rerender(); };
-const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
 // In the review, Esc goes back to editing; a review that started there (an edited copy, an earlier version) closes.
 document.addEventListener('keydown', event => {
   const edit = state.baseEdit;
@@ -27,7 +26,7 @@ document.addEventListener('keydown', event => {
 /** Leaves the review: back to the editor, or closed when the review started on the card (an edited copy, an earlier version). */
 function closeOrBack(edit: BaseEdit) {
   const startedInReview = edit.source && edit.source.kind !== 'own';
-  if (startedInReview) state.baseEdit = undefined; else edit.stage = 'edit';
+  if (startedInReview) state.baseEdit = undefined; else Object.assign(edit, { stage: 'edit', conflict: undefined });
   rerender();
   const from = edit.source?.kind === 'copy' ? `base-adopt-${edit.source.tool}` : edit.source?.kind === 'putBack' ? `base-restore-${edit.source.tool}` : 'base-edit';
   document.getElementById(startedInReview ? from : 'base-text')?.focus();
@@ -37,32 +36,34 @@ const lineCount = (text: string) => (text ? text.replace(/\n$/, '').split('\n').
 /** What saving the draft does to one tool's file: the new text, and a sentence saying so. Undefined: the file is not involved. */
 function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string } | undefined {
   const chosen = edit.tools.includes(file.tool) && !!edit.text.trim();
-  if (!chosen && !file.base) return undefined;
+  // A file is involved when it gets the base now or got it before; a missing file is never created just to take a block out.
+  if (!chosen && (!file.base?.chosen || !file.exists)) return undefined;
   const name = fileName(file.path);
   const { own, copy } = splitBase(file.text);
   const ours = edit.source?.tool === file.tool;
   const putBack = edit.source?.kind === 'putBack' && ours;
   const adopt = edit.source?.kind === 'own' && ours;
-  const write = baseWrite(file.text, { base: edit.text, chosen, known: file.base ? file.base.state !== 'edited' : copy === undefined, adopt, overwrite: putBack });
-  if (write.edited) return { next: file.text, says: `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` };
+  const write = baseWrite(file.text, { base: edit.text, chosen, copyIsABase: file.base?.state !== 'edited', adopt, overwrite: putBack });
+  if (write.edited) return { next: file.text, says: chosen ? `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` : `Left as it is, block included: its copy of the base was edited in ${name}, so Central Knot doesn’t take it out.` };
   const { next } = write;
-  const says = !chosen ? (own.trim() ? 'The base instructions come out. Its own instructions stay.' : `The base instructions come out of their block and stay as plain text, so ${name} is not left empty.`)
-    : putBack ? `Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`
-    : !file.exists ? `${name} is created, holding only the base instructions.`
-    : next === file.text ? 'No change: it already has these base instructions.'
-    : adopt ? `Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`
-    : copy === undefined ? (own.trim() ? `The base instructions go after its ${plural(lineCount(own), 'line')} of its own.` : 'The base instructions are added.')
-    : 'Its copy of the base is updated. Its own instructions stay.';
-  return { next, says };
+  const says = (text: string) => ({ next, says: text });
+  if (!chosen) return says(own.trim() ? 'The base instructions come out. Its own instructions stay.' : `The base instructions come out of their block and stay as plain text, so ${name} is not left empty.`);
+  if (putBack) return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`);
+  if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
+  if (next === file.text) return says('No change: it already has these base instructions.');
+  if (adopt) return says(`Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`);
+  if (copy === undefined) return says(own.trim() ? `The base instructions go after its ${plural(lineCount(own), 'line')} of its own.` : 'The base instructions are added.');
+  return says('Its copy of the base is updated. Its own instructions stay.');
 }
 
 /** The draft differs from what is saved, or comes from somewhere: saving it does something. */
-const draftChanges = (edit: BaseEdit) => edit.text !== (state.base?.text ?? '') || edit.tools.join() !== (state.base?.tools ?? []).join() || !!edit.source;
+const draftChanges = (edit: BaseEdit) => baseDraftChanged(edit) || !!edit.source;
 
 function editView(files: InstructionFile[], edit: BaseEdit) {
-  const empty = !edit.text.trim();
-  const reviewable = () => draftChanges(edit) && !(empty && !state.base?.tools.length);
-  const hint = () => (reviewable() ? keys : empty ? 'Write the base instructions to review them.' : 'Make a change to review it.');
+  // Read as the person types: the editor isn't redrawn on each key.
+  const empty = () => !edit.text.trim();
+  const reviewable = () => draftChanges(edit) && !(empty() && !state.base?.tools.length);
+  const hint = () => (reviewable() ? keys : empty() ? 'Write the base instructions to review them.' : 'Make a change to review it.');
   const area = h('textarea.ins-text', { id: 'base-text', spellcheck: 'false', 'aria-label': 'Edit the base instructions',
     placeholder: 'Write what every tool should know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them',
     oninput: (event: Event) => {
@@ -121,6 +122,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const startedInReview = kind && kind !== 'own';
   return h('div.ins-editor', {},
     h('p.ins-review-title', {}, title),
+    edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${edit.conflict.replace(/ Review again\.$/, '')} This review now shows things as they are.`)) : null,
     edit.text === before ? null : diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }, 'Changes to the base instructions'),
     plans.length ? h('h3.base-subhead', {}, 'Each file') : h('p.ins-empty', {}, 'No tool is chosen, so no file changes. The base instructions are kept here for later.'),
     h('ul.plain-list.base-plan', {}, plans.map(({ file, plan }) => {
@@ -135,7 +137,8 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
     })),
     h('div.ins-actions', {},
       button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy, onclick: () => void applyBaseChange(
-        { text: edit.text, tools: edit.text.trim() ? edit.tools : [], adopt: edit.source?.kind === 'own' ? edit.source.tool : undefined, overwrite: putBack ? [edit.source!.tool!] : undefined },
+        { text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen: Object.fromEntries(plans.map(({ file }) => [file.tool, file.hash])),
+          adopt: edit.source?.kind === 'own' ? edit.source.tool : undefined, overwrite: putBack ? [edit.source!.tool!] : undefined },
         written => putBack ? `The base instructions are back in ${putBack}. The edited copy is under ${from}’s Earlier versions.`
           : kind === 'update' ? `Updated ${written || 'nothing'} with the base instructions.`
           : (edit.source?.kind === 'version' ? 'The earlier base instructions are back' : 'Base instructions saved') + (written ? ` in ${written}.` : '.')) }),
@@ -179,13 +182,13 @@ export function baseCard(files: InstructionFile[]) {
   const readOnly = !!state.home && !state.home.manage.access.allowed;
   const toolEdit = state.instructionEdit;
   const toolFile = toolEdit && files.find(file => file.tool === toolEdit.tool);
-  const toolDirty = !!toolFile && toolEdit!.text !== ownText(toolFile);
+  const toolDirty = !!toolFile && !toolEdit!.restoring && toolEdit!.text !== ownText(toolFile);
   const lockedWhy = readOnly ? 'Saving is off in this home.' : toolDirty ? `Finish or cancel the ${fileName(toolFile!.path)} edit first.` : undefined;
   const locked = !!state.busy || !!lockedWhy;
   const lockAttrs = lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined;
-  const chosen = files.filter(file => file.base);
+  const chosen = files.filter(file => file.base?.chosen);
   const behind = chosen.filter(file => file.base!.state === 'older' || file.base!.state === 'missing');
-  const others = files.filter(file => !file.base);
+  const others = files.filter(file => !file.base?.chosen);
   const preview = base.text.replace(/\n$/, '').split('\n');
   const hasBase = !!base.text.trim();
   const starts = files.filter(file => ownText(file).trim());
@@ -221,10 +224,7 @@ export function baseCard(files: InstructionFile[]) {
         lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null),
     ];
   }
-  const versions = !edit && base.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${base.versions.length})`),
-    h('ul.plain-list', {}, base.versions.slice(0, 20).map(version => h('li.ins-version', {},
-      h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` · ${version.firstLine || 'empty'} · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
-      button({ variant: 'link', size: 'micro', label: 'Restore…', id: `base-load-${version.id}`, disabled: locked, attrs: lockAttrs, onclick: () => void loadBaseVersion(version.id) }))))) : null;
+  const versions = edit ? null : versionsList(base.versions, { id: version => `base-load-${version}`, disabled: locked, why: lockedWhy, run: version => void loadBaseVersion(version) });
   return h('article.card.ins-card.base-card', { id: 'base-card', 'aria-label': 'Base instructions' }, head, ...body, versions);
 }
 
@@ -234,7 +234,7 @@ export function baseStrip(file: InstructionFile) {
   if (!base || base.copy === undefined) return null;
   const key = `strip-${file.tool}`;
   const lines = lineCount(base.copy);
-  const said = base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file; see Base instructions above' : 'an older version; see Base instructions above';
+  const said = !base.chosen ? 'not on the base list, so Central Knot leaves this block as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file; see Base instructions above' : 'an older version; see Base instructions above';
   return h('div.base-strip', {},
     h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, 'Then the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
       button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide' : 'Show', id: `ins-base-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),

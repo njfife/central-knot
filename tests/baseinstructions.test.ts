@@ -9,7 +9,7 @@ import { splitBase, withBase, withOwn, withoutBase } from '../src/basetext.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
-test('The base block goes after a file’s own text, is replaced in place, and comes out leaving the own text byte for byte', () => {
+test('The base block goes after a file’s own text (ending it with a line break), is replaced in place, and comes out leaving the own text', () => {
   const own = '# Mine\n- Keep this exactly.';
   const added = withBase(own, 'Shared one.\n');
   assert.equal(splitBase(added).own, own + '\n');
@@ -33,7 +33,9 @@ async function sandbox() {
   for (const folder of ['.claude', '.copilot', '.codex']) await mkdir(join(home, folder), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
   const snapshots = () => Promise.all(tools.map(harness => discover({ home, mode: 'custom', harness })));
-  return { home, context, snapshots, cleanup: () => rm(base, { recursive: true, force: true }) };
+  // What the review would have shown: every file with the hash it holds now.
+  const seen = async () => Object.fromEntries((await instructionsView(context, await snapshots())).map(file => [file.tool, file.hash]));
+  return { home, context, snapshots, seen, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Starting from one tool’s instructions shares them with the others; an edit in a tool’s copy is kept until the person chooses; Undo puts every file back', async () => {
@@ -42,24 +44,31 @@ test('Starting from one tool’s instructions shares them with the others; an ed
   try {
     await writeFile(claude, 'Be brief.\n');
     await writeFile(codex, 'Codex only.\n');
-    const first = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\n', expected: (await baseView(box.context)).hash, tools, adopt: 'claude-cli' });
+    const first = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools, adopt: 'claude-cli' });
     assert.deepEqual(first.left, []);
     assert.equal(splitBase(await readFile(claude, 'utf8')).own, '');
     assert.equal(splitBase(await readFile(codex, 'utf8')).own, 'Codex only.\n');
     assert.equal(splitBase(await readFile(copilot, 'utf8')).copy, 'Be brief.\n');
 
+    // A file changed after the review stops the save before anything is written.
+    const stale = await box.seen();
+    await writeFile(claude, (await readFile(claude, 'utf8')) + 'Typed after the review.\n');
+    const stopped = await applyBase(box.context, await box.snapshots(), { text: 'Other.\n', expected: (await baseView(box.context)).hash, seen: stale, tools });
+    assert.ok(stopped.changed && !(await readFile(codex, 'utf8')).includes('Other.') && (await baseView(box.context)).text === 'Be brief.\n');
+    await writeFile(claude, (await readFile(claude, 'utf8')).replace('Typed after the review.\n', ''));
+
     // An edit inside Codex's copy: the next base edit leaves Codex alone and says so.
     await writeFile(codex, (await readFile(codex, 'utf8')).replace('Be brief.', 'Be very brief.'));
     let files = await instructionsView(box.context, await box.snapshots());
     assert.equal(files.find(file => file.tool === 'codex-cli')!.base!.state, 'edited');
-    const second = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nCite files.\n', expected: (await baseView(box.context)).hash, tools });
+    const second = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nCite files.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools });
     assert.deepEqual(second.left, [{ tool: 'codex-cli', why: 'edited' }]);
     assert.match(await readFile(codex, 'utf8'), /Be very brief\./);
     assert.match(await readFile(claude, 'utf8'), /Cite files\./);
 
     // Put the base back in Codex, then undo that: Codex's edited copy returns exactly.
     const editedCodex = await readFile(codex, 'utf8');
-    const putBack = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nCite files.\n', expected: (await baseView(box.context)).hash, tools, overwrite: ['codex-cli'] });
+    const putBack = await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nCite files.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools, overwrite: ['codex-cli'] });
     assert.equal(splitBase(await readFile(codex, 'utf8')).copy, 'Be brief.\nCite files.\n');
     await undoBase(box.context, await box.snapshots(), putBack.undo!);
     assert.equal(await readFile(codex, 'utf8'), editedCodex);
@@ -74,13 +83,17 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     await assert.rejects(stat(copilot));
     assert.deepEqual((await baseView(box.context)).tools, []);
 
-    // Taking a tool off the list takes its block out and leaves its own text.
+    // Taking a tool off the list takes its block out and leaves its own text; a copy edited there stays, and a file deleted
+    // meanwhile is not created.
     await writeFile(codex, 'Codex only.\n');
-    await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, tools: ['claude-cli', 'codex-cli'] });
-    await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, tools: ['claude-cli'] });
-    assert.equal(await readFile(codex, 'utf8'), 'Codex only.\n');
-    files = await instructionsView(box.context, await box.snapshots());
-    assert.equal(files.find(file => file.tool === 'codex-cli')!.base, undefined);
-    assert.equal(files.find(file => file.tool === 'claude-cli')!.base!.state, 'same');
+    await writeFile(claude, 'Claude only.\n');
+    await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools });
+    await rm(copilot);
+    await writeFile(codex, (await readFile(codex, 'utf8')).replace('Shared.', 'Shared, mine.'));
+    const off = await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools: ['claude-cli'] });
+    assert.ok((await readFile(claude, 'utf8')).startsWith('Claude only.\n\n<!--'));
+    assert.match(await readFile(codex, 'utf8'), /Shared, mine\./);
+    assert.deepEqual(off.left, [{ tool: 'codex-cli', why: 'edited' }]);
+    await assert.rejects(stat(copilot));
   } finally { await box.cleanup(); }
 });

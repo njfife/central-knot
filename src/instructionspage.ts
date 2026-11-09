@@ -2,7 +2,7 @@
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
 import { baseDraftChanged, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { toolNames } from './words.ts';
+import { fileName, toolNames } from './words.ts';
 import { plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
@@ -13,7 +13,6 @@ export { lineDiff } from './diff.ts';
 const names = toolNames as Record<string, string>;
 /** The base editor holds a change: tool editors wait until it is saved or dropped. */
 const baseDirty = () => !!state.baseEdit && baseDraftChanged(state.baseEdit);
-export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
 function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
@@ -31,7 +30,16 @@ const ago = (at: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
 
-const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+/** The editors' keyboard hint, once there is something to review. */
+export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+
+/** An "Earlier versions (N)" list: each version's date, age and how far it is from now, with Restore… (which opens a review). */
+export function versionsList(versions: InstructionFile['versions'], restore: { id: (version: string) => string; disabled: boolean; why?: string; run: (version: string) => void }) {
+  return versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${versions.length})`),
+    h('ul.plain-list', {}, versions.slice(0, 20).map(version => h('li.ins-version', {},
+      h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
+      button({ variant: 'link', size: 'micro', label: 'Restore…', id: restore.id(version.id), disabled: restore.disabled, attrs: restore.why ? { title: restore.why } : undefined, onclick: () => restore.run(version.id) }))))) : null;
+}
 
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
@@ -163,10 +171,8 @@ function card(file: InstructionFile) {
         h('div.ins-actions', {},
           button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
-    file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
-      h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
-        h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
-        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== own), attrs: lockedWhy || editing ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
+    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== own),
+      why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 
 export function instructionsPage() {

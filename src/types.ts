@@ -375,8 +375,9 @@ export interface InstructionFile {
   nextStep: string;
   /** Earlier versions kept before each save, newest first. */
   versions: InstructionVersion[];
-  /** Set when this tool gets the base instructions: its own text, its copy of the base, and how that copy compares. */
-  base?: { state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string };
+  /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
+   *  and how that copy compares ('edited': it is neither the base nor an earlier base, so someone wrote in it). */
+  base?: { chosen: boolean; state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string };
 }
 export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 
@@ -386,11 +387,14 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[] }
 /** Set the base and its tools. `expected`: the base's hash when opened. `adopt`: the tool whose own text became the base.
  *  `overwrite`: tools whose edited copy is replaced by the base. */
-export interface BaseApply { text: string; expected: string; tools: HarnessId[]; adopt?: HarnessId; overwrite?: HarnessId[] }
+export interface BaseApply { text: string; expected: string; tools: HarnessId[];
+  /** The files the review showed, by tool, with the hash each held then ('' for no file): only these are written. */
+  seen: Partial<Record<HarnessId, string>>;
+  adopt?: HarnessId; overwrite?: HarnessId[] }
 /** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
-export interface BaseResult { stopped?: string; written: { tool: HarnessId; before: string | null; after: string }[]; left: { tool: HarnessId; why: 'edited' | 'failed' }[]; undo?: BaseUndo }
+export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean; written: { tool: HarnessId; before: string | null; after: string }[]; left: { tool: HarnessId; why: 'edited' | 'failed' }[]; undo?: BaseUndo }
 /** Everything an apply changed, to put back: the base and its tools, and each file's text before (null: the apply created it). */
-export interface BaseUndo { text: string; tools: HarnessId[]; files: { tool: HarnessId; before: string | null; after: string }[] }
+export interface BaseUndo { text: string; tools: HarnessId[]; /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: { tool: HarnessId; before: string | null; after: string }[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
