@@ -205,10 +205,10 @@ async function gatherAgents(context: ShareContext, tools: HarnessId[]) {
   return { byKey, problems, folders, unreadable, duplicates };
 }
 
-const order: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli'];
+const toolPrecedence: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli'];
 /** The copy that holds the most fields among those with this content: the natural origin when none is recorded or chosen. */
-function richest(entries: AgentEntry[], hash: string): AgentEntry | undefined {
-  return entries.filter(entry => entry.hash === hash).sort((first, second) => Object.keys(second.agent.fields).length - Object.keys(first.agent.fields).length || order.indexOf(first.tool) - order.indexOf(second.tool))[0];
+function withMostFields(entries: AgentEntry[], hash: string): AgentEntry | undefined {
+  return entries.filter(entry => entry.hash === hash).sort((first, second) => Object.keys(second.agent.fields).length - Object.keys(first.agent.fields).length || toolPrecedence.indexOf(first.tool) - toolPrecedence.indexOf(second.tool))[0];
 }
 
 /** Why an agent can't be handled right now, if it can't: a file there that can't be read as an agent, or names that differ only by case. */
@@ -232,12 +232,12 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
   const present = tools.filter(tool => agentTools.includes(tool));
   const { byKey, problems, unreadable, duplicates } = await gatherAgents(context, present);
   const record = await readAgentRecord(context.home);
-  const servers: SkillFacts[] = [];
+  const agents: SkillFacts[] = [];
   for (const [key, slot] of [...byKey].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[key];
     const entries = Object.values(slot) as AgentEntry[];
     const managed = item?.state === 'shared';
-    const origin = (managed && item.origin && slot[item.origin]) || richest(entries, (entries.find(entry => entry.tool === 'claude-cli') ?? entries[0]).hash) || entries[0];
+    const origin = (managed && item.origin && slot[item.origin]) || withMostFields(entries, (entries.find(entry => entry.tool === 'claude-cli') ?? entries[0]).hash) || entries[0];
     const copies: Partial<Record<HarnessId, ToolCopy>> = {};
     for (const entry of entries) {
       let modified = '';
@@ -254,43 +254,45 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
     const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
-    servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
+    agents.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
   }
-  return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };
+  return { tools: present, servers: agents, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }
 
 // ---------- Apply ----------
 
 /** Observed missing times per file, kept while the app runs (DEL-01's settle). A restart forgets them, which only delays a deletion. */
-const missingSinceByFile = new Map<string, number>();
+const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
 interface AgentPass { context: ShareContext; present: HarnessId[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
-  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; only?: Set<string>; now: number; settleMs: number; missingSince: Map<string, number> }
-interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number }
-type AgentCopies = ReturnType<typeof reconcileCopies>; type Loser = { tool: HarnessId; hash: string };
+  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; syncOffApplyOnly?: Set<string>; now: number; settleMs: number }
+interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number } type Loser = { tool: HarnessId; hash: string };
+interface CopyNow { copy: AgentCopy; entry?: AgentEntry; is: 'removing' | 'away' | 'stopped' | 'off' | 'one-way' | 'unchanged' | 'edited' | 'deleted' }
+interface Target { tool: HarnessId; entry?: AgentEntry; recorded?: CopyNow }
 /**
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
  */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
-  const refused = await refuseOrClaimOwnership(context, changes.length > 0);
-  if (refused) return refused;
+  const stop = await claimSyncRecordOrStop(context, changes.length > 0);
+  if (stop !== 'claimed') return stop;
   const present = tools.filter(tool => agentTools.includes(tool));
   // A write or removal a crash interrupted is finished first, so a file moved aside is never read as deleted.
   for (const tool of present) await recoverParked(folder(context, tool));
   const onDisk = await gatherAgents(context, present);
   const record = await readAgentRecord(context.home);
   const log: PassLog = { results: [], events: [], notices: [], writes: 0 };
-  const carried = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
-  const pass: AgentPass = { context, present, record, onDisk, ...await readFolderIds(context, present, record.roots), ...recordChoices(record, onDisk.byKey, changes, log),
-    only: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000, missingSince: missingSinceByFile };
-  let settling = false;
-  for (const [key, item] of Object.entries(record.items)) if (item.state === 'shared' && (!options.only || options.only.has(key)) && await syncAgent(pass, log, key, item)) settling = true;
+  const displacedByEarlierPass = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
+  const { folderIds, resetTools } = await readFolderIds(context, present, record.roots);
+  const { chosen, newlyManaged } = recordChoices(record, onDisk.byKey, changes, log);
+  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, syncOffApplyOnly: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000 };
+  let deletionSettling = false;
+  for (const [key, item] of Object.entries(record.items)) if (item.state === 'shared' && (!options.only || options.only.has(key)) && await syncAgent(pass, log, key, item) === 'deletion settling') deletionSettling = true;
   await finishPendingRemovals(pass, log);
-  await saveRecordAndHistory(pass, log, carried);
-  return { results: log.results, writes: log.writes, notices: log.notices, settling };
+  await saveRecordAndHistory(pass, log, displacedByEarlierPass);
+  return { results: log.results, writes: log.writes, notices: log.notices, settling: deletionSettling };
 }
-async function refuseOrClaimOwnership(context: ShareContext, hasChanges: boolean): Promise<McpResult | undefined> {
+async function claimSyncRecordOrStop(context: ShareContext, hasChanges: boolean): Promise<McpResult | 'claimed'> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -299,6 +301,7 @@ async function refuseOrClaimOwnership(context: ShareContext, hasChanges: boolean
   if (!syncRecord && !hasChanges) return { results: [], writes: 0 };
   if (!syncRecord) { syncRecord = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, syncRecord); }
   if (gate.state !== 'ready') await remember(context, syncRecord.generation);
+  return 'claimed';
 }
 // A tool's agents folder made again since the last pass (a reset or reinstall, even between two reads): its missing copies are
 // put back, never read as deletions.
@@ -328,55 +331,55 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
   }
   return { chosen, newlyManaged };
 }
-async function syncAgent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem): Promise<boolean> {
+async function syncAgent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem): Promise<'deletion settling' | 'done'> {
   const syncing = pass.present.filter(tool => !item.off.includes(tool));
   const problem = blocked(key, pass.onDisk.unreadable, pass.onDisk.duplicates, syncing);
-  if (problem) { for (const copy of item.copies) pass.missingSince.delete(copy.file); log.results.push({ item: item.name, outcome: 'held', message: problem }); return false; }
-  const copies = reconcileCopies(pass, log, item, pass.onDisk.byKey.get(key) ?? {}, syncing);
-  if (pass.only && !pass.chosen.has(key) && (copies.edited.length || copies.missing.length)) { log.results.push({ item: item.name, outcome: 'held', message: `An edit or deletion of ${item.name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); return false; }
-  if (deletionStillSettling(pass, copies)) return true;
-  item.copies = item.copies.filter(copy => !copies.missing.includes(copy));
-  if (copies.missing.length && !copies.edited.length) await spreadDeletion(pass, log, key, item, copies);
-  else await spreadContent(pass, log, key, item, copies);
-  return false;
+  if (problem) { for (const copy of item.copies) firstSeenMissingAt.delete(copy.file); log.results.push({ item: item.name, outcome: 'held', message: problem }); return 'done'; }
+  const { copies, targets } = classifyCopies(pass, log, item, pass.onDisk.byKey.get(key) ?? {}, syncing);
+  item.copies = copies.map(({ copy }) => copy);
+  const edited = copies.some(({ is }) => is === 'edited'), deleted = copies.some(({ is }) => is === 'deleted');
+  if (pass.syncOffApplyOnly && !pass.chosen.has(key) && (edited || deleted)) { log.results.push({ item: item.name, outcome: 'held', message: `An edit or deletion of ${item.name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); return 'done'; }
+  if (deletionStillSettling(pass, copies)) return 'deletion settling';
+  item.copies = copies.filter(({ is }) => is !== 'deleted').map(({ copy }) => copy);
+  await (deleted && !edited ? spreadDeletion : spreadContent)(pass, log, key, item, copies, targets);
+  return 'done';
 }
-function reconcileCopies(pass: AgentPass, log: PassLog, item: AgentRecordItem, slot: AgentSlot, syncing: HarnessId[]) {
-  // A copy recorded in a folder its tool no longer uses (a moved config root) is let go, never read as a deletion.
-  item.copies = item.copies.filter(copy => dirname(copy.file) === folder(pass.context, copy.tool) || !pass.present.includes(copy.tool));
-  // A tool whose agents folder is gone right now (uninstalled, moved away): its copy is neither updated nor read as deleted.
-  const away = new Set(item.copies.filter(copy => !pass.onDisk.folders.has(copy.tool)).map(copy => copy.tool));
-  // Its folder gone, then back (a reinstall or reset): never a deletion.
-  const missingFromReturnedFolder = (copy: AgentCopy) => copy.status !== 'removing' && !away.has(copy.tool) && (copy.away || pass.resetTools.has(copy.tool)) && !slot[copy.tool];
-  item.copies = item.copies.filter(copy => !missingFromReturnedFolder(copy));
-  for (const copy of item.copies) if (copy.status !== 'removing') { if (away.has(copy.tool)) copy.away = true; else delete copy.away; }
-  const lastSynced = new Map(item.copies.filter(copy => copy.status !== 'removing').map(copy => [copy.tool, copy]));
-  const changedOneWay = [...lastSynced.values()].filter(copy => copy.oneWay && !copy.stopped && !away.has(copy.tool) && syncing.includes(copy.tool) && slot[copy.tool]?.bytes !== copy.bytes);
-  for (const copy of changedOneWay) { copy.stopped = true; log.results.push({ item: item.name, harness: copy.tool, outcome: 'held', message: `${slot[copy.tool] ? 'Changed' : 'Deleted'} in ${harnesses[copy.tool].name}, which gets this agent one-way. Central Knot stopped updating it there; nothing spread.` }); }
-  const updating = new Set(syncing.filter(tool => !lastSynced.get(tool)?.stopped && !away.has(tool)));
-  const twoWay = new Set([...updating].filter(tool => !lastSynced.get(tool)?.oneWay));
-  const found = [...updating].map(tool => slot[tool]).filter((entry): entry is AgentEntry => !!entry);
-  const edited = found.filter(entry => twoWay.has(entry.tool) && lastSynced.has(entry.tool) && lastSynced.get(entry.tool)!.hash !== entry.hash);
-  // Deletion of a two-way copy (DEL-01): its file gone from a folder that is there, settled, spreads (DEL-02); an edit racing it wins.
-  const missing = [...lastSynced.values()].filter(copy => twoWay.has(copy.tool) && !slot[copy.tool]);
-  return { slot, away, lastSynced, updating, twoWay, found, edited, missing };
+function classifyCopies(pass: AgentPass, log: PassLog, item: AgentRecordItem, slot: AgentSlot, syncing: HarnessId[]): { copies: CopyNow[]; targets: Target[] } {
+  const copies: CopyNow[] = [];
+  for (const recorded of item.copies) {
+    const { tool } = recorded, entry = slot[tool], folderGone = !pass.onDisk.folders.has(tool);
+    // A copy recorded in a folder its tool no longer uses (a moved config root) is let go, never read as a deletion.
+    if (pass.present.includes(tool) && dirname(recorded.file) !== folder(pass.context, tool)) continue;
+    if (recorded.status === 'removing') { copies.push({ copy: recorded, is: 'removing' }); continue; }
+    // Its folder gone, then back (a reinstall or reset): never a deletion.
+    if (!folderGone && !entry && (recorded.away || pass.resetTools.has(tool))) continue;
+    const copy = { ...recorded };
+    // A tool whose agents folder is gone right now (uninstalled, moved away): its copy is neither updated nor read as deleted.
+    if (folderGone) copy.away = true; else delete copy.away;
+    if (copy.oneWay && !copy.stopped && !folderGone && syncing.includes(tool) && entry?.bytes !== copy.bytes) { copy.stopped = true; log.results.push({ item: item.name, harness: tool, outcome: 'held', message: `${entry ? 'Changed' : 'Deleted'} in ${harnesses[tool].name}, which gets this agent one-way. Central Knot stopped updating it there; nothing spread.` }); }
+    // Deletion of a two-way copy (DEL-01): its file gone from a folder that is there, settled, spreads (DEL-02); an edit racing it wins.
+    copies.push({ copy, entry, is: copy.stopped ? 'stopped' : folderGone ? 'away' : !syncing.includes(tool) ? 'off' : copy.oneWay ? 'one-way' : !entry ? 'deleted' : entry.hash === copy.hash ? 'unchanged' : 'edited' });
+  }
+  const targets = syncing.filter(tool => !copies.some(({ copy, is }) => copy.tool === tool && (is === 'stopped' || !pass.onDisk.folders.has(tool))));
+  return { copies, targets: targets.map(tool => ({ tool, entry: slot[tool], recorded: copies.find(({ copy, is }) => copy.tool === tool && is !== 'removing') })) };
 }
-function deletionStillSettling(pass: AgentPass, { slot, away, lastSynced, missing }: AgentCopies): boolean {
-  for (const copy of lastSynced.values()) if (slot[copy.tool] || away.has(copy.tool)) pass.missingSince.delete(copy.file);
-  for (const copy of missing) if (!pass.missingSince.has(copy.file)) pass.missingSince.set(copy.file, pass.now);
-  const settling = missing.some(copy => pass.now - pass.missingSince.get(copy.file)! < pass.settleMs);
-  if (!settling) for (const copy of missing) pass.missingSince.delete(copy.file);
+function deletionStillSettling(pass: AgentPass, copies: CopyNow[]): boolean {
+  for (const { copy, entry, is } of copies) if (is !== 'removing' && (entry || !pass.onDisk.folders.has(copy.tool))) firstSeenMissingAt.delete(copy.file);
+  const deleted = copies.filter(({ is }) => is === 'deleted').map(({ copy }) => copy.file);
+  for (const file of deleted) if (!firstSeenMissingAt.has(file)) firstSeenMissingAt.set(file, pass.now);
+  const settling = deleted.some(file => pass.now - firstSeenMissingAt.get(file)! < pass.settleMs);
+  if (!settling) for (const file of deleted) firstSeenMissingAt.delete(file);
   return settling;
 }
-async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, { slot, away, lastSynced, found, missing }: AgentCopies) {
-  const deletedIn = missing[0].tool;
-  const removed: HarnessId[] = [], remaining: AgentCopy[] = [];
-  for (const copy of item.copies) {
-    const here = slot[copy.tool];
+async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, copies: CopyNow[], targets: Target[]) {
+  const deletedIn = copies.find(({ is }) => is === 'deleted')!.copy.tool;
+  const removedFrom: HarnessId[] = [], remaining: AgentCopy[] = [];
+  for (const { copy, entry: here, is } of copies) {
     // A stopped one-way copy is the person's own now: it stays, and stays known as this agent's, so Restore leaves it alone.
-    if (copy.stopped) remaining.push(copy);
-    else if (away.has(copy.tool) || copy.status === 'removing') remaining.push({ ...copy, status: 'removing' });
+    if (is === 'stopped') remaining.push(copy);
+    else if (is === 'away' || is === 'removing') remaining.push({ ...copy, status: 'removing' });
     else if (here) {
-      try { await keep(pass.context, here); await removeFileChecked(here.file, here.text); log.writes++; removed.push(copy.tool); log.results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: `Deleted in ${harnesses[deletedIn].name}, so removed here too.` }); }
+      try { await keep(pass.context, here); await removeFileChecked(here.file, here.text); log.writes++; removedFrom.push(copy.tool); log.results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: `Deleted in ${harnesses[deletedIn].name}, so removed here too.` }); }
       catch (error) {
         if (errorCode(error) === 'CK_CHANGED') { log.results.push({ item: item.name, harness: copy.tool, outcome: 'held', message: `${harnesses[copy.tool].name}'s copy was changed just as the deletion spread, so it was kept as it is.` }); continue; }
         remaining.push({ ...copy, status: 'removing' });
@@ -384,47 +387,45 @@ async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: 
       }
     }
   }
-  for (const entry of found) if (!lastSynced.has(entry.tool)) log.results.push({ item: item.name, harness: entry.tool, outcome: 'held', message: `${harnesses[entry.tool].name} has a different “${item.name}” that was never synced. It stays.` });
+  for (const { tool, entry, recorded } of targets) if (entry && !recorded) log.results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} has a different “${item.name}” that was never synced. It stays.` });
   const id = logEvent(log, { key: `agent:${key}`, item: item.name, kind: 'deleted', winner: { tool: deletedIn, hash: item.hash }, losers: [], orderProved: true, previous: item.hash });
-  log.notices.push({ key: `agent:${key}`, item: item.name, kind: 'deleted', winner: deletedIn, losers: removed, orderProved: true, history: id });
+  log.notices.push({ key: `agent:${key}`, item: item.name, kind: 'deleted', winner: deletedIn, losers: removedFrom, orderProved: true, history: id });
   Object.assign(item, { state: 'dont-share', deleted: { at: new Date(pass.now).toISOString(), tool: deletedIn, hash: item.hash }, copies: remaining } satisfies Partial<AgentRecordItem>);
 }
-async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, copies: AgentCopies) {
+async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, copies: CopyNow[], targets: Target[]) {
   // An edit raced the deletion: the edit is kept, and the deleted copy comes back with it (CON-01, D-04's offer).
-  const deletedMeanwhile = copies.missing.map(copy => copy.tool);
-  for (const tool of deletedMeanwhile) copies.lastSynced.delete(tool);
-  const twoWayFound = copies.found.filter(entry => copies.twoWay.has(entry.tool));
-  const recordedOrigin = item.origin && copies.twoWay.has(item.origin) ? copies.slot[item.origin] : undefined;
-  const source = pickSource(copies.edited, twoWayFound, recordedOrigin, item.hash);
-  if (!source) { log.results.push({ item: item.name, outcome: 'held', message: twoWayFound.length ? 'Copies differ. Choose which copy to use.' : 'No copy is left to start from.' }); return; }
+  const deletedMeanwhile = copies.filter(({ is }) => is === 'deleted').map(({ copy }) => copy.tool);
+  const twoWayFound = targets.flatMap(({ entry, recorded }) => (entry && recorded?.is !== 'one-way' ? [entry] : []));
+  const edited = targets.flatMap(({ entry, recorded }) => (entry && recorded?.is === 'edited' ? [entry] : []));
+  const recordedOrigin = twoWayFound.find(({ tool }) => tool === item.origin);
+  const source = pickSource(edited, twoWayFound, recordedOrigin, item.hash);
   // An unrecorded copy that differs, with no baseline to call it behind, is a same-name collision: it needs a choice.
-  if (!pass.chosen.has(key) && copies.found.some(entry => !copies.lastSynced.has(entry.tool) && entry.hash !== source.hash && entry.hash !== item.hash)) { log.results.push({ item: item.name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); return; }
+  const sameNameCollision = !!source && !pass.chosen.has(key) && targets.some(({ entry, recorded }) => entry && !recorded && entry.hash !== source.hash && entry.hash !== item.hash);
+  if (!source || sameNameCollision) { log.results.push({ item: item.name, outcome: 'held', message: twoWayFound.length ? 'Copies differ. Choose which copy to use.' : 'No copy is left to start from.' }); return; }
   // The origin stays the same tool unless it is chosen anew or can no longer be one (stable, so one-way never flips by itself).
-  const origin = recordedOrigin || richest(twoWayFound, source.hash) || source;
+  const origin = recordedOrigin || withMostFields(twoWayFound, source.hash) || source;
   item.origin = origin.tool;
-  const historyWillName = copies.edited.length > 0 || pass.chosen.has(key) || deletedMeanwhile.length > 0;
+  const historyWillName = edited.length > 0 || pass.chosen.has(key) || deletedMeanwhile.length > 0;
   const replaced: Loser[] = [], added: Loser[] = [];
   await keep(pass.context, source);
-  const nextCopies = item.copies.filter(copy => copy.stopped || copy.status === 'removing' || copies.away.has(copy.tool));
-  for (const tool of copies.updating) {
-    const { copy, wrote } = await writeCopy(pass, log, item, tool, copies, source, origin, historyWillName);
-    const here = copies.slot[tool];
+  const nextCopies = copies.filter(({ is }) => is === 'stopped' || is === 'removing' || is === 'away').map(({ copy }) => copy);
+  for (const target of targets) {
+    const { copy, wrote } = await writeCopy(pass, log, item, target, source, origin, historyWillName);
     if (copy) nextCopies.push(copy);
-    if (wrote && here) replaced.push({ tool, hash: here.hash });
-    else if (wrote && pass.newlyManaged.has(key)) added.push({ tool, hash: copy.bytes });
+    if (wrote && target.entry) replaced.push({ tool: target.tool, hash: target.entry.hash });
+    else if (wrote && pass.newlyManaged.has(key)) added.push({ tool: target.tool, hash: copy.bytes });
   }
-  logSpreadEvents(log, key, item, source, { chosen: pass.chosen.has(key), edited: copies.edited, deletedMeanwhile }, replaced, added);
+  logSpreadEvents(log, key, item, source, { chosen: pass.chosen.has(key), edited, deletedMeanwhile }, replaced, added);
   Object.assign(item, { name: source.name, hash: source.hash, copies: nextCopies } satisfies Partial<AgentRecordItem>);
 }
-// The winner: a one-sided edit at a two-way copy; competing edits by the fixed tool order (D-04); else the baseline.
-function pickSource(edited: AgentEntry[], twoWayFound: AgentEntry[], recordedOrigin: AgentEntry | undefined, baseline: ContentHash): AgentEntry | undefined {
-  if (edited.length) return [...edited].sort((first, second) => order.indexOf(first.tool) - order.indexOf(second.tool))[0];
-  if (recordedOrigin?.hash === baseline) return recordedOrigin;
+// The winner: a one-sided edit at a two-way copy; competing edits by the fixed tool order (D-04); else the last synced content.
+function pickSource(edited: AgentEntry[], twoWayFound: AgentEntry[], recordedOrigin: AgentEntry | undefined, lastSyncedHash: ContentHash): AgentEntry | undefined {
+  if (edited.length) return [...edited].sort((first, second) => toolPrecedence.indexOf(first.tool) - toolPrecedence.indexOf(second.tool))[0];
+  if (recordedOrigin?.hash === lastSyncedHash) return recordedOrigin;
   const allAgree = new Set(twoWayFound.map(entry => entry.hash)).size === 1;
-  return richest(twoWayFound, baseline) ?? (allAgree ? richest(twoWayFound, twoWayFound[0].hash) : undefined);
+  return withMostFields(twoWayFound, lastSyncedHash) ?? (allAgree ? withMostFields(twoWayFound, twoWayFound[0].hash) : undefined);
 }
-async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, tool: HarnessId, copies: AgentCopies, source: AgentEntry, origin: AgentEntry, historyWillName: boolean): Promise<{ copy: AgentCopy; wrote: true } | { copy?: AgentCopy; wrote: false }> {
-  const here = copies.slot[tool];
+async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, { tool, entry: here, recorded }: Target, source: AgentEntry, origin: AgentEntry, historyWillName: boolean): Promise<{ copy: AgentCopy; wrote: true } | { copy?: AgentCopy; wrote: false }> {
   const lost = losses(tool, origin);
   const oneWay = lost.length > 0 || undefined;
   if (here?.hash === source.hash) return { copy: { tool, file: here.file, hash: here.hash, bytes: here.bytes, oneWay }, wrote: false };
@@ -432,21 +433,21 @@ async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, t
   const path = here?.file ?? fileFor(pass.context, tool, source.name);
   let text: string;
   try { text = agentText(tool, source.agent, here?.text); } catch { log.results.push({ item: item.name, harness: tool, outcome: 'held', message: 'This file could not be updated without changing other parts of it.' }); return { wrote: false }; }
-  try {
-    if (here) await keep(pass.context, here);
-    // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (a write that
-    // failed, caught up now) holds an older version that History already has.
-    if (here && historyWillName) { (item.displaced ??= []).push({ tool, hash: here.hash }); await saveAgentRecord(pass.context.home, pass.record); }
-    await writeFileChecked(path, text, here?.text);
-  } catch (error) {
+  try { if (here) await keepOverwrittenForHistory(pass, item, here, historyWillName); await writeFileChecked(path, text, here?.text); }
+  catch (error) {
     if (here) dropDisplaced(item, entry => entry.tool === tool && entry.hash === here.hash);
     log.results.push({ item: item.name, harness: tool, outcome: 'held', message: error instanceof Error && 'code' in error && String(error.code).startsWith('CK_') ? error.message : `Could not write ${harnesses[tool].name}'s copy.` });
     // Not written: it keeps what was recorded, so the next pass still sees it as it is.
-    return { copy: copies.lastSynced.get(tool), wrote: false };
+    return { copy: here && recorded?.copy, wrote: false };
   }
   log.writes++;
   log.results.push({ item: item.name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
   return { copy: { tool, file: path, hash: agentHash(source.agent), bytes: sha(text), oneWay }, wrote: true };
+}
+// A copy that is only behind (a write that failed, caught up now) holds an older version that History already has.
+async function keepOverwrittenForHistory(pass: AgentPass, item: AgentRecordItem, here: AgentEntry, historyWillName: boolean) {
+  await keep(pass.context, here);
+  if (historyWillName) { (item.displaced ??= []).push({ tool: here.tool, hash: here.hash }); await saveAgentRecord(pass.context.home, pass.record); }
 }
 function logSpreadEvents(log: PassLog, key: string, item: AgentRecordItem, source: AgentEntry, why: { chosen: boolean; edited: AgentEntry[]; deletedMeanwhile: HarnessId[] }, replaced: Loser[], added: Loser[]) {
   const historyKey = `agent:${key}`;
@@ -470,7 +471,7 @@ function logSpreadEvents(log: PassLog, key: string, item: AgentRecordItem, sourc
 async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
   for (const [key, item] of Object.entries(pass.record.items)) {
     const pending = item.copies.filter(copy => copy.status === 'removing');
-    if ((pass.only && !pass.only.has(key)) || !pending.length) continue;
+    if ((pass.syncOffApplyOnly && !pass.syncOffApplyOnly.has(key)) || !pending.length) continue;
     const slot = pass.onDisk.byKey.get(key) ?? {};
     const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !pending.some(copy => copy.tool === entry.tool));
     const done: AgentCopy[] = [];
@@ -485,20 +486,20 @@ async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
     item.copies = item.copies.filter(copy => !done.includes(copy));
   }
 }
-async function saveRecordAndHistory(pass: AgentPass, log: PassLog, carried: (Loser & { key: string })[]) {
-  const named = (key: string, hash: string) => log.events.some(made => made.key === `agent:${key}` && (made.previous === hash || made.winner?.hash === hash || made.losers.some(loser => loser.hash === hash)));
+async function saveRecordAndHistory(pass: AgentPass, log: PassLog, displacedByEarlierPass: (Loser & { key: string })[]) {
+  const historyNames = (key: string, hash: string) => log.events.some(made => made.key === `agent:${key}` && (made.previous === hash || made.winner?.hash === hash || made.losers.some(loser => loser.hash === hash)));
   // Displaced content no event of this pass names (left by a pass that stopped part-way) gets its own History entry.
-  for (const left of carried) {
+  for (const left of displacedByEarlierPass) {
     const item = pass.record.items[left.key];
-    if (item && !named(left.key, left.hash)) logEvent(log, { key: `agent:${left.key}`, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
+    if (item && !historyNames(left.key, left.hash)) logEvent(log, { key: `agent:${left.key}`, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
   }
   // Folder identities are kept only by a full pass: Apply all with Sync off skips agents, so a reset must still be seen next time.
-  if (!pass.only) pass.record.roots = { ...pass.record.roots, ...pass.folderIds };
+  if (!pass.syncOffApplyOnly) pass.record.roots = { ...pass.record.roots, ...pass.folderIds };
   await saveAgentRecord(pass.context.home, pass.record);
   await appendHistory(pass.context, log.events);
   // History names it now: the hold is dropped. A crash between leaves the hold, never content no one can restore.
-  const released = Object.entries(pass.record.items).filter(([key, item]) => item.displaced?.some(entry => named(key, entry.hash)));
-  for (const [key, item] of released) dropDisplaced(item, entry => named(key, entry.hash));
+  const released = Object.entries(pass.record.items).filter(([key, item]) => item.displaced?.some(entry => historyNames(key, entry.hash)));
+  for (const [key, item] of released) dropDisplaced(item, entry => historyNames(key, entry.hash));
   if (released.length) await saveAgentRecord(pass.context.home, pass.record);
 }
 const logEvent = (log: PassLog, fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), ...fields }; log.events.push(made); return made.id; };
