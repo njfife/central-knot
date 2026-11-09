@@ -11,6 +11,7 @@ import { harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import { mcpDisabled, readMcpSwitches } from './mcpswitch.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
@@ -282,6 +283,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
   const record = await readMcpRecord(context.home);
   const servers: SkillFacts[] = [];
   const claudePending: string[] = [];
+  // Each tool's own switch (profiles turn servers off with it): read once, then asked about every server there.
+  const switches = await readMcpSwitches(context, present);
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[name];
     const entries = Object.values(slot) as McpEntry[];
@@ -293,7 +296,10 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
+    const disabled = entries.filter(entry => { const file = switches.get(entry.tool); return !!file && !file.problem && mcpDisabled(entry.tool, file.text, name); }).map(entry => entry.tool);
+    const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
+    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
+      ...(disabled.length ? { disabled } : {}), ...(Object.keys(switchProblem).length ? { switchProblem } : {}) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }

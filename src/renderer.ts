@@ -9,12 +9,13 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
+import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', profiles: 'Profiles', history: 'History', tools: 'Tools', settings: 'Settings' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */
@@ -26,6 +27,7 @@ function applyLayout() {
   classes.toggle('rail', rail);
   classes.toggle('one-pane', contentWidth < 960);
   classes.toggle('page-skills', state.page === 'skills');
+  classes.toggle('page-profiles', state.page === 'profiles');
   return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
 }
 
@@ -69,6 +71,7 @@ function renderSidebar() {
     navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
     navRow('instructions', 'Instructions', 'pencil-line'),
     navRow('plugins', 'Plugins', 'puzzle'),
+    navRow('profiles', 'Profiles', 'sliders-horizontal'),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
@@ -102,7 +105,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.remove('has-item');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
@@ -118,6 +121,8 @@ function renderStatus() {
     state.home
       ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
+    // The profile in use is always in sight, right after the home, and one click away from switching.
+    profileStatus() ?? '',
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
     // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one.
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))

@@ -224,6 +224,31 @@ async function practiceFlow() {
   same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
   await a.click('#nav-skills');
 
+  // Profiles: a profile with only notes in it turns every other skill and MCP server off with each tool's own switch, in one
+  // History step; the copies and MCP entries stay where they are, and Undo puts every switch back.
+  const switchFiles = ['.claude/settings.json', '.copilot/settings.json', '.codex/config.toml'].map(file => join(practice, file));
+  const readSwitches = () => switchFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : ''));
+  const switchesBefore = readSwitches();
+  const claudeJsonBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
+  await a.click('#nav-profiles');
+  await a.click('#profile-new');
+  await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+  await a.settle();
+  await a.click('#pf-skill\\:notes');
+  check('ticking only edits the profile', JSON.stringify(readSwitches()) === JSON.stringify(switchesBefore));
+  await a.click('#profile-switch');
+  const [claudeSwitches, copilotSwitches, codexSwitches] = readSwitches();
+  same('the switch turns the rest off in each tool’s own settings', [JSON.parse(claudeSwitches).skillOverrides?.standup, JSON.parse(claudeSwitches).deniedMcpServers, JSON.parse(copilotSwitches).disabledMcpServers, codexSwitches.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n')],
+    ['off', [{ serverName: 'docs' }], ['files'], true]);
+  same('nothing is moved: copies and MCP entries stay', [existsSync(join(practice, '.claude/skills/standup/SKILL.md')), readFileSync(join(practice, '.claude.json'), 'utf8') === claudeJsonBefore], [true, true]);
+  same('the status bar names the profile in use', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await a.click('#outcome-undo');
+  // settings.json files the switch made hold only emptied switch lists afterwards; Codex's config.toml is byte for byte as it was.
+  const settled = (text, index) => (index === 2 ? text : JSON.stringify(Object.fromEntries(Object.entries(text.trim() ? JSON.parse(text) : {}).filter(([, value]) => !(value && typeof value === 'object' && !Object.keys(value).length)))));
+  same('Undo switch puts every switch back', readSwitches().map(settled), switchesBefore.map(settled));
+  same('…and No profile is in use again', (await a.text('#status-profile'))?.trim(), 'No profile');
+  await a.click('#nav-skills');
+
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
   const standupBefore = readFileSync(standupPath('claude'), 'utf8');

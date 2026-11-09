@@ -58,7 +58,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -109,6 +109,11 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
+  saveProfile(profile: { id?: string; name: string; items: string[] }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
+  deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
+  /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
+  switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -160,9 +165,9 @@ export interface SkillFacts {
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
   stopped?: HarnessId[];
-  /** Skills: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
+  /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
-  /** Skills: why Disable can't be used in a tool (its settings file can't be read or is in a form Central Knot doesn't edit). */
+  /** Skills and MCP servers: why a tool's switch can't be used (its settings file can't be read or is in a form Central Knot doesn't edit). */
   switchProblem?: Partial<Record<HarnessId, string>>;
 }
 
@@ -220,8 +225,11 @@ export interface HistoryEvent {
   item: string;
   /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it.
    * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
-   * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
+   * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
+   * 'profile': a profile switch (key 'profile', item the profile's name); Undo switches back. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile';
+  /** 'profile': which profile was active before and after, every switch it flipped, and what profiles held off before it. */
+  profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[]; heldBefore: Record<string, HarnessId[]> };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false). */
   switched?: { tool: HarnessId; disabled: boolean }[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
@@ -394,3 +402,27 @@ export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
 
+
+// ---------- Profiles ----------
+
+/**
+ * A named set of skills and MCP servers to have on, chosen from what the home has. Switching to it turns everything else off with
+ * each tool's own switch (nothing is moved or deleted) and turns back on what an earlier switch turned off. Items are named by
+ * kind and key: `skill:<key>` and `mcp:<name>`.
+ */
+export interface Profile { id: string; name: string; items: string[] }
+
+export interface ProfilesView {
+  profiles: Profile[];
+  /** The profile last switched to; none means No profile. */
+  active?: string;
+  /** What profile switches turned off and have not turned back on, per item and tool. Switches turned off by hand are never here. */
+  held: Record<string, HarnessId[]>;
+  /** Why profiles can't be read or saved here, if they can't. */
+  problem?: string;
+}
+
+/** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
+export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
+
+export interface ProfileSwitchResult { stopped?: string; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }

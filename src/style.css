@@ -1365,3 +1365,70 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-switch-pending .switch { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
 .tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
 .tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-faint); cursor: help; }
+
+/* Profiles: list of profiles beside the open one; per tool, what is on and what a switch changes */
+.profiles-split { min-height: 0; }
+.toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
+.profile-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-in-use { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; background: var(--picked); color: var(--accent-ink); }
+.profile-header .pane-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-header .pane-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-actions { flex: none; gap: 8px; }
+.profile-actions .btn.text-danger { color: var(--danger); }
+.profile-confirm { font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
+.profile-back { display: none; }
+.one-pane.page-profiles .profile-back { display: inline-flex; }
+.profile-name-input { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 600 14px/20px var(--sans); user-select: text; cursor: text; }
+.profile-name-input:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.pf-scroll { display: flex; flex-direction: column; }
+.pf-table { --pf-col: 96px; display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
+.pf-row { display: grid; grid-template-columns: minmax(240px, 880px) repeat(var(--pf-tools), var(--pf-col)) minmax(0, 1fr); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--line); }
+.pf-row:not(.pf-head):hover { background: var(--hover); }
+.pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
+.pf-head .pf-name { padding-left: 16px; }
+.pf-head-cell { flex-direction: column; gap: 2px; color: var(--ink); }
+.pf-head-name { white-space: nowrap; }
+.pf-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
+.pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-desc { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 6px; color: var(--ink-soft); }
+.pf-tick:hover { background: var(--press); color: var(--ink); }
+.pf-tick .tick-box { margin: 0; }
+.pf-tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.pf-included .pf-tick { color: var(--ink); }
+.pf-cell { display: flex; align-items: center; justify-content: center; height: 100%; }
+.pf-row .pf-cell { position: relative; }
+.pf-row:not(.pf-head) .pf-cell::before { content: ''; position: absolute; width: 28px; height: 28px; border-radius: 6px; }
+.pf-cell-pending::before { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.pf-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--ink); }
+.pf-section { display: flex; align-items: center; height: 33px; padding: 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 40px; z-index: 1; }
+.pf-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; }
+.pf-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.pf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.pf-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.pf-legend-ring { position: relative; width: 16px; height: 16px; }
+.pf-legend-ring::before { content: ''; position: absolute; inset: 0; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.pf-none { padding: 24px 16px; color: var(--ink-soft); }
+.pf-how { list-style: none; margin: 0; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; max-width: 72ch; }
+.pf-how li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-soft); }
+.pf-how li .icon { flex: none; margin-top: 3px; }
+.pf-eyebrow { padding: 16px 16px 8px; }
+
+/* Status bar: the profile in use, with a menu to switch */
+.status-profile-wrap { position: relative; display: flex; flex: none; max-width: 200px; }
+.status-profile { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 6px; min-width: 0; height: 22px; padding: 0 6px; margin: 0 -6px; border-radius: 6px; color: var(--ink); font-weight: 500; }
+.status-profile:hover:not(:disabled) { background: var(--hover); }
+.status-profile:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.status-profile .icon { color: var(--accent-ink); flex: none; }
+.pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay, 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)); }
+.pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); white-space: nowrap; }
+.pf-menu-item:hover:not(:disabled), .pf-menu-item:focus-visible { background: var(--hover); }
+.pf-menu-item:disabled { opacity: 0.5; }
+.pf-menu-tick { width: 14px; flex: none; display: grid; place-items: center; color: var(--accent-ink); }
+.pf-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pf-menu-sep { height: 1px; margin: 2px 4px; background: var(--line); }
+
+/* Profiles: their pane header and toolbars span the pane (the Skills files view caps its own) */
+.profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
+.profiles-split .toolbar-end { border-left: 0; padding-left: 0; }

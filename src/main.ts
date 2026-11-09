@@ -15,7 +15,8 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import { deleteProfile, readProfiles, saveProfile, switchProfile, undoProfileSwitch } from './profiles.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
@@ -29,6 +30,8 @@ let current: { mode: HomeMode; home: string; label: string } | undefined;
 /** Whether the open home can be written; read with each view, so the menus can say "preview only" like the window. */
 let homeWritable = true;
 let lastManagedCount = 0;
+/** The open home's profiles as last read, for the menu bar's Profile menu. */
+let lastProfiles: ProfilesView = { profiles: [], held: {} };
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -149,10 +152,36 @@ function statusLine() {
   const where = current?.label ?? 'No home open yet';
   return unseen ? `Sync made changes · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
 }
+/** The active profile's name, or undefined for No profile. */
+const activeProfileName = () => lastProfiles.profiles.find(profile => profile.id === lastProfiles.active)?.name;
+/**
+ * Profile: one click switches, from the menu bar or the app menu. The label says which is active; each profile is a radio item.
+ * Shown once a profile exists; before that, "Profiles…" opens the page that makes one.
+ */
+function profileMenu(): Electron.MenuItemConstructorOptions {
+  if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
+  const choose = (id: string | null) => void fromTray(async () => {
+    if (!current) return;
+    const result = await switchProfile(context(), id);
+    // What could not be switched is told on the page, like a background pass's failures.
+    for (const entry of [...result.results.filter(item => item.outcome === 'failed' || item.outcome === 'held'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
+    lastProfiles = await readProfiles(current.home);
+  });
+  const usable = homeWritable && !!current && !lastProfiles.problem;
+  return { label: `Profile: ${activeProfileName() ?? 'None'}`, submenu: [
+    { label: 'No profile', type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
+    ...lastProfiles.profiles.map(profile => ({ label: profile.name, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable, click: () => choose(profile.id) })),
+    { type: 'separator' },
+    { label: 'Edit profiles…', click: () => showPage('profiles') },
+  ] };
+}
+
 function trayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open Central Knot', click: showWindow },
     { label: 'Settings…', click: () => showPage('settings') },
+    { type: 'separator' },
+    profileMenu(),
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen, click: showWindow },
@@ -169,8 +198,10 @@ function refreshTray() {
   appMenu();
   if (!tray) return;
   tray.setContextMenu(trayMenu());
-  tray.setToolTip(unseen ? 'Central Knot: sync made changes' : 'Central Knot');
-  if (process.platform === 'darwin') tray.setTitle(unseen ? '•' : '');
+  const profile = activeProfileName();
+  tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : ''}`);
+  // The active profile is always in sight: its name sits beside the menu bar icon.
+  if (process.platform === 'darwin') tray.setTitle(`${unseen ? '•' : ''}${profile ? ` ${profile}` : ''}`.trim());
 }
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
@@ -191,6 +222,7 @@ function appMenu() {
     { label: app.name, submenu: [
       { role: 'about' },
       { label: 'Settings…', accelerator: 'Command+,', click: () => showPage('settings') },
+      profileMenu(),
       // The same status line as the menu bar menu: where, and any news.
       { label: statusLine(), enabled: unseen, click: showWindow },
       { type: 'separator' },
@@ -265,7 +297,7 @@ async function view(explicit = false): Promise<HomeView> {
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), profiles: await readProfiles(current!.home),
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
     ...(await (async () => {
       const notices = pendingMcpNotices.splice(0);
@@ -275,6 +307,7 @@ async function view(explicit = false): Promise<HomeView> {
       };
     })()),
   };
+  if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles)) { lastProfiles = made.profiles; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;
@@ -534,6 +567,7 @@ app.whenReady().then(async () => {
     ? await (async () => {
       const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
       const tools = (await manageView(context())).tools;
+      if (key === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
@@ -542,6 +576,25 @@ app.whenReady().then(async () => {
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+  // Profiles: their definitions are Central Knot's own file; a switch flips each tool's own switches (profiles.ts).
+  const strings = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []);
+  const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
+  handle('profiles:save', async (profile, home) => {
+    if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
+    const input = profile as { id?: unknown; name?: unknown; items?: unknown };
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items) });
+    return saved.problem ? saved : { ...saved, view: await view() };
+  });
+  handle('profiles:delete', async (id, home) => {
+    if (home !== current?.home || typeof id !== 'string') return { problem: elsewhere };
+    const deleted = await deleteProfile(context(), id);
+    return deleted.problem ? deleted : { view: await view() };
+  });
+  handle('profiles:switch', async (id, home) => {
+    if (home !== current?.home || (id !== null && typeof id !== 'string')) return { stopped: elsewhere, results: [], flips: [] };
+    const result = await switchProfile(context(), id as string | null);
+    return { ...result, view: await view() };
+  });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });
   handle('sync:now', async home => (home === current?.home ? view(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.

@@ -7,7 +7,7 @@ import { loadPlugins, resetMarket } from './pluginstate.ts';
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'profiles' | 'history' | 'tools' | 'settings';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -241,6 +241,11 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
+  if (past?.kind === 'profile') {
+    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${past.profile?.fromName ?? 'No profile'} is the profile again${result.harnessWrites ? `; ${plural(result.harnessWrites, 'switch', 'switches')} put back` : ''}. New sessions use it.${stayedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
+    announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
+    return;
+  }
   const everywhere = where.length >= presentCount() ? `all ${where.length} tools` : andList(where);
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
@@ -419,7 +424,7 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
 let refreshing = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
-const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
+const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'tools', 'settings'];
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
 api().onSyncChanged(async () => {
@@ -527,4 +532,53 @@ const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…'
   const names = written.map(write => write.name);
   state.outcome = result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` };
   announce(result.stopped ?? state.outcome!.text, true);
+});
+
+// ---------- Profiles ----------
+
+/** What a switch or its undo left as it was, said once after the result. */
+const stayedNote = (results: DestinationResult[]) => {
+  const failed = results.filter(entry => entry.outcome === 'failed' || entry.outcome === 'held');
+  return failed.length ? ` ${plural(failed.length, 'switch', 'switches')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '';
+};
+
+/** The profile open on the Profiles page: one of the home's profiles, or 'none' for No profile. */
+export const profileState = { open: undefined as string | undefined, confirmDelete: undefined as string | undefined, renaming: undefined as string | undefined };
+
+/** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
+export const switchToProfile = (id: string | null) => busy('Switching profile…', async () => {
+  const home = state.home!;
+  const name = id === null ? 'No profile' : home.profiles.profiles.find(profile => profile.id === id)?.name ?? 'that profile';
+  const result = await api().switchProfile(id, home.home);
+  if (result.view) state.home = result.view;
+  if (result.stopped) { announce(result.stopped); return; }
+  const items = (disabled: boolean) => new Set(result.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
+  const off = items(true), on = items(false);
+  const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
+  const what = [off && `${plural(off, 'item')} turned off`, on && `${plural(on, 'item')} turned back on`].filter(Boolean).join(' and ');
+  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${stayedNote(result.results)}`,
+    undo: result.event ? { id: result.event, label: 'Undo switch' } : undefined };
+  announce(state.outcome.text, true);
+});
+
+/** Saves a profile's name and items. Quiet when it works: the page shows the change in place. */
+export const saveProfileDef = (profile: { id?: string; name: string; items: string[] }, said?: string) => busy('Saving profile…', async () => {
+  const result = await api().saveProfile(profile, state.home!.home);
+  if (result.view) state.home = result.view;
+  if (result.problem) { announce(result.problem); return; }
+  if (result.id) profileState.open = result.id;
+  announce(said ?? 'Profile saved.', true);
+});
+
+/** Deletes a profile's definition; one click on Undo saves it again. */
+export const deleteProfileDef = (id: string) => busy('Deleting profile…', async () => {
+  const gone = state.home!.profiles.profiles.find(profile => profile.id === id);
+  const result = await api().deleteProfile(id, state.home!.home);
+  if (result.view) state.home = result.view;
+  profileState.confirmDelete = undefined;
+  if (result.problem || !gone) { announce(result.problem ?? 'That profile is gone.'); return; }
+  profileState.open = undefined;
+  state.outcome = { page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. Nothing in your tools changed.`,
+    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ name: gone.name, items: gone.items }, `${gone.name} is back.`).then(() => { state.outcome = undefined; rerender(); }) } };
+  announce(state.outcome.text, true);
 });

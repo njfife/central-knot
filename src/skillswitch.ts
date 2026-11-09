@@ -102,7 +102,7 @@ function codexRules(text: string) {
 }
 
 /** Whether the text turns this copy off. Throws when the text isn't the tool's format. */
-function switchState(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget): boolean {
+export function switchState(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget): boolean {
   switch (tool) {
     case 'claude-cli': { const overrides = parseJson(text).skillOverrides; return !!overrides && typeof overrides === 'object' && (overrides as Record<string, unknown>)[target.folder] === 'off'; }
     case 'copilot-cli': return list(parseJson(text).disabledSkills).includes(target.name);
@@ -118,7 +118,7 @@ function switchState(context: ShareContext, tool: HarnessId, text: string, targe
 }
 
 /** The text with this copy turned on or off. Only the switch changes. */
-function withSwitch(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean): string {
+export function withSwitch(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean): string {
   switch (tool) {
     case 'claude-cli': return setJsonMember(text, ['skillOverrides', target.folder], disabled ? 'off' : undefined);
     case 'copilot-cli': {

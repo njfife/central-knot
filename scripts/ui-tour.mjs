@@ -218,6 +218,48 @@ if (wanted('plugins')) {
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of Apply all.'); }
 }
 
+// ---------- Profiles ----------
+if (wanted('profiles')) {
+  begin('profiles');
+  const name = async text => { await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle(); };
+  await a.click('#nav-profiles'); await shot(a, 'empty', 'Clicked "Profiles" in the sidebar before any profile exists.');
+  await a.click('#profile-new'); await shot(a, 'new-naming', 'Clicked "New profile": a profile is made and its name field is ready to type in.');
+  await name('Incident');
+  await shot(a, 'new-named', 'Typed "Incident" and pressed Enter. Nothing is in it yet.');
+  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:docs');
+  await shot(a, 'incident-ticked', 'Ticked the notes skill and the docs MCP server. The blue rings show what switching to Incident turns off.');
+  await a.click('#profile-switch');
+  const claudeSettings = readFileSync(join(practice, '.claude/settings.json'), 'utf8');
+  await shot(a, 'incident-switched', `Clicked "Switch to Incident". Claude Code's settings.json now holds:\n\n\`\`\`json\n${claudeSettings}\`\`\`\n`);
+  await a.click('#profile-new'); await name('Development');
+  await a.click('#profile-from-now'); await shot(a, 'development-from-now', 'Made a second profile, "Development", and clicked "Start from what\'s on now".');
+  await a.click('#pf-skill\\:standup');
+  await shot(a, 'development-edited', 'Ticked standup too.');
+  await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu.');
+  await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Development')).click()`); await a.settle();
+  await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
+  await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
+  await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: standup is off where a profile turned it off.');
+  await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch is one row with Undo.');
+  const undo = await a.run(`document.querySelector('.history-row[data-kind="profile"] button')?.id ?? ''`);
+  if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo switch" on the newest switch: Incident is in use again.'); }
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`); await a.settle();
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
+    for (const theme of ['dark', 'light']) {
+      await a.theme(theme);
+      // Below 960 of content width the list and the profile show one at a time: the profile, with its back link.
+      if (!(await a.has('.profile-header'))) await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`);
+      await a.settle();
+      await shot(a, `size-${width}-${theme}`, `Incident open on the Profiles page at ${width}×${height}, ${theme}.`);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
+}
+
 // ---------- Instructions ----------
 if (wanted('instructions')) {
   begin('instructions');

@@ -51,6 +51,22 @@ State lives in one folder with no second copy, `.central-knot/` inside the selec
 - **MCP:** Claude Code's `~/.claude.json` is written only by **Write now**, with Claude Code quit (Write now refuses while it runs). Codex servers written inline or with dotted keys are left alone.
 - **Background:** closing the window keeps Central Knot syncing. The app menu (and the menu bar icon, when the menu bar has room) has Sync, Sync now, Start at sign-in and Quit. Start at sign-in is on by default once the app is in `/Applications`.
 
+## Profiles
+
+A **profile** is a named set of skills and MCP servers to have on, such as *Incident* or *Development*, chosen from what the home already has (**Profiles** in the sidebar). Switching to one, from that page, the status bar or the menu bar icon's **Profile** menu, turns everything it leaves out **off with each tool's own switch** and turns back on what an earlier switch turned off. Nothing is moved or deleted, and the MCP entries themselves are never edited:
+
+| Tool | Skill switch | MCP server switch |
+|---|---|---|
+| Claude Code | `skillOverrides` in `~/.claude/settings.json` | `deniedMcpServers` in `~/.claude/settings.json` (never `~/.claude.json`, so no Write now) |
+| Copilot CLI | `disabledSkills` in `~/.copilot/settings.json` | `disabledMcpServers` in the same file |
+| Codex | `[[skills.config]]` by path in `config.toml` | `enabled = false` in the server's table |
+| Pi | a `-skills/…` filter in `settings.json` | `"enabled": false` in `mcp.json` |
+
+- **One step in History.** A switch is one History row; **Undo switch** puts back every switch it changed (where it is still as the switch left it) and the profile before.
+- **Hand-made choices stay.** A skill you turned off in one tool yourself (Disable on the Skills page) stays off; profiles only turn back on what a profile turned off. **No profile** turns all of that back on.
+- **Managed keeps syncing.** A managed item that a profile turned off still receives edits, so it is current when it comes back. Profiles never change Managed.
+- Agents have no off-switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json` in the home. A switch takes effect from each tool's next session.
+
 ## Trying v1 on your Mac
 
 1. Open the build (the newest under `~/agent-builds/central-knot/`, or `release/` after `npm run package:mac`). It opens on the **Practice copy**; try things there first.
