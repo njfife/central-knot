@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs
 import { dirname, join } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
-  FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
+  FORMAT_VERSION, changedWhileSyncing, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
@@ -60,7 +60,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       if (entry.facts.copies[tool]) continue;
       const snapshot = snapshots.find(item => item.harness === tool)!;
       const definition = harnesses[tool];
-      const directory = join(writeRoot(definition, context.home, context.overrides?.[tool]), source.folder);
+      const directory = join(rootOf(context, tool), source.folder);
       if (snapshot.discovery === 'restricted' || snapshot.discovery === 'failed') { entry.facts.cannot[tool] = `${definition.name}'s folder could not be read.`; continue; }
       const problem = problems.get(tool);
       if (problem) { entry.facts.cannot[tool] = problem; continue; }
@@ -118,12 +118,12 @@ function blocksFor(entry: Gathered, source: HarnessId): { tool: HarnessId; reaso
 }
 
 /** Why a choice cannot be carried out for the tools it syncs to, if it cannot. */
-function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): string | undefined {
+function choiceProblem(entry: Gathered, use: HarnessId, hash: string | undefined, syncing: HarnessId[]): Pick<DestinationResult, 'message' | 'chooseAgain'> | undefined {
   const copy = entry.facts.copies[use];
-  if (!copy) return `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`;
-  if (hash !== undefined && copy.hash !== hash) return `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`;
+  if (!copy) return { message: `The copy you chose in ${harnesses[use].name} is gone. Nothing was changed; choose again.`, chooseAgain: true };
+  if (hash !== undefined && copy.hash !== hash) return { message: `The copy you chose in ${harnesses[use].name} has changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true };
   const block = entry.facts.choiceBlocks[use]?.find(entry => syncing.includes(entry.tool));
-  return block ? `${block.reason} Nothing was changed.` : undefined;
+  return block ? { message: `${block.reason} Nothing was changed.` } : undefined;
 }
 
 const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[tool], context.home, context.overrides?.[tool]);
@@ -167,17 +167,17 @@ async function folderExists(path: string): Promise<boolean> {
 
 const historyPath = (home: string) => join(storeDirectory(home), 'history.json');
 
-/** History, newest last. Unreadable history reads as empty; sync never depends on it. */
-/** Adds events to the shared History (used by MCP sync too), with the same retention and moving aside of an unreadable file. */
 /** Writes History as given (for marking an event undone alongside a new one). */
 export async function replaceHistory(context: ShareContext, events: HistoryEvent[]) {
   await saveHistory(context.home, events, clock(context));
 }
 
+/** Adds events to the shared History (used by MCP sync too), with the same retention and moving aside of an unreadable file. */
 export async function appendHistory(context: ShareContext, events: HistoryEvent[]) {
   if (events.length) await saveHistory(context.home, [...await readHistory(context.home), ...events], clock(context));
 }
 
+/** History, newest last. Unreadable history reads as empty; sync never depends on it. */
 export async function readHistory(home: string): Promise<HistoryEvent[]> {
   try { const parsed = JSON.parse(await readFile(historyPath(home), 'utf8')); return Array.isArray(parsed?.events) ? parsed.events : []; } catch { return []; }
 }
@@ -267,9 +267,6 @@ export async function manageView(context: ShareContext, caughtUp: DestinationRes
   return { tools, writes, skills, access: await writeAccess(context), gate: await syncGate(context), caughtUp, notices };
 }
 
-/** A copy changed between being read and being replaced: it is left as it is, for the next pass to see as an edit. */
-const changedWhileSyncing = () => Object.assign(new Error('It changed while syncing, so it was left as it is. The next pass looks at it again.'), { code: 'CK_CHANGED' });
-
 /**
  * Moves a different copy aside and puts the chosen one in its place. The replaced bytes are kept in the store first. `expected` is the
  * content the pass decided to replace: a copy holding anything else (an edit made meanwhile) is never replaced.
@@ -326,15 +323,15 @@ function displace(item: RecordItem, tool: HarnessId, hash: string) {
 }
 
 /**
- * Records the person's choices, then brings every managed skill into line: a copy goes to each tool it syncs to and lacks,
- * and for differing copies the chosen copy replaces the others. No changes means a catch-up pass.
- */
-/**
  * `observeOnly` (Sync off, SYN-03): read and keep the ordering evidence, write nothing. `only`: write only these skills, so an
  * explicit Apply all with Sync off does exactly what it shows and no background spreading rides along.
  */
 export interface PassOptions { observeOnly?: boolean; only?: Set<string> }
 
+/**
+ * Records the person's choices, then brings every managed skill into line: a copy goes to each tool it syncs to and lacks,
+ * and for differing copies the chosen copy replaces the others. No changes means a catch-up pass.
+ */
 export async function applyChanges(context: ShareContext, changes: Change[], resume = false, options: PassOptions = {}): Promise<ApplyResult> {
   try { return await runApply(context, changes, resume, options); }
   catch (error) {
@@ -387,7 +384,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (change.use && change.use !== 'separate') {
       const syncing = tools.filter(tool => !change.off.includes(tool) && !entry.facts.cannot[tool]);
       const problem = choiceProblem(entry, change.use, change.useHash, syncing);
-      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', message: problem }); continue; }
+      if (problem) { results.push({ item: entry.facts.name, outcome: 'held', ...problem }); continue; }
     }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
@@ -402,7 +399,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     record.items[change.key] = item;
   }
   await save();
-  if (!options.observeOnly) await clearStaleStages(context, tools.map(tool => writeRoot(harnesses[tool], context.home, context.overrides?.[tool])));
+  if (!options.observeOnly) await clearStaleStages(context, tools.map(tool => rootOf(context, tool)));
 
   let writes = 0;
   let settling = false;
@@ -442,7 +439,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     if (item.use) {
       // A choice recorded before a crash is finished only if it still holds.
       const problem = choiceProblem(entry, item.use.tool, item.use.hash, syncing.filter(tool => !entry.facts.cannot[tool]));
-      if (problem) { results.push({ item: name, outcome: 'held', message: problem }); delete item.use; continue; }
+      if (problem) { results.push({ item: name, outcome: 'held', ...problem }); delete item.use; continue; }
     }
     // ---- Two-way: once a skill has a synced baseline, edits and deletions spread on their own (8b) ----
     // A copy is tracked only in its tool's current folders: one left behind by a moved CLAUDE_CONFIG_DIR, COPILOT_HOME or CODEX_HOME
@@ -629,7 +626,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           inSync.add(location.copy.directory);
           replaced.push(location.tool);
           losers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
         }
       } else if ((hashes.size > 1 || !hashes.has(item.hash)) && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))
         && (active.some(location => location.copy.hash === item.hash) || await exists(storedRevision(context, key, item.hash)))) {
@@ -655,7 +652,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Caught up. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
         }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
@@ -683,7 +680,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           writes++;
           inSync.add(location.copy.directory);
           chosenLosers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
         }
       } else for (const location of active) inSync.add(location.copy.directory);
       delete item.use;
@@ -716,7 +713,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const sourceSkill = entry.skills[sourceTool]?.find(skill => skill.directory === source.directory);
       for (const tool of syncing.filter(entryTool => !entry.locations.some(location => location.tool === entryTool))) {
         if (entry.facts.cannot[tool]) continue;
-        const directory = join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), entry.facts.name);
+        const directory = join(rootOf(context, tool), entry.facts.name);
         const refused = (sourceSkill && targetFor(tool, directory, sourceSkill).skipped) || await rootProblem(context, tool);
         if (refused) { results.push({ item: name, harness: tool, outcome: 'held', message: refused }); continue; }
         const intent = { harness: tool, directory, hash: tree.hash, created: true, status: 'pending' as const };
@@ -845,8 +842,6 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (cleared) await save();
   return { results, harnessWrites: writes, notices, settling };
 }
-
-void readFile;
 
 // ---------- Explicit History actions: Restore and Delete everywhere ----------
 

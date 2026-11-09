@@ -15,7 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HomeMode, HomeView, Snapshot, SyncNotice } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
@@ -157,7 +157,7 @@ function trayMenu() {
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen, click: showWindow },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: process.platform !== 'linux',
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
@@ -195,7 +195,7 @@ function appMenu() {
       { label: statusLine(), enabled: unseen, click: showWindow },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
       { type: 'separator' },
@@ -217,63 +217,60 @@ function makeTray() {
   refreshTray();
 }
 
-/** What background passes did since the page last read, so no notice is lost between reads. */
-let pendingResults: ApplyResult['results'] = [];
-let pendingNotices: NonNullable<ApplyResult['notices']> = [];
+/** What passes did since the page last read, so no notice is lost between reads. */
+let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
+let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
-/** What MCP sync did on its own since the page last read, and whether the last pass changed anything. */
-let pendingMcpNotices: NonNullable<ApplyResult['notices']> = [];
-let mcpChanged = false;
-/** An MCP or agent deletion is inside its settle window: the background looks again shortly, as for skills. */
-let otherSettling = false;
+
+interface McpAndAgentsResult { failures: DestinationResult[]; stopped?: DestinationResult; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
+interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
-async function pass(explicit = false): Promise<ApplyResult | undefined> {
+async function pass(explicit = false): Promise<PassResult> {
   const shared = context();
-  if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return undefined;
-  const result = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
+  if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return {};
+  const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
-  if (syncOn || explicit) {
-    // A background MCP or agents pass that fails, or a copy it could not write, is told on the page, never dropped.
-    const failed = (what: string) => (error: unknown) => { const message = `${what} could not finish: ${error instanceof Error ? error.message : String(error)}`; if (!pendingResults.some(known => known.message === message)) pendingResults.push({ item: what, outcome: 'failed', message }); return undefined; };
-    const mcp = await applyMcp(shared, (await manageView(shared)).tools, []).catch(failed('MCP sync'));
-    pendingMcpNotices.push(...(mcp?.notices ?? []));
-    // Agents follow the same switch and rules (D-32).
-    const agents = await applyAgents(shared, (await manageView(shared)).tools, []).catch(failed('Agents sync'));
-    pendingMcpNotices.push(...(agents?.notices ?? []));
-    for (const result of [...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')) {
-      if (!pendingResults.some(known => known.item === result.item && known.harness === result.harness && known.message === result.message)) pendingResults.push(result);
-    }
-    const stoppedWhy = mcp?.stopped ?? agents?.stopped;
-    if (stoppedWhy && !pendingResults.some(known => known.message === stoppedWhy)) pendingResults.push({ item: mcp?.stopped ? 'MCP sync' : 'Agents sync', outcome: 'failed', message: stoppedWhy });
-    mcpChanged = !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length);
-    otherSettling = !!(mcp?.settling || agents?.settling);
-  }
-  return result;
+  if (!syncOn && !explicit) return { skills };
+  const tools = (await manageView(shared)).tools;
+  const crashes: DestinationResult[] = [];
+  const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
+  const mcp = await applyMcp(shared, tools, []).catch(crashed('MCP sync'));
+  // Agents follow the same switch and rules (D-32).
+  const agents = await applyAgents(shared, tools, []).catch(crashed('Agents sync'));
+  const stopped = mcp?.stopped ?? agents?.stopped;
+  return { skills, mcpAndAgents: {
+    failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
+    stopped: stopped ? { item: mcp?.stopped ? 'MCP sync' : 'Agents sync', outcome: 'failed', message: stopped } : undefined,
+    mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
+    changed: !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
 
-async function view(explicit = false): Promise<HomeView> {
+/** A failed MCP or agents pass, or a copy it could not write, is told on the page, never dropped. */
+function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
+  if (!outcome) return;
+  for (const failure of outcome.failures) if (!pendingResults.some(known => known.item === failure.item && known.harness === failure.harness && known.message === failure.message)) pendingResults.push(failure);
+  if (outcome.stopped && !pendingResults.some(known => known.message === outcome.stopped!.message)) pendingResults.push(outcome.stopped);
+  pendingMcpNotices.push(...outcome.mcpNotices);
+  pendingAgentNotices.push(...outcome.agentNotices);
+}
+
+async function syncThenView(explicit = false): Promise<HomeView> {
   const shared = context();
-  const result = await pass(explicit);
+  const { skills, mcpAndAgents } = await pass(explicit);
+  keepMcpAndAgents(mcpAndAgents);
   // A pass that could not finish says so on the page instead of failing quietly.
-  const caughtUp = [...pendingResults, ...(result?.results ?? []), ...(result?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: result.stopped }] : [])];
-  const notices = [...pendingNotices, ...(result?.notices ?? [])];
-  pendingResults = [];
-  pendingNotices = [];
+  const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
+  const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
   const snapshots = await read();
   latestSnapshots = snapshots;
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
-    ...(await (async () => {
-      const notices = pendingMcpNotices.splice(0);
-      return {
-        mcp: await mcpView(shared, presentTools(snapshots), notices.filter(notice => !notice.key.startsWith('agent:'))),
-        agents: await agentsView(shared, presentTools(snapshots), notices.filter(notice => notice.key.startsWith('agent:'))),
-      };
-    })()),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices),
+    mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
+    agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
@@ -287,37 +284,37 @@ let watchers: FSWatcher[] = [];
 let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
-
-function background() {
-  if (!current || smoke) return;
-  const work = queue.then(async () => {
-    if (!current) return;
-    const fromEvent = touched;
-    touched = false;
-    const result = await pass();
-    // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
-    if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
-    // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-    if (result?.settling || otherSettling) { clearTimeout(followUp); followUp = setTimeout(background, 2_500); }
-    if (result?.stopped && result.stopped !== lastStopped) {
-      lastStopped = result.stopped;
-      pendingResults.push({ item: 'Sync', outcome: 'failed', message: result.stopped });
-      if (!window.isDestroyed()) window.webContents.send('sync:changed');
-    }
-    if (!result?.stopped) lastStopped = undefined;
-    if (!result || (!result.harnessWrites && !result.notices?.length && !mcpChanged)) return;
-    pendingResults.push(...result.results);
-    pendingNotices.push(...(result.notices ?? []));
-    if (!window.isDestroyed()) window.webContents.send('sync:changed');
-    // Nobody saw it: the window is closed, gone or behind other windows (D-36).
-    if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
-  });
-  queue = work.catch(() => undefined);
-}
-
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
-const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(background, DEBOUNCE_MS); };
+
+/** One thing at a time: planning and writing never interleave. */
+let queue: Promise<unknown> = Promise.resolve();
+function queueBackgroundPass() { if (current && !smoke) queue = queue.then(backgroundPass).catch(() => undefined); }
+
+async function backgroundPass() {
+  if (!current) return;
+  const fromEvent = touched;
+  touched = false;
+  const { skills, mcpAndAgents } = await pass();
+  keepMcpAndAgents(mcpAndAgents);
+  // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
+  if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
+  // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
+  if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+  if (skills?.stopped && skills.stopped !== lastStopped) {
+    pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
+    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+  }
+  lastStopped = skills?.stopped;
+  if (!skills || (!skills.harnessWrites && !skills.notices?.length && !mcpAndAgents?.changed)) return;
+  pendingResults.push(...skills.results);
+  pendingNotices.push(...(skills.notices ?? []));
+  if (!window.isDestroyed()) window.webContents.send('sync:changed');
+  // Nobody saw it: the window is closed, gone or behind other windows (D-36).
+  if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
+}
+
+const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
 
 function stopWatching() {
   for (const watcher of watchers) watcher.close();
@@ -343,7 +340,7 @@ async function startWatching() {
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }
   }
-  poller = setInterval(background, POLL_MS);
+  poller = setInterval(queueBackgroundPass, POLL_MS);
 }
 
 
@@ -374,7 +371,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   const previous = current;
   current = next;
   try {
-    const shown = await view();
+    const shown = await syncThenView();
     void startWatching();
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     refreshTray();
@@ -382,20 +379,27 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   } catch (error) { current = previous; throw error; }
 }
 
-/** At launch: the home last opened, else the practice copy. A remembered folder that is gone falls back to the practice copy. */
+/**
+ * The Practice copy (throwaway sample files) exists only in dev builds and tests. A released app works on this
+ * computer's own home, and other folders can still be opened.
+ */
+const practiceAvailable = () => !app.isPackaged || smoke;
+
+/**
+ * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
+ * Dev builds and tests start on the Practice copy instead, so a development run never syncs this machine's real tools.
+ */
 async function startHome(): Promise<HomeView | null> {
   // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.
-  if (current) return view();
+  if (current) return syncThenView();
   const last = smoke ? undefined : appSettings.home;
   if (last?.mode === 'actual') return selectHome('actual');
   if (last?.mode === 'custom' && last.path) { try { await access(last.path); return await selectHome('custom', last.path); } catch { /* gone */ } }
-  return selectHome('fixture');
+  return selectHome(practiceAvailable() ? 'fixture' : 'actual');
 }
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
-/** One thing at a time: planning and writing never interleave. */
-let queue: Promise<unknown> = Promise.resolve();
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
@@ -488,10 +492,11 @@ app.whenReady().then(async () => {
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
+    if (mode === 'fixture' && !practiceAvailable()) throw new Error('The practice copy is only in development builds.');
     return selectHome(mode as HomeMode);
   });
   handle('discovery:start', async () => startHome());
-  handle('discovery:refresh', async () => (current ? view() : null));
+  handle('discovery:refresh', async () => (current ? syncThenView() : null));
   // Writes act only on the home the window says it is showing.
   const changes = (value: unknown): Change[] => (Array.isArray(value) ? value : []).filter((change): change is Change =>
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
@@ -530,8 +535,8 @@ app.whenReady().then(async () => {
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
-  handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });
-  handle('sync:now', async home => (home === current?.home ? view(true) : null));
+  handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
+  handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, home) => (home === current?.home
