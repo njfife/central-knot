@@ -81,8 +81,8 @@ export interface DesktopApi {
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
   /** Main saved a change to the settings, whoever made it (this page, a menu, a dialog). */
   onSettingsChanged(callback: () => void): void;
-  /** Shows Central Knot's own log in the file manager (its folder if nothing is logged yet); `failed` says why it couldn't. */
-  showLog(): Promise<{ failed?: string }>;
+  /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
+  showLog(): Promise<ShownLog>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
@@ -383,4 +383,6 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
+/** What Show log file did: `failed` says why it couldn't; else whether the log was selected, and whether anything is logged yet. */
+export interface ShownLog { failed?: string; selected?: boolean; logged?: boolean }
 

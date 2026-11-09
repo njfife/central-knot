@@ -1,4 +1,4 @@
-import { loadSettings } from './settingspage.ts';
+import { loadSettings, openSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
@@ -181,7 +181,7 @@ export function showPage(page: Page) {
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
-  if (page === 'settings') void loadSettings();
+  if (page === 'settings') openSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
   state.page = page;

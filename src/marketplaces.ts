@@ -260,16 +260,16 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
 
 /**
  * The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. `handle`
- * queues a request behind the app's other work; `handleRead` answers at once, for reads that change nothing a tool uses.
+ * queues a request behind the app's other work; `handleNow` answers at once, for requests that change nothing a tool uses.
  */
-export function registerMarketplaces({ handle, handleRead }: { handle: Handle; handleRead: Handle }, host: MarketplaceHost): void {
+export function registerMarketplaces({ handle, handleNow }: { handle: Handle; handleNow: Handle }, host: MarketplaceHost): void {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
   handle('plugins:view', async fresh => (open() ? markets.view(fresh === true ? true : undefined) : null));
-  handleRead('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
-  handleRead('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
+  handleNow('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
+  handleNow('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
-  handleRead('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
+  handleNow('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:refresh', async source => (open() && isText(source) ? markets.refresh(source) : null));
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));

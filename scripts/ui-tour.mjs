@@ -17,10 +17,14 @@ const command = flag('--electron') ? join(root, 'node_modules/electron/dist', re
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
+// On Linux the file manager is a stand-in that opens nothing.
+mkdirSync(join(scratch, 'bin'));
+writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
+chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
 async function launch() {
   const port = 9300 + Math.floor(Math.random() * 400);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
@@ -50,10 +54,11 @@ let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
 const wanted = name => !only || only.includes(name);
-async function shot(a, name, caption) {
+/** `pointer`: where the mouse rests for the shot (to show a hover); by default out of the way. */
+async function shot(a, name, caption, pointer = { x: 2, y: 798 }) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 798 });
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
   await wait(120);
   const reply = await a.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
@@ -205,18 +210,37 @@ if (wanted('settings')) {
     await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
   }
   await size(860, 560); await a.theme('dark');
-  // Keyboard: Tab reaches the cards and Enter chooses one, with the focus ring showing.
-  await a.run(`document.querySelector('#appearance-dark').focus()`);
-  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: type === 'keyDown' ? '\r' : undefined });
-  await a.settle(); await shot(a, 'settings-keyboard', 'Focused the Dark card from the keyboard and pressed Enter: Dark is chosen and the focus ring shows.');
+  // Keyboard: the chosen card is the group's one Tab stop; the right arrow moves to Light and chooses it, with the focus ring.
+  await a.run(`document.querySelector('#appearance-system').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle(); await shot(a, 'settings-keyboard', 'Focused the System card (the group\'s Tab stop) and pressed the right arrow: Light is chosen, and the focus ring moved with it.');
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle();
   // A save that fails: the settings file is made read-only, then Light is clicked.
   const file = join(scratch, 'data/app-settings.json');
   chmodSync(file, 0o444);
-  await a.click('#appearance-light'); await shot(a, 'settings-save-failed-dark', 'With the settings file made read-only, clicked Light: the row says why, and Dark stays chosen.');
+  await a.click('#appearance-light'); await shot(a, 'settings-save-failed-dark', 'Pressed the right arrow again (Dark), then made the settings file read-only and clicked Light: the row says in plain words what happened and what to do, and Dark stays chosen.');
   await a.theme('light'); await shot(a, 'settings-save-failed-light', 'The same, light (the system appearance is light; the app is still set to Dark).');
   chmodSync(file, 0o644);
+  // The tour's clicks don't move focus as a real click would: let the keyboard focus go so no card keeps its ring.
+  await a.run(`document.activeElement?.blur()`);
   await a.click('#appearance-system');
-  await a.theme('dark'); await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await a.theme('dark'); await a.click('#show-log');
+  await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
+  await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
+  // A wide row's hover: pointing at the hint lights the whole row, out to its button.
+  await size(1728, 1117);
+  const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
+  await shot(a, 'settings-row-hover-1728', 'At 1728×1117, the pointer on the Log file hint: the whole row lights up, tying the text to its button far to the right.', hint);
+  await size(860, 560);
+  // The narrowest row: no real window reaches it (the window is at least 860 wide and has no zoom), so this emulates a
+  // 573-px-wide page (860 at 150% zoom) with the sidebar open, to show the control moving under its text.
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 573, height: 373, deviceScaleFactor: 3, mobile: false }); await a.settle();
+  const railed = await a.has('.rail');
+  if (railed) await a.click('#sidebar-toggle');
+  await shot(a, 'settings-narrow-stacked', 'Emulated: a 573×373 page (860×560 at 150% zoom, which the app does not offer) with the sidebar open, so each row is under 512px: the controls sit under their text, left-aligned.');
+  if (railed) await a.click('#sidebar-toggle');
+  await size(860, 560); await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
   await size(1280, 800);
 }
 

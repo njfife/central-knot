@@ -1,4 +1,4 @@
-import { onlyAllowed } from './values.ts';
+import { onlyAllowed, record } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -96,8 +96,7 @@ let appSettings: AppSettings = {};
 /** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
 async function loadAppSettings() {
   try {
-    const saved: unknown = JSON.parse(await readFile(appSettingsPath(), 'utf8'));
-    appSettings = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    appSettings = record(JSON.parse(await readFile(appSettingsPath(), 'utf8'))) ?? {};
   } catch { appSettings = {}; }
 }
 /**
@@ -122,17 +121,21 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
 }
 const appearances: Appearance[] = ['system', 'light', 'dark'];
 /** The settings as the page shows them; a stored value this version doesn't offer counts as the default. */
-const preferences = (): AppPreferences => ({ appearance: appearances.includes(appSettings.appearance!) ? appSettings.appearance! : 'system' });
+function preferences(): AppPreferences {
+  const appearance = appSettings.appearance;
+  return { appearance: appearance && appearances.includes(appearance) ? appearance : 'system' };
+}
 /**
- * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux opens
- * that folder: where no file manager answers Electron over D-Bus, its fallback opens the folder above instead. Selecting a file
- * reports nothing back, so that case can only be taken as done; opening the folder says why it couldn't, where the system tells.
+ * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
+ * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
+ * back, while opening the folder says why it couldn't. So a selection can only be taken as done; the page says which it got.
  */
-async function showLog(): Promise<{ failed?: string }> {
+async function showLog(): Promise<ShownLog> {
   const logged = await access(logPath()).then(() => true, () => false);
-  if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return {}; }
+  if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return { selected: true, logged }; }
   const failed = await shell.openPath(app.getPath('userData'));
-  return failed ? { failed } : {};
+  if (failed) log(`showing the log failed: ${failed}`);
+  return failed ? { failed } : { selected: false, logged };
 }
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
@@ -448,13 +451,17 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
 }
 
 /**
- * A request that writes nothing a tool reads (a README, a plugin's contents, Central Knot's own settings): answered at once,
- * outside the queue, so it never waits behind sync and background reads never hold up a change the person asked for.
+ * A request that touches nothing a tool reads (a README, a plugin's contents, Central Knot's own settings, even saving them):
+ * answered at once, outside the queue, so it never waits behind sync and background reads never hold up a change the person asked for.
  */
-function handleRead(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
+function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    return work(...args);
+    return work(...args).catch(error => {
+      // The page says what happened in plain words; the error itself is kept here, for a problem report.
+      log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      throw error;
+    });
   });
 }
 
@@ -521,14 +528,14 @@ app.whenReady().then(async () => {
   makeTray();
   createWindow(!smoke && !startedHidden());
   // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
-  handleRead('settings:get', async () => settingsWrites.then(preferences));
-  handleRead('settings:appearance', async appearance => {
+  handleNow('settings:get', async () => settingsWrites.then(preferences));
+  handleNow('settings:appearance', async appearance => {
     if (!appearances.includes(appearance as Appearance)) throw new Error('Invalid appearance.');
     await saveAppSettings({ appearance: appearance as Appearance });
     applyAppearance();
     return preferences();
   });
-  handleRead('settings:show-log', showLog);
+  handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
@@ -542,7 +549,7 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
-  registerMarketplaces({ handle, handleRead }, {
+  registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
     tools: async () => presentTools(latestSnapshots),
     writeAccess: () => writeAccess(context()),
