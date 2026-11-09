@@ -80,6 +80,9 @@ export function announce(text: string, quiet = false) {
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
 
 
+/** Where focus goes when the running work ends, when its result replaced the control that started it (a review opening). */
+let focusAfterBusy: string | undefined;
+
 /** One piece of work at a time: every mutating control is disabled while it runs. */
 export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
@@ -96,7 +99,8 @@ export async function busy(message: string, work: () => Promise<void>) {
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
-  focusById(focused);
+  focusById(document.getElementById(focusAfterBusy ?? '') ? focusAfterBusy : focused);
+  focusAfterBusy = undefined;
 }
 
 function accept(view: HomeView) {
@@ -203,7 +207,13 @@ export function showPage(page: Page) {
   if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   if (page === 'settings') void loadSettings();
-  // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
+  // An unsaved draft survives a page switch: the save is still checked against the file it was opened from. An editor with
+  // nothing typed closes, so coming back shows the page from the top.
+  if (state.page === 'instructions' && page !== 'instructions') {
+    const tool = state.instructionEdit, file = tool && state.instructions?.find(entry => entry.tool === tool.tool);
+    if (tool && file && (tool.restoring || tool.text === ownText(file))) state.instructionEdit = undefined;
+    if (state.baseEdit && state.baseEdit.source?.kind !== 'own' && !baseDraftChanged(state.baseEdit)) state.baseEdit = undefined;
+  }
   if (page === 'instructions') void loadInstructions();
   state.page = page;
   state.find = '';
@@ -368,6 +378,7 @@ export function startInstructionEdit(file: InstructionFile) {
 
 /** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
 export const loadInstructionVersion = (file: InstructionFile, id: string) => askAboutOpenDraft() ? undefined : busy('Reading the earlier version…', async () => {
+  focusAfterBusy = `ins-save-${file.tool}`;
   const text = await api().instructionVersion(file.tool, id);
   if (text === undefined) { announce('That version is no longer kept.'); return; }
   state.outcome = undefined;
@@ -420,22 +431,30 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
   state.baseEdit = undefined;
   const written = result.written.map(entry => entry.tool);
   const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolNamesOf(written)} session` : 'session in each'} to use ${written.length === 1 ? 'it' : 'them'}.` : '';
+  const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);
+  const undoTitle = `Put the base instructions back as they were${written.length ? `, and ${fileNames(written)} as ${written.length === 1 ? 'it was' : 'they were'}` : ''}${created.length ? ` (${fileNames(created)}, which this save created, goes again)` : ''}`;
   state.outcome = { page: 'instructions', text: `${done(written.length ? fileNames(written) : '')}${leftText(result)}${sessions}`,
-    act: result.undo ? { label: 'Undo', id: 'outcome-undo-base', title: 'Put the base instructions and every file this changed back as they were', run: () => void undoBaseChange(result.undo!) } : undefined };
+    act: result.undo ? { label: 'Undo', id: 'outcome-undo-base', title: undoTitle, run: () => void undoBaseChange(result.undo!) } : undefined };
   announce(state.outcome.text, true);
 });
 
 const undoBaseChange = (undo: BaseUndo) => busy('Undoing…', async () => {
+  // Said for what this undo puts back: the base only if the save changed it (Put back and Update change files alone).
+  const baseMoves = undo.text !== state.base?.text || undo.tools.join() !== state.base?.tools.join();
   const result = await api().undoBase(undo, state.home!.home);
   await readInstructions();
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
   const back = result.written.map(entry => entry.tool);
-  state.outcome = { page: 'instructions', text: `The base instructions are back as they were${back.length ? `, and so ${back.length === 1 ? 'is' : 'are'} ${fileNames(back)}` : ''}.${leftText(result, true)} What the undo replaced is under Earlier versions.` };
+  const what = baseMoves ? `The base instructions are back as they were${back.length ? `, and so ${back.length === 1 ? 'is' : 'are'} ${fileNames(back)}` : ''}`
+    : `${fileNames(back)} ${back.length === 1 ? 'is' : 'are'} back as ${back.length === 1 ? 'it was' : 'they were'}`;
+  const shelves = [...(baseMoves ? ['the Base instructions card'] : []), ...back.map(tool => `${namedTools[tool]}’s card`)];
+  state.outcome = { page: 'instructions', text: `${what}.${leftText(result, true)} What the undo replaced is under Earlier versions on ${andList(shelves)}.` };
   announce(state.outcome.text, true);
 });
 
 /** Loads an earlier base into the editor, at the review: going back is an ordinary save. */
 export const loadBaseVersion = (id: string) => askAboutOpenDraft() ? undefined : busy('Reading the earlier version…', async () => {
+  focusAfterBusy = 'base-save';
   const text = await api().instructionVersion('base', id);
   if (text === undefined) { announce('That version is no longer kept.'); return; }
   state.outcome = undefined;

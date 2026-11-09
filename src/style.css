@@ -1371,7 +1371,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 .base-copy { background: transparent; border-style: dashed; }
 /* Instructions fill the window: the base card spans it, and tool cards sit side by side once there is room for two. */
-.cards-scroll.ins-scroll { max-width: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr)); align-items: start; }
+.cards-scroll.ins-scroll { max-width: none; display: grid; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr)); align-items: start; }
 .ins-scroll > .tools-note, .ins-scroll > .base-card, .ins-scroll > .empty-state { grid-column: 1 / -1; }
 #instructions-scroll.ins-scroll > .ins-card { max-width: none; min-width: 0; }
 .ins-scroll .ins-readers, .ins-scroll .ins-empty, .ins-scroll .ins-note, .ins-scroll .tools-note { max-width: 90ch; }
@@ -1382,3 +1382,8 @@ body.page-wide .page > .bands > .band { padding-right: 16px; }
 .base-legend-removed { color: var(--danger, #f85149); }
 .base-legend-added { color: var(--success, #3fb950); }
 .base-explain { margin: 0; font-size: 12.5px; color: var(--ink-soft); max-width: 90ch; }
+.ins-actions { flex-wrap: wrap; }
+.base-pill-warn { color: var(--ink); border-color: color-mix(in oklab, var(--warning, #d29922) 60%, transparent); }
+.base-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px 24px; align-items: start; }
+.base-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+@media (min-width: 1500px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }

@@ -192,6 +192,7 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+  await a.click('#ins-cancel-copilot-cli');
 }
 
 // ---------- Base instructions ----------
@@ -199,6 +200,7 @@ if (wanted('base')) {
   begin('base');
   await a.click('#nav-instructions');
   await waitFor(a, `!!document.querySelector('#base-card')`);
+  await a.run(`(() => { document.activeElement?.blur(); document.querySelector('#instructions-scroll').scrollTop = 0; })()`);
   await shot(a, 'base-start', 'Clicked "Instructions". The Base instructions card is at the top; nothing is set up yet.');
   await a.click('#base-from-claude-cli'); await shot(a, 'base-from-claude', 'Clicked "Claude Code’s CLAUDE.md" beside "or start from".');
   await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Write tests for every bug fix.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -220,6 +222,10 @@ if (wanted('base')) {
   await a.click('#base-restore-codex-cli'); await shot(a, 'base-put-back-review', 'Cancelled, then clicked "Put the base back in AGENTS.md…" instead.');
   await a.click('#base-save'); await shot(a, 'base-put-back', 'Clicked "Put the base back in AGENTS.md".');
   await a.click('#outcome-undo-base'); await wait(400); await shot(a, 'base-undo', 'Clicked "Undo" on the result.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-tool-copilot-cli'); await a.click('#base-review');
+  await shot(a, 'base-untick-review', 'Clicked "Edit text or tools", unticked Copilot CLI, and clicked "Review changes".');
+  await a.click('#base-back'); await a.click('#base-cancel'); if (await a.has('#base-discard')) await a.click('#base-discard');
   await a.click('#ins-edit-claude-cli'); await shot(a, 'base-own-edit', 'Clicked "Edit" on Claude Code’s card: the editor holds only Claude Code’s own instructions.');
   await a.click('#ins-cancel-claude-cli');
   await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`); await shot(a, 'base-light', 'The same page in the light appearance.'); await a.theme('dark');
@@ -227,6 +233,14 @@ if (wanted('base')) {
     await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
     await shot(a, `base-${width}`, `The window at ${width}×${height}.`);
   }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- One more shared line.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await a.click('#base-review-discard');
+  await a.run(`document.querySelector('#base-review-discard-yes').scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-review-discard', 'At 860×560: Edit text or tools, added a line, Review changes, then Discard changes (the question is open).');
+  await a.click('#base-review-discard-yes');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
 }
 

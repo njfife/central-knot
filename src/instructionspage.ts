@@ -41,13 +41,21 @@ export function versionsList(versions: InstructionFile['versions'], restore: { i
       button({ variant: 'link', size: 'micro', label: 'Restore…', id: restore.id(version.id), disabled: restore.disabled, attrs: restore.why ? { title: restore.why } : undefined, onclick: () => restore.run(version.id) }))))) : null;
 }
 
+/** Leaves a tool's review: back to its editor (focus in the text), or, for an earlier version, closed (focus on its Edit). */
+function leaveReview(tool: string) {
+  const edit = state.instructionEdit;
+  if (!edit) return;
+  if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
+  rerender();
+  document.getElementById(edit.restoring ? `ins-edit-${tool}` : `ins-text-${tool}`)?.focus();
+}
+
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
   if (event.key !== 'Escape' || state.page !== 'instructions' || edit?.stage !== 'review') return;
   event.preventDefault();
-  if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
-  rerender();
+  leaveReview(edit.tool);
 });
 
 /** A line diff with changed words tinted, long unchanged runs folded until `showAll`. */
@@ -96,7 +104,7 @@ function editor(file: InstructionFile) {
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
         button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
-        button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } }),
+        button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
         edit.restoring ? null : edit.confirmDiscard
           ? h('span.ins-confirm', {}, h('span.ins-confirm-text', {}, `Discard your changes to ${name}?`),
             button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-review-discard-yes-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
@@ -117,7 +125,7 @@ function editor(file: InstructionFile) {
     },
     onkeydown: (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); document.getElementById(`ins-cancel-${file.tool}`)?.click(); }
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== original) { event.preventDefault(); edit.stage = 'review'; rerender(); }
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== original) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
   area.rows = edit.text ? Math.min(30, Math.max(8, edit.text.split('\n').length + 3)) : 6;
@@ -126,15 +134,15 @@ function editor(file: InstructionFile) {
   const actions = edit.confirmDiscard
     ? h('div.ins-actions.ins-confirm', { id: `ins-actions-${file.tool}`, role: 'group', 'aria-label': 'Discard changes?' },
       h('span.ins-confirm-text', {}, `Discard your changes to ${name}?`),
-      button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-discard-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
+      button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-discard-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); document.getElementById(`ins-edit-${file.tool}`)?.focus(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Keep editing', id: `ins-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById(`ins-text-${file.tool}`)?.focus(); } }))
     : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
       button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
-      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { if (dirty()) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = dirty(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
       h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
   return h('div.ins-editor', {},
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
-    file.base ? h('p.ins-empty', {}, `${names[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
+    file.base ? h('p.base-explain', {}, `${names[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
     area, actions);
 }
 
@@ -161,7 +169,7 @@ function card(file: InstructionFile) {
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === own }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
-    editing ? editor(file)
+    editing ? [editor(file), baseStrip(file)]
       : h('div.ins-body', {},
         file.exists && own.trim() ? [h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, open.has(file.tool) ? preview.join('\n') : preview.slice(0, 14).join('\n')),
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
