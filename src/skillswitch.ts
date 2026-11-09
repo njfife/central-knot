@@ -2,8 +2,8 @@
 // The copy stays where it is and keeps receiving updates; the tool just doesn't load it. Each tool keeps its switch in its own
 // user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON
 // list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty
-// goes with its last entry (and a settings file that wasn't there is left as `{}`); a config.toml without a final newline gains
-// one when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line added for it.
+// goes with its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline
+// gains one when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it.
 //   Claude Code  settings.json   "skillOverrides": { "<folder>": "off" }   (keyed by folder: Claude names a skill after it)
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
@@ -13,12 +13,11 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
 import { appendTomlTable, eolOf, readTomlTables, removeTomlTables, setJsonMember, tableEnd, tomlValue, type TomlTable } from './textedit.ts';
-import type { HarnessId, SwitchProblem } from './types.ts';
-import { problemText } from './words.ts';
+import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
+export type { SwitchTarget };
+import { problemText, toolName } from './words.ts';
 import { record, withoutBom } from './values.ts';
 
-/** One tool's copy of a skill, as its switch names it. */
-export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
 
 /** One tool's switch file, read and parsed once: its text ('' when there is none yet), or why it can't be used. */
@@ -66,7 +65,8 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
 }
 
 /**
- * Turns one tool's copy of a skill off or on, then reads the file back to confirm. Writes only over the text it read (a save
+ * Turns one tool's copy of a skill off or on, then reads the file back to confirm. A caller offering a new Disable checks
+ * unverifiedBuild first (this only edits the file; it doesn't know the tool's build). Writes only over the text it read (a save
  * made meanwhile is never overwritten) and only when something changes. `restore`: what Claude Code's override held before a
  * Disable (say "name-only"), put back by Enable instead of no override. Returns whether it changed, and that earlier value.
  * Throws an error whose message says why (see switchFailure).
@@ -78,7 +78,7 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
   if (now.disabled === disabled) return { changed: false };
   await writeFileChecked(file.path, withSwitch(context, file, target, disabled, restore), file.exists ? file.text : undefined);
   const after = await readSwitchFile(context, tool);
-  if (!after.parsed || stateIn(context, tool, after.parsed, target).disabled !== disabled) throw failure(`${harnesses[tool].name}’s settings did not take the change.`);
+  if (!after.parsed || stateIn(context, tool, after.parsed, target).disabled !== disabled) throw failure(`${toolName(tool)}’s settings did not take the change.`);
   return { changed: true, previous: now.previous };
 }
 
@@ -89,10 +89,12 @@ const failure = (message: string) => Object.assign(new Error(message), { code: '
 // ---------- Each tool's form ----------
 
 interface CodexRule { table: TomlTable; path?: unknown; name?: unknown; enabled?: unknown }
+/** A path with forward slashes, as Pi patterns and Codex rules are compared. */
+const forwardSlashes = (path: string) => path.split(sep).join('/').replace(/\\/g, '/');
 /** Whether a rule's `path` is this copy's SKILL.md: by separator-blind comparison, and without case on Windows, as Codex reads paths there. */
 const isPathOf = (rule: CodexRule, skillFile: string) => {
   if (typeof rule.path !== 'string') return false;
-  const plain = (path: string) => { const forward = path.replace(/\\/g, '/'); return process.platform === 'win32' ? forward.toLowerCase() : forward; };
+  const plain = (path: string) => (process.platform === 'win32' ? forwardSlashes(path).toLowerCase() : forwardSlashes(path));
   return plain(rule.path) === plain(skillFile);
 };
 /** A switch file parsed: JSON settings, or Codex's skill rules. */
@@ -134,18 +136,17 @@ function codexRules(text: string): CodexRule[] {
 
 /** Pi's exact forms for a copy: relative to its agent folder (how `pi config` writes it) and absolute, for the file and its folder. */
 function piForms(target: SwitchTarget, config: string): { written: string; all: Set<string> } {
-  const posix = (path: string) => path.split(sep).join('/');
   const rel = relative(config, target.skillFile);
   const inside = !rel.startsWith('..') && !isAbsolute(rel);
-  const file = posix(target.skillFile);
-  const forms = [file, file.replace(/\/SKILL\.md$/, ''), ...(inside ? [posix(rel), posix(rel).replace(/\/SKILL\.md$/, '')] : [])];
-  return { written: inside ? posix(rel) : file, all: new Set(forms) };
+  const file = forwardSlashes(target.skillFile);
+  const forms = [file, file.replace(/\/SKILL\.md$/, ''), ...(inside ? [forwardSlashes(rel), forwardSlashes(rel).replace(/\/SKILL\.md$/, '')] : [])];
+  return { written: inside ? forwardSlashes(rel) : file, all: new Set(forms) };
 }
 /** Whether a Pi `skills` entry excludes exactly this copy (`-` or `!` before one of its forms; `./` and `~/` resolved as Pi does). */
 function piExcludes(entry: unknown, forms: Set<string>, home: string): boolean {
   if (typeof entry !== 'string' || !/^[-!]/.test(entry)) return false;
   const path = entry.replace(/^[+!-]/, '').replace(/^\.\//, '');
-  return forms.has(path.startsWith('~/') ? join(home, path.slice(2)).split(sep).join('/') : isAbsolute(path) ? path.split(sep).join('/') : path);
+  return forms.has(path.startsWith('~/') ? forwardSlashes(join(home, path.slice(2))) : isAbsolute(path) ? forwardSlashes(path) : path);
 }
 
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */
@@ -190,10 +191,11 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
  */
 function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarget, disabled: boolean): string {
   const eol = eolOf(text);
-  const ourRule = (enabled: boolean) => ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${enabled}`].join(eol);
-  // Ours to take out: a rule in exactly our form saying the opposite of what is wanted now. Turning off, that is our earlier
-  // "enabled = true"; turning on, our "enabled = false". So its `enabled` value equals `disabled`.
-  const staleRule = ourRule(disabled);
+  /** The rule Central Knot writes for this copy, saying `enabled`. */
+  const ruleSaying = (enabled: boolean) => ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${enabled}`].join(eol);
+  const wantEnabled = !disabled;
+  // Ours to take out: our own rule saying the opposite of what is wanted now.
+  const staleRule = ruleSaying(!wantEnabled);
   const isOurs = (rule: CodexRule) => text.slice(rule.table.start, tableEnd(text, rule.table)).trimEnd() === staleRule;
   const ours = codexRules(text).filter(rule => isPathOf(rule, target.skillFile) && isOurs(rule));
   let out = removeTomlTables(text, ours.map(rule => rule.table));
@@ -202,11 +204,13 @@ function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarg
   // The person's own rules for this path, from the last, so earlier offsets stay right.
   for (const rule of codexRules(out).filter(candidate => isPathOf(candidate, target.skillFile)).reverse()) {
     const entry = rule.table.entries.find(candidate => candidate.key === 'enabled');
-    const value = `enabled = ${!disabled}`;
+    // Already saying what is wanted (no `enabled` key counts as enabled): left exactly as it is.
+    if ((rule.enabled ?? true) === wantEnabled) continue;
+    const value = `enabled = ${wantEnabled}`;
     const headerEnd = out.indexOf('\n', rule.table.start) + 1;
     out = entry ? out.slice(0, entry.start) + entry.raw.replace(/enabled\s*=\s*(?:true|false)/, value) + out.slice(entry.end)
       : `${out.slice(0, headerEnd)}${value}${eol}${out.slice(headerEnd)}`;
   }
   if (stateIn(context, 'codex-cli', { rules: codexRules(out) }, target).disabled === disabled) return out;
-  return appendTomlTable(out, `${ourRule(!disabled)}${eol}`);
+  return appendTomlTable(out, `${ruleSaying(wantEnabled)}${eol}`);
 }

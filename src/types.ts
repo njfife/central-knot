@@ -171,6 +171,12 @@ export interface SkillFacts {
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
 export interface SwitchProblem { file: string; reason: string }
 
+/** One tool's copy of a skill, as its switch names it: Claude Code by folder, Copilot by name, Codex and Pi by SKILL.md path. */
+export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
+
+/** One switch a 'switched' History event changed: which way, the entry it named, and a Claude Code override it replaced ("name-only"). */
+export interface SwitchRecord { tool: HarnessId; disabled: boolean; target: SwitchTarget; before?: string }
+
 export interface ManageView {
   tools: HarnessId[];
   /** Where each tool's new copies go, and which other tools read that folder too. */
@@ -230,18 +236,21 @@ export interface HistoryEvent {
    * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
-  switched?: { tool: HarnessId; disabled: boolean; before?: string; /** The copy as the switch named it, so Undo reverses that entry even if the copy is gone. */ target?: { folder: string; name: string; skillFile: string } }[];
+  switched?: SwitchRecord[];
   /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. */
   restoredTools?: HarnessId[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
+  /** 'removed': the removal took a managed skill's last copies, so it was unmanaged; Restore manages it again. */
+  unmanaged?: boolean;
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
-  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string }[];
+  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string; /** 'removed': the copy's folder name as it was, to put it back under the same name. */ folder?: string;
+    /** 'removed', managed: the content last synced to that copy, so Restore puts its sync record back and an unsynced edit in it spreads. */ synced?: string }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;
-  /** Set once undone or restored, naming the event that did it. */
+  /** Set once undone or restored, naming the event that did it; ALREADY_AS_IT_WAS when nothing needed doing (no event made). */
   undoneBy?: string;
 }
 
@@ -403,3 +412,6 @@ export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
 
+
+/** HistoryEvent.undoneBy for an Undo or Restore that found everything already as it was, so it wrote nothing and made no event. */
+export const ALREADY_AS_IT_WAS = 'already-as-it-was';

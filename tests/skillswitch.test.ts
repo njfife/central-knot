@@ -70,6 +70,10 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'pi-cli'), piTarget), true);
     await setDisabled(box.context, 'pi-cli', piTarget, false);
     assert.deepEqual(JSON.parse(await readFile(pi, 'utf8')).skills, ['+skills/alpha/SKILL.md']);
+    // A byte-order mark (some Windows editors add one) is kept.
+    await writeFile(claude, '\uFEFF{ "model": "opus" }\n');
+    await setDisabled(box.context, 'claude-cli', target, true);
+    assert.ok((await readFile(claude, 'utf8')).startsWith('\uFEFF{'));
     // A new Disable is offered from the build where each switch was seen working; an unknown build is not held back.
     assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, false]);
   } finally { await box.cleanup(); }
@@ -149,10 +153,12 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     await skill(box.home, 'claude-cli', 'kept');
     await applyChanges(box.context, [{ key: 'kept', managed: true, off: [] }]);
     const result = await applyChanges(box.context, [
-      { key: 'loose', managed: false, off: [], remove: ['copilot-cli'] },
+      { key: 'loose', managed: false, off: [], remove: ['copilot-cli'], disable: ['claude-cli'] },
       { key: 'kept', managed: true, off: [], remove: ['copilot-cli'], seenManaged: true },
     ]);
     assert.equal(result.results.filter(entry => entry.outcome === 'removed').length, 2, JSON.stringify(result));
+    // Disable works on an unmanaged skill too, beside its removal elsewhere.
+    assert.deepEqual((await manageView(box.context)).skills.find(item => item.key === 'loose')!.disabled, ['claude-cli']);
     // A later pass neither re-adds the managed copy nor reads its removal as a deletion to spread.
     await applyChanges(box.context, []);
     await applyChanges(box.context, []);
@@ -169,6 +175,19 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     const kept = (await manageView(box.context)).skills.find(item => item.key === 'kept')!;
     assert.deepEqual([kept.managed, kept.off, !!kept.copies['copilot-cli']], [true, [], true]);
     await applyChanges(box.context, []);
+    // Removing a managed skill's every copy unmanages it, quietly; Restore puts both back and manages it again.
+    await skill(box.home, 'claude-cli', 'whole');
+    await applyChanges(box.context, [{ key: 'whole', managed: true, off: [] }]);
+    const gone = await applyChanges(box.context, [{ key: 'whole', managed: true, off: [], remove: ['claude-cli', 'copilot-cli'], seenManaged: true }]);
+    assert.deepEqual(gone.results.map(entry => entry.outcome), ['removed', 'removed'], JSON.stringify(gone));
+    assert.equal((await manageView(box.context)).skills.some(item => item.key === 'whole'), false);
+    await restoreFromHistory(box.context, (await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'whole')!.id);
+    const whole = (await manageView(box.context)).skills.find(item => item.key === 'whole')!;
+    assert.deepEqual([whole.managed, whole.off, Object.keys(whole.copies).length], [true, [], 2]);
+    // Removing the very copy chosen for every tool is refused, changing nothing.
+    await skill(box.home, 'claude-cli', 'pick'); await skill(box.home, 'copilot-cli', 'pick', text('pick', 'Other.'));
+    const refused = await applyChanges(box.context, [{ key: 'pick', managed: true, off: [], use: 'claude-cli', remove: ['claude-cli'] }]);
+    assert.ok(refused.results.some(entry => entry.outcome === 'held' && /also asked to remove it/.test(entry.message)), JSON.stringify(refused));
     // A Restore that can't finish everywhere (a different copy took one tool's place) puts back the rest, and a retry finishes.
     await skill(box.home, 'claude-cli', 'pair'); await skill(box.home, 'copilot-cli', 'pair');
     await applyChanges(box.context, [{ key: 'pair', managed: false, off: [], remove: ['claude-cli', 'copilot-cli'] }]);

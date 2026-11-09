@@ -177,6 +177,9 @@ const removeEverywhere = (key: string) => {
   return applyManage([{ key, managed: false, off: base.off, remove: removable(base), seenManaged: false }] as Change[], () => view.draft.delete(key));
 };
 
+/** Whether a tool's cell shows this skill as disabled there: the switch is off (or queued off) and the tool has, or gets, a copy. */
+const shownDisabled = (skill: SampleSkill, tool: Tool) => !!skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool);
+
 /** Tools where this skill's copy can be removed: there, and not a link or shared folder Central Knot doesn't change. */
 const removable = (skill: SampleSkill) => toolList().filter(tool => skill.copies[tool] !== undefined && skill.writable?.[tool] !== false);
 
@@ -348,7 +351,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const on = skill.managed && !skill.off.includes(tool);
   const wasOn = base.managed && !base.off.includes(tool);
   // Disabled with the tool's own switch: the copy is there, and the cell keeps its state, with a corner mark.
-  const disabled = !!skill.disabled?.includes(tool) && state !== 'cannot' && state !== 'absent';
+  const disabled = shownDisabled(skill, tool);
   const switching = disabled !== (!!base.disabled?.includes(tool) && cellOf(base, tool) !== 'absent') && switchQueued(skill.key, tool);
   const syncPending = state !== cellOf(base, tool) || on !== wasOn;
   const pending = state !== 'cannot' && (syncPending || switching);
@@ -421,8 +424,9 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
   if (problem) return `${problemText(problem, shownPath)} Fix it, then Refresh.`;
   const disabled = !!skill.disabled?.includes(tool);
   const was = !!committedOf(skill.key).disabled?.includes(tool);
-  // An older build: no new Disable, but a copy disabled there can still be enabled.
+  // An older build: no new Disable, but a copy disabled there can still be enabled (its effect there isn't verified).
   if (!disabled && !was && skill.disableUnverified?.[tool]) return skill.disableUnverified[tool]!;
+  if (skill.disableUnverified?.[tool] && was) return disabled ? 'Disabled. Enable is offered here, though its effect on this build isn’t verified.' : 'Enabled again on Apply all (its effect on this build isn’t verified).';
   if (disabled && !was && skill.copies[tool] === undefined) return `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
   if (disabled && !was) return 'Disabled on Apply all.';
   // "Still synced" only where the skill really syncs to this tool: its box can be off while the copy stays disabled.
@@ -457,7 +461,7 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   // No switch at all when its file can't be used, or (an older build) when it is enabled: only Enable is offered there.
   const unavailable = !!skill.switchProblem?.[tool] || (!disabled && !pending && !!skill.disableUnverified?.[tool]);
   // Queued and restorable, so it is a quiet action, not a red one; a row without it keeps its place so the switches line up.
-  const canRemove = skill.copies[tool] !== undefined && skill.writable?.[tool] !== false;
+  const canRemove = removable(skill).includes(tool);
   const remove = canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
   if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
@@ -628,6 +632,8 @@ function details(skill: SampleSkill, closable = true) {
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   // MCP keeps one layout in every state (a row per tool with its status and settings file), so it never takes the one-line form.
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
+  // Skills list each tool even when the status already says how the copies stand (all the same, or a choice to make first).
+  const quietRows = (allSame || (differs && !draft)) && kind === 'skills' && !designMode;
   // Skills: where a copy is disabled now, said after the status. What Apply all will change is said in each tool's row.
   const disabledIn = toolList().some(tool => switchQueued(skill.key, tool)) ? [] : toolList().filter(tool => committedOf(skill.key).disabled?.includes(tool) && !skill.removing?.includes(tool) && skill.copies[tool] !== undefined);
   const disabledNote = disabledIn.length ? ` · disabled in ${andList(disabledIn.map(tool => names[tool]))}` : '';
@@ -665,7 +671,7 @@ function details(skill: SampleSkill, closable = true) {
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     // Skills always list each tool, so Disable and Remove are there for every copy, managed or not.
-    allSame || (differs && !draft) ? kind === 'skills' && !designMode ? [h('div.details-tools', {}, toolList().map(tool => toolRow(tool, { quiet: true }))), switchNote] : null : null,
+    quietRows ? [h('div.details-tools', {}, toolList().map(tool => toolRow(tool, { quiet: true }))), switchNote] : null,
     allSame
       ? (!closable ? h('div.details-where-row', {}, wherePaths(skill), deleteAction(skill)) : wherePaths(skill))
       : differs && !draft ? wherePaths(skill) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), switchNote, kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : wherePaths(skill)],
@@ -774,7 +780,7 @@ function legend(list: SampleSkill[]) {
   oneWaySwatch.classList.add('cell-oneway');
   oneWaySwatch.append(h('span.cell-oneway-mark', {}, icon('arrow-up-right', 8)));
   const fresh = list.some(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined));
-  const disabledShown = list.some(skill => toolList().some(tool => committedOf(skill.key).disabled?.includes(tool) && skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool)));
+  const disabledShown = list.some(skill => toolList().some(tool => shownDisabled(skill, tool) && !switchQueued(skill.key, tool)));
   const disabledSwatch = swatch('synced', true);
   disabledSwatch.classList.add('cell-disabled');
   disabledSwatch.append(h('span.cell-disabled-mark', {}, icon('circle-off', 8)));
@@ -1329,7 +1335,7 @@ const miniCell = (skill: SampleSkill, tool: Tool) => {
   const on = skill.managed && !skill.off.includes(tool);
   // The same Disable and Remove marks as the table, so a switch changed in the details shows here too.
   if (skill.removing?.includes(tool)) return h('span.legend-cell.mini-cell.cell-removing', { title: `${names[tool]}: removed on Apply all` }, icon('minus', 11));
-  const disabled = !!skill.disabled?.includes(tool) && state !== 'cannot' && state !== 'absent';
+  const disabled = shownDisabled(skill, tool);
   return h(`span.legend-cell.mini-cell.${look.tone}${on ? '.cell-on' : ''}${disabled ? '.cell-disabled' : ''}${switchQueued(skill.key, tool) ? '.cell-pending-edit' : ''}`, { title: `${names[tool]}: ${look.label}${disabled ? '; disabled there' : ''}` },
     look.glyph ? icon(look.glyph, state === 'present' ? 9 : 11, state === 'present' ? 'glyph-fill' : '') : null,
     disabled ? h('span.cell-disabled-mark', {}, icon('circle-off', 8)) : null);
