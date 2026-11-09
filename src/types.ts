@@ -228,6 +228,8 @@ export interface HistoryEvent {
   undoneBy?: string;
   /** Made by Pull from the git repo. */
   via?: 'repo';
+  /** A pull that changed only an agent's Claude Code settings: that tool's file, and the earlier file kept whole for Undo. */
+  settingsFile?: { path: string; kept: string };
 }
 
 // ---------- Marketplaces and plugins ----------

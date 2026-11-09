@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
-import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsPull, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -119,7 +119,8 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await pullRepo(second);
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
     const settings = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
-    assert.equal((await restoreAgent(second, tools, settings.id)).stopped, undefined);
+    await applyAgents(second, tools, []);
+    assert.equal((await undoSettingsPull(second, settings.id)).stopped, undefined, 'Undo still works after a sync pass');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
     await writeFile(join(second.home, '.claude/agents/planner.md'), (await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8')).replace('model: opus', 'model: sonnet'));
 
@@ -179,6 +180,13 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
     assert.ok(view.pushBlocked);
     view = live((await pullRepo(first)).view);
     assert.equal(view.pushBlocked, undefined);
+    // The branch deleted in the repo, with nothing else to send: nothing reads as deleted, and Push puts the branch back.
+    await pushRepo(first);
+    git(box.remote, 'update-ref', '-d', 'refs/heads/main');
+    view = live(await repoView(first, { check: true }));
+    assert.deepEqual([view.branchGone, view.incoming, view.outgoing], [true, [], []]);
+    assert.equal((await pushRepo(first)).stopped, undefined);
+    assert.ok(git(box.remote, 'rev-parse', 'main'));
   } finally { await box.cleanup(); }
 });
 

@@ -546,7 +546,7 @@ type PassScope = (key: string) => Set<string> | undefined;
  * an item no tool here had) and what went in. `pending`: what was there was an edit made here that hadn't spread yet, so it is what
  * Undo puts back. `settingsOnly`: only an agent's Claude Code settings changed, which sync's versions don't tell apart.
  */
-interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; after: string; pending?: boolean; settingsOnly?: boolean }
+interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; after: string; pending?: boolean; settingsOnly?: HistoryEvent['settingsFile'] }
 type Wrote = (write: Omit<FirstWrite, 'change'>) => void;
 /** A context whose passes decide at once: a copy Pull just removed is a deletion, with no settle window to wait out. */
 const decidingAtOnce = (context: ShareContext): ShareContext => ({ ...context, settleMs: 0 });
@@ -627,9 +627,6 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const text = item && await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
   if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
-  // Only Claude Code's own settings (model, tools) differ: sync's versions don't tell those apart, so History is told, and the old
-  // file is kept again after sync's pass (which may keep the new one under the same version).
-  let settingsOnlyWrite = false;
   try {
     if (!agent) { if (existing) await removeFileChecked(existing.file, existing.text); }
     else {
@@ -642,9 +639,8 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
         await writeFileChecked(file, next, existing?.text);
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
         // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
-        settingsOnlyWrite = !!existing && existing.hash === agentHash(agent);
         if (!facts) wrote({ tool: writer, after: sha(next) });
-        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: settingsOnlyWrite });
+        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing) : undefined });
       }
     }
   } catch (error) {
@@ -653,10 +649,36 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const changes: Change[] = agent ? [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }] : [];
   const done = await applyAgents(context, tools, changes, { only: only(key), settleMs: 0 });
   if (done.stopped) return [notIn(change.name, done.stopped)];
-  // (Follow-up: kept agent versions are keyed by the cross-tool identity, which ignores these settings; a later replacement at the
-  // same identity overwrites this one. Keying them by the settings too would belong in agents.ts.)
-  if (settingsOnlyWrite && existing) await keepAgentVersion(context, existing);
   return !agent || (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) ? done.results : [...done.results, notManaged(change, writer)];
+}
+
+/**
+ * Only Claude Code's own settings (model, tools) differ: sync's kept versions are keyed by what every tool holds, which these don't
+ * change, so the earlier file is kept whole under its own bytes, where nothing writes over it, for this pull's Undo.
+ */
+async function keepSettingsFile(context: ShareContext, existing: AgentEntry): Promise<HistoryEvent['settingsFile']> {
+  const kept = join(storeDirectory(context.home), 'items', 'agent-settings', encodeURIComponent(existing.key), `${sha(existing.text)}.md`);
+  await writeDurably(kept, existing.text);
+  return { path: existing.file, kept };
+}
+
+/**
+ * Undo of a pull that changed only an agent's Claude Code settings: the earlier file goes back as it was, if the file still holds
+ * what the pull wrote. Nothing spreads: no other tool has those settings.
+ */
+export async function undoSettingsPull(context: ShareContext, eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
+  const history = await readHistory(context.home);
+  const past = history.find(event => event.id === eventId);
+  if (!past?.settingsFile) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0 };
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
+  const earlier = await readFile(past.settingsFile.kept, 'utf8').catch(() => undefined);
+  if (earlier === undefined) return { stopped: 'The kept version is no longer in Central Knot’s store, so it can’t be restored.', results: [], harnessWrites: 0 };
+  const now = await readFile(past.settingsFile.path, 'utf8').catch(() => undefined);
+  try { await writeFileChecked(past.settingsFile.path, earlier, now); }
+  catch (error) { return { stopped: `It couldn’t be put back: ${plainError(error)}`, results: [], harnessWrites: 0 }; }
+  past.undoneBy = randomUUID();
+  await replaceHistory(context, history);
+  return { results: [{ item: past.item, harness: 'claude-cli', outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1 };
 }
 
 /** The base instructions: handed to the base-instructions feature to apply (only reached when this build has it, so `base` is set). */
@@ -712,7 +734,7 @@ function accountForReplacedCopy(history: HistoryEvent[], mine: HistoryEvent[], {
     if (replaced.losers.some(loser => loser.hash === before)) return;
     if (pending) replaced.losers.unshift({ tool, hash: before }); else replaced.losers.push({ tool, hash: before });
   } else if (!replaced && !separate) {
-    history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo' });
+    history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo', settingsFile: settingsOnly });
   }
 }
 
@@ -835,6 +857,14 @@ export function pushRepo(context: ShareContext, options: { base?: BaseInstructio
     if (sides.latestId !== state.base) return refusal(context, PULL_FIRST, options.base);
     const { outgoing } = classify(sides, state.unfinished);
     const sending = outgoing.filter(change => !change.held);
+    // The branch gone from the repo and nothing else to send: the commit this computer has goes back as it was.
+    if (!sending.length && sides.branchGone && state.base) {
+      const restored = await git(dir, ['push', '--quiet', 'origin', `${state.base}:refs/heads/${state.branch}`], 120_000);
+      if (restored.code !== 0) return refusal(context, whyPushFailed(restored.code, restored.output), options.base);
+      await gitOrThrow(dir, ['update-ref', `refs/remotes/origin/${state.branch}`, state.base]);
+      await saveState(context.home, { ...state, pushedAt: new Date().toISOString() });
+      return { results: [], view: await buildView(context, options.base), pushed: await describeCommit(dir, state.base) };
+    }
     if (!sending.length) return refusal(context, 'Nothing to push: the repo already has the Managed set as it is here.', options.base);
     const sent = new Set(sending.map(change => change.key));
     await keepAsBase(dir, [...new Set([...sides.base.keys(), ...sides.here.keys()])].filter(key => !sent.has(key)).map(key => ({ atBase: sides.base.get(key), here: sides.here.get(key) })), state.base);

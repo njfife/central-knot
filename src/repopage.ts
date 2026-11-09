@@ -181,7 +181,8 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   // A newer commit that changes nothing here still has to be pulled before a push: Pull then just moves to it.
   const pullButton = pullable || retryable || view.pushBlocked ? button({ variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull', id: 'repo-pull', disabled: moving || !view.latest,
     attrs: view.problem ? { 'aria-describedby': 'repo-incoming-blocked' } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
-  const pushButton = pushable ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: `Push ${pushable}`, id: 'repo-push', disabled: moving || !!view.pushBlocked,
+  // The branch gone from the repo: Push puts it back even with nothing else to send.
+  const pushButton = pushable || view.branchGone ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: pushable ? `Push ${pushable}` : 'Push', id: 'repo-push', disabled: moving || !!view.pushBlocked,
     attrs: view.pushBlocked || view.problem ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;

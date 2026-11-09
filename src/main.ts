@@ -14,7 +14,7 @@ import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } fro
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
-import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView } from './gitrepo.ts';
+import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsPull } from './gitrepo.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
@@ -531,7 +531,10 @@ app.whenReady().then(async () => {
   handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
-      const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
+      const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
+      const key = past?.key ?? '';
+      // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
+      if (past?.settingsFile) return undoSettingsPull(context(), eventId);
       const tools = (await manageView(context())).tools;
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
