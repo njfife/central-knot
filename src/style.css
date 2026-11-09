@@ -1347,3 +1347,35 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .appearance-choice:disabled { opacity: .5; cursor: default; }
 .appearance-choice:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
 
+
+/* Base instructions: one card above the tools, and a marked strip on each tool card that gets them. */
+.base-card { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.base-tools { border: 0; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.base-tools legend { padding: 0; margin-bottom: 4px; font-size: 12.5px; color: var(--ink-soft); }
+.base-tools .tick-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.base-file { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--ink-faint); }
+.base-subhead { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+.base-plan, .base-tool-list { display: flex; flex-direction: column; gap: 6px; }
+.base-plan-row, .base-tool { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.base-plan-row:first-child, .base-tool:first-child { border-top: 0; }
+.base-plan-line, .base-tool-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; min-width: 0; }
+.base-plan-says { color: var(--ink-soft); flex: 1 1 260px; min-width: 0; }
+.base-state { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); }
+.base-edited { color: var(--ink); }
+.base-choice { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
+.base-choice .ins-actions { flex-wrap: wrap; margin-top: 0; }
+.base-start { flex-wrap: wrap; }
+.base-strip { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border: 1px dashed color-mix(in oklab, var(--accent) 40%, var(--line)); border-radius: 8px; }
+.base-strip-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+.base-strip-line > span { flex: 1; min-width: 0; }
+.base-strip-line strong { color: var(--ink); font-weight: 600; }
+.base-copy { background: transparent; border-style: dashed; }
+/* Instructions fill the window: the base card spans it, and tool cards sit side by side once there is room for two. */
+.cards-scroll.ins-scroll { max-width: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr)); align-items: start; }
+.ins-scroll > .tools-note, .ins-scroll > .base-card, .ins-scroll > .empty-state { grid-column: 1 / -1; }
+.ins-scroll .ins-card { max-width: none; min-width: 0; }
+.ins-scroll .ins-readers, .ins-scroll .ins-empty, .ins-scroll .ins-note, .ins-scroll .tools-note { max-width: 90ch; }
+.ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+#instructions-scroll.ins-scroll > .ins-card { max-width: none; }
+body.page-wide #header { padding-right: 16px; }
+body.page-wide .page > .bands > .band { padding-right: 16px; }

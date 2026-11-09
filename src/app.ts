@@ -1,5 +1,6 @@
 import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import { splitBase, withOwn } from './basetext.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -8,6 +9,16 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+
+export interface BaseEdit {
+  text: string; hash: string; tools: HarnessId[]; stage: 'edit' | 'review';
+  /** The draft started from a tool's own instructions (they move into the base), a tool's edited copy, or an earlier version. */
+  source?: { kind: 'own' | 'copy' | 'version'; tool?: HarnessId };
+  confirmDiscard?: boolean; fullDiff?: boolean;
+}
+
+/** The text a tool's editor works on: its own instructions, without the base block when it gets the base. */
+export const ownText = (file: InstructionFile) => (file.base ? file.base.own : file.text);
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -33,6 +44,10 @@ export const state = {
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
   instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
+  /** The base instructions and which tools get them, read with the instruction files. */
+  base: undefined as BaseView | undefined,
+  /** The base being edited: its text and tools so far, the hash it was opened at, and where the draft came from. */
+  baseEdit: undefined as BaseEdit | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
@@ -86,6 +101,7 @@ function accept(view: HomeView) {
   state.applied = undefined;
   state.item = undefined;
   state.instructionEdit = undefined;
+  state.baseEdit = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -168,6 +184,8 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
   if (!view) return;
   state.home = view;
   state.applied = undefined;
+  // Instruction files may have changed outside too; an open draft stays as it is.
+  if (state.page === 'instructions') await readInstructions();
   announce(readSummary(view));
 });
 
@@ -265,15 +283,23 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
 
 // ---------- Instructions ----------
 
+const readInstructions = async () => {
+  const [files, base] = await Promise.all([api().instructions(), api().instructionBase()]);
+  state.instructions = files ?? undefined;
+  state.base = base ?? undefined;
+};
+
 export const loadInstructions = () => busy('Reading instruction files…', async () => {
-  state.instructions = (await api().instructions()) ?? undefined;
+  await readInstructions();
   announce('', true);
 });
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
-export const saveInstructionText = (file: InstructionFile, text: string) => busy('Saving…', async () => {
+export const saveInstructionText = (file: InstructionFile, own: string) => busy('Saving…', async () => {
+  // A tool that gets the base is edited for its own text; its base block stays as it is in the file.
+  const text = file.base ? withOwn(file.text, own) : own;
   const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
-  state.instructions = (await api().instructions()) ?? state.instructions;
+  await readInstructions();
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) {
     state.outcome = undefined;
@@ -294,7 +320,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
-  state.instructions = (await api().instructions()) ?? state.instructions;
+  await readInstructions();
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
   state.outcome = { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
@@ -305,7 +331,8 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 export function startInstructionEdit(file: InstructionFile) {
   // A save on another card keeps its Undo there; any other result belongs to the last task.
   if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
-  state.instructionEdit = { tool: file.tool, text: file.text, hash: file.hash, stage: 'edit' };
+  state.baseEdit = undefined;
+  state.instructionEdit = { tool: file.tool, text: ownText(file), hash: file.hash, stage: 'edit' };
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
   area?.focus();
@@ -317,8 +344,68 @@ export const loadInstructionVersion = (file: InstructionFile, id: string) => bus
   const text = await api().instructionVersion(file.tool, id);
   if (text === undefined) { announce('That version is no longer kept.'); return; }
   state.outcome = undefined;
-  state.instructionEdit = { tool: file.tool, text, hash: file.hash, stage: 'review', restoring: true };
+  state.baseEdit = undefined;
+  state.instructionEdit = { tool: file.tool, text: file.base ? splitBase(text).own : text, hash: file.hash, stage: 'review', restoring: true };
   announce('Review going back to the earlier version, then save to put it back.', true);
+});
+
+// ---------- Base instructions ----------
+
+const fileOf = (tool: HarnessId) => state.instructions?.find(file => file.tool === tool);
+const fileNames = (tools: HarnessId[]) => andList(tools.map(tool => fileOf(tool)?.path.split(/[\\/]/).pop() ?? namedTools[tool]));
+const toolNamesOf = (tools: HarnessId[]) => andList(tools.map(tool => namedTools[tool]));
+
+/** What an apply or undo left alone, said after what it did. */
+function leftText(result: BaseResult) {
+  const edited = result.left.filter(entry => entry.why === 'edited').map(entry => entry.tool);
+  const failed = result.left.filter(entry => entry.why === 'failed').map(entry => entry.tool);
+  return [edited.length ? ` ${fileNames(edited)} ${edited.length === 1 ? 'was' : 'were'} left as ${edited.length === 1 ? 'it is' : 'they are'}: changed there since.` : '',
+    failed.length ? ` ${fileNames(failed)} could not be written; nothing in ${failed.length === 1 ? 'it' : 'them'} changed.` : ''].join('');
+}
+
+/** Opens the base in its editor; a clean tool editor closes, since only one thing is edited at a time. */
+export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }) {
+  if (!(state.outcome && /^Saved /.test(state.outcome.text))) state.outcome = undefined;
+  state.instructionEdit = undefined;
+  state.baseEdit = { stage: 'edit', ...draft, hash: state.base?.hash ?? '' };
+  rerender();
+  if (state.baseEdit.stage === 'edit') document.getElementById('base-text')?.focus();
+  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+}
+
+/**
+ * Saves the base and its tools, then updates every chosen file (INS-03, INS-04). `done` says what was asked for, in the result.
+ * Undo puts the base, its tools and every file it wrote back as they were.
+ */
+export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (written: string) => string) => busy('Saving the base instructions…', async () => {
+  const result = await api().applyBase({ ...request, expected: state.baseEdit?.hash ?? state.base?.hash ?? '' }, state.home!.home);
+  await readInstructions();
+  if (result.stopped) { state.outcome = undefined; announce(result.stopped); if (state.baseEdit) state.baseEdit.stage = 'edit'; return; }
+  state.baseEdit = undefined;
+  const written = result.written.map(entry => entry.tool);
+  const sessions = written.length ? ` Start a new session in ${toolNamesOf(written)} to use ${written.length === 1 ? 'it' : 'them'}.` : '';
+  state.outcome = { page: 'instructions', text: `${done(written.length ? fileNames(written) : '')}${leftText(result)}${sessions}`,
+    act: result.undo ? { label: 'Undo', id: 'outcome-undo-base', title: 'Put the base instructions and every file this changed back as they were', run: () => void undoBaseChange(result.undo!) } : undefined };
+  announce(state.outcome.text, true);
+});
+
+const undoBaseChange = (undo: BaseUndo) => busy('Undoing…', async () => {
+  const result = await api().undoBase(undo, state.home!.home);
+  await readInstructions();
+  if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
+  const back = result.written.map(entry => entry.tool);
+  state.outcome = { page: 'instructions', text: `The base instructions are back as they were${back.length ? `, and so ${back.length === 1 ? 'is' : 'are'} ${fileNames(back)}` : ''}.${leftText(result)} What the undo replaced is under Earlier versions.` };
+  announce(state.outcome.text, true);
+});
+
+/** Loads an earlier base into the editor, at the review: going back is an ordinary save. */
+export const loadBaseVersion = (id: string) => busy('Reading the earlier version…', async () => {
+  const text = await api().instructionVersion('base', id);
+  if (text === undefined) { announce('That version is no longer kept.'); return; }
+  state.outcome = undefined;
+  state.instructionEdit = undefined;
+  state.baseEdit = { text, hash: state.base?.hash ?? '', tools: state.base?.tools ?? [], stage: 'review', source: { kind: 'version' } };
+  announce('Review going back to the earlier base instructions, then save to put them back.', true);
 });
 
 /** The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. */

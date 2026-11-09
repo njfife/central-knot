@@ -102,6 +102,8 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.remove('has-item');
+  // Pages whose content fills the window take the header and bands with them (core resizing rule).
+  document.body.classList.toggle('page-wide', state.page === 'instructions');
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 

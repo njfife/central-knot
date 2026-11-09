@@ -12,10 +12,10 @@ import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
-import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
+import { applyBase, baseView, instructionsView, instructionVersion, saveInstruction, undoBase } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, BaseApply, BaseUndo, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
@@ -405,6 +405,18 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
+const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && value.every(tool => typeof tool === 'string');
+const isBaseApply = (value: unknown): value is BaseApply => {
+  const request = value as BaseApply;
+  return !!request && typeof request.text === 'string' && typeof request.expected === 'string' && isTools(request.tools)
+    && (request.adopt === undefined || typeof request.adopt === 'string') && (request.overwrite === undefined || isTools(request.overwrite));
+};
+const isBaseUndo = (value: unknown): value is BaseUndo => {
+  const undo = value as BaseUndo;
+  return !!undo && typeof undo.text === 'string' && isTools(undo.tools) && Array.isArray(undo.files)
+    && undo.files.every(file => typeof file?.tool === 'string' && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
+};
+
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
@@ -527,7 +539,11 @@ app.whenReady().then(async () => {
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool as HarnessId, text, expected)
     : { stopped: 'The home on screen is not the one open. Nothing was saved. Read it again.' }));
-  handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
+  handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId | 'base', id) : undefined));
+  handle('instructions:base', async () => (current ? baseView(context()) : null));
+  const otherHome = { stopped: 'The home on screen is not the one open. Nothing was saved. Read it again.', written: [], left: [] };
+  handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
+  handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';

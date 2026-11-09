@@ -99,7 +99,11 @@ export interface DesktopApi {
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
-  instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
+  instructionVersion(tool: HarnessId | 'base', id: string): Promise<string | undefined>;
+  /** The base instructions and the tools that get them (INS-03). */
+  instructionBase(): Promise<BaseView | null>;
+  applyBase(request: BaseApply, home: string): Promise<BaseResult>;
+  undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
   plugins(fresh?: boolean): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
@@ -370,10 +374,23 @@ export interface InstructionFile {
   notes: string[];
   nextStep: string;
   /** Earlier versions kept before each save, newest first. */
-  versions: { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the file as it is now. */ differs: number }[];
+  versions: InstructionVersion[];
+  /** Set when this tool gets the base instructions: its own text, its copy of the base, and how that copy compares. */
+  base?: { state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string };
 }
+export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 
 export interface InstructionSave { stopped?: string; saved?: boolean }
+
+/** The base instructions: one text Central Knot keeps in every chosen tool's file, after that tool's own text. */
+export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[] }
+/** Set the base and its tools. `expected`: the base's hash when opened. `adopt`: the tool whose own text became the base.
+ *  `overwrite`: tools whose edited copy is replaced by the base. */
+export interface BaseApply { text: string; expected: string; tools: HarnessId[]; adopt?: HarnessId; overwrite?: HarnessId[] }
+/** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
+export interface BaseResult { stopped?: string; written: { tool: HarnessId; before: string | null; after: string }[]; left: { tool: HarnessId; why: 'edited' | 'failed' }[]; undo?: BaseUndo }
+/** Everything an apply changed, to put back: the base and its tools, and each file's text before (null: the apply created it). */
+export interface BaseUndo { text: string; tools: HarnessId[]; files: { tool: HarnessId; before: string | null; after: string }[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
