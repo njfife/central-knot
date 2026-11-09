@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, readHistory } from '../src/manage.ts';
-import { applyMcp, restoreMcp } from '../src/mcp.ts';
+import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, heldAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
@@ -187,12 +187,5 @@ test('A managed MCP server a profile turned off keeps syncing, and stays off', a
     const codex = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
     assert.match(codex, /\[mcp_servers\.sentry\]\ncommand = "sentry"\nargs = \["--v2"\]\nenabled = false\n/);
     assert.equal(mcpDisabled('codex-cli', codex, 'sentry'), true);
-    // Restoring the earlier version after No profile turned it back on: the version comes back, the switch stays on.
-    await switchProfile(box.context, null);
-    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit' && event.key === 'mcp:sentry')!;
-    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
-    const restored = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
-    assert.doesNotMatch(restored, /--v2/);
-    assert.equal(mcpDisabled('codex-cli', restored, 'sentry'), false);
   } finally { await box.cleanup(); }
 });

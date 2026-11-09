@@ -666,13 +666,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
     // This tool's own settings as the event replaced them, when it names them; a tool without an entry gets the latest kept ones;
     // otherwise its current settings stay.
     const ref = past.losers.find(loser => loser.tool === tool && loser.kept && loser.hash === hash)?.kept;
-    // A server's on/off switch (Codex's and Pi's `enabled`, which profiles set) is not part of the version: it stays as it is now.
-    const keptWithSwitchNow = (fields: Record<string, unknown> | undefined) => {
-      if (!fields || !here) return fields;
-      const { enabled: _kept, ...rest } = fields;
-      return 'enabled' in here.extras ? { ...rest, enabled: here.extras.enabled } : rest;
-    };
-    const extras = keptWithSwitchNow(ref ? await keptExtras(context, name, hash, ref) : here ? undefined : version.extras[tool]);
+    const extras = ref ? await keptExtras(context, name, hash, ref) : here ? undefined : version.extras[tool];
     if (here?.hash === hash && (!extras || JSON.stringify(here.extras) === JSON.stringify(extras))) { holds.set(tool, hash); continue; }
     if (here) holds.set(tool, here.hash);
     const reason = cannotHold(tool, version.server);
