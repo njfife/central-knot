@@ -58,12 +58,12 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} ${edits === 1 ? 'change' : 'changes'} waiting` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Claude Code` }
         : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All managed ones in sync' }
-          : total ? { tone: 'tone-muted', glyph: 'circle' as const, text: 'Nothing managed yet' } : undefined;
+          : undefined;
   // The card opens the whole page; a "different copies" line is its own link, to the page narrowed to them.
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint')),
-      h('span.kind-card-count', {}, total ? (managed ? `${plural(total, noun[0], noun[1])} · ${managed} managed` : plural(total, noun[0], noun[1])) : `No ${noun[1]}`)),
+      h('span.kind-card-count', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed yet'}` : `No ${noun[1]}`)),
     !attention ? null : differs
       ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: 'Show only these', onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text, icon('arrow-right', 12))
       : h(`span.kind-card-state.${attention.tone}`, {}, icon(attention.glyph, 13), attention.text));
@@ -94,7 +94,7 @@ export function overviewPage() {
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is managed, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot in the ${navigator.userAgent.includes('Mac') ? 'menu bar' : 'tray'}: sync on or off, start at sign-in, quit.`),
+        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in the ${navigator.userAgent.includes('Mac') ? 'menu bar' : 'tray'}. From there you can turn sync on or off${navigator.userAgent.includes('Linux') ? '' : ', start it at sign-in,'} or quit.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all adds or replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
 

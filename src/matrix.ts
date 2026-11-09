@@ -353,6 +353,16 @@ function limitedFields(skill: SampleSkill) {
   return match ? match[1] : 'other';
 }
 
+/** MCP: the server's definition as labelled lines ("Type HTTP", "URL …"), read from its one-line summary. */
+function definition(summary: string) {
+  const [kind, ...rest] = summary.split(' · ');
+  const value = rest.join(' · ');
+  const isCommand = kind === 'Command';
+  return h('dl.details-definition', {},
+    h('dt', {}, 'Type'), h('dd', {}, isCommand ? 'Command (stdio)' : kind),
+    h('dt', {}, isCommand ? 'Runs' : 'URL'), h('dd.mono', {}, value));
+}
+
 /** Agents: the tool whose copy the one-way copies come from, read from the limits text. */
 const oneWaySource = (skill: SampleSkill): Tool | undefined => {
   const match = /^One-way from ([^.]+)\./.exec(Object.values(skill.limits ?? {})[0] ?? '');
@@ -390,7 +400,7 @@ function details(skill: SampleSkill, closable = true) {
   return h(`div.compare.details${differs ? '.details-differs' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
     closable && differs && !draft ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null,
     h('div.details-head', {},
-      kind === 'mcp' && skill.description ? h('p.details-description.details-definition', {}, skill.description) : null,
+      kind === 'mcp' && skill.description ? definition(skill.description) : null,
       (!closable && allSame) || (differs && !skill.managed && !draft) || (kind === 'mcp' && allSame) ? null : h('p.details-status', {}, allSame ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}` : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
       kind !== 'mcp' && skill.description && !(differs && !draft) ? h('p.details-description', {}, skill.description) : null),
     differs ? compareChoices(skill) : null,
@@ -754,8 +764,8 @@ function mcpNotices() {
     const servers = rest.length === 1 ? 'server' : 'servers';
     const what = missing.length === rest.length ? ['Claude Code doesn’t have the ', ...nameList(rest), ` ${servers} yet.`] : [`Claude Code has ${rest.length === 1 ? 'an older copy' : 'older copies'} of the `, ...nameList(rest), ` ${servers}.`];
     bands.push(h('div.band.band-write-now', { role: 'status' }, icon('clock', 14, 'tone-warning'),
-      h('span.band-text', {}, ...what, ' Quit Claude Code first. ', h('span.band-why', {}, 'Claude Code rewrites ~/.claude.json while open.')),
-      button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: () => void writeClaudeNow(mcp.claudePending) })));
+      h('span.band-text', {}, ...what, ' Quit Claude Code first.'),
+      button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', attrs: { title: 'Claude Code rewrites ~/.claude.json while it is open, so Central Knot writes it only when Claude Code is closed.' }, onclick: () => void writeClaudeNow(mcp.claudePending) })));
   }
   // Before Apply all: say that Claude Code takes a second step, so it is no surprise after.
   if (kind === 'mcp' && [...view.draft].some(([, draft]) => draft.managed && !draft.off.includes('claude-cli')) && toolList().includes('claude-cli'))
@@ -846,9 +856,11 @@ export function changePanel(eventId: string) {
   if (found === undefined) return h('p.change-panel.tone-faint', {}, 'Reading the change…');
   if (found === null) return h('p.change-panel.tone-faint', {}, 'The earlier version is no longer kept, so the change can’t be shown.');
   const diff = lineDiff(found.before, found.after);
-  return h('pre.change-panel.ins-diff', { tabindex: '0', 'aria-label': 'What the edit changed' }, folded(diff, false).map(line => line.kind === 'fold'
+  const added = diff.filter(line => line.kind === 'added').length, removed = diff.filter(line => line.kind === 'removed').length;
+  const counts = [added ? `${added} ${added === 1 ? 'line' : 'lines'} added` : '', removed ? `${removed} ${removed === 1 ? 'line' : 'lines'} removed` : ''].filter(Boolean).join(', ') || 'no line changed';
+  return h('div.change-panel', {}, h('p.change-caption', {}, `The edit: ${counts}. Undo puts the earlier version back in every tool it syncs to.`), h('pre.ins-diff', { tabindex: '0', 'aria-label': 'What the edit changed' }, folded(diff, false).map(line => line.kind === 'fold'
     ? h('span.ins-fold-static', {}, `… ${line.count} unchanged ${line.count === 1 ? 'line' : 'lines'}\n`)
-    : h(`span.ins-line.ins-${line.kind}`, {}, h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''), h('span.ins-code', {}, `${line.text}\n`))));
+    : h(`span.ins-line.ins-${line.kind}`, {}, h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''), h('span.ins-code', {}, `${line.text}\n`)))));
 }
 
 /** A deletion that spread leaves a trace in the table while its notice stands: the name, where it was deleted, and Restore. */
@@ -920,7 +932,7 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
   const quiet = off;
   // Waiting for Claude Code: the sentence takes the full width, and the actions sit on their own line, Write first.
   return h(`p.sync-notice${writeClaude ? '.notice-stacked' : ''}`, { 'data-kind': notice.kind }, icon(writeClaude ? 'clock' : glyph, 14, writeClaude ? 'tone-warning' : tone),
-    h('span.notice-text', {}, ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy. Quit Claude Code first.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
+    h('span.notice-text', {}, off && notice.kind !== 'deleted' ? 'Synced once: ' : '', ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy. Quit Claude Code first.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     h('span.notice-actions', {},
       writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,

@@ -73,10 +73,12 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
       // Status on the heading; what installing would do under a label of its own.
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : view.clis[tool] || view.tools.every(other => !view.clis[other]) ? 'Not installed' : 'Not installed · command-line tool not found')),
+        entry.states[plugin.name]?.[tool]?.state === 'installed' ? h('span.plugin-card-state.plugin-card-installed', {}, 'Installed') : !view.clis[tool] && view.tools.some(other => view.clis[other]) ? h('span.plugin-card-state', {}, 'Command-line tool not found') : null),
       // One line per outcome, led by when it applies: "When installed: skills keep their own names."
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
+        h('span', {}, ...(outcome.component === 'Skills' && skillNames.length === 1
+          ? ['Skill is called ', h('code.plugin-name', {}, /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill)]
+          : namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill)))))))))) : null);
 }
 
 // Escape takes back an armed uninstall, wherever focus is.
@@ -95,7 +97,7 @@ function boxKey(view: PluginsView, entry: MarketplaceView) {
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     states.includes('not-installed') ? item('Not installed: click to install', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
     states.includes('installed') ? item('Installed: click to uninstall', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
-    states.includes('not-known') ? item('Not confirmed: click to install again', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
+    states.includes('not-known') ? item('Unknown: the tool didn’t confirm the install. Click to try again', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     states.includes('cannot') ? item(view.tools.every(tool => !view.clis[tool]) ? 'Unavailable: command-line tool not found' : 'Can’t install here: see the note above', h('span.legend-cell.cell-cannot', {})) : null);
 }
 
@@ -130,7 +132,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       h('div.market-actions', {},
         entry.fetchedAt ? h('span.market-when', { title: when(entry.fetchedAt) }, `Last ${entry.kind === 'folder' ? 'read' : 'fetched'} ${new Date(entry.fetchedAt).toDateString() === new Date().toDateString() ? new Date(entry.fetchedAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : new Date(entry.fetchedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`) : null,
         button({ variant: 'ghost', size: 'small', icon: 'refresh-cw', label: entry.kind === 'folder' ? 'Read again' : 'Fetch again', id: `refresh-${index}`, disabled: !!state.busy, onclick: () => void refreshMarketplace(entry.source) }),
-        entry.origins.includes('central-knot') ? (() => { const remove = button({ variant: 'ghost', size: 'small', label: 'Remove from list', name: `Remove ${title} from Central Knot’s list. Installed plugins stay installed.`, id: `forget-${index}`, disabled: !!state.busy, onclick: () => void forgetMarketplace(entry.source) }); remove.title = 'Removes it from this list only. Installed plugins stay installed.'; return remove; })() : null)),
+        entry.origins.includes('central-knot') ? (() => { const remove = button({ variant: 'ghost', size: 'small', icon: 'circle-minus', label: 'Remove from list', name: `Remove ${title} from Central Knot’s list. Installed plugins stay installed.`, id: `forget-${index}`, disabled: !!state.busy, onclick: () => void forgetMarketplace(entry.source) }); remove.title = 'Removes it from this list only. Installed plugins stay installed.'; return remove; })() : null)),
     entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale ? ` Showing the copy fetched ${when(entry.fetchedAt)}; installing waits until it can be reached.` : '')) : null,
     (() => {
       const cannot = view.tools.filter(tool => !view.clis[tool]);
@@ -139,7 +141,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       const someCan = view.tools.some(tool => view.clis[tool]) && view.canWrite;
       const anyInstalled = entry.plugins.some(plugin => view.tools.some(tool => entry.states[plugin.name]?.[tool]?.state === 'installed'));
       const installable = someCan && entry.plugins.some(plugin => view.tools.some(tool => view.clis[tool] && !blocked(view, entry, tool) && entry.states[plugin.name]?.[tool]?.state !== 'installed'));
-      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, installable ? `Click a box to install in that tool. It installs right away, using that tool’s own command.${anyInstalled ? ' Click a check to uninstall.' : ''}` : 'Click a check to uninstall. It runs at once, through the tool’s own command.')) : null;
+      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, installable ? `Click a box to install in that tool. It installs right away, using that tool’s own command.${anyInstalled ? ' Click a check to uninstall; you confirm before it runs.' : ''}` : 'Click a check to uninstall; you confirm before it runs.')) : null;
       const refused = entry.plugins.filter(plugin => plugin.copilotRefuses);
       const refusal = refused.length && view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'), h('span.hint-body', {}, `Copilot CLI can’t take this marketplace: ${refused[0].copilotRefuses}`)) : null;
       if (!cannot.length) return refusal ? h('div.market-hints', {}, how, refusal) : how;
@@ -181,7 +183,8 @@ function reverse(report: ActionReport) {
 function reports() {
   const result = state.pluginResult;
   if (!result) return null;
-  if (result.problem || result.stopped) return h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.problem ?? result.stopped));
+  if (result.problem || result.stopped) return h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.problem ?? result.stopped),
+    h('button.band-dismiss', { type: 'button', id: 'report-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.pluginResult = undefined; rerender(); } }, icon('x', 12)));
   if (!result.reports.length) return null;
   const changed = result.reports.flatMap(report => report.runs.flatMap(run => run.changed.map(entry => entry.path)));
   const installedHere = result.reports.filter(report => report.outcome === 'installed').map(report => report.tool);
@@ -225,6 +228,6 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Adding one installs nothing. Marketplaces you added in Claude Code, Copilot CLI or Codex appear here automatically.',
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Type owner/repo or a Git URL in the box above, or choose a folder; adding one installs nothing. Marketplaces you added in Claude Code, Copilot CLI or Codex appear here automatically.',
           button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }))));
 }

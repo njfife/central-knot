@@ -296,7 +296,7 @@ export interface InstructionFile {
   notes: string[];
   nextStep: string;
   /** Earlier versions kept before each save, newest first. */
-  versions: { id: string; at: string }[];
+  versions: { id: string; at: string; firstLine: string; lines: number }[];
 }
 
 export interface InstructionSave { stopped?: string; saved?: boolean }

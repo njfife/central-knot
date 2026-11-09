@@ -32,7 +32,7 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h('span.nav-count', { 'aria-hidden': 'true' }, String(count)),
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true' }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
@@ -86,7 +86,7 @@ function renderHeader(rail: boolean) {
     }),
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
-    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && !(state.page === 'overview' && practiceNoteOpen()) ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
+    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),
@@ -101,8 +101,8 @@ function renderPage() {
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
-  if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Changes write to your real tools', tone: 'tone-warning' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes write only to this practice copy' : 'Changes write only inside this folder', tone: '' };
+  if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', tone: '' };
+  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Nothing real is changed' : 'Changes write only inside this folder', tone: '' };
 }
 
 function renderStatus() {

@@ -42,7 +42,12 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
 async function versions(home: string, tool: HarnessId) {
   try {
     const names = (await readdir(versionsFolder(home, tool))).filter(name => name.endsWith('.md')).sort().reverse();
-    return names.map(name => ({ id: name, at: new Date(Number(name.split('-')[0])).toISOString() }));
+    // Each version says what it was: its first non-empty line and its length, so several saves a day can be told apart.
+    return await Promise.all(names.map(async name => {
+      const text = (await readText(join(versionsFolder(home, tool), name))) ?? '';
+      const lines = text.replace(/\n$/, '').split('\n');
+      return { id: name, at: new Date(Number(name.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0 };
+    }));
   } catch { return []; }
 }
 

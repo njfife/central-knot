@@ -72,7 +72,7 @@ function actions(event: HistoryEvent, action?: string) {
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
   const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
-  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action;
+  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);

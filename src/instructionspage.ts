@@ -16,17 +16,35 @@ const ago = (at: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
 
+const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+
+// In the review, Esc goes back to editing.
+document.addEventListener('keydown', event => {
+  const edit = state.instructionEdit;
+  if (event.key !== 'Escape' || state.page !== 'instructions' || edit?.stage !== 'review') return;
+  event.preventDefault();
+  if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
+  rerender();
+});
+
 function editor(file: InstructionFile) {
   const edit = state.instructionEdit!;
   const name = fileName(file.path);
   if (edit.stage === 'review') {
     const diff = lineDiff(file.text, edit.text);
-    const added = diff.filter(line => line.kind === 'added').length;
-    const removed = diff.filter(line => line.kind === 'removed').length;
-    const changed = added + removed;
-    const counts = [added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ');
+    // A removed line followed by an added one is a changed line, as the person sees their edit.
+    let added = 0, removed = 0, altered = 0;
+    for (let index = 0; index < diff.length;) {
+      let r = 0, a = 0;
+      while (diff[index]?.kind === 'removed') { r++; index++; }
+      while (diff[index]?.kind === 'added') { a++; index++; }
+      if (!r && !a) { index++; continue; }
+      altered += Math.min(r, a); removed += r - Math.min(r, a); added += a - Math.min(r, a);
+    }
+    const changed = added + removed + altered;
+    const counts = [altered ? `${plural(altered, 'line')} changed` : '', added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ');
     const title = !changed ? 'Nothing changed.'
-      : edit.restoring ? `Review going back to the earlier version of ${name}: ${counts}.`
+      : edit.restoring ? `Going back to an earlier version of ${name}: ${counts}.`
       : `Review before saving ${name}: ${counts}.`;
     const empties = changed && file.text.trim() && !edit.text.trim();
     return h('div.ins-editor', {},
@@ -39,7 +57,7 @@ function editor(file: InstructionFile) {
           h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
           h('span.ins-code', {}, `${line.text}\n`)))),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-        button({ variant: 'primary', size: 'small', label: file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+        button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
         button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
@@ -51,12 +69,15 @@ function editor(file: InstructionFile) {
       const review = document.getElementById(`ins-review-${file.tool}`) as HTMLButtonElement | null;
       if (review) review.disabled = !changed;
       document.getElementById(`ins-draft-${file.tool}`)?.toggleAttribute('hidden', !changed);
+      const hint = document.getElementById(`ins-hint-${file.tool}`);
+      if (hint) hint.textContent = changed ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.';
     },
     onkeydown: (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); document.getElementById(`ins-cancel-${file.tool}`)?.click(); }
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== file.text) { event.preventDefault(); edit.stage = 'review'; rerender(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
+  area.rows = Math.min(30, Math.max(8, edit.text.split('\n').length + 3));
   if (!file.text) area.classList.add('ins-text-new');
   const dirty = () => edit.text !== file.text;
   const actions = edit.confirmDiscard
@@ -65,8 +86,9 @@ function editor(file: InstructionFile) {
       button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-discard-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Keep editing', id: `ins-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById(`ins-text-${file.tool}`)?.focus(); } }))
     : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), attrs: { title: 'Ctrl+Enter or ⌘+Enter' }, onclick: () => { edit.stage = 'review'; rerender(); } }),
-      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { if (dirty()) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); } }));
+      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { if (dirty()) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); } }),
+      h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
   return h('div.ins-editor', {},
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     area, actions);
@@ -78,7 +100,9 @@ const open = new Set<string>();
 function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
-  const lockedWhy = other ? `Finish or cancel the ${fileName(other.path)} edit first.` : undefined;
+  // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
+  const otherDirty = !!other && state.instructionEdit!.text !== other.text;
+  const lockedWhy = otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const preview = file.text.replace(/\n$/, '').split('\n');
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
@@ -90,13 +114,18 @@ function card(file: InstructionFile) {
       : h('div.ins-body', {},
         file.exists && file.text.trim() ? [h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, open.has(file.tool) ? preview.join('\n') : preview.slice(0, 14).join('\n')),
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
-          : h('p.ins-empty', {}, file.exists ? 'The file is empty.' : `Saving creates ${fileName(file.path)} here.`),
+          : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || !!state.instructionEdit, attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
+          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
+            const open = state.instructionEdit, openFile = open && state.instructions?.find(entry => entry.tool === open.tool);
+            // Typed since the page was drawn: ask on that editor rather than drop the draft.
+            if (open && openFile && open.text !== openFile.text) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
+            startInstructionEdit(file);
+          } }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
-        h('span', {}, 'Version from ', new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)})`)),
+        h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.lines} ${version.lines === 1 ? 'line' : 'lines'}${version.firstLine ? ` · ${version.firstLine}` : ''}`)),
         button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || !!state.instructionEdit, attrs: state.instructionEdit ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 

@@ -130,7 +130,7 @@ function trayMenu() {
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
-    { label: unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}`, enabled: false },
+    { label: unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`, enabled: false },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
