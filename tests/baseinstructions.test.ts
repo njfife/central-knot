@@ -38,7 +38,9 @@ async function sandbox(present: HarnessId[] = tools) {
   /** Saves `text` as the base for `chosen`, as reviewed just now. */
   const set = async (text: string, chosen: HarnessId[], more: Partial<BaseApply> = {}) => applyBase(context, await snapshots(), { text, expected: (await baseView(context)).hash, seen: await seen(), tools: chosen, ...more });
   const file = (path: string) => join(home, path);
-  return { home, context, snapshots, seen, set, file, cleanup: () => rm(base, { recursive: true, force: true }) };
+  /** How a tool's file holds the base now. */
+  const state = async (tool: HarnessId) => (await instructionsView(context, await snapshots())).find(entry => entry.tool === tool)!.base!.state;
+  return { home, context, snapshots, seen, set, file, state, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Starting from one tool’s instructions shares them; a change after the review stops the save; Undo puts every file back', async () => {
@@ -82,12 +84,11 @@ test('Starting from one tool’s instructions shares them; a change after the re
 test('A copy edited in a tool’s file stays until the person chooses, also after using it as the base and undoing that', async () => {
   const box = await sandbox();
   const claude = box.file('.claude/CLAUDE.md'), codex = box.file('.codex/AGENTS.md');
-  const codexState = async () => (await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state;
   try {
     await writeFile(codex, 'Codex only.\n');
     await box.set('Be brief.\n', tools);
     await writeFile(codex, (await readFile(codex, 'utf8')).replace('Be brief.', 'Be very brief.'));
-    assert.equal(await codexState(), 'edited');
+    assert.equal(await box.state('codex-cli'), 'edited');
     const second = await box.set('Be brief.\nCite files.\n', tools);
     assert.deepEqual(second.left, [{ tool: 'codex-cli', why: 'edited' }]);
     assert.match(await readFile(codex, 'utf8'), /Be very brief\./);
@@ -104,7 +105,7 @@ test('A copy edited in a tool’s file stays until the person chooses, also afte
     const adopted = await box.set(splitBase(editedCodex).copy!, tools);
     assert.match(await readFile(claude, 'utf8'), /Be very brief\./);
     await undoBase(box.context, await box.snapshots(), adopted.undo!);
-    assert.equal(await codexState(), 'edited');
+    assert.equal(await box.state('codex-cli'), 'edited');
     assert.deepEqual((await box.set('Be brief.\nCite files.\nAnd more.\n', tools)).left, [{ tool: 'codex-cli', why: 'edited' }]);
     assert.equal(await readFile(codex, 'utf8'), editedCodex);
   } finally { await box.cleanup(); }
@@ -138,6 +139,9 @@ test('Taking a tool off takes the block out, keeps own text and edited copies, a
       const blocked = await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
       await chmod(box.file('.copilot'), 0o755);
       assert.ok(blocked.left.some(entry => entry.tool === 'copilot-cli' && entry.why === 'failed'));
+      // Taken off again before the retry (nothing to change in the file): the record of the plain text stays.
+      await box.set('Shared.\n', ['claude-cli']);
+      assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
     }
     await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await box.set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
@@ -164,7 +168,6 @@ test('Tools reading one linked file are one destination: chosen together and wri
     // Unticking one of them leaves the file with the base, since the other still reads it; a base edit writes it once.
     await box.set('Shared.\n', ['codex-cli']);
     const edited = await box.set('Shared, again.\n', ['codex-cli']);
-
     assert.deepEqual([edited.written.length, edited.left], [1, []]);
     assert.deepEqual(splitBase(await readFile(claude, 'utf8')), { own: '', copy: 'Shared, again.\n' });
   } finally { await box.cleanup(); }
@@ -180,13 +183,16 @@ test('Putting back an earlier version of a tool’s file reads as an older base,
     await box.set('Be brief.\nCite files.\n', tools);
     const now = await readFile(codex, 'utf8');
     await saveInstruction(box.context, await box.snapshots(), 'codex-cli', older, (await box.seen())['codex-cli']!.hash, true);
-    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'older');
+    assert.equal(await box.state('codex-cli'), 'older');
     assert.equal((await box.set('Be brief.\nCite files.\n', tools)).left.length, 0);
     assert.equal(await readFile(codex, 'utf8'), now);
+    // Saving its own text from its editor keeps the block as it is.
+    await saveInstruction(box.context, await box.snapshots(), 'codex-cli', withOwn(now, 'Codex, reworded.\n'), (await box.seen())['codex-cli']!.hash);
+    assert.deepEqual([splitBase(await readFile(codex, 'utf8')).own, await box.state('codex-cli')], ['Codex, reworded.\n', 'same']);
     // A version whose copy was edited by hand back then stays protected as an edit when put back.
-    const handEdited = now.replace('Cite files.', 'Cite every file.');
+    const handEdited = (await readFile(codex, 'utf8')).replace('Cite files.', 'Cite every file.');
     await saveInstruction(box.context, await box.snapshots(), 'codex-cli', handEdited, (await box.seen())['codex-cli']!.hash, true);
-    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'edited');
+    assert.equal(await box.state('codex-cli'), 'edited');
   } finally { await box.cleanup(); }
 });
 
@@ -200,7 +206,7 @@ test('An Undo that leaves a file changed since alone keeps its record, so its co
     await writeFile(codex, `Codex, edited since.\n${(await readFile(codex, 'utf8')).replace('Codex only.\n', '')}`);
     const undone = await undoBase(box.context, await box.snapshots(), second.undo!);
     assert.deepEqual(undone.left, [{ tool: 'codex-cli', why: 'edited' }]);
-    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'older');
+    assert.equal(await box.state('codex-cli'), 'older');
   } finally { await box.cleanup(); }
 });
 

@@ -562,8 +562,8 @@ async function practiceFlow() {
   writeFileSync(join(practice, '.codex/AGENTS.md'), baseCodex1.replace('- Shared by every tool.', '- Shared, edited in Codex.'));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
-  check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-adopt-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
-  await a.click('#base-adopt-codex-cli');
+  check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
+  await a.click('#base-usecopy-codex-cli');
   await a.click('#base-save');
   check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
   await a.click('#outcome-undo-base');

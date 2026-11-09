@@ -62,6 +62,9 @@ export const pathText = (text: string, full = text) => {
   return node;
 };
 
+/** A disabled control's reason, as its tooltip and its accessible description. */
+export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
+
 export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
   return h('label.tick', {},
     h('input.hidden-input', {

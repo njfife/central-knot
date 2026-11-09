@@ -111,6 +111,8 @@ function accept(view: HomeView) {
   state.item = undefined;
   state.instructionEdit = undefined;
   state.baseEdit = undefined;
+  state.instructions = undefined;
+  state.base = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -176,7 +178,9 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
-  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}`) + leftText,
+  // Another home's instruction files and base are never shown for this one: on the Instructions page they are read again.
+  if (view) { accept(view); if (state.page === 'instructions') await readInstructions(); }
+  if (view) { state.outcome = { page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}`) + leftText,
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined }; announce(readSummary(view) + leftText, true); } else announce('');
 }));
 
@@ -333,14 +337,15 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', kind: file.exists && result.saved ? 'tool-save' : undefined, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', kind: file.exists && result.saved ? 'tool-save' : undefined, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot doesn’t delete instruction files you keep; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.${result.problem ? ` ${result.problem}` : ''}` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
 
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
-  const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
+  // Like putting back a version: the base copy it held is judged again against the base texts Central Knot kept.
+  const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home, true);
   await readInstructions();
   const name = fileName(file.path);
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
@@ -352,7 +357,8 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 const differsFromBase = (edit: BaseEdit) => {
   const saved = state.base?.text ?? '';
   if (!edit.text.trim() && !saved.trim()) return false;
-  return edit.text !== saved || edit.tools.join() !== (state.base?.tools ?? []).join();
+  const tools = new Set(state.base?.tools ?? []);
+  return edit.text !== saved || edit.tools.length !== tools.size || edit.tools.some(tool => !tools.has(tool));
 };
 /** Saving this base draft does something: it differs from the base, or it starts somewhere (a tool's text, a copy, a version). */
 export const baseSaveDoesSomething = (edit: BaseEdit) => differsFromBase(edit) || !!edit.source;
@@ -383,6 +389,9 @@ function askAboutOpenDraft(): boolean {
   }
   return false;
 }
+
+/** This home only shows its files: saving is off (a preview-only home or another build syncing). */
+export const savingOff = () => !!state.home && !state.home.manage.access.allowed;
 
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
 export function startInstructionEdit(file: InstructionFile) {
@@ -449,11 +458,15 @@ export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?
 /**
  * After a save stopped because the base or a file changed since the review: the draft is shown again as a review against things
  * as they are now. A draft that only carries something stored follows it: putting the base back or updating writes the base as it
- * is now, and using an edited copy uses that copy as it is now (no longer edited there: nothing left to choose, so it closes).
+ * is now, using an edited copy uses that copy as it is now (no longer edited there: nothing left to choose, so it closes), and a
+ * draft started from a tool's text and not edited since follows that text (`ownBefore`: the text it started from).
  */
-function resyncDraft(edit: BaseEdit, why: string) {
+function resyncDraft(edit: BaseEdit, why: string, ownBefore: string | undefined) {
   Object.assign(edit, { hash: state.base?.hash ?? '', stage: 'review', conflict: why });
   const { kind, tool } = edit.source ?? {};
+  // Started from a tool's own text and not changed since: it follows that text as it is now (a line added outside is kept).
+  const file = tool && fileOf(tool);
+  if (kind === 'own' && file && edit.text === ownBefore) edit.text = ownText(file);
   if (state.base && (kind === 'putBack' || kind === 'update')) Object.assign(edit, { text: state.base.text, tools: state.base.tools });
   if (kind === 'copy') {
     const held = tool && fileOf(tool)?.base;
@@ -467,13 +480,15 @@ function resyncDraft(edit: BaseEdit, why: string) {
  */
 export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (written: string) => string) => busy('Saving the base instructions…', async () => {
   focusAfterBusy = 'outcome-undo-base';
+  const source = state.baseEdit?.source;
+  const ownBefore = source?.kind === 'own' && source.tool ? ownText(fileOf(source.tool)!) : undefined;
   const result = await api().applyBase({ ...request, expected: state.baseEdit?.hash ?? state.base?.hash ?? '' }, state.home!.home);
   await readInstructions();
   if (result.stopped) {
     state.outcome = undefined;
     announce(result.stopped);
     // Changed since the review: the draft stays, now against the base and files as they are, and the review is shown again.
-    if (state.baseEdit && result.changed) resyncDraft(state.baseEdit, result.stopped);
+    if (state.baseEdit && result.changed) resyncDraft(state.baseEdit, result.stopped, ownBefore);
     return;
   }
   state.baseEdit = undefined;

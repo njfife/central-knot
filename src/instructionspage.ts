@@ -1,51 +1,16 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
-// (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { baseDraftTyped, loadInstructionVersion, ownText, toolDraftTyped, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+// (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled or emptied by Central Knot (the one
+// deletion is an Undo of a base save removing a file that save created, while unchanged).
+import { baseDraftTyped, savingOff, loadInstructionVersion, ownText, toolDraftTyped, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { fileName, linesOf, toolNames } from './words.ts';
-import { plural } from './model.ts';
-import { button, emptyState, h, icon, pathText } from './dom.ts';
+import { changeCounts, diffView, discardConfirm, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { fileName, lineCount, toolNames } from './words.ts';
+import { button, emptyState, h, icon, lockAttrs, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
-import { folded, lineDiff } from './diff.ts';
+import { lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
-const names = toolNames as Record<string, string>;
-
-/** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
-function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
-  if (line.kind === 'same') return [line.text];
-  const index = diff.indexOf(line as never);
-  const partner = line.kind === 'removed' ? diff[index + 1] : diff[index - 1];
-  if (!partner || partner.kind === line.kind || partner.kind === 'same') return [line.text];
-  const mine = line.text.split(/(\s+)/), theirs = partner.text.split(/(\s+)/);
-  const parts = line.kind === 'removed' ? lineDiff(mine.join('\n'), theirs.join('\n')) : lineDiff(theirs.join('\n'), mine.join('\n'));
-  const keep = line.kind === 'removed' ? 'removed' : 'added';
-  return parts.filter(part => part.kind === 'same' || part.kind === keep).map(part => part.kind === 'same' ? part.text : h('span.ins-word', {}, part.text));
-}
-const ago = (at: string) => {
-  const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
-  return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
-};
-
-/** The editors' keyboard hint, once there is something to review. */
-export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
-
-/** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control. */
-export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }) {
-  const then = (step: { run: () => void; focus: string }) => () => { step.run(); rerender(); document.getElementById(step.focus)?.focus(); };
-  return h('span.ins-confirm', { role: 'group', 'aria-label': 'Discard changes?' }, h('span.ins-confirm-text', {}, `Discard your changes to ${what}?`),
-    button({ variant: 'outline', size: 'small', label: 'Discard', id: ids.discard, onclick: then(discard) }),
-    button({ variant: 'ghost', size: 'small', label: keepLabel, id: ids.keep, onclick: then(keep) }));
-}
-
-/** An "Earlier versions (N)" list: each version's date, age and how far it is from now, with Restore… (which opens a review). */
-export function versionsList(versions: InstructionFile['versions'], restore: { id: (version: string) => string; disabled: boolean; why?: string; run: (version: string) => void }) {
-  return versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${versions.length})`),
-    h('ul.plain-list', {}, versions.slice(0, 20).map(version => h('li.ins-version', {},
-      h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
-      button({ variant: 'link', size: 'micro', label: 'Restore…', id: restore.id(version.id), disabled: restore.disabled, attrs: restore.why ? { title: restore.why } : undefined, onclick: () => restore.run(version.id) }))))) : null;
-}
 
 /** Leaves a tool's review: back to its editor (focus in the text), or, for an earlier version, closed (focus on its Edit). */
 function leaveReview(tool: string) {
@@ -63,31 +28,6 @@ document.addEventListener('keydown', event => {
   event.preventDefault();
   leaveReview(edit.tool);
 });
-
-/** Says which side of a difference is which, above it. */
-export const legend = (removed: string | undefined, added: string) => h('p.base-legend', {}, removed ? h('span.base-legend-removed', {}, `− ${removed}`) : null, h('span.base-legend-added', {}, `+ ${added}`));
-
-/** A line diff with changed words tinted, long unchanged runs folded until `showAll`. */
-export function diffView(diff: { kind: 'same' | 'added' | 'removed'; text: string }[], full: boolean, showAll: () => void, label = 'Changes') {
-  return h('pre.ins-diff', { tabindex: '0', 'aria-label': label }, folded(diff, full).map(line => line.kind === 'fold'
-    ? h('button.ins-fold', { type: 'button', onclick: showAll }, `… ${plural(line.count, 'unchanged line')} · show`)
-    : h(`span.ins-line.ins-${line.kind}`, {},
-      h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
-      h('span.ins-code', {}, ...words(line, diff), '\n'))));
-}
-
-/** "N lines changed, M added, K removed": a removed line followed by an added one is a changed line, as the person sees their edit. */
-export function changeCounts(diff: { kind: string }[]) {
-  let added = 0, removed = 0, altered = 0;
-  for (let index = 0; index < diff.length;) {
-    let r = 0, a = 0;
-    while (diff[index]?.kind === 'removed') { r++; index++; }
-    while (diff[index]?.kind === 'added') { a++; index++; }
-    if (!r && !a) { index++; continue; }
-    altered += Math.min(r, a); removed += r - Math.min(r, a); added += a - Math.min(r, a);
-  }
-  return { total: added + removed + altered, text: [altered ? `${plural(altered, 'line')} changed` : '', added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ') };
-}
 
 function editor(file: InstructionFile) {
   const edit = state.instructionEdit!;
@@ -109,9 +49,9 @@ function editor(file: InstructionFile) {
     const empties = changed && original.trim() && !edit.text.trim() && !file.base?.copy?.trim();
     return h('div.ins-editor', {},
       h('p.ins-review-title', {}, title),
-      edit.takeOut ? h('p.base-explain', {}, `${names[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
+      edit.takeOut ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
         : edit.wholeFile && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
-      empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${names[file.tool]} will start sessions with no instructions from it.`)) : null,
+      empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${toolNames[file.tool]} will start sessions with no instructions from it.`)) : null,
       edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
       legend(`${name} now`, edit.wholeFile && !edit.takeOut ? 'the earlier version' : 'after saving'),
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
@@ -124,7 +64,7 @@ function editor(file: InstructionFile) {
           : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
-    placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
+    placeholder: `Write what ${toolNames[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
     oninput: (event: Event) => {
       edit.text = (event.target as HTMLTextAreaElement).value; edit.confirmDiscard = false;
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
@@ -140,7 +80,7 @@ function editor(file: InstructionFile) {
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== original) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
-  area.rows = edit.text ? Math.min(30, Math.max(8, edit.text.split('\n').length + 3)) : 6;
+  area.rows = edit.text ? Math.min(30, Math.max(8, lineCount(edit.text) + 3)) : 6;
   if (!original) area.classList.add('ins-text-new');
   const dirty = () => edit.text !== original;
   const actions = edit.confirmDiscard
@@ -152,19 +92,8 @@ function editor(file: InstructionFile) {
       h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
   return h('div.ins-editor', {},
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
-    file.base ? h('p.base-explain', {}, `${names[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
+    file.base ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
     area, actions);
-}
-
-/** Cards whose whole file is shown, for reading without editing. */
-const open = new Set<string>();
-
-/** A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). */
-export function previewBlock(text: string, key: string, label: string, moreId: string) {
-  const lines = linesOf(text);
-  const all = open.has(key);
-  return [h('pre.ins-preview', { tabindex: '0', 'aria-label': label }, (all ? lines : lines.slice(0, 14)).join('\n')),
-    lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
 }
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
@@ -175,11 +104,11 @@ function card(file: InstructionFile) {
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
   const otherDirty = (!!other && toolDraftTyped()) || baseDraftTyped();
-  const readOnly = !!state.home && !state.home.manage.access.allowed;
+  const readOnly = savingOff();
   const lockedWhy = readOnly ? 'Saving is off in this home.' : baseDraftTyped() ? 'Finish or cancel the base instructions edit first.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const own = ownText(file);
-  return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
-    h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
+  return h('article.card.ins-card', { 'aria-label': `${toolNames[file.tool]} instructions` },
+    h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, toolNames[file.tool]), pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
       savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
@@ -189,11 +118,11 @@ function card(file: InstructionFile) {
     editing ? [editor(file), baseStrip(file, lockedWhy)]
       : h('div.ins-body', {},
         file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
-          : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
+          : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${toolNames[file.tool]} reads only the base instructions below.`)
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         baseStrip(file, lockedWhy),
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
+          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockAttrs(lockedWhy), onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
     versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && toolDraftTyped()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));

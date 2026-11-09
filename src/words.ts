@@ -11,6 +11,8 @@ export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** A text's lines, without the empty one after a final line break ('' has one empty line). */
 export const linesOf = (text: string) => text.replace(/\n$/, '').split('\n');
+/** How many lines a text has (0 for none). */
+export const lineCount = (text: string) => (text ? linesOf(text).length : 0);
 
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));

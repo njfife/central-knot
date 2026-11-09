@@ -40,6 +40,9 @@ export interface RecordItem { name: string; hash: string; state: 'shared' | 'don
   displaced?: { tool: HarnessId; hash: string }[] }
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
+/** A text's sha256, in hex. */
+export const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 

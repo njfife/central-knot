@@ -2,18 +2,16 @@
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here empties a file; the only deletion is an Undo removing a file its own base save
 // created, while it still holds what was written. No project or workspace file is read or written.
-import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { baseAction, blockText, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
-import { andList, linesOf, toolNames } from './words.ts';
+import { errorCode, landingOf, plainError, recoverParked, sha, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { baseAction, comparableBase, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
+import { andList, lineCount, linesOf, toolNames } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
 /** Where earlier versions are kept: one folder per tool, and one for the base instructions. */
 type Shelf = HarnessId | 'base';
@@ -22,7 +20,7 @@ const versionsFolder = (home: string, shelf: Shelf) => join(storeDirectory(home)
 const basePath = (home: string) => join(storeDirectory(home), 'instructions', 'base.md');
 const baseListPath = (home: string) => join(storeDirectory(home), 'instructions', 'base-tools.json');
 /** The hash of a base copy as a block holds it, so a copy and the base text it came from compare equal. */
-const copyHash = (copy: string) => sha(blockText(copy));
+const copyHash = (copy: string) => sha(comparableBase(copy));
 /** A file's hash for checks: '' when there is no file. */
 const hashOf = (text: string | undefined) => (text === undefined ? '' : sha(text));
 
@@ -67,9 +65,10 @@ async function shelf(home: string, which: Shelf): Promise<{ id: string; text: st
 /** Each version says what it was: its date, first non-empty line, length and how far it is from `now`. */
 const describe = (kept: { id: string; text: string }[], now: string) => kept.map(({ id, text }) => {
   const lines = linesOf(text);
-  return { id, at: new Date(Number(id.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0, differs: lineDiff(text, now).filter(line => line.kind !== 'same').length };
+  return { id, at: new Date(Number(id.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: lineCount(text), differs: lineDiff(text, now).filter(line => line.kind !== 'same').length };
 });
 
+/** Tool ids to hashes as read from base-tools.json: unknown tools and non-string values dropped. */
 const toolHashes = (value: unknown): Partial<Record<HarnessId, string>> => Object.fromEntries(Object.entries(value ?? {}).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string'));
 async function readBaseList(home: string): Promise<BaseList> {
   try {
@@ -96,10 +95,13 @@ export async function baseView(context: ShareContext): Promise<BaseView> {
 
 /** How a tool's file holds the base: the same, the copy Central Knot last wrote there (an older base), edited there, or not at
  *  all; and whether its whole text is the plain base text left there when the tool was taken off the list. */
-function baseState(text: string, tool: HarnessId, base: StoredBase): BaseHeld {
+function baseState(text: string, readers: HarnessId[], base: StoredBase): BaseHeld {
+  // Records are kept for every reader of a file alike; a file is chosen when any of its readers is on the list.
+  const [tool] = readers;
   const { own, copy } = splitBase(text);
   const state = copy === undefined ? 'missing' : sameBase(copy, base.text) ? 'same' : base.list.written[tool] === copyHash(copy) ? 'older' : 'edited';
-  return { chosen: base.list.tools.includes(tool) && !!base.text.trim(), state, own, copy, leftPlain: copy === undefined && !!text && base.list.leftPlain[tool] === sha(text) };
+  const chosen = readers.some(reader => base.list.tools.includes(reader)) && !!base.text.trim();
+  return { chosen, state, own, copy, leftPlain: copy === undefined && !!text && base.list.leftPlain[tool] === sha(text) };
 }
 
 /** A file's base part when the file is involved with the base: it gets it, holds a block (left by an Undo, or pasted in), or holds
@@ -128,13 +130,13 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
     files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: hashOf(text), readers, notes, nextStep: 'Start a new session to use the change.',
-      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', snapshot.harness, base)), sameFile });
+      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', readersOfFile(snapshot.harness, sameFile), base)), sameFile });
   }
   return files;
 }
 
 /** Saves one tool's file: only if it still holds what was opened, keeping the text it replaces first. `restoring`: an earlier
- *  version put back; when its base copy is a base text Central Knot kept, base-tools.json records it as that tool's copy, so it
+ *  version put back (or a save undone; a take-out passes false); when its base copy is a base text Central Knot kept, base-tools.json records it as that tool's copy, so it
  *  reads as an older base rather than an edit made there. */
 export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string, restoring = false): Promise<InstructionSave> {
   const access = await writeAccess(context);
@@ -146,23 +148,28 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
   if (hashOf(current) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
   if (current === text) return { saved: false };
   try { await keepAndWrite(context.home, tool, path, text, current); }
-  catch { return { stopped: 'The file changed just now, so nothing was saved. Read it again and redo the edit.' }; }
-  // An earlier version put back: a copy that is a base text Central Knot kept counts as one it wrote (an older base); any other
-  // copy was edited by hand back then, and stays protected as an edit.
-  const copy = splitBase(text).copy;
-  if (restoring && copy !== undefined) {
-    const base = await readBase(context.home);
-    if (base.list.tools.includes(tool)) {
-      const wrote = sameBase(copy, base.text) || (await shelf(context.home, 'base')).some(old => sameBase(copy, old.text));
-      const destination = (await destinations(snapshots)).find(entry => entry.snapshot.harness === tool);
-      for (const reader of readersOfFile(tool, destination?.sameFile ?? [])) {
-        if (wrote) base.list.written[reader] = copyHash(copy); else delete base.list.written[reader];
-      }
-      try { await writeBaseList(context.home, base.list); }
-      catch (error) { return { saved: true, problem: `Central Knot could not note that its base copy is an older one (${plainError(error)}), so it may show as edited there.` }; }
-    }
+  catch (error) {
+    return { stopped: changedMeanwhile(error) ? 'The file changed just now, so nothing was saved. Read it again and redo the edit.' : `${basename(path)} could not be saved: ${plainError(error)} Nothing was changed.` };
   }
-  return { saved: true };
+  const copy = splitBase(text).copy;
+  const problem = restoring && copy !== undefined ? await recordRestoredCopy(context, snapshots, tool, copy) : undefined;
+  return { saved: true, problem };
+}
+
+/**
+ * After an earlier version is put back: a base copy in it that is a base text Central Knot kept counts as one it wrote (an older
+ * base); any other copy was edited by hand back then and stays protected as an edit. Returns a problem to say if the record
+ * could not be saved.
+ */
+async function recordRestoredCopy(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, copy: string): Promise<string | undefined> {
+  const base = await readBase(context.home);
+  const destination = (await destinations(snapshots)).find(entry => entry.snapshot.harness === tool);
+  const readers = readersOfFile(tool, destination?.sameFile ?? []);
+  if (!readers.some(reader => base.list.tools.includes(reader))) return undefined;
+  const wrote = sameBase(copy, base.text) || (await shelf(context.home, 'base')).some(old => sameBase(copy, old.text));
+  for (const reader of readers) { if (wrote) base.list.written[reader] = copyHash(copy); else delete base.list.written[reader]; }
+  try { await writeBaseList(context.home, base.list); return undefined; }
+  catch (error) { return `Central Knot could not note that its base copy is an older one (${plainError(error)}), so it may show as edited there.`; }
 }
 
 /** Keeps a file's text as an earlier version on its shelf. */
@@ -191,8 +198,11 @@ async function storeBaseText(home: string, text: string, seen: string | undefine
   return text;
 }
 
+/** A checked write refused because the file changed (or appeared) between being read and being written. */
+const changedMeanwhile = (error: unknown) => ['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error));
+
 /** A base.md write that failed: changed meanwhile (the review is shown again), or could not be written at all. */
-const storeFailure = (error: unknown, changed: BaseResult): BaseResult => (['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error)) ? changed
+const storeFailure = (error: unknown, changed: BaseResult): BaseResult => (changedMeanwhile(error) ? changed
   : { stopped: `The base instructions could not be saved: ${plainError(error)} Nothing was changed.`, written: [], left: [] });
 
 /**
@@ -206,14 +216,14 @@ const storeFailure = (error: unknown, changed: BaseResult): BaseResult => (['CK_
 export async function applyBase(context: ShareContext, snapshots: Snapshot[], request: BaseApply): Promise<BaseResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
-  const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
+  const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved.', changed: true, written: [], left: [] };
   const stored = await readBase(context.home, true);
   if (hashOf(stored.raw) !== request.expected) return baseChanged;
   const bound = await destinations(snapshots);
   // One physical file is chosen when any tool reading it is.
   const chosen = new Set(request.text.trim() ? bound.filter(entry => request.tools.includes(entry.snapshot.harness)).flatMap(entry => readersOfFile(entry.snapshot.harness, entry.sameFile)) : []);
   const files = await reviewedFiles(bound, request.seen);
-  if ('changed' in files) return { stopped: `${basename(files.changed)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
+  if ('changed' in files) return { stopped: `${basename(files.changed)} changed since the review, so nothing was saved.`, changed: true, written: [], left: [] };
   let baseNow: string | undefined;
   try { baseNow = await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailure(error, baseChanged); }
   // A listed tool not found in this home right now (moved, reinstalling) stays on the list; only present tools are re-chosen.
@@ -223,7 +233,8 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   for (const { tool, readers, path, current } of files) {
     const text = current ?? '';
     const isChosen = chosen.has(tool);
-    const planned = fileWithBase(text, request.text, { chosen: isChosen, held: baseState(text, tool, stored), action: baseAction(readers, request) });
+    const held = baseState(text, readers, stored);
+    const planned = fileWithBase(text, request.text, { chosen: isChosen, held, action: baseAction(readers, request) });
     if ('left' in planned) { result.left.push({ tool, why: 'edited' }); continue; }
     const { next } = planned;
     // Nothing to change, and a missing file is never created empty.
@@ -231,10 +242,14 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     if (!unchanged) {
       // A failed write keeps the tool's records, so a retry still knows what Central Knot wrote and left there.
       try { await keepAndWrite(context.home, tool, path, next, current); }
-      catch { result.left.push({ tool, why: 'failed' }); continue; }
+      catch (error) { result.left.push({ tool, why: changedMeanwhile(error) ? 'edited' : 'failed' }); continue; }
       result.written.push({ tool, path, before: current ?? null, afterHash: sha(next) });
     }
-    recordHeld(list, readers, isChosen ? { copy: request.text } : { plain: !unchanged && !splitBase(text).own.trim() ? next : undefined });
+    // Taken off with nothing of its own: the base stays in the file as plain text (never emptied), and that text is remembered.
+    const leftAsPlain = !isChosen && !unchanged && !splitBase(text).own.trim();
+    // Not chosen and untouched while it still holds plain base text left earlier (a re-add that failed): that record stays.
+    if (!isChosen && unchanged && held.leftPlain) continue;
+    recordHeld(list, readers, isChosen ? { copy: request.text } : { plain: leftAsPlain ? next : undefined });
   }
   result.undo!.files = result.written;
   // The files are written either way; a list that could not be saved is said, and Undo still puts the files back.
@@ -267,7 +282,8 @@ function keepRecords(list: BaseList, from: BaseList, readers: HarnessId[]) {
 }
 
 /** Records what Central Knot now has in one physical file, for every tool reading it: the base copy it wrote there, or (taken off
- *  the list with nothing of its own) the plain base text it left, so adding the tool again moves that text back into the block. */
+ *  the list with nothing of its own) the plain base text it left, so adding the tool again moves that text back into the block.
+ *  `{ plain: undefined }`: neither, so both records are cleared. */
 function recordHeld(list: BaseList, readers: HarnessId[], held: { copy: string } | { plain: string | undefined }) {
   for (const reader of readers) {
     delete list.written[reader]; delete list.leftPlain[reader];
@@ -276,18 +292,19 @@ function recordHeld(list: BaseList, readers: HarnessId[], held: { copy: string }
   }
 }
 
-/** Undo of an apply: the base and its list as they were (after the very first save, base.md is left empty, which reads as no base) (only if the base is still as that apply left it), and each file it
- *  wrote back as it was, if not changed since. */
+/**
+ * Undo of an apply. It runs only while the base is still what that apply left. It puts the base and its list back as they were
+ * (after the very first save, base.md stays as an empty file, which reads as no base), and each file the apply wrote, if not
+ * changed since.
+ */
 export async function undoBase(context: ShareContext, snapshots: Snapshot[], undo: BaseUndo): Promise<BaseResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   // The base edited since (in Central Knot or in base.md itself) stays: an Undo never overwrites newer work.
   const baseChanged = { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
-  await recoverParked(dirname(basePath(context.home)));
-  const seenBase = await readText(basePath(context.home));
-  if (hashOf(seenBase) !== undo.baseHash) return baseChanged;
-  try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailure(error, baseChanged); }
-  const now = await readBaseList(context.home);
+  const { raw, list: now } = await readBase(context.home, true);
+  if (hashOf(raw) !== undo.baseHash) return baseChanged;
+  try { await storeBaseText(context.home, undo.text, raw); } catch (error) { return storeFailure(error, baseChanged); }
   const bound = await destinations(snapshots);
   const result: BaseResult = { written: [], left: [] };
   for (const file of undo.files) {
