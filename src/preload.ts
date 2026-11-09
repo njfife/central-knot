@@ -27,6 +27,7 @@ const api: DesktopApi = {
   setAppearance: appearance => ipcRenderer.invoke('settings:appearance', appearance),
   setStartAtSignIn: on => ipcRenderer.invoke('settings:sign-in', on),
   openSignInSettings: () => ipcRenderer.invoke('settings:open-sign-in'),
+  setHistoryDays: days => ipcRenderer.invoke('settings:history-days', days),
   onSettingsChanged: callback => { ipcRenderer.on('settings:changed', () => callback()); },
   showLog: () => ipcRenderer.invoke('settings:show-log'),
   onNavigate: callback => { ipcRenderer.on('navigate', (_event, page) => callback(String(page))); },

@@ -31,7 +31,7 @@ export function icon(name: IconName, size = 16, extraClass = ''): SVGElement {
 export const hiddenText = (text: string) => h('span.hidden-text', {}, text);
 
 interface ButtonOptions {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'link';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'link' | 'danger';
   size?: 'micro' | 'small' | 'default';
   icon?: IconName;
   label?: string;

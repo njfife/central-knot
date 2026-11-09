@@ -585,6 +585,38 @@ async function practiceFlow() {
     same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
       [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
   }
+  // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
+  // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
+  const historyFile = join(practice, '.central-knot/history.json');
+  const DAY = 24 * 60 * 60 * 1000;
+  writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
+    ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
+  const agedIn = events => events.map(event => event.key).filter(key => key.startsWith('aged-'));
+  const agedOnFile = () => agedIn(JSON.parse(readFileSync(historyFile, 'utf8')).events);
+  const agedShown = async () => agedIn(await a.run('window.centralKnot.history()'));
+  const keepFor = async days => { await a.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`); await a.settle(); };
+  same('History is kept for 30 days at first: it shows what that covers, and reading alone removes nothing',
+    [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(90);
+  same('a longer window saves at once, with no question, and History shows what it now covers',
+    [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(7);
+  const question = await a.text('#history-shorten-text') ?? '';
+  same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed',
+    [/^History from before .+ will be removed and can’t be restored\. Other homes apply this the next time they write History\.$/.test(question), await a.text('#history-shorten'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [true, 'Shorten to 7 days', '90', 90]);
+  await a.shot('settings-history-confirm');
+  await a.click('#history-shorten-cancel');
+  same('Cancel writes nothing', [await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  await keepFor(7);
+  await a.click('#history-shorten');
+  for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
+  await a.click('#nav-history');
+  const listed = await a.text('#history-scroll') ?? '';
+  same('Shorten saves, removes the older History from this home’s file, and History shows only what is left',
+    [savedSettings().historyDays, agedOnFile(), listed.includes('aged-5-days'), listed.includes('aged-20-days')], [7, ['aged-5'], true, false]);
+  await a.click('#nav-settings');
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
@@ -694,6 +726,17 @@ async function realHomeFlow() {
     same('main process refuses too', refused.harnessWrites, 0);
     check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
+    // The History window chosen in the practice run survives the restart. Shortening it here, a preview-only home, writes nothing.
+    mkdirSync(join(HOME, '.central-knot'));
+    const previewHistory = join(HOME, '.central-knot/history.json');
+    writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
+    const before = readFileSync(previewHistory, 'utf8');
+    const restarted = (await a.run('window.centralKnot.getSettings()')).historyDays;
+    await a.run(`window.centralKnot.setHistoryDays(30).then(() => window.centralKnot.setHistoryDays(7))`);
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).length], [7, true, 0]);
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();
     return;
   }

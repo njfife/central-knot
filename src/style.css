@@ -94,7 +94,7 @@ ul { list-style: none; }
 
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.btn.primary:focus-visible { outline-color: #ffffff; }
+.btn.primary:focus-visible, .btn.danger:focus-visible { outline-color: #ffffff; }
 
 /* Frame */
 #frame { flex: 1; min-height: 0; display: flex; }
@@ -161,6 +161,9 @@ ul { list-style: none; }
 .btn.square { padding: 0; aspect-ratio: 1; }
 .btn.primary { background: var(--accent); color: #fff; box-shadow: var(--lift); }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+/* Destructive: the strong danger fill in both themes, as the reference gives it, so white text keeps its contrast. */
+.btn.danger { background: #dc2626; color: #fff; box-shadow: var(--lift); }
+.btn.danger:hover:not(:disabled) { background: #b91c1c; }
 .btn.secondary { background: var(--hover); }
 .btn.secondary:hover:not(:disabled) { background: var(--press); }
 .btn.outline { background: var(--surface); border-color: var(--control-line); box-shadow: var(--lift); }
@@ -1351,6 +1354,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }
+/* A select as the reference draws it: 32 tall, control border, panel fill, small lift, 13/500, chevrons at the right. */
+.select { position: relative; display: inline-flex; align-items: center; }
+.select select { appearance: none; height: 32px; min-width: 72px; max-width: 256px; padding: 0 28px 0 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--lift); color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; }
+.select select:hover:not(:disabled) { background: var(--hover); }
+.select select:disabled { opacity: 0.5; cursor: default; }
+.select .icon { position: absolute; right: 8px; color: var(--ink-soft); pointer-events: none; }
+/* A row's question (shortening History): a danger notice across the row, under its text and control, buttons after the words. */
+.setting-confirm { grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
+.setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
+.setting-confirm-text { flex: 1 1 320px; min-width: 0; max-width: 72ch; }
+.setting-confirm-actions { display: flex; gap: 8px; margin-left: auto; }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }

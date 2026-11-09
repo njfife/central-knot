@@ -1,9 +1,9 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
-import { announce, rerender } from './app.ts';
+import { announce, rereadHistory, rerender } from './app.ts';
 import { button, h, icon, toggle, trayName } from './dom.ts';
 import type { IconName } from './icons.ts';
-import type { AppPreferences, Appearance, SignInPlace } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, SignInPlace } from './types.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -23,6 +23,8 @@ const settled = (row: string, message: RowMessage | undefined) => message?.about
 /** Each row's newest action, so one that finishes late never sets or clears the message of a newer one. */
 const attempts = new Map<string, number>();
 let attempted = 0;
+/** A shorter History window waiting for its confirming click; the select keeps showing the saved one until then. */
+let shortening: HistoryDays | undefined;
 
 /** Answers from main can cross (a save, then a re-read on focus): only the newest request's answer is shown. */
 let latest = 0;
@@ -48,6 +50,7 @@ export const loadSettings = () => showNewest(window.centralKnot.getSettings());
 /** Opens the page fresh: what the rows said last time (a failure since put right elsewhere, say) belongs to that visit. */
 export function openSettings() {
   messages.clear();
+  shortening = undefined;
   // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row.
   attempts.clear();
   void loadSettings();
@@ -137,6 +140,42 @@ function moveAppearance(event: KeyboardEvent) {
   void chooseAppearance(next);
 }
 
+const historyChoices: HistoryDays[] = [7, 30, 90];
+
+/** A longer window saves at once. A shorter one removes History for good, so the row asks first. (The select works only once `current` is known.) */
+function chooseHistoryDays(days: HistoryDays) {
+  if (days >= current!.historyDays) { void keepHistoryFor(days); return; }
+  shortening = days;
+  // What the row said last was about an earlier choice; the question replaces it.
+  messages.delete('history');
+  rerender();
+}
+
+/** Saves the window. A shorter one has main take the open home's History down to it, so History is read again after. */
+async function keepHistoryFor(days: HistoryDays) {
+  const kept = current ? `History is still kept for ${current.historyDays} days.` : '';
+  closeShortening();
+  if (await save('history', () => window.centralKnot.setHistoryDays(days), kept)) await rereadHistory();
+}
+
+/** Closes the row's question; the select, where it started, takes the focus back. */
+function closeShortening() {
+  shortening = undefined;
+  rerender();
+  document.getElementById('history-days')?.focus();
+}
+
+/** The row's question before a shorter window removes anything: from when, that it can't be undone, and that other homes follow later. */
+function shortenConfirmation(days: HistoryDays): HTMLElement {
+  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return h('div.notice.notice-danger.setting-confirm', { role: 'group', 'aria-labelledby': 'history-shorten-text' },
+    icon('circle-alert', 16, 'tone-danger'),
+    h('p.setting-confirm-text', { id: 'history-shorten-text', role: 'alert' }, `History from before ${from} will be removed and can’t be restored. Other homes apply this the next time they write History.`),
+    h('div.setting-confirm-actions', {},
+      button({ variant: 'danger', size: 'small', label: `Shorten to ${days} days`, id: 'history-shorten', onclick: () => void keepHistoryFor(days) }),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'history-shorten-cancel', onclick: closeShortening })));
+}
+
 /** Shows the log in the file manager. Where it could only open the folder, the row says so and names the file to look for. */
 const showLog = () => act('log', async () => {
   const shown = await window.centralKnot.showLog();
@@ -162,9 +201,9 @@ function messageLine({ text, tone, action }: RowMessage, { id, announce = true }
 /**
  * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and beneath both, on
  * lines of their own so the control never moves when they come or go: what its last action said, and `notice`, what needs
- * the person about its current state.
+ * the person about its current state, or a question the row is asking.
  */
-function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage): HTMLElement {
+function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage | HTMLElement): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
@@ -172,7 +211,7 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
       h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
     h('div.setting-control', {}, control),
     message && messageLine(message, { id: `setting-${id}-message` }),
-    notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }));
+    notice instanceof HTMLElement ? notice : notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }));
 }
 
 const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
@@ -198,6 +237,15 @@ export function settingsPage(): HTMLElement {
             type: 'button', role: 'radio', id: `appearance-${choice.value}`, 'aria-checked': String(chosen === choice.value),
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
           }, icon(choice.glyph, 20), h('span', {}, choice.label)))))),
+    settingsSection('history', 'History',
+      settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
+        // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one.
+        h('span.select', {},
+          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current,
+            onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays) },
+          historyChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? 30) }, `${days} days`))),
+          icon('chevrons-up-down', 14)),
+        shortening ? shortenConfirmation(shortening) : undefined)),
     settingsSection('help', 'Help',
       settingRow('log', 'Log file', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.',
         button({ variant: 'outline', label: 'Show log file', id: 'show-log', onclick: () => void showLog(), attrs: { 'aria-describedby': 'setting-log-hint' } })))));

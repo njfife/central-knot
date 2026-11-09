@@ -625,7 +625,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
-  const history = await readHistory(context.home);
+  const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');

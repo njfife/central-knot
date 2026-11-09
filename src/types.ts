@@ -81,6 +81,8 @@ export interface DesktopApi {
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
   /** Turns starting at sign-in on or off. Returns the settings as saved, with the system's answer. */
   setStartAtSignIn(on: boolean): Promise<AppPreferences>;
+  /** How long History keeps things. A shorter window also removes what is now older from the open home's History. Returns the settings as saved. */
+  setHistoryDays(days: HistoryDays): Promise<AppPreferences>;
   /** Opens the system's own sign-in settings: Login Items on macOS, Startup apps on Windows. */
   openSignInSettings(): Promise<void>;
   /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
@@ -394,8 +396,10 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
+/** How many days History keeps changes and deleted items. */
+export type HistoryDays = 7 | 30 | 90;
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn }
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
 export interface ShownLog { selected: boolean; logged: boolean }
 

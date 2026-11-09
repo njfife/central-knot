@@ -213,6 +213,9 @@ export const loadHistory = () => busy('Reading History…', async () => {
   announce('');
 });
 
+/** History as main has it now, read without a busy state (Settings changed its window; History reads it fresh again when opened). */
+export const rereadHistory = async () => { state.history = await api().history(); };
+
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;

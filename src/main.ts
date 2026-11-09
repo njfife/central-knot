@@ -9,14 +9,14 @@ import { discover } from './discovery.ts';
 import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
+import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -70,6 +70,7 @@ function context(): ShareContext {
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
+    historyDays: historyDays(),
   };
 }
 
@@ -91,7 +92,7 @@ async function saveSyncSetting(on: boolean) {
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
@@ -126,7 +127,9 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
 const appearances: Appearance[] = ['system', 'light', 'dark'];
 /** The settings as the page shows them; a stored value this version doesn't offer counts as the default. */
 const appearance = (): Appearance => appSettings.appearance && appearances.includes(appSettings.appearance) ? appSettings.appearance : 'system';
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn() });
+const historyChoices: HistoryDays[] = [7, 30, 90];
+const historyDays = (): HistoryDays => appSettings.historyDays && historyChoices.includes(appSettings.historyDays) ? appSettings.historyDays : 30;
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
  * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
@@ -229,9 +232,7 @@ function refreshTray() {
 }
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
-  const next = queue.then(work);
-  queue = next.catch(() => undefined);
-  await next.catch(() => undefined);
+  await queued(work).catch(() => undefined);
   refreshTray();
   if (window && !window.isDestroyed()) window.webContents.send('sync:changed');
 }
@@ -346,7 +347,7 @@ let followUp: NodeJS.Timeout | undefined;
 
 function background() {
   if (!current || smoke) return;
-  const work = queue.then(async () => {
+  void queued(async () => {
     if (!current) return;
     const fromEvent = touched;
     touched = false;
@@ -367,8 +368,7 @@ function background() {
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
     // Nobody saw it: the window is closed, gone or behind other windows (D-36).
     if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
-  });
-  queue = work.catch(() => undefined);
+  }).catch(() => undefined);
 }
 
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
@@ -462,16 +462,15 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 /** Keeps a failed request's error for a problem report; the page says what happened in plain words. */
 const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 
-/** One thing at a time: planning and writing never interleave. */
+/** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
-function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
-  ipcMain.handle(channel, (event, ...args) => {
-    if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    const next = queue.then(() => work(...args));
-    queue = next.catch(error => { logFailure(channel, error); });
-    return next;
-  });
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  const next = queue.then(work);
+  queue = next.catch(() => undefined);
+  return next;
 }
+/** A page request that takes its turn in the queue. */
+const handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => handleNow(channel, (...args) => queued(() => work(...args)));
 
 /**
  * A request that touches nothing a tool reads (a README, a plugin's contents, Central Knot's own settings, even saving them):
@@ -566,6 +565,18 @@ app.whenReady().then(async () => {
     return preferences();
   });
   handleNow('settings:open-sign-in', openSignInSettings);
+  // A longer window only saves. A shorter one takes its turn in the queue, so it never runs beside a sync pass, and takes the
+  // open home's History down to it. History reads the new window either way, so a prune that can't finish is only logged.
+  handleNow('settings:history-days', async value => {
+    if (!historyChoices.includes(value as HistoryDays)) throw new Error('Invalid history days.');
+    const days = value as HistoryDays;
+    if (days >= historyDays()) await saveAppSettings({ historyDays: days });
+    else await queued(async () => {
+      await saveAppSettings({ historyDays: days });
+      if (current) await pruneHistory(context()).catch(error => logFailure('history prune', error));
+    });
+    return preferences();
+  });
   handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
@@ -588,7 +599,7 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
   });
-  handle('history:list', async () => (current ? readHistory(current.home) : []));
+  handle('history:list', async () => (current ? readHistory(context()) : []));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
@@ -603,7 +614,7 @@ app.whenReady().then(async () => {
   handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
-      const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
+      const key = (await readHistory(context())).find(entry => entry.id === eventId)?.key ?? '';
       const tools = (await manageView(context())).tools;
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));

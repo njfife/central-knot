@@ -578,7 +578,7 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
-  const history = await readHistory(context.home);
+  const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedAgent(context, tools, history, past);
   const key = past?.key.replace(/^agent:/, '');
