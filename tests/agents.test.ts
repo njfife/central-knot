@@ -253,3 +253,27 @@ test('Undo of an agent Apply all with nothing edited unmanages it', async () => 
     assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
   } finally { await box.cleanup(); }
 });
+
+test('Convert to skill: an agent becomes a Pi skill once, with its origin recorded; it is never placed back in the agent’s tool', async () => {
+  const box = await sandbox();
+  try {
+    const { convertAgentToSkill } = await import('../src/agents.ts');
+    const { manageView, applyChanges } = await import('../src/manage.ts');
+    const { discover } = await import('../src/discovery.ts');
+    await mkdir(join(box.home, '.pi/agent'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\n', 'model: opus\n'));
+    const withPi: HarnessId[] = ['claude-cli', 'pi-cli'];
+    const context = { ...box.context, read: () => Promise.all(withPi.map(harness => discover({ home: box.home, mode: 'custom', harness }))) };
+    const made = await convertAgentToSkill(context, withPi, 'reviewer');
+    assert.equal(made.stopped, undefined);
+    const skill = await read(box.home, '.pi/agent/skills/reviewer/SKILL.md');
+    assert.match(skill, /^---\nname: "reviewer"\ndescription: "Reviews code"\n---\n\nYou review code\.\n$/);
+    assert.match((await convertAgentToSkill(context, withPi, 'reviewer')).stopped ?? '', /already has a skill/);
+    await applyChanges({ ...context, settleMs: 0 }, [{ key: 'reviewer', managed: true, off: [] }]);
+    const facts = (await manageView(context)).skills.find(item => item.key === 'reviewer')!;
+    assert.match(facts.cannot['claude-cli'] ?? '', /Converted from Claude Code’s agent/);
+    assert.ok(facts.converted?.losses.some(loss => /model/.test(loss)));
+    assert.deepEqual(await readdir(join(box.home, '.claude/skills')).catch(() => []), [], 'nothing reached Claude Code’s skills');
+    assert.equal(await read(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\n', 'model: opus\n'), 'the agent is unchanged');
+  } finally { await box.cleanup(); }
+});

@@ -975,3 +975,4 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ov-cell { position: relative; }
 .cell-confirm-label { position: absolute; left: calc(50% + 22px); top: 50%; transform: translateY(-50%); margin-left: 0; pointer-events: none; }
 .plugin-table .ov-row:not(.ov-head):hover { background: var(--hover); cursor: pointer; }
+.convert-block { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }

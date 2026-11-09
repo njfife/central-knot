@@ -294,6 +294,22 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   announce(result.stopped ?? (restored.length ? text : `Restored in ${plural(restored.length, 'tool')}.`), !result.stopped && !!restored.length);
 });
 
+// ---------- Convert to skill ----------
+
+/** Converts an agent to a Pi skill, then manages that skill for Pi only: never the agent's own tool, and other tools only if chosen later. */
+export const convertAgent = (key: string, name: string) => busy('Converting…', async () => {
+  const home = state.home!;
+  const made = await api().convertAgent(key, home.home);
+  if (made.stopped || !made.skill) { announce(made.stopped ?? 'Nothing was converted.'); return; }
+  const others = home.manage.tools.filter(tool => tool !== 'pi-cli');
+  const applied = await api().apply([{ key: made.skill, managed: true, off: others }], home.manage.gate.state === 'needs-resume', home.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  const from = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' }[made.origin ?? 'claude-cli'];
+  state.outcome = { page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be managed: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent. It syncs to Pi only; turn on other tools for it on the Skills page.` };
+  announce(state.outcome.text, true);
+});
+
 // ---------- Instructions ----------
 
 export const loadInstructions = () => busy('Reading instruction files…', async () => {

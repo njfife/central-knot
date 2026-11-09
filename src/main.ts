@@ -10,7 +10,7 @@ import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp } from './mcp.ts';
-import { agentTools, agentsView, applyAgents, restoreAgent } from './agents.ts';
+import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import { trayIconPng } from './trayicon.ts';
@@ -556,6 +556,9 @@ app.whenReady().then(async () => {
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
+  handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
+    ? convertAgentToSkill(context(), presentTools(await read()), key)
+    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool as HarnessId, text, expected)

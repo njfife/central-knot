@@ -72,7 +72,29 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
     }
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
   }
+  // A skill converted from an agent never goes back to the agent's own tool on its own (AGT-03): only an explicit request could.
+  const converted = await readConverted(context.home);
+  for (const [key, entry] of map) {
+    const from = Object.hasOwn(converted, key) ? converted[key] : undefined;
+    if (!from || entry.facts.copies[from.origin]) continue;
+    entry.facts.converted = { agent: from.agent, origin: from.origin, losses: from.losses };
+    entry.facts.cannot[from.origin] = `Converted from ${harnesses[from.origin].name}’s agent “${from.agent}”, so it is not placed back there; ${harnesses[from.origin].name} keeps the agent.`;
+  }
   return map;
+}
+
+/** Skills made by Convert to skill (AGT-02), with where they came from: kept beside the sync record. */
+export interface ConvertedFrom { agent: string; origin: HarnessId; at: string; losses: string[] }
+const convertedPath = (home: string) => join(storeDirectory(home), 'converted.json');
+export async function readConverted(home: string): Promise<Record<string, ConvertedFrom>> {
+  // A null-prototype map: a skill named “constructor” or “__proto__” is a key like any other, never a built-in.
+  try { return Object.assign(Object.create(null), JSON.parse(await readFile(convertedPath(home), 'utf8'))); } catch { return Object.create(null); }
+}
+export async function recordConverted(home: string, key: string, from: ConvertedFrom) {
+  const all = await readConverted(home);
+  all[key] = from;
+  await mkdir(storeDirectory(home), { recursive: true });
+  await writeDurably(convertedPath(home), `${JSON.stringify(all, null, 2)}\n`);
 }
 
 /** The skill as found at a tool's main copy. */

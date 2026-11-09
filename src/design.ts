@@ -12,6 +12,8 @@ export const tools: Tool[] = threeTools ? ['claude-cli', 'copilot-cli', 'codex-c
 /** A copy's content id per tool (same id = same bytes), or absent. */
 export interface SampleSkill {
   key: string;
+  /** Made by Convert to skill from an agent. */
+  converted?: { agent: string; origin: string; losses: string[] };
   /** Shown name, with its case. */
   name?: string;
   /** Other copies a tool also reads, for the details. */

@@ -10,8 +10,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
-import { harnesses } from './harnesses.ts';
-import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import { mkdir } from 'node:fs/promises';
+import { harnesses, writeRoot } from './harnesses.ts';
+import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
@@ -532,6 +533,35 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
   past.undoneBy = randomUUID();
   await replaceHistory(context, history);
   return { results, writes };
+}
+
+/** What an agent has that a skill never does (AGT-02): said on the converted skill, never "agent installed". */
+export const conversionLosses = ['its own isolated context', 'tool restrictions', 'model selection', 'being picked as an agent (it is invoked as a skill)'];
+
+/**
+ * Convert to skill (AGT-02): a one-time snapshot of an agent as an ordinary skill, for Pi, which has no native agents. It is written
+ * to Pi's own skills folder (no root the agent's tool reads, AGT-03) and its origin is recorded, so it is never placed back in that
+ * tool automatically. Skill edits never write to any agent. The caller then manages it like any skill.
+ */
+export async function convertAgentToSkill(context: ShareContext, tools: HarnessId[], key: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason };
+  if (!tools.includes('pi-cli')) return { stopped: 'Pi is not in this home, so there is nowhere to convert to.' };
+  const slot = (await gatherAgents(context, tools.filter(tool => agentTools.includes(tool)))).byKey.get(key);
+  // The agent's own tool, where every field lives: Claude Code first, as the fullest format.
+  const origin = (['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[]).find(tool => slot?.[tool]);
+  const entry = origin ? slot![origin]! : undefined;
+  if (!entry || !origin) return { stopped: 'That agent is not there any more.' };
+  if (!entry.agent.description.trim()) return { stopped: `Pi skips a skill with no description, and “${entry.name}” has none. Add one to the agent first.` };
+  if (!safeName(entry.name)) return { stopped: 'This agent’s name can’t be a folder name.' };
+  const folder = join(writeRoot(harnesses['pi-cli'], context.home, context.overrides?.['pi-cli']), entry.name);
+  try { await stat(folder); return { stopped: `Pi already has a skill named “${entry.name}”. Nothing was written.` }; } catch { /* free */ }
+  if ((await readConverted(context.home))[entry.name.toLowerCase()]) return { stopped: `“${entry.name}” was converted before.` };
+  const text = `---\nname: ${JSON.stringify(entry.name)}\ndescription: ${JSON.stringify(entry.agent.description)}\n---\n\n${entry.agent.prompt.replace(/^\s+/, '')}${entry.agent.prompt.endsWith('\n') ? '' : '\n'}`;
+  await mkdir(folder, { recursive: true });
+  await writeFileChecked(join(folder, 'SKILL.md'), text, undefined);
+  await recordConverted(context.home, entry.name.toLowerCase(), { agent: entry.name, origin, at: new Date().toISOString(), losses: [...conversionLosses, ...Object.keys(entry.agent.fields).map(field => `“${field}”`)] });
+  return { skill: entry.name.toLowerCase(), origin };
 }
 
 /** Undo or Restore of an agent event: each tool gets back its own kept file where one was kept; stopped one-way copies are left alone. */

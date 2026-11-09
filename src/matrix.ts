@@ -1,7 +1,7 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
-import { flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
@@ -16,7 +16,7 @@ const ago = (iso: string) => {
 
 /** The real home's facts in the shape the page works with. */
 const fromFacts = (facts: SkillFacts): SampleSkill => ({
-  key: facts.key, name: facts.name, description: facts.description, limits: facts.limits, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
+  key: facts.key, name: facts.name, description: facts.description, converted: facts.converted, limits: facts.limits, stopped: facts.stopped, managed: facts.managed, off: facts.off, cannot: facts.cannot, held: facts.held, separate: facts.separate, edited: facts.edited,
   blocks: facts.choiceBlocks, hashes: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.hash])),
   // A tool reading two different copies has copies that differ, even if one of them matches the other tool.
   copies: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, facts.extra.some(extra => extra.tool === tool && extra.hash !== copy!.hash) ? `mixed:${tool}` : copy!.hash])),
@@ -319,6 +319,16 @@ function deleteAction(skill: SampleSkill) {
     : smallAction('Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger');
 }
 
+/** Pi has no native agents (CD §5): an agent can reach it only as a skill, by an explicit, one-time Convert to skill (AGT-02). */
+function convertBlock(skill: SampleSkill) {
+  if (designMode || !state.home?.manage.tools.includes('pi-cli')) return null;
+  const done = state.home.manage.skills.find(entry => entry.converted?.agent.toLowerCase() === skill.key.toLowerCase());
+  if (done) return h('p.details-limits.details-note', {}, icon('check', 12, 'tone-muted'), `Converted to a Pi skill, “${done.name}”: see it on the Skills page.`);
+  return h('div.convert-block', {},
+    h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Pi has no agents. You can convert this one to a skill for Pi: a one-time copy of its name, description and prompt. A skill has no ${andList(['own isolated context', 'tool restrictions', 'model selection'])}, and it is invoked as a skill, not picked as an agent. The agent stays as it is.`),
+    smallAction('Convert to a Pi skill', `convert-${skill.key}`, () => void convertAgent(skill.key, skill.name ?? skill.key)));
+}
+
 /** Tool rows, with tools that say exactly the same thing (an agent's receiving copies) folded into one row naming them all. */
 function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
   if (kind !== 'agents') return toolList().map(toolRow);
@@ -395,6 +405,8 @@ function details(skill: SampleSkill, closable = true) {
       ? (!closable ? h('div.details-where-row', {}, wherePaths(skill), deleteAction(skill)) : wherePaths(skill))
       : differs && !draft ? wherePaths(skill) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), wherePaths(skill)],
     kind === 'agents' ? oneWayNote(skill) : null,
+    kind === 'agents' ? convertBlock(skill) : null,
+    kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
     // Only skills have foot actions (Files, Delete everywhere); other kinds end at the last line, with no empty foot.
     kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
       h('span.compare-foot-start', {},

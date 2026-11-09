@@ -77,6 +77,8 @@ export interface DesktopApi {
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
   instructions(): Promise<InstructionFile[] | null>;
+  /** Convert to skill (AGT-02): an agent as a Pi skill. */
+  convertAgent(key: string, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;
@@ -108,6 +110,8 @@ export interface ToolCopy {
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */
 export interface SkillFacts {
+  /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
+  converted?: { agent: string; origin: HarnessId; losses: string[] };
   key: string;
   name: string;
   description: string;
