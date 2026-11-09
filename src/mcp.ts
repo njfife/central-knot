@@ -389,7 +389,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     for (const copy of missing) missingSince[copy.tool] ??= now;
     for (const tool of Object.keys(missingSince) as HarnessId[]) if (!missing.some(copy => copy.tool === tool)) delete missingSince[tool];
     // With Sync off, Apply all writes only what it shows: this server's own pending edit or deletion waits for Sync (SYN-03).
-    if (options.only && !chosenNow.has(name) && (edited.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for Sync. Turn Sync on or use Sync now.` }); continue; }
+    if (options.only && !chosenNow.has(name) && (edited.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); continue; }
     let raced: HarnessId[] | undefined;
     if (missing.length) {
       if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }

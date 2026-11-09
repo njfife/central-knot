@@ -93,7 +93,7 @@ export function overviewPage() {
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on and waiting: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.' : 'Automatic sync is on: an edit in one tool spreads to the others within seconds, with a notice and Undo.']
-            : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
+            : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing this window leaves Central Knot running in the background; once something is managed, it keeps syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all adds or replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
@@ -243,5 +243,6 @@ export function toolsPage() {
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so no app is checked here. Open ' : 'This is a folder, not this computer: no app is checked here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    home.snapshots.map(snapshot => toolCard(snapshot, home))));
+    // A sample folder lists only the tools it has; this computer's home also lists tools that were not found, with how to fix that.
+    home.snapshots.filter(snapshot => home.mode === 'actual' || snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => toolCard(snapshot, home))));
 }

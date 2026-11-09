@@ -1277,7 +1277,7 @@ test('R10: with Sync off, Apply all does not carry a pending deletion along', as
     await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
     await applyChanges(three(box), [], false, { observeOnly: true });
     const result = await applyChanges(three(box), [manage('foo', ['codex-cli'])], false, { only: new Set(['foo']) });
-    assert.match(result.results.map(entry => entry.message).join(' '), /waiting for Sync/);
+    assert.match(result.results.map(entry => entry.message).join(' '), /waiting for sync/);
     assert.equal(await exists(join(box.home, COPILOT, 'foo/SKILL.md')), true);
   } finally { await box.cleanup(); }
 });
@@ -1527,5 +1527,44 @@ test('Pi: a managed skill reaches Pi’s own skills folder; one Pi would not loa
     assert.ok(result.results.every(entry => !(entry.item === 'bare' && entry.outcome === 'written')));
     const bare = (await manageView(piCtx)).skills.find(item => item.key === 'bare')!;
     assert.match(bare.cannot['pi-cli'] ?? '', /Pi will not load it: it has no description text/);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo right after a copy choice puts the replaced copy back in its own tool only, removes added copies and unmanages', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.codex'), { recursive: true });
+    await skill(box.home, CLAUDE, 'foo', text('foo', 'CLAUDE VERSION'));
+    await skill(box.home, COPILOT, 'foo', text('foo', 'COPILOT VERSION'));
+    await applyChanges(three(box), [{ key: 'foo', managed: true, off: [], use: 'claude-cli' }]);
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'));
+    assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true, 'the choice added a Codex copy');
+    const chosen = (await readHistory(box.home)).find(entry => entry.kind === 'chosen')!;
+    const undone = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    assert.equal(undone.stopped, undefined, undone.stopped ?? '');
+    assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'), 'the chosen tool keeps its copy');
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'COPILOT VERSION'), 'the replaced copy is back');
+    assert.equal(await exists(join(box.home, CODEX, 'foo')), false, 'the added copy is gone');
+    const view = (await manageView(three(box))).skills.find(item => item.key === 'foo')!;
+    assert.equal(view.managed, false);
+    // A later pass leaves the differing copies alone.
+    await applyChanges(three(box), []);
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'COPILOT VERSION'));
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of a copy choice writes nothing when a copy changed since', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.codex'), { recursive: true });
+    await skill(box.home, CLAUDE, 'foo', text('foo', 'CLAUDE VERSION'));
+    await skill(box.home, COPILOT, 'foo', text('foo', 'COPILOT VERSION'));
+    await applyChanges(three(box), [{ key: 'foo', managed: true, off: [], use: 'claude-cli' }]);
+    await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'EDITED IN CODEX'));
+    const chosen = (await readHistory(box.home)).find(entry => entry.kind === 'chosen')!;
+    const undone = await restoreFromHistory(three(box), chosen.id, false, 'narrow');
+    assert.ok(undone.stopped, 'stopped');
+    assert.equal(await readFile(join(box.home, COPILOT, 'foo/SKILL.md'), 'utf8'), text('foo', 'CLAUDE VERSION'), 'nothing was written');
+    assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'EDITED IN CODEX'));
   } finally { await box.cleanup(); }
 });

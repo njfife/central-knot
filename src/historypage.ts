@@ -1,5 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
-import { restoreEvent, showPage, state } from './app.ts';
+import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { outcomeBand } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -9,7 +9,7 @@ const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cl
 const who = (tool?: string) => (tool ? names[tool] ?? tool : 'Central Knot');
 const list = (tools: string[]) => {
   const all = [...new Set(tools)].map(who);
-  if (all.length > 2 && all.length >= (state.home?.snapshots.length ?? 3)) return `all ${all.length} tools`;
+  if (all.length > 2 && all.length >= presentCount()) return `all ${all.length} tools`;
   return all.length > 2 ? `${all.slice(0, -1).join(', ')} and ${all.at(-1)}` : all.join(' and ');
 };
 
@@ -71,7 +71,7 @@ function actions(event: HistoryEvent, action?: string) {
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
-  const scope = !touched.length || touched.length >= (state.home?.snapshots.length ?? 3) ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
+  const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
   const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
