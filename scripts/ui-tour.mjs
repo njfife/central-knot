@@ -204,6 +204,14 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+  // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
+  await a.size(1240, 800);
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
+  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await a.size(1280, 800);
+  await a.click('#ins-edit-copilot-cli');
   // A draft whose tool leaves the home: kept, and offered to copy or discard.
   await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   renameSync(join(practice, '.copilot'), join(practice, '.copilot-away'));
@@ -318,7 +326,23 @@ if (wanted('sizes')) {
   }
   await a.theme('light');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
-  await a.theme('dark'); await a.size(1280, 800);
+  await a.theme('dark');
+  // A marketplace with a long name and long facts, with a change waiting, at the smallest window.
+  await a.size(860, 560);
+  await ensureMarket();
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace'); await waitFor(a, `document.querySelectorAll('.market-item').length > 1`, 30000);
+  const box = await a.run(`document.querySelector('.plugin-row .cell-button:not([disabled])')?.id ?? ''`);
+  if (box) await a.click(`#${box}`);
+  await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, and chose one install, at 860×560.');
+  await a.size(1280, 800); await shot(a, '1280-long-marketplace', 'The same at 1280×800: the facts that don\'t fit beside the name drop whole.');
+  if (await a.has('#plugins-discard')) await a.click('#plugins-discard');
+  await a.click('#market-tab-about'); await shot(a, '1280-long-marketplace-about', 'Its About tab: every fact, where it comes from, and Remove.');
+  if (await a.has('[id^="forget-"]')) await a.click('[id^="forget-"]');
+  await a.size(1280, 800);
 }
 
 // ---------- A home with only some tools ----------
@@ -362,10 +386,19 @@ if (wanted('missing')) {
   await wait(500);
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
-  await a.click('#nav-plugins'); await waitFor(a, `!!document.querySelector('.empty')`);
-  await shot(a, 'pi-only-plugins', 'A folder whose only tool is Pi: Plugins says no tool here can install plugins.');
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
   await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
-  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'The same folder\'s Overview: the sidebar dims Agents and Plugins, which Pi can\'t hold; they still open.');
+  // A folder with no tools at all: every page stays, each saying so.
+  const empty = join(scratch, 'no-tools');
+  mkdirSync(empty, { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
+  a = await launch();
+  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: every page stays in the sidebar, and the Overview says no tools were found.');
+  await a.size(860, 560); await shot(a, 'no-tools-860-overview', 'The same at 860×560.');
+  await a.click('#nav-skills'); await shot(a, 'no-tools-860-skills', 'Its Skills page at 860×560.');
+  await a.size(1280, 800);
 }
 
 a.quit();

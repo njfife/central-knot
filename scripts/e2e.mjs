@@ -96,9 +96,9 @@ function seedHome() {
 
 // ---------- App ----------
 let app;
-async function launch(userData = join(scratch, 'data'), extra = []) {
+async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
   const port = 9400 + randomInt(500);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME: home, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
@@ -544,6 +544,17 @@ async function practiceFlow() {
   check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
   await fullSize(a);
   await a.press('Escape');
+  // A scrolled table keeps its place when the window crosses the dock's breakpoint (a redraw), both ways.
+  const tableTop = () => a.run(`document.querySelector('#table-skills')?.scrollTop ?? -1`);
+  await sizeTo(a, 1280, 560);
+  // Partway down, so the same position exists however tall the table's area is at either width.
+  await a.run(`(() => { const table = document.querySelector('#table-skills'); table.scrollTop = Math.min(100, table.scrollHeight - table.clientHeight); })()`);
+  const scrolled = await tableTop();
+  await sizeTo(a, 2560, 560);
+  const docked = await tableTop();
+  await sizeTo(a, 1280, 560);
+  check('a scrolled table keeps its place across the dock breakpoint, both ways', scrolled > 0 && docked === scrolled && await tableTop() === scrolled, { scrolled, docked, back: await tableTop() });
+  await fullSize(a);
   for (let n = 1; n <= 6; n++) rmSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true, force: true });
   await a.click('#header-refresh');
   // A large display docks an open row's details beside the table, and nothing on it is cut off; laptop full screen docks too.
@@ -725,7 +736,7 @@ async function practiceFlow() {
   await a.click('#sidebar-toggle'); await fullSize(a);
   await a.click('#pinstall-0-document-tools');
   same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
-  check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  check('the change bar counts what will run', /1 change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   await fitsAtMinimum(a, 'a plugin page with changes waiting for Apply all');
   await a.click('#plugin-back');
   await fitsAtMinimum(a, 'the plugin table with its tool labels and changes waiting');
@@ -740,8 +751,27 @@ async function practiceFlow() {
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#plugin-back');
+  // About has every fact about the marketplace, and Remove.
+  await a.click('#market-tab-about');
+  check('About names who made the marketplace and where it comes from', /By Platform team[\s\S]*market/.test(await a.text('.market-about-head') ?? ''), await a.text('.market-about-head'));
   await a.click('#forget-0');
   check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  // A marketplace with a long name and long facts, with a change waiting: nothing is cut off at the smallest window, and
+  // where the facts don't fit beside the name they drop whole rather than being cut mid-word.
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await a.click('#pcell-0-document-tools-claude-cli');
+  await fitsAtMinimum(a, 'a long-named marketplace with a change waiting');
+  await sizeTo(a, 1280, 800);
+  const factsWhole = `(() => { const line = document.querySelector('.market-title-line'); if (!line) return 'no title line'; const box = line.getBoundingClientRect();
+    return [...line.querySelectorAll('.market-fact')].every(fact => { const at = fact.getBoundingClientRect(); return at.top >= box.bottom - 1 || (at.right <= box.right + 1 && at.bottom <= box.bottom + 1); }); })()`;
+  same('the long marketplace’s facts show whole or not at all', await a.run(factsWhole), true);
+  await fullSize(a);
+  await a.click('#plugins-discard');
+  await a.click('#market-tab-about');
+  await a.click('#forget-0');
   // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
@@ -765,6 +795,18 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // A card's edit, review and discard-confirm rows wrap by its width: nothing spills out around the cards' column breakpoints.
+  await a.click('#ins-edit-copilot-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const insFits = async state => { for (const width of [1180, 1240, 1320]) { await sizeTo(a, width, 800); same(`nothing cut off in Instructions (${state}) at ${width}×800`, await a.run(CUT_OFF), []); } };
+  await insFits('editing');
+  await a.click('#ins-review-copilot-cli');
+  await insFits('review');
+  await a.click('#ins-review-discard-copilot-cli');
+  await insFits('discard confirmation');
+  await a.shot('instructions-discard-confirm');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await fullSize(a);
   // A draft whose tool leaves the home is kept, offered to copy or discard, and never silently replaced by another edit.
   await a.click('#ins-edit-codex-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value = area.value + 'Codex draft.'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -830,6 +872,31 @@ async function releasedStartupFlow() {
   await a.quit();
 }
 
+/**
+ * A home with no tools, then with Pi alone, then with Claude Code too. With no tools every page stays, each saying so; a
+ * kind no tool here can hold (agents, plugins with Pi alone) is left out of the sidebar and the Overview, named once; a
+ * tool that holds it brings it back.
+ */
+async function fewToolsFlow() {
+  const home = join(scratch, 'home-few');
+  mkdirSync(home, { recursive: true });
+  const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
+  const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  same('a home with no tools keeps every page', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  check('its Overview says no tools were found', (await a.text('.overview-lead') ?? '').includes('No tools were found in this home'), await a.text('.overview-lead'));
+  await fitsAtMinimum(a, 'a home with no tools');
+  mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
+  writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
+  await a.click('#header-refresh');
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']);
+  check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  await a.click('#header-refresh');
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  same('no page errors, few tools', a.pageErrors, []);
+  await a.quit();
+}
+
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
@@ -855,7 +922,7 @@ async function realHomeFlow() {
   await a.click('#manage-all');
   await fitsAtMinimum(a, 'Skills with changes waiting for Apply all');
   await sizeTo(a, 860, 560);
-  check('the pending count stays, shortened, at the smallest window', await a.run(`(() => { const short = document.querySelector('.toolbar .count-short'); return !!short && short.getBoundingClientRect().width > 0 && short.parentElement.title.includes('to change'); })()`));
+  check('the pending count stays at the smallest window, its full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.toolbar .apply-count'); return !!count && count.getBoundingClientRect().width > 0 && /\\d+ changes?/.test(count.title); })()`));
   await fullSize(a);
   await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
@@ -984,6 +1051,7 @@ try {
   seedHome();
   await practiceFlow();
   await releasedStartupFlow();
+  await fewToolsFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
   execChmod();

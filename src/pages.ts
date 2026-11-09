@@ -1,9 +1,9 @@
-import { announce, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, trayPlace, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, isPresent, takesPlugins } from './presence.ts';
+import { absentTools, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 import { andList, orList } from './words.ts';
 
@@ -44,7 +44,7 @@ function leadSentence(tools: HarnessId[], agentTools: HarnessId[]) {
   const named = andList(tools.map(toolName));
   if (tools.length < 2) return `Central Knot keeps the skills, MCP servers and agents you choose the same between your tools. ${tools.length ? `Only ${named} is in this home, so there is nothing to keep in step yet.` : 'No tools were found in this home.'}`;
   const without = tools.filter(tool => !agentTools.includes(tool)).map(toolName);
-  return without.length ? `Central Knot keeps the skills and MCP servers you choose the same in ${named}, and the agents in all of them but ${andList(without)}.` : `Central Knot keeps the skills, MCP servers and agents you choose the same in ${named}.`;
+  return without.length ? `Central Knot keeps the skills and MCP servers you choose the same in ${named}; agents in all but ${andList(without)}.` : `Central Knot keeps the skills, MCP servers and agents you choose the same in ${named}.`;
 }
 
 /** Shown before any home has been read, or when reading failed. */
@@ -68,33 +68,33 @@ function practiceBanner() {
 }
 
 /** One card per kind: how many, how many are managed, and the one thing that needs attention, if any. */
+interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown> }
+
 /**
- * One kind on the Overview: how many there are and how many are managed, and what needs attention. `holders` are the
- * tools here that can hold this kind; with none, the card says so, quieter and with no arrow, and still opens its page.
+ * One kind on the Overview: how many there are and how many are managed, then a row with each tool here that holds this
+ * kind and its count, and what needs attention, in short words ("1 differs"). The entries wrap whole, never mid-entry.
+ * The card opens the kind's page; "differs" is its own link, to the page narrowed to those.
  */
-function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Parameters<typeof icon>[0], noun: [string, string], facts: { managed: boolean; edited?: unknown[]; waits?: boolean; differs: boolean }[], holders: HarnessId[], waitsForClaude = 0) {
-  if (!holders.length) {
-    return h('div.kind-card.kind-card-none', {}, h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
-      h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title)),
-      h('span.kind-card-count', {}, `${title} unavailable in this home: no tool here holds them`)));
-  }
+function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Parameters<typeof icon>[0], noun: [string, string], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
   const total = facts.length;
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
-  const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'has' : 'have'} different copies` }
-    : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} ${edits === 1 ? 'change' : 'changes'} waiting` }
-      : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Claude Code` }
-        : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All managed ones in sync' }
+  const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'differs' : 'differ'}`, title: `${differs} ${differs === 1 ? 'has' : 'have'} different copies. Show only these.` }
+    : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} waiting`, title: `${plural(edits, 'change')} waiting to sync` }
+      : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} for Claude Code`, title: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Write to Claude Code` }
+        : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every managed one is the same in every tool it syncs to' }
           : undefined;
-  // The card opens the whole page; a "different copies" line is its own link, to the page narrowed to them.
+  const tools = holders.map(tool => h('span.kind-tool', { title: `${toolName(tool)} has ${plural(facts.filter(fact => fact.copies[tool] !== undefined).length, noun[0], noun[1])}` },
+    brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(facts.filter(fact => fact.copies[tool] !== undefined).length))));
+  const state = !attention ? null : differs
+    ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
+    : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
   return h('div.kind-card', {},
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint')),
       h('span.kind-card-count', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`)),
-    !attention ? null : differs
-      ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: 'Show only these', onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text, icon('arrow-right', 12))
-      : h(`span.kind-card-state.${attention.tone}`, {}, icon(attention.glyph, 13), attention.text));
+    total ? h('div.kind-card-tools', {}, tools, state) : null);
 }
 
 /**
@@ -112,7 +112,10 @@ export function overviewPage() {
   const home = state.home;
   if (!home) return notRead();
   const differs = (fact: { managed: boolean; copies: Record<string, unknown>; separate?: boolean; off: string[] }) => !fact.separate && new Set(Object.entries(fact.copies).filter(([tool]) => !fact.off.includes(tool)).map(([, copy]) => (copy as { hash: string }).hash)).size > 1;
-  const pick = (list: typeof home.manage.skills) => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact) }));
+  const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
+  // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
+  const absent = absentKinds();
+  const absentNames = absent.map(kind => (kind === 'mcp' ? 'MCP servers' : kind));
   const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...(home.agents?.servers ?? [])].some(fact => fact.managed);
   const done = outcomeBand();
   return h('div.page', {},
@@ -124,20 +127,21 @@ export function overviewPage() {
         nextStep(home, nothingManaged)),
       h('div.kind-cards', {},
         kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills), homeTools()),
-        kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
-        kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []), home.agents.tools)),
+        absent.includes('mcp') ? null : kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
+        absent.includes('agents') ? null : kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []), home.agents.tools)),
       h('div.overview-more', {},
+        absent.length ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absentNames)}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is managed, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in the ${navigator.userAgent.includes('Mac') ? 'menu bar' : 'tray'}. Turn sync off${navigator.userAgent.includes('Linux') ? '' : ', set it to start at sign-in,'} or quit from there.`),
+        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in ${trayPlace}. Turn sync off${navigator.userAgent.includes('Linux') ? '' : ', set it to start at sign-in,'} or quit from there.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are.
         // Plugins only where a tool here installs them.
         h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
-          ...(homeTools().some(takesPlugins) ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
+          ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
 }
 
 // ---------- MCP servers ----------

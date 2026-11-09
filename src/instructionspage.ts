@@ -143,7 +143,7 @@ function card(file: InstructionFile) {
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
+          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || editing, attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
             const open = state.instructionEdit;
             // Typed since the page was drawn: ask on that editor rather than drop the draft.
             if (open && draftUnsaved() && draftFile()) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }

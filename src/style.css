@@ -163,8 +163,6 @@ ul { list-style: none; }
 .nav-count { font-size: 11px; line-height: 14px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .nav-count:empty, .nav-count-zero { opacity: 0.45; }
 /* A page for a kind no tool here can hold: still there, quieter. */
-.nav-dim:not([aria-current]) { color: var(--ink-faint); }
-.nav-dim:not([aria-current]) .icon { opacity: 0.6; }
 .nav-unseen { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 6px; flex: none; }
 .nav-divider { height: 1px; margin: 6px 8px; background: var(--line); flex: none; }
 #homes { flex: none; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
@@ -211,7 +209,8 @@ ul { list-style: none; }
 .sync-switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .sync-track { position: relative; width: 26px; height: 14px; border-radius: 999px; background: var(--switch-off); flex: none; transition: background 140ms var(--ease); }
 .sync-track.on { background: var(--switch-on); }
-.sync-track.on.idle { background: var(--ink-faint); }
+/* On, with nothing managed yet: the On colour, muted, so it still reads as on; the tooltip says it waits for something to sync. */
+.sync-track.on.idle { background: color-mix(in oklab, var(--switch-on) 45%, var(--switch-off)); }
 .sync-knob { position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; transition: transform 140ms var(--ease); }
 .sync-track.on .sync-knob { transform: translateX(12px); }
 .sync-state { font-weight: 600; }
@@ -464,6 +463,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .legend-lead { font-size: 12px; color: var(--ink-soft); }
 /* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
 .legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
+.legend-first { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
 .legend-plain { border: 1px solid var(--control-line); border-radius: 5px; background: transparent; }
 .legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); background: var(--accent); }
 .legend-switch > .switch-knob { top: 1px; left: auto; right: 1px; width: 8px; height: 8px; box-shadow: none; }
@@ -546,6 +546,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-definition dt { color: var(--ink-faint); }
 .details-definition dd { color: var(--ink); overflow-wrap: anywhere; }
 .details-definition-hint { grid-column: 1 / -1; margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
+/* Prose in the details keeps a reading measure; the details themselves and their file rows span the width. */
+.details-definition-hint, .details-status, .details-limits, .details-note { max-width: var(--measure); }
 .details-tools { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .details-tool { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .details-tool:last-child { border-bottom: 0; }
@@ -598,7 +600,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
 .split { --list-row: 37px; flex-direction: row; }
-.list-column { width: 300px; min-width: 260px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+/* The list grows with the window, so a wide one gives it room for long names; the content beside it keeps a reading measure. */
+.list-column { width: clamp(300px, 22%, 480px); min-width: 260px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .list-toolbar .find { flex: 1 1 auto; }
 .list-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--ink-soft); }
 .list-head > span:first-child { flex: 1; }
@@ -625,6 +628,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll > * { flex: none; min-width: 0; max-width: 100%; }
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
+.detail-scroll pre.content { max-width: 100ch; }
 /* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
@@ -667,19 +671,20 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .intro #intro-dismiss { margin-left: auto; }
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 .kind-cards { display: flex; flex-wrap: wrap; gap: 12px; }
-/* The kind cards share a row from the left, each at most 420px, so a wide window places them rather than stretching them. */
-.kind-cards > .kind-card { flex: 1 1 0; min-width: 180px; max-width: 420px; }
-.kind-card-none { border-style: dashed; }
-.kind-card-none .kind-card-head, .kind-card-none .kind-card-count { color: var(--ink-faint); }
-.kind-card { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
+/* The kind cards share the content width as flexible tracks; each fills its width with a row of its tools. */
+.kind-cards > .kind-card { flex: 1 1 0; min-width: 200px; }
+.kind-card { display: flex; flex-direction: column; align-items: stretch; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
 .kind-card-main { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 14px 16px 6px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .kind-card-main:hover, .kind-card-main:focus-visible { background: var(--selected-row); }
-.kind-card-head { display: flex; align-items: center; gap: 8px; width: 100%; font-size: 14px; }
-.kind-card-head .tone-faint { margin-left: auto; }
+/* The arrow sits right after the kind's name, never floating away from it. */
+.kind-card-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .kind-card-count { font-size: 12.5px; color: var(--ink-soft); }
-.kind-card-state { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
-.kind-card > .kind-card-state { padding: 4px 16px 14px; }
-.kind-card-link { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; width: 100%; }
+/* Each tool that holds the kind, with its count, then what needs attention: entries wrap whole. */
+.kind-card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 6px 16px 14px; font-size: 12.5px; color: var(--ink-soft); }
+.kind-tool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.kind-tool-count { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; }
+.kind-card-link { padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
 .overview-more { display: flex; flex-direction: column; gap: 8px; }
 /* An icon, then a sentence that wraps under itself rather than under the icon. */
@@ -692,12 +697,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cards-scroll > * { flex: none; }
 /*
  * Cards in equal columns, each row's cards matching its height. The columns come from the width and the count (dom.ts
- * cardGrid): two from 960px, three cards three across from 1300px, four 2×2 and then four across from 2400px. An odd last
- * card keeps one column's width at the left, so it has the same inner layout as the cards above it.
+ * cardGrid): two from 960px; three cards three across once each can be about 320px wide; four 2×2, then four across from
+ * 2400px. No grid cell is left empty: where three cards sit in two columns, the third spans both and uses the room (a tool
+ * card's two inner columns).
  */
 .card-grid { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; }
-@container cards (width >= 960px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
-@container cards (width >= 1300px) { .card-grid[data-count="3"] { --cols: 3; } }
+@container cards (width >= 960px) {
+  .card-grid:not([data-count="1"]) { --cols: 2; }
+  .card-grid[data-count="3"] > :last-child { grid-column: 1 / -1; }
+}
+@container cards (width >= 992px) {
+  .card-grid[data-count="3"] { --cols: 3; }
+  .card-grid[data-count="3"] > :last-child { grid-column: auto; }
+}
 @container cards (width >= 2400px) { .card-grid[data-count="4"] { --cols: 4; } }
 .tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
@@ -725,9 +737,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ins-preview, .ins-diff { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ins-preview { max-height: none; font-size: 12.5px; }
 .ins-empty { font-size: 12.5px; color: var(--ink-soft); }
-.ins-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+/* A card's actions, and a discard confirmation, wrap by the card's width rather than spill out of it. */
+.ins-actions, .ins-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; min-width: 0; }
+span.ins-confirm { margin-top: 0; }
 .ins-confirm-text { margin-right: 4px; font-size: 12.5px; font-weight: 600; }
-.ins-locked { font-size: 12px; color: var(--ink-soft); }
+.ins-locked { min-width: 0; font-size: 12px; color: var(--ink-soft); }
 .ins-editor { display: flex; flex-direction: column; gap: 6px; }
 .ins-text { width: 100%; padding: 10px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; resize: vertical; }
 .ins-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -754,9 +768,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 .history-list { list-style: none; margin: 0; padding: 0 var(--pad-end) 0 16px; }
 .history-day { list-style: none; padding: 14px 16px 4px 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-.history-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: start; gap: 12px; padding: 10px 0; box-shadow: inset 0 -1px 0 var(--line); }
-.history-entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
-.history-entry > .history-what { flex: 0 1 auto; }
+/* A row is a grid: when, what happened (the flexible column, wrapping inside it), and its actions in a right-aligned column
+   of steady width, at the same place on every row. */
+.history-row { --history-actions: 250px; display: grid; grid-template-columns: 80px minmax(0, 1fr) var(--history-actions); align-items: start; gap: 12px 16px; padding: 10px 0; box-shadow: inset 0 -1px 0 var(--line); }
+@container content (width < 880px) { .history-row { --history-actions: 170px; } }
 .history-row > .history-when { padding-top: 2px; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .history-what { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
@@ -767,8 +782,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .history-done { padding-right: 6px; font-size: 12px; color: var(--ink-faint); }
 .history-undone .history-what { color: var(--ink-faint); }
 .history-undone .history-what strong { color: var(--ink-soft); }
-.history-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
-.history-actions .btn.link { height: auto; }
+.history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
+.history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
 
 /* ---------- Plugins: marketplaces at the left, the chosen marketplace or plugin at the right ---------- */
 .plugins-page { --market-list-width: 236px; --market-gutter: 24px; }
@@ -804,15 +819,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-hint .btn { height: auto; padding-top: 0; padding-bottom: 0; line-height: inherit; }
 .market-main { padding: 18px max(0px, calc(var(--market-gutter) - var(--scrollbar))) 32px var(--market-gutter); }
 /* The toolbar's left on a marketplace's page: its name, then the facts, which shorten first (their tooltip has them all). */
-.market-title-line { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 14px; }
-.market-title-line h2 { flex: none; margin: 0; font-size: 16px; font-weight: 650; white-space: nowrap; }
-.plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
-.market-title-line .market-page-meta { flex: 0 1 auto; min-width: 0; margin: 0; flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.market-page-head { display: flex; align-items: baseline; gap: 4px 16px; }
-.market-page-head > .btn { margin-left: auto; align-self: center; }
+/*
+ * The toolbar's left on a marketplace's page: its name, then its facts, on one line. What doesn't fit wraps onto a line
+ * below, out of sight, so facts drop whole, the last first; the name, first, only shortens (with its tooltip) once alone.
+ */
+.market-title-line { flex: 0 1 auto; min-width: 0; height: 26px; overflow: hidden; display: flex; flex-wrap: wrap; align-items: baseline; align-content: flex-start; }
+.market-title-line h2 { flex: 0 1 auto; min-width: 0; margin: 0 14px 0 0; font-size: 16px; line-height: 26px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-fact { flex: none; font-size: 12px; line-height: 26px; color: var(--ink-soft); white-space: nowrap; }
+.market-fact + .market-fact::before { content: "·"; margin: 0 6px; color: var(--ink-faint); }
 .market-page-about, .plugin-about { margin: 6px 0 0; max-width: var(--measure); font-size: 13.5px; color: var(--ink); }
-.market-page-head .market-page-about { margin: 0; }
-.market-page-meta, .plugin-meta { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 0 0; font-size: 12px; color: var(--ink-faint); }
+.market-page > .market-page-about { margin: 0; }
+.market-about-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin: 0 0 12px; }
+.market-about-head .market-page-meta { margin: 0; }
+.market-page-meta, .plugin-meta { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 0 0; font-size: 12px; color: var(--ink-soft); }
 .market-page-meta .btn, .plugin-meta .btn { height: auto; min-height: 0; padding: 0; font-size: 12px; }
 .meta-dot { margin: 0 6px; color: var(--ink-faint); }
 .market-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 14px 0 10px; border-bottom: 1px solid var(--line); }
@@ -856,6 +875,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-row-about { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-holds { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-go { display: grid; place-items: center; }
+/* A wide table fills the name column: the description sits beside the name on one line, what it holds under them. */
+@container table (width >= 1100px) {
+  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 14px; }
+  .plugin-row-open { flex: none; max-width: 60%; }
+  .plugin-row-about { flex: 1 1 0; min-width: 0; }
+  .plugin-row-holds { flex-basis: 100%; }
+}
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
@@ -866,8 +892,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .hint-narrow { display: none; }
 .plugin-legend .legend-cell.cell-absent { border-style: solid; }
 /* A plugin's own page */
-.plugin-head h2 { display: inline; margin-right: 8px; }
-.plugin-id { font-size: 12px; color: var(--ink-faint); }
+.plugin-head h2 { display: inline; margin: 0 8px 0 0; font-size: 18px; font-weight: 650; }
+.plugin-id { font-size: 12px; color: var(--ink-soft); }
 .plugin-name { display: inline-block; max-width: 100%; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
 .plugin-page { container: plugin / inline-size; }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
@@ -928,6 +954,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .plugin-row-about ~ .plugin-row-holds::after { content: "·"; margin: 0 6px; }
   .plugin-row-about { order: 2; flex: 1 1 0; min-width: 0; }
   .plugin-hint { display: block; }
+  /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
+  .market-title-line, .toolbar-title-only { display: none; }
+  .market-page > .market-page-about { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .hint-wide { display: none; }
   .hint-narrow { display: inline; }
 }

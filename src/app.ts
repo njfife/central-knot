@@ -4,6 +4,8 @@ import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { machineNames } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
+import { takesPlugins } from './presence.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -11,7 +13,7 @@ const api = () => window.centralKnot;
 export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
 
 /** This computer's home ("This Mac’s home") and the machine in a sentence ("this Mac"), named as the main process names them. */
-export const { home: realHomeName, machine: thisMachine } = machineNames(navigator.userAgent.includes('Mac'));
+export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machineNames(navigator.userAgent.includes('Mac'));
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -31,8 +33,8 @@ export const state = {
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
-  /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
+  /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
+  outcome: undefined as Outcome | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one instruction file being edited (InstructionDraft). */
@@ -101,7 +103,8 @@ function accept(view: HomeView) {
   // An unsaved Instructions draft outlives a home switch: the Instructions page offers to copy or discard it.
   if (!draftUnsaved()) state.instructionEdit = undefined;
   resetMarket();
-  if (state.page === 'plugins') void loadPlugins();
+  // The page's own data (Plugins, Instructions, History, Settings) belonged to the home before: read it for this one.
+  void loadPageData(state.page);
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
@@ -198,15 +201,31 @@ export async function readAgain() {
  * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins. An unsaved Instructions
  * draft stays, still checked against the file it was opened from. `fresh` reads each marketplace anew.
  */
-function loadPageData(page: Page, fresh = false): Promise<void> | undefined {
-  if (page === 'history') return loadHistory();
-  if (page === 'settings') return loadSettings();
-  if (page === 'instructions') return loadInstructions();
-  if (page === 'plugins') return loadPlugins(fresh);
+async function loadPageData(page: Page, fresh = false): Promise<void> {
+  // The status bar's message (a Refresh's summary, say) outlasts this read: once its "Reading…" is cleared, it comes back.
+  const region = document.getElementById('announcement')!;
+  const said = { text: region.textContent ?? '', quiet: region.dataset.quiet === 'true' };
+  if (page === 'history') await loadHistory();
+  else if (page === 'settings') await loadSettings();
+  else if (page === 'instructions') await loadInstructions();
+  else if (page === 'plugins') await loadPlugins(fresh);
+  else return;
+  if (!region.textContent && said.text) announce(said.text, said.quiet);
 }
 
 /** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
 export const homeTools = (): HarnessId[] => state.home?.manage.tools ?? [];
+
+/**
+ * The pages for kinds no tool in this home can hold (presence.ts): the sidebar and the Overview leave them out, since what
+ * doesn't exist here shouldn't show as an option. A home with no tools at all keeps every page, each saying so.
+ */
+export function absentKinds(): ('mcp' | 'agents' | 'plugins')[] {
+  const home = state.home, tools = homeTools();
+  if (!home || !tools.length) return [];
+  return [!home.mcp.tools.length && 'mcp' as const, !home.agents.tools.length && 'agents' as const, !tools.some(takesPlugins) && 'plugins' as const]
+    .filter((kind): kind is 'mcp' | 'agents' | 'plugins' => !!kind);
+}
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -311,27 +330,32 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   announce(state.outcome.text, true);
 });
 
-// ---------- Instructions ----------
+// ---------- Results ----------
 
-/**
- * The one instruction file being edited: the text so far, and `from`, the file as it was opened (its home, path and
- * text), kept apart from the page's list of files so the draft is still known if that file's tool leaves the home.
- * `hash` is what a save checks the file against; it moves on when the file changed outside and the draft is kept.
- */
-export interface InstructionDraft {
-  tool: HarnessId;
-  from: { home: string; path: string; text: string };
+/** What an action did: its sentence, the items it names, and what it offers next (its own button, Undo, or History). */
+export interface Outcome {
+  page: Page;
   text: string;
-  hash: string;
-  stage: 'edit' | 'review';
-  restoring?: boolean;
-  confirmDiscard?: boolean;
-  conflict?: boolean;
-  fullDiff?: boolean;
+  note?: string;
+  item?: string;
+  items?: string[];
+  /** Said again on the next page opened (a home just opened). */
+  carry?: boolean;
+  history?: boolean;
+  undo?: { id: string; label: string };
+  act?: { label: string; id: string; run: () => void; title?: string };
 }
 
+/**
+ * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo or History
+ * link), so it needs no room of its own. Plugins says every result in its toolbar instead.
+ */
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note) && outcome.page !== 'plugins';
+
+// ---------- Instructions ----------
+
 /** The open draft holds changes not saved anywhere. */
-export const draftUnsaved = (): boolean => !!state.instructionEdit && state.instructionEdit.text !== state.instructionEdit.from.text;
+export const draftUnsaved = (): boolean => unsaved(state.instructionEdit);
 
 /** The file the open draft belongs to, while it is on the page: the same home and the same tool. */
 export const draftFile = (): InstructionFile | undefined => {
@@ -341,9 +365,10 @@ export const draftFile = (): InstructionFile | undefined => {
 
 /** Every draft that replaces the open one comes through here: one with unsaved changes stays, and the page says why. */
 function openDraft(file: InstructionFile, text: string, stage: InstructionDraft['stage'], restoring = false): boolean {
-  if (draftUnsaved()) { announce('Your unsaved instructions draft is still open. Save, copy or discard it first.'); return false; }
-  state.instructionEdit = { tool: file.tool, from: { home: state.home!.home, path: file.path, text: file.text }, text, hash: file.hash, stage, restoring };
-  return true;
+  const next = nextDraft(state.instructionEdit, { tool: file.tool, from: { home: state.home!.home, path: file.path, text: file.text }, text, hash: file.hash, stage, restoring });
+  if (next.refused) announce('Your unsaved instructions draft is still open. Save, copy or discard it first.');
+  state.instructionEdit = next.draft;
+  return !next.refused;
 }
 
 export const loadInstructions = () => busy('Reading instruction files…', async () => {
@@ -528,7 +553,11 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.replaced);
     const undoable = addedNow.length > 0 && !replacedAny;
-    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andList(copied)} copied to ${andList(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andList(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andList(to)}` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
+    const done = managed ? `${plural(managed, 'server')} now managed` : 'Applied';
+    const wrote = copied.length ? `${andList(copied)} copied to ${andList(to)}` : 'Nothing needed writing';
+    const already = matched.length && copied.length ? `; ${andList(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andList(to)}` : '';
+    const takeBack = undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.';
+    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...matched], text: `${done}. ${wrote}${already}.${takeBack}` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });

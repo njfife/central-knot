@@ -146,7 +146,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
   async function view(fresh = false): Promise<PluginsView> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
-    const tools = (await host.tools()).filter(takesPlugins);
+    const tools = toolIds(await host.tools());
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
     const note = (source: string, origin: MarketplaceView['origins'][number]) => {

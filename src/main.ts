@@ -94,7 +94,12 @@ async function saveSyncSetting(on: boolean) {
  * open Settings page reads them again instead of showing, and then resending, an old value.
  */
 function preferencesChanged() {
-  if (window && !window.isDestroyed()) window.webContents.send('settings:changed');
+  tell('settings:changed');
+}
+
+/** Sends the page a message, when there is a window to send it to. */
+function tell(channel: 'sync:changed' | 'settings:changed' | 'navigate', ...args: unknown[]) {
+  if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
@@ -127,7 +132,7 @@ function applyAppearance() {
 /** Shows the window on one of its pages (the Settings… menu item). */
 function showPage(page: string) {
   showWindow();
-  if (window && !window.isDestroyed()) window.webContents.send('navigate', page);
+  tell('navigate', page);
 }
 
 /** A login item is registered only for an installed app, so a test or dev build never adds itself to sign-in. */
@@ -179,7 +184,7 @@ function trayMenu() {
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen, click: showWindow },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
+    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: process.platform !== 'linux',
       click: item => void setStartAtSignIn(item.checked) },
@@ -194,13 +199,15 @@ function refreshTray() {
   tray.setToolTip(unseen ? 'Central Knot: sync made changes' : 'Central Knot');
   if (process.platform === 'darwin') tray.setTitle(unseen ? '•' : '');
 }
+/** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
+const syncOnce = () => fromTray(async () => { keepMcpAndAgents((await pass(await read(), true)).mcpAndAgents); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   const next = queue.then(work);
   queue = next.catch(() => undefined);
   await next.catch(() => undefined);
   refreshTray();
-  if (window && !window.isDestroyed()) window.webContents.send('sync:changed');
+  tell('sync:changed');
 }
 /**
  * The app menu carries the menu bar's controls too, so they are always reachable: a crowded menu bar (or the notch) can hide the
@@ -217,7 +224,7 @@ function appMenu() {
       { label: statusLine(), enabled: unseen, click: showWindow },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
+      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void setStartAtSignIn(item.checked) },
       { type: 'separator' },
@@ -249,15 +256,15 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
 
 /**
  * One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence.
- * `tools`: the tools in the home, when the caller has just read them; otherwise the pass reads them itself.
+ * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
  */
-async function pass(explicit = false, tools?: HarnessId[]): Promise<PassResult> {
-  const shared = context();
+async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
+  const shared: ShareContext = { ...context(), read: async () => snapshots };
   if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
-  const present = tools ?? presentTools(await read());
+  const present = presentTools(snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
   const mcp = await applyMcp(shared, present, []).catch(crashed('MCP sync'));
@@ -281,13 +288,16 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 
 async function syncThenView(explicit = false): Promise<HomeView> {
   const shared = context();
-  const { skills, mcpAndAgents } = await pass(explicit);
+  const before = await read();
+  const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
-  const snapshots = await read();
+  // The home is read again only when the pass wrote skills to it; otherwise the first read is still what is there.
+  const snapshots = skills?.harnessWrites ? await read() : before;
   latestSnapshots = snapshots;
+  lastPresent = presentTools(snapshots).join();
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
@@ -311,6 +321,9 @@ let followUp: NodeJS.Timeout | undefined;
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
 
+/** The tools the page was last told of (presence.ts), so a background pass tells it of a change once. */
+let lastPresent = '';
+
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
 function queueBackgroundPass() { if (current && !smoke) queue = queue.then(backgroundPass).catch(() => undefined); }
@@ -319,29 +332,31 @@ async function backgroundPass() {
   if (!current) return;
   const fromEvent = touched;
   touched = false;
-  // Which tools are in the home is read on every pass, whatever Sync or write access say (reading writes nothing). A tool
-  // installed or removed changes every page's columns, so the page reads again; until it has, the next pass tells it again.
-  // Its folders are watched from then on, as a home's are when it opens.
-  const tools = presentTools(await read());
-  if (tools.join() !== presentTools(latestSnapshots).join()) {
-    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+  // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
+  // A tool installed or removed changes every page's columns: the page is told once, and its folders are watched from
+  // then on, as a home's are when it opens.
+  const snapshots = await read();
+  const present = presentTools(snapshots).join();
+  if (present !== lastPresent) {
+    lastPresent = present;
+    tell('sync:changed');
     void startWatching();
   }
-  const { skills, mcpAndAgents } = await pass(false, tools);
+  const { skills, mcpAndAgents } = await pass(snapshots);
   keepMcpAndAgents(mcpAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
-  if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
+  if (fromEvent && !syncOn) tell('sync:changed');
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
   if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
-    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+    tell('sync:changed');
   }
   lastStopped = skills?.stopped;
   if (!skills || (!skills.harnessWrites && !skills.notices?.length && !mcpAndAgents?.changed)) return;
   pendingResults.push(...skills.results);
   pendingNotices.push(...(skills.notices ?? []));
-  if (!window.isDestroyed()) window.webContents.send('sync:changed');
+  tell('sync:changed');
   // Nobody saw it: the window is closed, gone or behind other windows (D-36).
   if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
 }

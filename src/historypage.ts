@@ -28,7 +28,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
         const first = state.history?.find(other => other.undoneBy === undone.id);
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
-      if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after its deletion; back${where}.`, action: 'Delete again' };
+      if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
@@ -90,10 +90,10 @@ export function historyPage() {
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
-      // The summary and its actions read as one line, the actions wrapping under it when the window is narrow.
-      h('div.history-entry', {},
-        h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
-        event.undoneBy ? h('span.history-done', {}, 'Undone') : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action))),
+      // The summary wraps in its own column; the actions keep a column of their own at the right, the same on every row.
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
+      event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, 'Undone'))
+        : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
       changePanel(event.id))];
   }))));
 }

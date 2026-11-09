@@ -113,28 +113,39 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   ];
 }
 
-function aboutTab(entry: MarketplaceView) {
+/** About a marketplace: every fact about it (who, where it comes from, when it was read), Remove, then its README. */
+function aboutTab(entry: MarketplaceView, marketIndex: number) {
   const read = market.readmes.get(entry.source);
-  if (!read || read.reading) return h('p.plugin-muted', {}, 'Reading…');
-  return read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.');
+  const remove = entry.origins.includes('central-knot') ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy, onclick: () => void forgetMarketplace(entry.source) }) : null;
+  if (remove) remove.title = 'Removes it from this list only. Installed plugins stay installed.';
+  const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
+  return [
+    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted([...marketFacts(entry), source])), remove),
+    !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
+      : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),
+  ];
+}
+
+/** Who made a marketplace, which tools added it (said only when Central Knot didn't), and when it was read. */
+function marketFacts(entry: MarketplaceView): string[] {
+  const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(toolName);
+  return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : ''].filter(Boolean);
 }
 
 function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const plugin = openPlugin(entry);
   if (plugin) return pluginPage(view, entry, marketIndex, plugin);
-  const remove = entry.origins.includes('central-knot') ? button({ variant: 'ghost', size: 'small', icon: 'circle-minus', label: 'Remove', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy, onclick: () => void forgetMarketplace(entry.source) }) : null;
-  if (remove) remove.title = 'Removes it from this list only. Installed plugins stay installed.';
-  // Compact, so the plugins themselves get the height: its name, who made it and when are on the toolbar's row (titleLine),
-  // the filters on the tab row. The header's Refresh fetches every marketplace again, so the page has no Refresh of its own.
+  // Compact, so the plugins themselves get the height: its name and facts are on the toolbar's row (titleLine), every fact
+  // and Remove under About, the filters on the tab row. The header's Refresh fetches every marketplace again.
   return h('section.market-page', { 'aria-label': marketTitle(entry) },
-    entry.description || remove ? h('header.market-page-head', {}, entry.description ? h('p.market-page-about', {}, entry.description) : null, remove) : null,
+    entry.description ? h('p.market-page-about', { title: entry.description }, entry.description) : null,
     entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale && entry.fetchedAt ? ` Showing the copy from ${when(entry.fetchedAt)}.` : '')) : null,
     h('div.market-tabs', {},
       h('div.market-tablist', { role: 'tablist' },
         (['plugins', 'about'] as const).map(tab => h(`button.market-tab${market.nav.tab === tab ? '.selected' : ''}`, { type: 'button', role: 'tab', id: `market-tab-${tab}`, 'aria-selected': String(market.nav.tab === tab), onclick: () => browse({ tab }) },
           tab === 'plugins' ? 'Plugins' : 'About'))),
       market.nav.tab === 'about' ? null : filters(entry)),
-    market.nav.tab === 'about' ? aboutTab(entry) : pluginsTab(view, entry, marketIndex));
+    market.nav.tab === 'about' ? aboutTab(entry, marketIndex) : pluginsTab(view, entry, marketIndex));
 }
 
 /**
@@ -174,7 +185,7 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
   if (counts.plugins) {
-    const pending = [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
+    const pending = [plural(counts.plugins, 'change'), counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
     return h('div.apply', {},
       pendingCount(pending, plural(counts.plugins, 'change')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
@@ -229,22 +240,19 @@ function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, l
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown.entry)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
-    : titleLine(shown.entry, shown.index);
-  return h('div.toolbar.plugins-toolbar.fit-bar', {}, left, h('span.toolbar-spacer'), right);
+    : titleLine(shown.entry);
+  // In narrow content the marketplace strip already names it, so a toolbar with only the name isn't drawn (style.css).
+  return h(`div.toolbar.plugins-toolbar.fit-bar${!plugin && !right ? '.toolbar-title-only' : ''}`, {}, left, h('span.toolbar-spacer'), right);
 }
 
 /**
- * The marketplace's name, then who made it, when it was read and where it comes from: the left of the toolbar's row on
- * its page, so a result at the right shares the row instead of taking a band of its own. The facts shorten first.
+ * The marketplace's name, then who made it and when it was read: the left of the toolbar's row on its page, so a result
+ * at the right shares the row instead of taking a band of its own. The facts drop whole, the last first, and only then
+ * does the name shorten (style.css); About has them all, with where it comes from.
  */
-function titleLine(entry: MarketplaceView, marketIndex: number) {
-  // Where it was added is worth saying only when a tool added it; added here is the usual case, and installs register it too.
-  const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(toolName);
-  const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
-  const facts = [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : '', source].filter(Boolean) as (string | HTMLElement)[];
-  const meta = h('p.market-page-meta', {}, dotted(facts));
-  meta.title = meta.textContent ?? '';
-  return h('div.market-title-line', {}, h('h2', {}, marketTitle(entry)), meta);
+function titleLine(entry: MarketplaceView) {
+  const name = marketTitle(entry);
+  return h('div.market-title-line', {}, h('h2', { title: name }, name), marketFacts(entry).map(fact => h('span.market-fact', {}, fact)));
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */

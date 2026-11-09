@@ -6,9 +6,9 @@ import { dirname, join } from 'node:path';
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
 const skill = (root, path, name, description) => file(root, `${path}/${name}/SKILL.md`, `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n\nFollow the steps.\n`);
 
-export function writeMarket(root, name = 'team-tools') {
+export function writeMarket(root, name = 'team-tools', owner = 'Platform team') {
   file(root, '.claude-plugin/marketplace.json', JSON.stringify({
-    name, owner: { name: 'Platform team' }, description: 'Plugins the platform team keeps for everyday work.',
+    name, owner: { name: owner }, description: 'Plugins the platform team keeps for everyday work.',
     plugins: [
       { name: 'document-tools', source: './plugins/document-tools', version: '1.2.0', category: 'productivity', author: { name: 'Docs crew' }, description: 'Read PDFs and tidy spreadsheets.', keywords: ['pdf', 'xlsx'] },
       { name: 'release-helper', source: './plugins/release-helper', version: '0.4.1', category: 'development', description: 'Release notes, a review agent and a check before each commit.' },

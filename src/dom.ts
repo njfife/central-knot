@@ -142,10 +142,13 @@ export const pendingCount = (full: string, short: string): HTMLElement =>
 /** What a crowded bar gives up, in order, until it fits: long pending counts, then button labels, then its single line. */
 const FIT_STEPS = ['bar-short', 'bar-icons', 'bar-wrap'];
 
-/** Whether anything in a bar reaches past its content box, into its padding or beyond. */
+/**
+ * Whether anything in a bar reaches past its content box, into its padding or beyond, or a part of the bar holds more
+ * than it shows (its own content overflows it, though the part itself fits).
+ */
 function overflows(bar: HTMLElement): boolean {
   const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
-  return [...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5);
+  return [...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5 || child.scrollWidth > child.clientWidth + 1);
 }
 
 /**
