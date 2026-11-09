@@ -110,12 +110,12 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
-  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
-  deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
+  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
+  deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
   /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
   /** A switch made from the menu bar: what it did, so the page can show it with Undo. */
-  onProfileSwitched(callback: (name: string, result: ProfileSwitchResult) => void): void;
+  onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -423,7 +423,7 @@ export interface ProfilesView {
   /** The profile last switched to; none means No profile. */
   active?: string;
   /** What profile switches turned off and have not turned back on, per item and tool. Switches turned off by hand are never here. */
-  held: Record<string, HarnessId[]>;
+  offByProfile: Record<string, HarnessId[]>;
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }
@@ -437,4 +437,4 @@ export interface ProfileEdit { id?: string; name?: string; items?: string[]; res
 /** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
 export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
 
-export interface ProfileSwitchResult { stopped?: string; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }
+export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }

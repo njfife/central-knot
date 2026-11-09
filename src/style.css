@@ -33,6 +33,8 @@
   --info: #0369a1;
   --info-tint: #ecf8fd;
   --lift: 0 1px 2px rgb(0 0 0 / 5%);
+  /* A small menu or tip floating over the page */
+  --overlay: 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%);
   --sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
   --mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", "Cascadia Mono", "Noto Sans Mono", monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -1371,7 +1373,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .profiles-split { min-height: 0; }
 .toolbar-title { font-size: 12px; line-height: 16px; font-weight: 600; }
 .profile-row-name { min-width: 0; overflow-wrap: anywhere; line-height: 16px; }
-.profile-in-use { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; background: var(--picked); color: var(--accent-ink); }
+.badge-picked { padding: 0 6px; background: var(--picked); color: var(--accent-ink); }
 .profile-header .pane-title h2, .profile-header .pane-title p { overflow-wrap: anywhere; }
 .profile-header { flex-wrap: wrap; row-gap: 8px; }
 .profile-header .pane-title { flex: 1 1 220px; }
@@ -1391,7 +1393,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-head .pf-name { padding-left: 16px; }
 .pf-head-cell { flex-direction: column; gap: 2px; color: var(--ink); }
 .pf-head-name { white-space: nowrap; }
-.pf-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
+.pf-name { position: relative; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow-wrap: anywhere; }
 .pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 6px; color: var(--ink-soft); }
@@ -1408,8 +1410,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-section { display: flex; align-items: center; height: 33px; padding: 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 40px; z-index: 1; }
 .pf-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; }
 .pf-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-.pf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.pf-legend > span { display: inline-flex; align-items: center; gap: 6px; }
+.pf-legend { align-items: center; gap: 8px 20px; padding: 16px; font-size: 12px; line-height: 16px; }
 .pf-legend-mark { position: relative; width: 20px; height: 20px; display: grid; place-items: center; }
 .pf-legend-mark.pf-cell-pending::before { content: ''; position: absolute; inset: 0; border-radius: 5px; }
 .pf-none { padding: 24px 16px; color: var(--ink-soft); }
@@ -1425,9 +1426,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .status-profile:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .status-profile .icon { color: var(--accent-ink); flex: none; }
 .status-profile .status-profile-chevron { color: var(--ink-soft); }
-.pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay, 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)); }
+.pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay); }
 .pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); white-space: nowrap; }
-.pf-menu-item:hover:not(:disabled), .pf-menu-item:focus-visible { background: var(--hover); }
+.pf-menu-item:hover:not(:disabled) { background: var(--hover); }
+.pf-menu-item:focus-visible { background: var(--hover); outline: 2px solid var(--focus); outline-offset: -2px; }
 .pf-menu-item:disabled { opacity: 0.5; }
 .pf-menu-tick { width: 14px; flex: none; display: grid; place-items: center; color: var(--accent-ink); }
 .pf-menu-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1438,8 +1440,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
 
 /* A narrow status bar keeps the home, the profile in use and the sync switch whole: the write note goes icon-only (its words stay on
-   hover) and the sync switch drops its idle note. */
-@media (max-width: 1180px) { .status-write .status-clip, .sync-note { display: none; } }
+   hover), the sync switch drops its idle note, and the profile's drift keeps only its dot. */
+@media (max-width: 1180px) { .status-write .status-clip, .sync-note, .status-profile-drift-text { display: none; } }
 
 /* Profiles: the setup step in an empty profile is a full small button, not the band's inline link size */
 .band #profile-from-now { height: 28px; padding: 0 8px; flex: none; }
@@ -1453,18 +1455,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-blocked .icon { flex: none; margin-top: 1px; }
 .status-profile-drift { width: 6px; height: 6px; border-radius: 999px; background: var(--accent-ink); flex: none; }
 /* A row's states and full description, shown under it while its tick box has keyboard focus */
-.pf-name { position: relative; }
-.pf-tip { display: none; position: absolute; left: 44px; top: calc(100% + 2px); z-index: 4; max-width: min(560px, 90%); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: var(--overlay, 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)); font-size: 12px; line-height: 16px; color: var(--ink); flex-direction: column; gap: 2px; }
+.pf-tip { display: none; position: absolute; left: 44px; top: calc(100% + 2px); z-index: 4; max-width: min(560px, 90%); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: var(--overlay); font-size: 12px; line-height: 16px; color: var(--ink); flex-direction: column; gap: 2px; }
 .pf-tip-desc { color: var(--ink-soft); }
 .pf-name:has(.hidden-input:focus-visible) .pf-tip { display: flex; }
 .pf-row:not(.pf-head):focus-within { background: var(--hover); }
 .pf-save-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
 @container (max-width: 639px) { .pf-save-note { display: none; } }
 .pf-menu-note { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--accent-ink); }
-.pf-menu-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .pf-note-path { display: block; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .status-profile-drift-text { font-weight: 400; color: var(--accent-ink); }
-@media (max-width: 1180px) { .status-profile-drift-text { display: none; } }
 .pf-menu-size { margin-left: auto; padding-left: 12px; font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .pf-menu-size + .pf-menu-note { margin-left: 0; padding-left: 8px; }
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */

@@ -23,6 +23,11 @@ export function icon(name: IconName, size = 16, extraClass = ''): SVGElement {
   return holder.content.firstElementChild as SVGElement;
 }
 
+/** A Find field: each keystroke hands the text to `onInput` (which redraws), and the redrawn field keeps the focus. */
+export const findInput = (field: { id: string; label: string; value: string; onInput: (text: string) => void; onKeydown?: (event: KeyboardEvent) => void }) =>
+  h('input.find-input', { id: field.id, type: 'text', placeholder: 'Find', 'aria-label': field.label, value: field.value, spellcheck: 'false', onkeydown: field.onKeydown,
+    oninput: (event: Event) => { field.onInput((event.target as HTMLInputElement).value); document.getElementById(field.id)?.focus(); } });
+
 export const hiddenText = (text: string) => h('span.hidden-text', {}, text);
 
 interface ButtonOptions {

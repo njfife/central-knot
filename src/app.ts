@@ -186,6 +186,9 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
 });
 
 /** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
+/** Why the open home can't be written now, if so: preview only, or another Central Knot build owns its sync. */
+export const whyReadOnly = (home: HomeView) => (!home.manage.access.allowed ? home.manage.access.reason : home.manage.gate.state === 'stopped' ? home.manage.gate.reason : undefined);
+
 export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
 
 export function showPage(page: Page) {
@@ -555,7 +558,8 @@ const notChangedNote = (results: DestinationResult[]) => {
 export const profileState = { open: undefined as string | undefined, confirmDelete: undefined as string | undefined, renaming: undefined as string | undefined, /** The name as typed while renaming. */ draft: undefined as string | undefined };
 
 /** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
-function switchOutcome(name: string, result: ProfileSwitchResult) {
+function switchOutcome(result: ProfileSwitchResult) {
+  const name = result.name ?? NO_PROFILE;
   const what = flipSummary(result.flips);
   state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
@@ -564,22 +568,24 @@ function switchOutcome(name: string, result: ProfileSwitchResult) {
 
 /** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
 export const switchToProfile = (id: string | null) => busy('Switching profile…', async () => {
-  const home = state.home!;
-  const name = id === null ? NO_PROFILE : home.profiles.profiles.find(profile => profile.id === id)?.name ?? 'that profile';
-  const result = await api().switchProfile(id, home.home);
+  const result = await api().switchProfile(id, state.home!.home);
   if (result.view) state.home = result.view;
   if (result.stopped) { announce(result.stopped); return; }
-  switchOutcome(name, result);
+  switchOutcome(result);
 });
 // A switch from the menu bar: its result and Undo are on the page the next time the window shows.
-api().onProfileSwitched((name, result) => { switchOutcome(name, result); rerender(); });
+api().onProfileSwitched(result => { switchOutcome(result); rerender(); });
 
-/** Saves a profile: only the fields given change. A new or restored profile opens; an edit leaves the page where it is. */
+/**
+ * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an
+ * edit leaves the page where it is.
+ */
 export const saveProfileDef = (profile: ProfileEdit, said?: string) => busy('Saving profile…', async () => {
   const result = await api().saveProfile(profile, state.home!.home);
-  if (result.view) state.home = result.view;
+  if (result.profiles) state.home = { ...state.home!, profiles: result.profiles };
   if (result.problem) { announce(result.problem); return; }
   if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
+  if (result.id && !profile.id) profileState.renaming = result.id;
   announce(said ?? 'Profile saved.', true);
 });
 
@@ -587,11 +593,11 @@ export const saveProfileDef = (profile: ProfileEdit, said?: string) => busy('Sav
 export const deleteProfileDef = (id: string) => busy('Deleting profile…', async () => {
   const gone = state.home!.profiles.profiles.find(profile => profile.id === id);
   const result = await api().deleteProfile(id, state.home!.home);
-  if (result.view) state.home = result.view;
+  if (result.profiles) state.home = { ...state.home!, profiles: result.profiles };
   profileState.confirmDelete = undefined;
   if (result.problem || !gone) { announce(result.problem ?? 'That profile is gone.'); return; }
   profileState.open = undefined;
   state.outcome = { page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. Nothing in your tools changed.`,
-    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`).then(() => { state.outcome = undefined; rerender(); }) } };
+    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`) } };
   announce(state.outcome.text, true);
 });

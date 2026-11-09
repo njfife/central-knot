@@ -4,8 +4,8 @@
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
-import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
+import { whyReadOnly, convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { button, closeButton, emptyState, findInput, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -39,8 +39,8 @@ type Kind = 'skills' | 'mcp' | 'agents';
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
 let kind: Kind = 'skills';
-/** Whether a profile switch turned this item off in this tool (Profiles: `held`), not a Disable made by hand. */
-const heldByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.held[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
+/** Whether a profile switch turned this item off in this tool, not a Disable made by hand. */
+const turnedOffByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.offByProfile[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
@@ -230,7 +230,7 @@ function filterBar() {
 const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync' && !(kind === 'mcp' && tool === 'claude-cli'))).length;
 const manageable = () => committedList().filter(skill => !skill.held).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
 
-const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
+const canWrite = () => designMode || (!!state.home && !whyReadOnly(state.home) && !state.busy);
 const resumeNeeded = () => !designMode && state.home?.manage.gate.state === 'needs-resume';
 
 /** Pending changes and Apply all. `bulk` adds Manage all, which belongs with the whole list. */
@@ -338,7 +338,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const limited = oneWay ? ', one-way (with limits)' : '';
   const becomesSource = kind === 'agents' && pending && on && oneWaySource(skill) === tool && !committedOf(skill.key).managed;
   // Turned off by a profile switch (not by hand): said, and marked apart, so turning it back on here is not a surprise later.
-  const byProfile = disabled && !switching && heldByProfile(skill.key, tool);
+  const byProfile = disabled && !switching && turnedOffByProfile(skill.key, tool);
   const disabledNote = byProfile ? `; off in ${names[tool]} by a profile (see Profiles)` : disabled ? `; disabled in ${names[tool]}` : switching ? `; enabled in ${names[tool]}` : '';
   const text = skill.cannot?.[tool] ?? (becomesSource ? `${names[tool]}: becomes the source on Apply all; edits made in ${names[tool]} go to ${andList(Object.keys(skill.limits ?? {}).filter(entry => !skill.off.includes(entry as Tool)).map(entry => names[entry as Tool]))}` : null) ?? `${names[tool]}: ${state === 'will-sync' && skill.copies[tool] === undefined ? 'Gets a new copy on Apply all' : replaces ? 'Its copy is replaced on Apply all (kept in History)' : look.label}${limited}${disabledNote}${pending ? ' (not applied yet)' : ''}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
@@ -718,9 +718,9 @@ function legend(list: SampleSkill[]) {
   oneWaySwatch.append(h('span.cell-oneway-mark', {}, icon('arrow-up-right', 8)));
   const fresh = list.some(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined));
   const disabledIn = (skill: SampleSkill) => toolList().filter(tool => skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool));
-  const disabledShown = list.some(skill => disabledIn(skill).some(tool => !heldByProfile(skill.key, tool)));
+  const disabledShown = list.some(skill => disabledIn(skill).some(tool => !turnedOffByProfile(skill.key, tool)));
   // A switch a profile turned off is marked apart (amber), and keyed apart, so it reads as the profile's doing.
-  const profileShown = list.some(skill => disabledIn(skill).some(tool => heldByProfile(skill.key, tool)));
+  const profileShown = list.some(skill => disabledIn(skill).some(tool => turnedOffByProfile(skill.key, tool)));
   const profileSwatch = swatch('present', false);
   profileSwatch.classList.add('cell-disabled');
   profileSwatch.append(h('span.cell-disabled-mark.cell-disabled-profile', {}, icon('sliders-horizontal', 8)));
@@ -1241,8 +1241,7 @@ export function designOverview(which: Kind = 'skills') {
   const needle = view.find.trim().toLowerCase();
   const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill, toolList()) === 'attention'))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
-  const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
-    oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
+  const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => { view.find = text; rerender(); } });
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
     notices(),
@@ -1295,8 +1294,7 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
   },
     middle(skill.name ?? skill.key, 12, 'list-name'),
     h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
-  const find = h('input.find-input', { id: 'skills-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
-    oninput: (event: Event) => { view.listFind = (event.target as HTMLInputElement).value; rerender(); document.getElementById('skills-find')?.focus(); } });
+  const find = findInput({ id: 'skills-find', label: 'Find a skill', value: view.listFind, onInput: text => { view.listFind = text; rerender(); } });
   const list = shown.length
     ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.map(listRow))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);

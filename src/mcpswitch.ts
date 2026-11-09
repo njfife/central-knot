@@ -14,7 +14,8 @@ import type { HarnessId } from './types.ts';
 
 /**
  * The file that holds a tool's MCP switches: Claude Code's and Copilot's settings.json (beside their skill switches), Codex's
- * config.toml and Pi's mcp.json (each server's own entry, as mcp.ts reads them).
+ * config.toml and Pi's mcp.json (each server's own entry). Pi's must be the file mcp.ts's mcpFile reads; it is spelled out here
+ * because mcp.ts imports this file.
  */
 export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
   return tool === 'pi-cli' ? join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'mcp.json') : switchPath(context, tool);

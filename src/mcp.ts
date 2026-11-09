@@ -12,6 +12,7 @@ import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRec
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { mcpDisabled, readMcpSwitches } from './mcpswitch.ts';
+import { switchFacts } from './skillswitch.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
@@ -296,12 +297,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
-    const disabled = entries.filter(entry => { const file = switches.get(entry.tool); return !!file && !file.problem && mcpDisabled(entry.tool, file.text, name); }).map(entry => entry.tool);
-    const unusable = entries.filter(entry => switches.get(entry.tool)?.problem);
-    const switchProblem = Object.fromEntries(unusable.map(entry => [entry.tool, switches.get(entry.tool)!.problem!]));
-    const switchFile = Object.fromEntries(unusable.map(entry => [entry.tool, switches.get(entry.tool)!.path]));
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
-      ...(disabled.length ? { disabled } : {}), ...(unusable.length ? { switchProblem, switchFile } : {}) });
+      ...switchFacts(entries.map(entry => entry.tool), switches, (tool, file) => mcpDisabled(tool, file.text, name)) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }

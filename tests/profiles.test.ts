@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { applyChanges, readHistory } from '../src/manage.ts';
+import { applyChanges, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
-import { deleteProfile, heldAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
+import { deleteProfile, offAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
@@ -35,6 +35,10 @@ test('Each tool’s MCP switch: off writes its own form, on takes it out, and ev
     if (tool === 'claude-cli') assert.deepEqual(JSON.parse(back), JSON.parse(before[tool]), tool);
     else assert.equal(back, before[tool], tool);
   }
+  // Codex: a server that has its own `enabled` line gets it changed in place, not a second one beside it.
+  const otherOff = withMcpSwitch('codex-cli', before['codex-cli'], 'other', true);
+  assert.equal(otherOff, before['codex-cli'].replace('enabled = true', 'enabled = false'));
+  assert.equal(mcpDisabled('codex-cli', withMcpSwitch('codex-cli', otherOff, 'other', false), 'other'), false);
   // A server removed from the file meanwhile is never made again as a bare switch.
   assert.throws(() => withMcpSwitch('pi-cli', '{ "mcpServers": {} }', 'docs', true), /no "docs" server/);
 });
@@ -52,23 +56,30 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   assert.deepEqual(plan.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on', 'mcp:sentry claude-cli off']);
   assert.deepEqual(plan.blocked.map(entry => `${entry.item} ${entry.tool}`), ['mcp:sentry copilot-cli']);
   // Held: what this switch turned off, and an item not read this time keeps its hold. Off by hand is never held.
-  assert.deepEqual(plan.held, { 'skill:gone': ['codex-cli'], 'mcp:sentry': ['claude-cli'] });
+  assert.deepEqual(plan.offByProfile, { 'skill:gone': ['codex-cli'], 'mcp:sentry': ['claude-cli'] });
   // No profile turns back on everything held that is here, and nothing else.
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
-  assert.deepEqual(none.held, {});
+  assert.deepEqual(none.offByProfile, {});
 });
 
-test('Holds after a failed flip, the switch that chose the profile in use, and holds on tools that can’t be read', () => {
-  // A flip that failed leaves its switch as it was: a failed turn-off isn't held, a failed turn-on still is.
-  assert.deepEqual(heldAfterFailures({ 'skill:a': ['claude-cli'], 'mcp:b': [] }, [{ item: 'skill:a', name: 'a', tool: 'claude-cli', disabled: true }, { item: 'mcp:b', name: 'b', tool: 'codex-cli', disabled: false }]), { 'mcp:b': ['codex-cli'] });
-  // Which switch chose the profile in use: the latest that changed it. An undo of an older switch (Undo A after B) chooses nothing.
+test('A flip that failed leaves its switch held or not, as it was', () => {
+  // A failed turn-off isn't held; a failed turn-on still is.
+  assert.deepEqual(offAfterFailures({ 'skill:a': ['claude-cli'], 'mcp:b': [] }, [{ item: 'skill:a', name: 'a', tool: 'claude-cli', disabled: true }, { item: 'mcp:b', name: 'b', tool: 'codex-cli', disabled: false }]), { 'mcp:b': ['codex-cli'] });
+});
+
+test('The switch that chose the profile in use is the latest one still standing that changed it', () => {
+  // An undo of an older switch (Undo A after B) changes switches, not the profile, so it chooses nothing.
   const event = (id: string, from?: string, to?: string): HistoryEvent => ({ id, at: '', key: 'profiles:switch', item: '', kind: 'profile', losers: [], orderProved: true, profile: { from, to, flips: [] } });
   const history = [event('A', undefined, 'dev'), event('B', 'dev', 'pager'), event('undoA', 'pager', 'pager')];
   assert.deepEqual(history.map(past => choseProfileInUse(history, past)), [false, true, false]);
-  // A hold whose tool can't be read, or has no copy right now, is kept: once it reads again it is still the profile's.
-  const unreadable = [item('skill:pager', { 'claude-cli': 'on' }, { 'claude-cli': 'unreadable' })];
-  assert.deepEqual(planSwitch(unreadable, undefined, { 'skill:pager': ['claude-cli', 'codex-cli'] }).held, { 'skill:pager': ['claude-cli', 'codex-cli'] });
+});
+
+test('A hold is kept while its tool can’t be read; one on a tool with no copy is kept until No profile', () => {
+  const pager = [item('skill:pager', { 'claude-cli': 'on' }, { 'claude-cli': 'unreadable' })];
+  const held = { 'skill:pager': ['claude-cli', 'codex-cli'] as HarnessId[] };
+  assert.deepEqual(planSwitch(pager, { items: ['skill:pager'] }, held).offByProfile, held);
+  assert.deepEqual(planSwitch(pager, undefined, held).offByProfile, { 'skill:pager': ['claude-cli'] });
 });
 
 async function sandbox() {
@@ -106,7 +117,7 @@ test('Switching to a profile turns the rest off in each tool’s settings, in on
     assert.match(await readFile(join(box.home, '.claude.json'), 'utf8'), /"sentry": \{ "type": "stdio", "command": "sentry" \}/);
     const view = await readProfiles(box.home);
     assert.equal(view.active, saved.id);
-    assert.deepEqual(view.held, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli', 'codex-cli'] });
+    assert.deepEqual(view.offByProfile, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli', 'codex-cli'] });
     assert.equal((await deleteProfile(box.context, saved.id!)).problem, 'That profile is in use. Switch to another profile, or to No profile, first.');
 
     const events = (await readHistory(box.home)).filter(event => event.kind === 'profile');
@@ -118,7 +129,7 @@ test('Switching to a profile turns the rest off in each tool’s settings, in on
     assert.equal(await readFile(files[1], 'utf8'), original[1]);
     const after = await readProfiles(box.home);
     assert.equal(after.active, undefined);
-    assert.deepEqual(after.held, {});
+    assert.deepEqual(after.offByProfile, {});
     // The undo is itself a switch: its Undo goes to Development again.
     const redo = (await readHistory(box.home)).at(-1)!;
     assert.equal(redo.kind, 'profile');
@@ -141,7 +152,7 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
     // The first switch's pager flip was made again by later switches, so it is theirs; only sentry goes back on.
     const after = await readProfiles(box.home);
     assert.equal(after.active, dev);
-    assert.deepEqual(after.held, { 'skill:pager': ['claude-cli'] });
+    assert.deepEqual(after.offByProfile, { 'skill:pager': ['claude-cli'] });
   } finally { await box.cleanup(); }
 });
 
@@ -155,7 +166,7 @@ test('A switch and its own Undo cancel out: undoing the switch before them goes 
     await undoProfileSwitch(box.context, second);
     const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
     await undoProfileSwitch(box.context, first.id);
-    assert.deepEqual(await readProfiles(box.home), { profiles: [{ id: dev, name: 'Development', items: ['skill:dev'] }, { id: pager, name: 'Pager', items: ['skill:pager'] }], held: {} });
+    assert.deepEqual(await readProfiles(box.home), { profiles: [{ id: dev, name: 'Development', items: ['skill:dev'] }, { id: pager, name: 'Pager', items: ['skill:pager'] }], offByProfile: {} });
   } finally { await box.cleanup(); }
 });
 
@@ -182,18 +193,23 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
     const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
     const all = (await saveProfile(box.context, { name: 'Everything', items: ['skill:dev', 'skill:pager', 'mcp:sentry'] })).id!;
     await switchProfile(box.context, dev);
-    // On the Skills page: pager enabled in Claude Code, then disabled again, by hand (as main.ts does after Apply all).
-    for (const disabled of [[], ['claude-cli']] as const) {
-      const changes = [{ key: 'pager', managed: false, off: [], disabled: [...disabled] }];
-      await releaseProfileHolds(box.context, switchedByHand(changes, (await applyChanges(box.context, changes)).results));
-    }
-    assert.equal((await readProfiles(box.home)).held['skill:pager'], undefined);
-    // Undo of the switch leaves pager as set by hand, too.
+    // On the Skills page: pager enabled in Claude Code by hand, then that Enable undone in History (as main.ts does after each).
+    const enable = [{ key: 'pager', managed: false, off: [], disabled: [] }];
+    await releaseProfileHolds(box.context, switchedByHand(enable, (await applyChanges(box.context, enable)).results));
+    const enabled = (await readHistory(box.home)).filter(event => event.kind === 'switched').at(-1)!;
+    await releaseProfileHolds(box.context, switchedByHand([{ key: 'pager' }], (await restoreFromHistory(box.context, enabled.id)).results));
+    assert.equal((await readProfiles(box.home)).offByProfile['skill:pager'], undefined);
+    // Undo of the switch leaves pager as set by hand, too: an Enable and its Undo are both choices made by hand.
     const switched = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
     assert.ok(!(await undoProfileSwitch(box.context, switched.id)).flips.some(flip => flip.item === 'skill:pager'));
     await switchProfile(box.context, dev);
     const result = await switchProfile(box.context, all);
-    assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry'], 'pager stays off: the last Disable was by hand');
+    assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry'], 'pager stays off: it was last set by hand');
+    // Turned back on in the tool's own settings, then the switch that turned it off undone: profiles no longer hold it.
+    const offAgain = (await switchProfile(box.context, dev)).event!;
+    await writeFile(mcpSwitchPath(box.context, 'codex-cli'), (await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8')).replace('enabled = false\n', ''));
+    await undoProfileSwitch(box.context, offAgain);
+    assert.equal((await readProfiles(box.home)).offByProfile['mcp:sentry'], undefined);
   } finally { await box.cleanup(); }
 });
 
@@ -210,4 +226,26 @@ test('A managed MCP server a profile turned off keeps syncing, and stays off', a
     assert.match(codex, /\[mcp_servers\.sentry\]\ncommand = "sentry"\nargs = \["--v2"\]\nenabled = false\n/);
     assert.equal(mcpDisabled('codex-cli', codex, 'sentry'), true);
   } finally { await box.cleanup(); }
+});
+
+test('A settings file that can’t be written fails only its own flips, and an Undo that put nothing back can be tried again', async () => {
+  const box = await sandbox();
+  const folders = [join(box.home, '.claude'), join(box.home, '.codex')];
+  try {
+    const settings = join(box.home, '.claude/settings.json');
+    const before = await readFile(settings, 'utf8');
+    await chmod(folders[0], 0o555);
+    const result = await switchProfile(box.context, (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!);
+    assert.equal(await readFile(settings, 'utf8'), before);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'failed').map(entry => `${entry.item} ${entry.harness}`).sort(), ['pager claude-cli', 'sentry claude-cli']);
+    assert.deepEqual(result.flips.map(flip => `${flip.item} ${flip.tool}`), ['mcp:sentry codex-cli']);
+    assert.deepEqual((await readProfiles(box.home)).offByProfile, { 'mcp:sentry': ['codex-cli'] });
+    // Then Pager is chosen, and the Development switch is undone while neither file can be written: its one flip (Codex's sentry)
+    // fails and the profile in use stays Pager, so nothing changed and the switch can still be undone later.
+    await chmod(folders[0], 0o755);
+    await switchProfile(box.context, (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!);
+    for (const folder of folders) await chmod(folder, 0o555);
+    assert.match((await undoProfileSwitch(box.context, result.event!)).stopped ?? '', /^Nothing was undone: /);
+    assert.equal((await readHistory(box.home)).find(event => event.id === result.event)?.undoneBy, undefined);
+  } finally { for (const folder of folders) await chmod(folder, 0o755); await box.cleanup(); }
 });

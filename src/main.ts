@@ -16,7 +16,7 @@ import { instructionsView, instructionVersion, saveInstruction } from './instruc
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { activeProfile, driftOf, NO_PROFILE, profilesInUse, switchItems } from './profileplan.ts';
+import { activeProfile, driftOf, NO_PROFILE, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { plural } from './model.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
@@ -33,13 +33,17 @@ let current: { mode: HomeMode; home: string; label: string } | undefined;
 let homeWritable = true;
 let lastManagedCount = 0;
 /** The open home's profiles as last read, for the menu bar's Profile menu. */
-let lastProfiles: ProfilesView = { profiles: [], held: {} };
+let lastProfiles: ProfilesView = { profiles: [], offByProfile: {} };
 /** How many switches no longer match the profile in use, as last read (the menus say so beside its name). */
 let lastDrift = 0;
-/** The switch files' modification times when drift was last looked at in the background. */
+/**
+ * The switch files' modification times as the page last read them (or the background last looked): a change since then was made
+ * in a tool's own settings. Every page read takes it again, so Central Knot's own writes (a switch, a Disable, an MCP Apply) and
+ * another home's files never count as one.
+ */
 let lastStamp = '';
-/** After Central Knot's own switch the page already reads again: the background need not look at those files once more. */
-const noteOwnSwitch = async () => { lastStamp = await switchFilesStamp(context()).catch(() => lastStamp); };
+/** Every item a profile can switch, as the page last read them: a profile edit works out its drift from these, without a read. */
+let lastItems: SwitchItem[] = [];
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -171,16 +175,14 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
   const choose = (id: string | null) => void fromTray(async () => {
     if (!current) return;
     const result = await switchProfile(context(), id);
-    await noteOwnSwitch();
     const page = window && !window.isDestroyed();
     // Reporting: a switch that couldn't start waits on the page like sync's failures. Otherwise its result, failures included,
     // goes to the page's band with Undo; with no window, the failures wait with sync's.
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
-    else if (page) window.webContents.send('profile:switched', id === null ? NO_PROFILE : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
+    else if (page) window.webContents.send('profile:switched', result);
     else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
     // Menus: the profiles as saved, and what still differs (the page's read updates it when there is a window).
-    lastProfiles = await readProfiles(current.home);
-    if (!page) lastDrift = await driftNow(context());
+    followProfiles(await readProfiles(current.home), page ? lastDrift : await driftNow(context()));
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
   const drift = lastDrift ? ` (${plural(lastDrift, 'item')} to apply)` : '';
@@ -313,12 +315,15 @@ async function view(explicit = false): Promise<HomeView> {
   const notices = [...pendingNotices, ...(result?.notices ?? [])];
   pendingResults = [];
   pendingNotices = [];
+  const profiles = await readProfiles(current!.home);
+  // Taken before the reads below, so a switch turned in a tool while they run is still seen by the background's next look.
+  lastStamp = profilesInUse(profiles) ? await switchFilesStamp(shared).catch(() => '') : '';
   const snapshots = await read();
   latestSnapshots = snapshots;
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), profiles: await readProfiles(current!.home),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), profiles,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
     ...(await (async () => {
       const notices = pendingMcpNotices.splice(0);
@@ -328,10 +333,8 @@ async function view(explicit = false): Promise<HomeView> {
       };
     })()),
   };
-  const drift = driftOf(switchItems(made.manage, made.mcp), made.profiles);
-  if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles) || drift !== lastDrift) { lastProfiles = made.profiles; lastDrift = drift; refreshTray(); }
-  // The first read starts the background's look at switch files from what is there now.
-  if (!lastStamp && profilesInUse(made.profiles)) lastStamp = await switchFilesStamp(shared).catch(() => '');
+  lastItems = switchItems(made.manage, made.mcp);
+  followProfiles(made.profiles);
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;
@@ -345,6 +348,43 @@ let poller: NodeJS.Timeout | undefined;
 let soon: NodeJS.Timeout | undefined;
 let followUp: NodeJS.Timeout | undefined;
 
+/** The menus follow the open home's profiles and how many items its tools no longer match the profile in use on. */
+function followProfiles(profiles: ProfilesView, drift = driftOf(lastItems, profiles)) {
+  if (JSON.stringify(profiles) === JSON.stringify(lastProfiles) && drift === lastDrift) return;
+  lastProfiles = profiles;
+  lastDrift = drift;
+  refreshTray();
+}
+
+/**
+ * After a profile is made, changed or deleted (Central Knot's own file only, no tool changes): the profiles for the page, which
+ * needs no other read, and the menus. Profiles that just came into play start the background's look at switch files here.
+ */
+async function profilesSaved(): Promise<ProfilesView> {
+  const profiles = await readProfiles(current!.home);
+  if (profilesInUse(profiles) && !lastStamp) lastStamp = await switchFilesStamp(context()).catch(() => '');
+  followProfiles(profiles);
+  return profiles;
+}
+
+/**
+ * A switch turned in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: while profiles are
+ * in play, the background looks at the switch files on its own. When one changed since the page read them, or the pass wrote
+ * something (an item may have come or gone), drift is worked out again: the menus follow it, and the page reads again (its marks
+ * show each switch). Codex's config.toml and Pi's mcp.json hold MCP entries too, so an MCP edit there counts.
+ */
+async function lookAtSwitchFiles(passWrote: boolean) {
+  if (!profilesInUse(lastProfiles)) return;
+  const stamp = await switchFilesStamp(context()).catch(() => '');
+  const switched = stamp !== lastStamp;
+  if (!switched && !passWrote) return;
+  lastStamp = stamp;
+  const drift = await driftNow(context()).catch(() => lastDrift);
+  const drifted = drift !== lastDrift;
+  followProfiles(lastProfiles, drift);
+  if ((switched || drifted) && !window.isDestroyed()) window.webContents.send('sync:changed');
+}
+
 function background() {
   if (!current || smoke) return;
   const work = queue.then(async () => {
@@ -352,20 +392,7 @@ function background() {
     const fromEvent = touched;
     touched = false;
     const result = await pass();
-    // A switch turned back in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: drift is
-    // looked at on its own while a profile holds anything, and the menus and the page follow it.
-    // Looked at when a file a switch lives in changed since the last look (Codex's config.toml and Pi's mcp.json hold MCP entries
-    // too, so an MCP edit there counts), or the pass wrote something (an item may have come or gone). Central Knot's own switches
-    // note the new times themselves. Such a change reads the page again (its marks show each switch); the menus follow the drift.
-    const stamp = profilesInUse(lastProfiles) ? await switchFilesStamp(context()).catch(() => '') : lastStamp;
-    if (profilesInUse(lastProfiles) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
-      const switched = stamp !== lastStamp;
-      lastStamp = stamp;
-      const drift = await driftNow(context()).catch(() => lastDrift);
-      const drifted = drift !== lastDrift;
-      if (drifted) { lastDrift = drift; refreshTray(); }
-      if ((switched || drifted) && !window.isDestroyed()) window.webContents.send('sync:changed');
-    }
+    await lookAtSwitchFiles(!!(result?.harnessWrites || mcpChanged));
     // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
     if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
@@ -609,7 +636,6 @@ app.whenReady().then(async () => {
       const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') {
         const undone = await undoProfileSwitch(context(), eventId);
-        await noteOwnSwitch();
         return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length };
       }
       const key = past?.key ?? '';
@@ -630,17 +656,16 @@ app.whenReady().then(async () => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
     const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
     const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), restore: input.restore === true });
-    return saved.problem ? saved : { ...saved, view: await view() };
+    return saved.problem ? saved : { ...saved, profiles: await profilesSaved() };
   });
   handle('profiles:delete', async (id, home) => {
     if (home !== current?.home || typeof id !== 'string') return { problem: elsewhere };
     const deleted = await deleteProfile(context(), id);
-    return deleted.problem ? deleted : { view: await view() };
+    return deleted.problem ? deleted : { profiles: await profilesSaved() };
   });
   handle('profiles:switch', async (id, home) => {
     if (home !== current?.home || (id !== null && typeof id !== 'string')) return { stopped: elsewhere, results: [], flips: [] };
     const result = await switchProfile(context(), id as string | null);
-    await noteOwnSwitch();
     return { ...result, view: await view() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });

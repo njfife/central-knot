@@ -1,7 +1,7 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
-import { andList, toolNames } from './words.ts';
+import { toolNames } from './words.ts';
 import { flipSummary, NO_PROFILE } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
@@ -57,6 +57,8 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? NO_PROFILE;
   if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}.`, action: 'Redo' };
+  // Apply to tools: the profile in use, made to match again.
+  if ((switched.from ?? '') === (switched.to ?? '')) return { glyph: 'sliders-horizontal', text: `Applied ${to} to tools again: ${counts}.`, action: 'Undo' };
   return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}.`, action: 'Undo' };
 }
 

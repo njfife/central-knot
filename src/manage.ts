@@ -8,7 +8,7 @@ import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import { isDisabled, readSwitchFile, setDisabled, targetOf, type SwitchTarget } from './skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled, switchFacts, targetOf, type SwitchTarget } from './skillswitch.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
@@ -76,11 +76,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
   // Each tool's own switch (Disable): read once, then asked about every copy there.
   const switches = new Map(await Promise.all(tools.map(async tool => [tool, await readSwitchFile(context, tool)] as const)));
   for (const entry of map.values()) {
-    for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
-      const file = switches.get(tool)!;
-      if (file.problem) { (entry.facts.switchProblem ??= {})[tool] = file.problem; (entry.facts.switchFile ??= {})[tool] = file.path; }
-      else if (isDisabled(context, tool, file, switchTarget(context, entry, tool)!)) (entry.facts.disabled ??= []).push(tool);
-    }
+    Object.assign(entry.facts, switchFacts(Object.keys(entry.facts.copies) as HarnessId[], switches, (tool, file) => isDisabled(context, tool, file, switchTarget(context, entry, tool)!)));
   }
   // A skill converted from an agent never goes back to the agent's own tool on its own (AGT-03): only an explicit request could.
   const converted = await readConverted(context.home);
@@ -116,7 +112,7 @@ const skillAt = (entry: Gathered, tool: HarnessId) => entry.skills[tool]?.find(s
  */
 function switchTarget(context: ShareContext, entry: Gathered, tool: HarnessId, placed = false): SwitchTarget | undefined {
   const copy = entry.facts.copies[tool];
-  if (copy) return targetOf(copy, copy.name ?? copy.folder);
+  if (copy) return targetOf(copy);
   if (!placed) return undefined;
   return { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(rootOf(context, tool), entry.facts.name, 'SKILL.md') };
 }

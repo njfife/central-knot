@@ -1,11 +1,11 @@
 // Profiles: named sets of skills and MCP servers, switched in one click (here, from the status bar, or from the menu bar).
 // The list shows each profile and which one is in use; the open profile shows every item with a box (in the profile or not) and,
 // per tool, whether it is on now and what a switch would change. Ticking only edits the profile; tools change on Switch.
-import { deleteProfileDef, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile } from './app.ts';
+import { deleteProfileDef, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
-import { button, emptyState, h, icon } from './dom.ts';
+import { button, emptyState, findInput, h, icon } from './dom.ts';
 import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, profilesInUse, planSwitch, switchItems, type SwitchItem, type SwitchPlan } from './profileplan.ts';
-import { toolName } from './words.ts';
+import { andList, toolName } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, Profile } from './types.ts';
 
@@ -16,11 +16,10 @@ const onePane = () => document.body.classList.contains('one-pane');
 const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.manage.tools, ...home.mcp.tools])]; };
 const items = (): SwitchItem[] => switchItems(state.home!.manage, state.home!.mcp);
 const profiles = () => state.home!.profiles;
-const canWrite = () => !state.busy && state.home!.manage.access.allowed && !profiles().problem;
-const named = (tool: HarnessId) => toolName(tool) ?? tool;
+const canWrite = () => !state.busy && !whyReadOnly(state.home!) && !profiles().problem;
 const danger = (control: HTMLElement) => { control.classList.add('text-danger'); return control; };
 
-/** The profile shown: the one opened, else (two panes) the one in use, the first, or No profile. */
+/** The profile shown: the one opened, else (two panes) the one in use or No profile; one pane shows the list instead. */
 function openId(): string | undefined {
   const view = profiles();
   if (profileState.open && (profileState.open === NONE || view.profiles.some(profile => profile.id === profileState.open))) return profileState.open;
@@ -33,7 +32,7 @@ function freshName() {
   const taken = new Set(profiles().profiles.map(profile => profile.name.toLowerCase()));
   for (let n = 1; ; n++) { const name = n === 1 ? 'New profile' : `New profile ${n}`; if (!taken.has(name.toLowerCase())) return name; }
 }
-const newProfile = () => { profileState.renaming = 'new'; void saveProfileDef({ name: freshName(), items: [] }, 'New profile made. Name it, then tick what it turns on.').then(() => { profileState.renaming = profileState.open; rerender(); focusName(); }); };
+const newProfile = () => void saveProfileDef({ name: freshName(), items: [] }, 'New profile made. Name it, then tick what it turns on.').then(focusName);
 const focusName = () => { const input = document.getElementById('profile-name') as HTMLInputElement | null; input?.focus(); input?.select(); };
 
 
@@ -46,7 +45,7 @@ function listRow(id: string, name: string, count: string, active: boolean, selec
     icon(id === NONE ? 'circle-dashed' : 'sliders-horizontal', 14, 'tone-muted'),
     h('span.list-name.profile-row-name', { title: name }, name),
     count ? h('span.list-fraction', {}, count) : null,
-    active ? h('span.profile-in-use', { title: `${name} is in use` }, icon('check', 12), 'In use') : null);
+    active ? h('span.badge.badge-picked', { title: `${name} is in use` }, icon('check', 12), 'In use') : null);
 }
 
 function listColumn(open: string | undefined) {
@@ -66,10 +65,10 @@ function listColumn(open: string | undefined) {
  * How one tool's cell looks: its state now, or (in blue, ringed) the state the view's action leaves it in. The legend lists only
  * the looks a table shows.
  */
-type Look = 'on' | 'held' | 'hand' | 'blocked' | 'none' | 'to-off' | 'to-on';
+type Look = 'on' | 'by-profile' | 'hand' | 'blocked' | 'none' | 'to-off' | 'to-on';
 const looks: Record<Look, { key: string; mark: () => Node }> = {
   'on': { key: 'On', mark: () => h('span.pf-dot', { 'aria-hidden': 'true' }) },
-  'held': { key: 'Off by a profile', mark: () => icon('sliders-horizontal', 14) },
+  'by-profile': { key: 'Off by a profile', mark: () => icon('sliders-horizontal', 14) },
   'hand': { key: 'Disabled by hand (profiles leave it)', mark: () => icon('circle-off', 14, 'tone-muted') },
   'blocked': { key: 'Can’t be switched (reason below)', mark: () => icon('circle-alert', 14, 'tone-warning') },
   'none': { key: 'No copy', mark: () => icon('minus', 14, 'tone-faint') },
@@ -82,8 +81,12 @@ const pending = (look: Look) => look === 'to-off' || look === 'to-on';
  * One table's context: the profile being edited (none on the No profile view), the plan its action would carry out, what profiles
  * hold off, how that action is said after "when you" (switch, apply, stop using profiles), and the looks drawn so far.
  */
-interface TableView { profile?: Profile; plan: SwitchPlan; held: Record<string, HarnessId[]>; action: string; seen: Set<Look> }
+interface TableView { profile?: Profile; plan: SwitchPlan; offByProfile: Record<string, HarnessId[]>; action: string; seen: Set<Look> }
 
+/**
+ * One tool's look for an item, and the same in words. A change the view's action would make wins over the state now, even over a
+ * switch that can't be read (the plan never flips one of those, so the two don't meet in practice).
+ */
 function lookOf(item: SwitchItem, tool: HarnessId, view: TableView): { look: Look; said: string } {
   const now = item.tools[tool];
   const flip = view.plan.flips.find(entry => entry.item === item.id && entry.tool === tool);
@@ -91,12 +94,12 @@ function lookOf(item: SwitchItem, tool: HarnessId, view: TableView): { look: Loo
   if (flip) return flip.disabled ? { look: 'to-off', said: `on now · turns off when you ${view.action}` } : { look: 'to-on', said: `off now · turns back on when you ${view.action}` };
   if (item.blocked[tool]) return { look: 'blocked', said: `can’t be switched: ${item.blocked[tool]}` };
   if (now === 'on') return { look: 'on', said: 'on' };
-  return view.held[item.id]?.includes(tool) ? { look: 'held', said: 'off (a profile turned it off)' } : { look: 'hand', said: 'off (turned off by hand; profiles leave it off)' };
+  return view.offByProfile[item.id]?.includes(tool) ? { look: 'by-profile', said: 'off (a profile turned it off)' } : { look: 'hand', said: 'off (turned off by hand; profiles leave it off)' };
 }
 
 function cell(tool: HarnessId, { look, said }: { look: Look; said: string }, view: TableView) {
   view.seen.add(look);
-  const text = `${named(tool)}: ${said}`;
+  const text = `${toolName(tool)}: ${said}`;
   return h(`span.pf-cell${pending(look) ? '.pf-cell-pending' : ''}`, { role: 'cell', title: text, 'aria-label': text, 'data-col': tool }, looks[look].mark());
 }
 
@@ -120,7 +123,7 @@ function itemRow(item: SwitchItem, view: TableView) {
   const cells = each.map(entry => cell(entry.tool, entry, view));
   // What the cells and a cut-off description say, in words: read with the tick box, and shown under the row while it has
   // keyboard focus, so nothing here needs a mouse.
-  const states = each.map(entry => `${named(entry.tool)}: ${entry.said}`).join(' · ');
+  const states = each.map(entry => `${toolName(entry.tool)}: ${entry.said}`).join(' · ');
   return h(`div.pf-row${included ? '.pf-included' : ''}`, { role: 'row', 'data-item': item.id },
     h('span.pf-name', { role: 'cell' },
       profile ? tick(profile, { id: `pf-${item.id}`, checked: included, label: `${item.name} (${item.kind === 'mcp' ? 'MCP server' : 'skill'}) in ${profile.name}`, help: `${help} ${states}.`,
@@ -144,14 +147,14 @@ function section(title: string, list: SwitchItem[], view: TableView) {
 
 /** The items with a column per tool, a key to the looks it shows, and why any switch can't be changed. */
 function table(list: SwitchItem[], options: Pick<TableView, 'profile' | 'plan' | 'action'>) {
-  const view: TableView = { ...options, held: profiles().held, seen: new Set() };
+  const view: TableView = { ...options, offByProfile: profiles().offByProfile, seen: new Set() };
   const head = h('div.pf-row.pf-head', { role: 'row' }, h('span.pf-name', { role: 'columnheader' }, view.profile ? 'In profile' : 'Item'),
-    tools().map(tool => h('span.pf-cell.pf-head-cell', { role: 'columnheader', 'data-col': tool }, brandMark(tool, 14), h('span.pf-head-name', {}, named(tool)))));
+    tools().map(tool => h('span.pf-cell.pf-head-cell', { role: 'columnheader', 'data-col': tool }, brandMark(tool, 14), h('span.pf-head-name', {}, toolName(tool)))));
   const grid = h(`div.pf-table${view.profile ? '.pf-table-profile' : ''}`, { role: 'table', 'aria-label': view.profile ? `What ${view.profile.name} has on` : 'Turned off by profiles' }, head,
     section('Skills', list.filter(item => item.kind === 'skill'), view), section('MCP servers', list.filter(item => item.kind === 'mcp'), view));
   grid.style.setProperty('--pf-tools', String(tools().length));
-  const legend = h('div.pf-legend', { 'aria-label': 'Key' }, (Object.keys(looks) as Look[]).filter(look => view.seen.has(look)).map(look =>
-    h('span', {}, h(`span.pf-legend-mark${pending(look) ? '.pf-cell-pending' : ''}`, { 'aria-hidden': 'true' }, looks[look].mark()), pending(look) ? `${looks[look].key} ${view.action}` : looks[look].key)));
+  const legend = h('div.legend.pf-legend', { 'aria-label': 'Key' }, (Object.keys(looks) as Look[]).filter(look => view.seen.has(look)).map(look =>
+    h('span.legend-item', {}, h(`span.pf-legend-mark${pending(look) ? '.pf-cell-pending' : ''}`, { 'aria-hidden': 'true' }, looks[look].mark()), pending(look) ? `${looks[look].key} ${view.action}` : looks[look].key)));
   return [grid, legend, notes(list, view)];
 }
 
@@ -165,24 +168,23 @@ function notes(list: SwitchItem[], view: TableView) {
     const blocked = list.filter(item => item.blocked[tool]);
     if (!blocked.length) continue;
     const files = [...new Set(blocked.flatMap(item => item.blockedFile[tool] ?? []))];
-    const kinds = [...new Set(blocked.map(item => (item.kind === 'mcp' ? 'MCP servers' : 'skills')))].join(' and ');
-    lines.push(h('li', {}, icon('circle-alert', 14, 'tone-warning'), h('span', {}, h('strong', {}, `${named(tool)}: `), `its settings can’t be read right now, so its ${kinds} can’t be switched. Central Knot leaves ${files.length === 1 ? 'that file' : 'those files'} as ${files.length === 1 ? 'it is' : 'they are'}: fix it (or let ${named(tool)} rewrite it), then Refresh.`,
+    const kinds = andList([...new Set(blocked.map(item => (item.kind === 'mcp' ? 'MCP servers' : 'skills')))]);
+    lines.push(h('li', {}, icon('circle-alert', 14, 'tone-warning'), h('span', {}, h('strong', {}, `${toolName(tool)}: `), `its settings can’t be read right now, so its ${kinds} can’t be switched. Central Knot leaves ${files.length === 1 ? 'that file' : 'those files'} as ${files.length === 1 ? 'it is' : 'they are'}: fix it (or let ${toolName(tool)} rewrite it), then Refresh.`,
       files.map(file => h('span.pf-note-path', { title: file }, shownPath(file))))));
   }
   if (view.profile) for (const item of list.filter(entry => view.profile!.items.includes(entry.id))) {
-    const hand = offByHand(item, view.held);
+    const hand = offByHand(item, view.offByProfile);
     if (!hand.length) continue;
     const where = item.kind === 'skill' ? ['Enable it there on the ', h('button.inline-link', { type: 'button', id: `pf-to-skills-${item.key}`, onclick: () => showPage('skills') }, 'Skills page'), '.'] : [`Turn it on in ${hand.length === 1 ? 'that tool’s' : 'those tools’'} own MCP settings.`];
-    lines.push(h('li', {}, looks.hand.mark(), h('span', {}, h('strong', {}, item.name), ` is disabled in ${hand.map(named).join(' and ')}: profiles leave it off. `, ...where)));
+    lines.push(h('li', {}, looks.hand.mark(), h('span', {}, h('strong', {}, item.name), ` is disabled in ${andList(hand.map(toolName))}: profiles leave it off. `, ...where)));
   }
   return lines.length ? h('ul.pf-blocked', { 'aria-live': 'polite' }, lines) : null;
 }
 
 /** Find, the count, and (for a profile) when ticks take effect: they save at once; tools change on the header's action. */
 function findBar(shown: number, total: number, saves?: string) {
-  const input = h('input.find-input', { id: 'profile-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill or MCP server', value: find, spellcheck: 'false',
-    oninput: (event: Event) => { find = (event.target as HTMLInputElement).value; rerender(); },
-    onkeydown: (event: KeyboardEvent) => { if (event.key === 'Escape' && find) { find = ''; rerender(); } } });
+  const input = findInput({ id: 'profile-find', label: 'Find a skill or MCP server', value: find, onInput: text => { find = text; rerender(); },
+    onKeydown: event => { if (event.key === 'Escape' && find) { find = ''; rerender(); } } });
   return h('div.toolbar', {}, h('label.find', {}, icon('search', 16, 'find-glyph'), input,
     find ? button({ variant: 'ghost', size: 'micro', icon: 'x', name: 'Clear', id: 'profile-find-clear', onclick: () => { find = ''; rerender(); document.getElementById('profile-find')?.focus(); } }) : null),
     h('div.toolbar-end', {}, saves ? h('span.pf-save-note', {}, saves) : null, find ? h('span.result-count', {}, `${shown} of ${total}`) : null));
@@ -190,13 +192,14 @@ function findBar(shown: number, total: number, saves?: string) {
 
 const matches = (item: SwitchItem) => !find || `${item.name} ${item.description}`.toLowerCase().includes(find.toLowerCase());
 
+/** Whether a mouse button or finger is down right now (afterClick waits for its click). */
+let pointerDown = false;
+document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
+document.addEventListener('pointerup', () => { setTimeout(() => { pointerDown = false; }); }, true);
 /**
  * Runs `work` once the click that took focus away has landed (a redraw on mouse-down would swallow that click), or at once when
  * focus left some other way (Tab).
  */
-let pointerDown = false;
-document.addEventListener('pointerdown', () => { pointerDown = true; }, true);
-document.addEventListener('pointerup', () => { setTimeout(() => { pointerDown = false; }); }, true);
 function afterClick(work: () => void) {
   if (!pointerDown) { setTimeout(work); return; }
   let done = false;
@@ -249,8 +252,8 @@ function subtitleOf(profile: Profile, all: SwitchItem[], plan: SwitchPlan, activ
   const differ = plan.flips.length > 0;
   const blockedTools = [...new Set(all.flatMap(item => Object.keys(item.blocked) as HarnessId[]))];
   // Said in short here too, since the notes under the table can be below the fold in a small window.
-  const byHand = profile.items.filter(id => { const item = all.find(entry => entry.id === id); return item && offByHand(item, profiles().held).length; }).length;
-  const caveats = [blockedTools.length ? h('span.pf-sub-caveat', {}, icon('circle-alert', 12, 'tone-warning'), `${blockedTools.map(named).join(' and ')} can’t be switched · `) : null, byHand ? `${plural(byHand, 'item')} disabled by hand · ` : null];
+  const byHand = profile.items.filter(id => { const item = all.find(entry => entry.id === id); return item && offByHand(item, profiles().offByProfile).length; }).length;
+  const caveats = [blockedTools.length ? h('span.pf-sub-caveat', {}, icon('circle-alert', 12, 'tone-warning'), `${andList(blockedTools.map(toolName))} can’t be switched · `) : null, byHand ? `${plural(byHand, 'item')} disabled by hand · ` : null];
   // "New sessions use it" is the quiet part: left out beside a caveat, and in a narrow window.
   const sessions = (text: string) => (blockedTools.length || byHand ? null : h('span.pf-sub-sessions', {}, text));
   if (active) return [...caveats, ...(differ ? [`In use · Apply to tools ${flipWords(change, 'will')} to match it`] : ['In use', sessions(' · new sessions in your tools use it')])];
@@ -269,27 +272,40 @@ function deleteActions(profile: Profile, active: boolean, backOn: number) {
     button({ variant: 'outline', size: 'small', label: `Stop using profiles${backOn ? ` (turns ${plural(backOn, 'item')} back on)` : ''}`, id: 'profile-stop', attrs: { title: 'Turn back on what profiles turned off; then Delete works. One step in History, with Undo.' }, onclick: () => { profileState.confirmDelete = undefined; void switchToProfile(null); } }), cancel)];
 }
 
+/**
+ * The header's main button: Switch to the profile, or Apply to tools when it is in use but the tools no longer match it. None while
+ * there is nothing to do (in use and matching; empty and not in use) or while the name is edited.
+ */
+function primaryAction(profile: Profile, active: boolean, plan: SwitchPlan): HTMLElement | null {
+  if ((active && !plan.flips.length) || (!profile.items.length && !active) || profileState.renaming === profile.id) return null;
+  const will = flipWords(flipCounts(plan.flips), 'will');
+  const label = active ? 'Apply to tools' : profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`;
+  const title = whyReadOnly(state.home!) ?? (active ? `Make your tools match ${profile.name} again: ${will}` : `Use ${profile.name}: ${will || 'nothing needs switching'}. One step in History, with Undo.`);
+  return button({ variant: 'primary', size: 'small', label, id: 'profile-switch', disabled: !canWrite(), attrs: { title }, onclick: () => void switchToProfile(profile.id) });
+}
+
+/** The header's actions: Delete's confirmation while it is asked, a hint while renaming, else the main button, Rename and Delete. */
+function headerActions(profile: Profile, active: boolean, primary: HTMLElement | null, backOn: number): (Node | null)[] {
+  if (profileState.confirmDelete === profile.id) return deleteActions(profile, active, backOn);
+  if (profileState.renaming === profile.id) return [h('span.profile-confirm.tone-muted', {}, 'Enter to save · Esc to cancel')];
+  return [primary,
+    button({ variant: 'ghost', size: 'small', label: 'Rename', id: 'profile-rename', disabled: !canWrite(), onclick: () => { profileState.renaming = profile.id; rerender(); focusName(); } }),
+    danger(button({ variant: 'ghost', size: 'small', label: 'Delete', id: 'profile-delete', disabled: !canWrite(), onclick: () => { profileState.confirmDelete = profile.id; rerender(); document.getElementById(active ? 'profile-delete-cancel' : 'profile-delete-confirm')?.focus(); } }))];
+}
+
 function profileDetail(profile: Profile) {
   const view = profiles();
   const all = items();
   const active = view.active === profile.id;
   const empty = !profile.items.length;
   // An empty profile not in use can't be switched to yet, so it previews no switch: its first step is choosing what it has.
-  const plan = empty && !active ? { flips: [], held: view.held, blocked: [] } : planSwitch(all, profile, view.held);
   // In use but not matching: the profile was edited since, an item turned up, or a switch was turned back by hand.
-  const change = flipCounts(plan.flips);
-  const differ = plan.flips.length;
-  const writeReason = !state.home!.manage.access.allowed ? state.home!.manage.access.reason : undefined;
-  // While renaming, the name field has the header to itself.
-  const renaming = profileState.renaming === profile.id;
-  const primary = (active && !differ) || (empty && !active) || renaming ? null : button({ variant: 'primary', size: 'small', label: active ? 'Apply to tools' : profile.name.length > 18 ? 'Switch to this profile' : `Switch to ${profile.name}`, id: 'profile-switch', disabled: !canWrite(),
-    attrs: { title: writeReason ?? (active ? `Make your tools match ${profile.name} again: ${flipWords(change, 'will')}` : `Use ${profile.name}: ${flipWords(change, 'will') || 'nothing needs switching'}. One step in History, with Undo.`) },
-    onclick: () => void switchToProfile(profile.id) });
+  const plan = empty && !active ? { flips: [], offByProfile: view.offByProfile, blocked: [] } : planSwitch(all, profile, view.offByProfile);
+  const primary = primaryAction(profile, active, plan);
   // What Stop using profiles would turn back on, said on its button where deleting the profile in use offers it.
-  const backOn = active ? flipCounts(planSwitch(all, undefined, view.held).flips).on : 0;
-  const actions = profileState.confirmDelete === profile.id ? deleteActions(profile, active, backOn)
-    : renaming ? [h('span.profile-confirm.tone-muted', {}, 'Enter to save · Esc to cancel')] : [primary, button({ variant: 'ghost', size: 'small', label: 'Rename', id: 'profile-rename', disabled: !canWrite(), onclick: () => { profileState.renaming = profile.id; rerender(); focusName(); } }),
-      danger(button({ variant: 'ghost', size: 'small', label: 'Delete', id: 'profile-delete', disabled: !canWrite(), onclick: () => { profileState.confirmDelete = profile.id; rerender(); document.getElementById(active ? 'profile-delete-cancel' : 'profile-delete-confirm')?.focus(); } }))];
+  const backOn = active ? flipCounts(planSwitch(all, undefined, view.offByProfile).flips).on : 0;
+  const actions = headerActions(profile, active, primary, backOn);
+  const renaming = profileState.renaming === profile.id;
   const shown = all.filter(matches);
   return h('div.detail-column', {}, header({ title: profile.name, subtitle: subtitleOf(profile, all, plan, active), actions, nameField: renaming ? renameField(profile) : undefined }),
     empty ? h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, `Nothing is in ${profile.name} yet. Tick what it should have on, or start from what is on now. Switching to it turns the rest off with each tool’s own switch; nothing is moved or deleted.`),
@@ -303,8 +319,8 @@ function profileDetail(profile: Profile) {
 function noProfileDetail() {
   const view = profiles();
   const all = items();
-  const plan = planSwitch(all, undefined, view.held);
-  const heldItems = all.filter(item => view.held[item.id]?.length);
+  const plan = planSwitch(all, undefined, view.offByProfile);
+  const offItems = all.filter(item => view.offByProfile[item.id]?.length);
   const active = !view.active;
   const primary = active && !plan.flips.length ? null : button({ variant: 'primary', size: 'small', label: active ? 'Apply to tools' : 'Stop using profiles', id: 'profile-switch', disabled: !canWrite(),
     attrs: { title: `Turn back on the ${plural(flipCounts(plan.flips).on, 'item')} profiles turned off` }, onclick: () => void switchToProfile(null) });
@@ -316,7 +332,7 @@ function noProfileDetail() {
         h('li', {}, icon('circle-off', 14, 'tone-muted'), h('span', {}, 'Something you disable by hand in one tool stays disabled. Profiles only turn back on what a profile turned off.')),
         h('li', {}, icon('refresh-cw', 14, 'tone-muted'), h('span', {}, 'Managed items keep syncing while they are off, so they are up to date when they come back.')),
         h('li', {}, icon('history', 14, 'tone-muted'), h('span', {}, 'Each switch is one step in History, with Undo. Switch here, from the status bar, or from Central Knot’s menu bar menu.'))),
-      heldItems.length ? [h('h3.eyebrow.pf-eyebrow', {}, 'Turned off by profiles', h('span.eyebrow-count', {}, String(heldItems.length))), ...table(heldItems, { plan, action: active ? 'apply' : 'stop using profiles' })] : null));
+      offItems.length ? [h('h3.eyebrow.pf-eyebrow', {}, 'Turned off by profiles', h('span.eyebrow-count', {}, String(offItems.length))), ...table(offItems, { plan, action: active ? 'apply' : 'stop using profiles' })] : null));
 }
 
 // ---------- Page ----------
@@ -327,7 +343,7 @@ export function profilesPage(): HTMLElement {
   const view = home.profiles;
   const bands = [outcomeBand(),
     view.problem ? h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', { title: view.problem }, view.problem)) : null,
-    !home.manage.access.allowed ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${home.manage.access.reason} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
+    whyReadOnly(home) ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${whyReadOnly(home)} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
   // No profiles at all, and nothing a profile still holds off: the start page. With holds left (a profile deleted after a switch
   // that couldn't finish), No profile stays reachable, so they can still be turned back on.
   if (!profilesInUse(view)) {

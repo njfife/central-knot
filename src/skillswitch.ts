@@ -10,16 +10,37 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
 import { errorCode, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, tableEnd, tomlValue } from './textedit.ts';
-import type { HarnessId } from './types.ts';
+import type { HarnessId, SkillFacts } from './types.ts';
 
 /** One tool's copy of a skill, as its switch names it. */
 export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
-/** How a tool's switch names its copy of a skill: the copy's folder, the skill's name as the tool reads it, and its SKILL.md. */
-export const targetOf = (copy: { folder: string; directory: string }, name: string): SwitchTarget => ({ folder: copy.folder, name, skillFile: join(copy.directory, 'SKILL.md') });
+/**
+ * How a tool's switch names its copy of a skill: the copy's folder, the skill's name as the tool reads it (its own `name`, else the
+ * folder), and its SKILL.md.
+ */
+export const targetOf = (copy: { folder: string; directory: string; name?: string }): SwitchTarget => ({ folder: copy.folder, name: copy.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') });
+
+/** Why a switch failed when its file, read back, doesn't say what was written. */
+export const notTaken = (tool: HarnessId) => `${harnesses[tool].name}’s settings did not take the change.`;
 
 /** One tool's switch file as read: its text ('' when there is none yet), or why it can't be used. */
 export interface SwitchFile { path: string; text: string; exists: boolean; problem?: string }
+
+/**
+ * What an item's facts say about its tools' switches, from each tool's switch file as read: the tools that have it off, and the
+ * tools whose file can't be used (why, and which file). Skills and MCP servers both use it, each with its own `isOff`.
+ */
+export function switchFacts(tools: HarnessId[], switches: Map<HarnessId, SwitchFile>, isOff: (tool: HarnessId, file: SwitchFile) => boolean): Pick<SkillFacts, 'disabled' | 'switchProblem' | 'switchFile'> {
+  const facts: Pick<SkillFacts, 'disabled' | 'switchProblem' | 'switchFile'> = {};
+  for (const tool of tools) {
+    const file = switches.get(tool);
+    if (!file) continue;
+    if (file.problem) { (facts.switchProblem ??= {})[tool] = file.problem; (facts.switchFile ??= {})[tool] = file.path; }
+    else if (isOff(tool, file)) (facts.disabled ??= []).push(tool);
+  }
+  return facts;
+}
 
 const rootOf = (context: ShareContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
@@ -62,7 +83,7 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
   if (file.problem) throw new Error(file.problem);
   if (switchState(context, tool, file.text, target) === disabled) return;
   await writeFileChecked(file.path, withSwitch(context, tool, file.text, target, disabled), file.exists ? file.text : undefined);
-  if (switchState(context, tool, await readFile(file.path, 'utf8'), target) !== disabled) throw new Error(`${harnesses[tool].name}’s settings did not take the change.`);
+  if (switchState(context, tool, await readFile(file.path, 'utf8'), target) !== disabled) throw new Error(notTaken(tool));
 }
 
 // ---------- Each tool's form ----------
