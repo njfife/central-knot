@@ -569,7 +569,7 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
 api().onProfileSwitched((name, result) => { switchOutcome(name, result); rerender(); });
 
 /** Saves a profile's name and items. Quiet when it works: the page shows the change in place. */
-export const saveProfileDef = (profile: { id?: string; name: string; items: string[] }, said?: string) => busy('Saving profile…', async () => {
+export const saveProfileDef = (profile: { id?: string; name: string; items: string[]; restore?: boolean }, said?: string) => busy('Saving profile…', async () => {
   const result = await api().saveProfile(profile, state.home!.home);
   if (result.view) state.home = result.view;
   if (result.problem) { announce(result.problem); return; }
@@ -586,6 +586,6 @@ export const deleteProfileDef = (id: string) => busy('Deleting profile…', asyn
   if (result.problem || !gone) { announce(result.problem ?? 'That profile is gone.'); return; }
   profileState.open = undefined;
   state.outcome = { page: 'profiles', item: gone.name, text: `Deleted the profile ${gone.name}. Nothing in your tools changed.`,
-    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ name: gone.name, items: gone.items }, `${gone.name} is back.`).then(() => { state.outcome = undefined; rerender(); }) } };
+    act: { label: 'Undo', id: 'outcome-undo-delete-profile', title: `Make ${gone.name} again, with the same items`, run: () => void saveProfileDef({ ...gone, restore: true }, `${gone.name} is back.`).then(() => { state.outcome = undefined; rerender(); }) } };
   announce(state.outcome.text, true);
 });

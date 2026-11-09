@@ -57,13 +57,14 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
 
 // ---------- Each tool's form ----------
 
-const parseJson = (text: string): Record<string, unknown> => {
+/** A settings file's JSON object ({} for an empty file). Throws when it is not one. */
+export const parseJson = (text: string): Record<string, unknown> => {
   if (!text.trim()) return {};
   const value: unknown = JSON.parse(text);
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Not a JSON object.');
   return value as Record<string, unknown>;
 };
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+export const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /** Pi's exact forms for a copy: relative to its agent folder (how `pi config` writes it) and absolute, for the file and its folder. */
 function piForms(target: SwitchTarget, config: string): { written: string; all: Set<string> } {

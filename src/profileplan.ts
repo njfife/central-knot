@@ -58,19 +58,21 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
   const next: Record<string, HarnessId[]> = Object.fromEntries(Object.entries(held).filter(([id]) => !items.some(item => item.id === id)));
   for (const item of items) {
     const before = held[item.id] ?? [];
-    const keep: HarnessId[] = [];
+    // A hold in a tool whose switch can't be read now, or that has no copy now, is kept as it is: it can't be checked, and
+    // dropping it would make that switch look turned off by hand once the tool reads again.
+    const keep: HarnessId[] = before.filter(tool => item.blocked[tool] || !item.tools[tool]);
     if (!wanted || wanted.has(item.id)) {
       for (const tool of before) {
-        if (item.tools[tool] !== 'off') continue;
-        if (item.blocked[tool]) { blocked.push({ item: item.id, name: item.name, tool, reason: item.blocked[tool]! }); keep.push(tool); continue; }
-        flips.push({ item: item.id, name: item.name, tool, disabled: false });
+        if (item.blocked[tool]) { blocked.push({ item: item.id, name: item.name, tool, reason: item.blocked[tool]! }); continue; }
+        if (item.tools[tool] === 'off') flips.push({ item: item.id, name: item.name, tool, disabled: false });
       }
     } else {
       // Off already, by an earlier switch: still held. Off by hand: left alone, and never held.
-      keep.push(...before.filter(tool => item.tools[tool] === 'off'));
+      keep.push(...before.filter(tool => item.tools[tool] === 'off' && !item.blocked[tool]));
       for (const [tool, now] of Object.entries(item.tools) as [HarnessId, 'on' | 'off'][]) {
         if (now !== 'on') continue;
-        if (item.blocked[tool]) { blocked.push({ item: item.id, name: item.name, tool, reason: item.blocked[tool]! }); continue; }
+        // Can't be read: reported, unless a profile turned it off already (then it is held, as above).
+        if (item.blocked[tool]) { if (!before.includes(tool)) blocked.push({ item: item.id, name: item.name, tool, reason: item.blocked[tool]! }); continue; }
         flips.push({ item: item.id, name: item.name, tool, disabled: true });
         keep.push(tool);
       }
@@ -82,3 +84,9 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
 
 /** Each item's tools turned off by hand (off, and not held by a profile). */
 export const offByHand = (item: SwitchItem, held: Record<string, HarnessId[]>) => (Object.entries(item.tools) as [HarnessId, 'on' | 'off'][]).filter(([tool, now]) => now === 'off' && !held[item.id]?.includes(tool)).map(([tool]) => tool);
+
+/** `held` with some switches taken over: each item's listed tools are no longer held (an explicit Disable or Enable elsewhere). */
+export function releaseHeld(held: Record<string, HarnessId[]>, released: { item: string; tool: HarnessId }[]): Record<string, HarnessId[]> {
+  const next = Object.fromEntries(Object.entries(held).map(([id, tools]) => [id, tools.filter(tool => !released.some(entry => entry.item === id && entry.tool === tool))]));
+  return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.length));
+}

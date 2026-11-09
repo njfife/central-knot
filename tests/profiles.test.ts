@@ -4,10 +4,11 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { readHistory } from '../src/manage.ts';
+import { applyChanges, readHistory } from '../src/manage.ts';
+import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { planSwitch, type SwitchItem } from '../src/profileplan.ts';
-import { deleteProfile, readProfiles, saveProfile, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
+import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -54,6 +55,9 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
   assert.deepEqual(none.held, {});
+  // A hold whose tool can't be read, or has no copy right now, is kept: once it reads again it is still the profile's.
+  const unreadable = [item('skill:pager', { 'claude-cli': 'on' }, { 'claude-cli': 'unreadable' })];
+  assert.deepEqual(planSwitch(unreadable, undefined, { 'skill:pager': ['claude-cli', 'codex-cli'] }).held, { 'skill:pager': ['claude-cli', 'codex-cli'] });
 });
 
 async function sandbox() {
@@ -109,5 +113,53 @@ test('Switching to a profile turns the rest off in each tool’s settings, in on
     assert.equal(redo.kind, 'profile');
     assert.equal((await undoProfileSwitch(box.context, redo.id)).flips.length, 3);
     assert.equal((await readProfiles(box.home)).active, saved.id);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of an older switch keeps what later switches hold, and the profile they chose', async () => {
+  const box = await sandbox();
+  try {
+    const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
+    const pager = (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!;
+    await switchProfile(box.context, dev);
+    await switchProfile(box.context, pager);
+    const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    await undoProfileSwitch(box.context, first.id);
+    // Development's switch of pager was undone since by Pager's; only sentry goes back on. Pager still holds dev off, and is in use.
+    const after = await readProfiles(box.home);
+    assert.equal(after.active, pager);
+    assert.deepEqual(after.held, { 'skill:dev': ['claude-cli', 'codex-cli'] });
+  } finally { await box.cleanup(); }
+});
+
+test('A switch set by hand afterwards is the person’s: profiles let go of it', async () => {
+  const box = await sandbox();
+  try {
+    const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
+    const all = (await saveProfile(box.context, { name: 'Everything', items: ['skill:dev', 'skill:pager', 'mcp:sentry'] })).id!;
+    await switchProfile(box.context, dev);
+    // On the Skills page: pager enabled in Claude Code, then disabled again, by hand (as main.ts does after Apply all).
+    for (const disabled of [[], ['claude-cli']] as const) {
+      const changes = [{ key: 'pager', managed: false, off: [], disabled: [...disabled] }];
+      await releaseProfileHolds(box.context, switchedByHand(changes, (await applyChanges(box.context, changes)).results));
+    }
+    assert.equal((await readProfiles(box.home)).held['skill:pager'], undefined);
+    const result = await switchProfile(box.context, all);
+    assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry'], 'pager stays off: the last Disable was by hand');
+  } finally { await box.cleanup(); }
+});
+
+test('A managed MCP server a profile turned off keeps syncing, and stays off', async () => {
+  const box = await sandbox();
+  try {
+    const tools: HarnessId[] = ['claude-cli', 'codex-cli'];
+    assert.equal((await applyMcp(box.context, tools, [{ key: 'sentry', managed: true, off: [] }])).stopped, undefined);
+    await switchProfile(box.context, (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!);
+    // An edit in Claude Code's own file spreads to Codex, whose entry keeps its enabled = false.
+    await writeFile(join(box.home, '.claude.json'), '{\n  "mcpServers": { "sentry": { "type": "stdio", "command": "sentry", "args": ["--v2"] } }\n}\n');
+    await applyMcp(box.context, tools, []);
+    const codex = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
+    assert.match(codex, /\[mcp_servers\.sentry\]\ncommand = "sentry"\nargs = \["--v2"\]\nenabled = false\n/);
+    assert.equal(mcpDisabled('codex-cli', codex, 'sentry'), true);
   } finally { await box.cleanup(); }
 });

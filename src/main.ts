@@ -15,7 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import { deleteProfile, readProfiles, saveProfile, switchProfile, undoProfileSwitch } from './profiles.ts';
+import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
 import { planSwitch, switchItems } from './profileplan.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
@@ -575,12 +575,16 @@ app.whenReady().then(async () => {
   handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
-      const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
+      const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
+      const key = past?.key ?? '';
       const tools = (await manageView(context())).tools;
-      if (key === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
+      if (past?.kind === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
-      return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
+      const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
+      // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
+      await releaseProfileHolds(context(), switchedByHand([{ key }], restored.results));
+      return restored;
     })()
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
@@ -591,8 +595,8 @@ app.whenReady().then(async () => {
   const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
-    const input = profile as { id?: unknown; name?: unknown; items?: unknown };
-    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items) });
+    const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items), restore: input.restore === true });
     return saved.problem ? saved : { ...saved, view: await view() };
   });
   handle('profiles:delete', async (id, home) => {
@@ -625,9 +629,14 @@ app.whenReady().then(async () => {
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
-  handle('manage:apply', async (list, resume, home) => (home === current?.home
-    ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+  handle('manage:apply', async (list, resume, home) => {
+    if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult;
+    const asked = changes(list);
+    const result = await applyChanges(context(), asked, resume === true, syncOn ? {} : { only: new Set(asked.map(change => change.key)) });
+    // A Disable or Enable chosen here takes that switch over from profiles: a later switch leaves it as set by hand.
+    await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disabled), result.results));
+    return result;
+  });
   await loading;
   if (smoke) {
     try {

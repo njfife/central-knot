@@ -110,7 +110,7 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
-  saveProfile(profile: { id?: string; name: string; items: string[] }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
+  saveProfile(profile: { id?: string; name: string; items: string[]; restore?: boolean }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
   /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
@@ -228,10 +228,10 @@ export interface HistoryEvent {
   /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it.
    * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
    * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
-   * 'profile': a profile switch (key 'profile', item the profile's name); Undo switches back. */
+   * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile';
-  /** 'profile': which profile was active before and after, every switch it flipped, and what profiles held off before it. */
-  profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[]; heldBefore: Record<string, HarnessId[]> };
+  /** 'profile': which profile was in use before and after, and every switch it flipped. */
+  profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false). */
   switched?: { tool: HarnessId; disabled: boolean }[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */

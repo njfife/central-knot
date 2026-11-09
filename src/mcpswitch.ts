@@ -9,6 +9,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
 import { errorCode, type ShareContext } from './share.ts';
+import { list, parseJson } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -32,13 +33,6 @@ export async function readMcpSwitches(context: ShareContext, tools: HarnessId[])
   })));
 }
 
-const parseJson = (text: string): Record<string, unknown> => {
-  if (!text.trim()) return {};
-  const value: unknown = JSON.parse(text);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Not a JSON object.');
-  return value as Record<string, unknown>;
-};
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 const deniesByName = (entry: unknown, name: string) => !!entry && typeof entry === 'object' && (entry as Record<string, unknown>).serverName === name;
 
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
