@@ -6,7 +6,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
 import { removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { sameBase, splitBase, withBase, withOwn, withoutBase } from './basetext.ts';
+import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import type { BaseApply, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -160,10 +160,9 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     const current = await readText(path);
     const text = current ?? '';
     const copy = splitBase(text).copy;
-    let next: string;
-    if (!tools.includes(tool)) next = withoutBase(text);
-    else if (copy !== undefined && !sameBase(copy, request.text) && !earlier.some(old => sameBase(copy, old)) && !request.overwrite?.includes(tool)) { result.left.push({ tool, why: 'edited' }); continue; }
-    else next = withBase(request.adopt === tool ? withOwn(text, '') : text, request.text);
+    const write = baseWrite(text, { base: request.text, chosen: tools.includes(tool), known: earlier.some(old => sameBase(copy, old)), adopt: request.adopt === tool, overwrite: request.overwrite?.includes(tool) });
+    if (write.edited) { result.left.push({ tool, why: 'edited' }); continue; }
+    const { next } = write;
     if (next === text && current !== undefined) continue;
     try { await keepAndWrite(context.home, tool, path, next, current); }
     catch { result.left.push({ tool, why: 'failed' }); continue; }

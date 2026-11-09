@@ -57,3 +57,16 @@ export function withoutBase(text: string): string {
   if (copy === undefined) return text;
   return own.trim() ? own : asLines(copy);
 }
+
+/**
+ * What one tool's file becomes when the base is saved: the block added or replaced (`chosen`), or taken out (not chosen).
+ * A copy edited in the file is left as it is (`edited`) unless `overwrite`; `known` says the copy is the current or an earlier
+ * base, so replacing it loses nothing. `adopt`: this file's own text became the base, so it moves into the block.
+ * The renderer previews with this and the main process writes with it, so the review always shows what is written.
+ */
+export function baseWrite(text: string, { base, chosen, known, adopt = false, overwrite = false }: { base: string; chosen: boolean; known: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
+  if (!chosen || !base.trim()) return { next: withoutBase(text) };
+  const { copy } = splitBase(text);
+  if (copy !== undefined && !sameBase(copy, base) && !known && !overwrite) return { edited: true };
+  return { next: withBase(adopt ? withOwn(text, '') : text, base) };
+}

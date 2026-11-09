@@ -2,7 +2,7 @@
 // in a marked block after that tool's own instructions. A tool's own text is never rewritten. A copy edited in a tool's file is
 // shown, never overwritten by itself: the person uses it as the base or puts the base back. Every save shows each file's change first.
 import { applyBaseChange, loadBaseVersion, ownText, rerender, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
-import { sameBase, splitBase, withBase, withOwn, withoutBase } from './basetext.ts';
+import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, pathText } from './dom.ts';
 import { changeCounts, diffView, fileName } from './instructionspage.ts';
@@ -37,21 +37,18 @@ const lineCount = (text: string) => (text ? text.replace(/\n$/, '').split('\n').
 /** What saving the draft does to one tool's file: the new text, and a sentence saying so. Undefined: the file is not involved. */
 function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string } | undefined {
   const chosen = edit.tools.includes(file.tool) && !!edit.text.trim();
-  const had = !!file.base;
-  if (!chosen && !had) return undefined;
+  if (!chosen && !file.base) return undefined;
   const name = fileName(file.path);
-  const copy = splitBase(file.text).copy;
-  if (!chosen) {
-    const next = withoutBase(file.text);
-    return { next, says: splitBase(file.text).own.trim() ? 'The base instructions come out. Its own instructions stay.' : `The base instructions come out of their block and stay as plain text, so ${name} is not left empty.` };
-  }
+  const { own, copy } = splitBase(file.text);
   const ours = edit.source?.tool === file.tool;
-  if (file.base?.state === 'edited' && !sameBase(copy, edit.text) && !ours) return { next: file.text, says: `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` };
-  if (edit.source?.kind === 'putBack' && ours) return { next: withBase(file.text, edit.text), says: `Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.` };
+  const putBack = edit.source?.kind === 'putBack' && ours;
   const adopt = edit.source?.kind === 'own' && ours;
-  const next = withBase(adopt ? withOwn(file.text, '') : file.text, edit.text);
-  const own = ownText(file);
-  const says = !file.exists ? `${name} is created, holding only the base instructions.`
+  const write = baseWrite(file.text, { base: edit.text, chosen, known: file.base ? file.base.state !== 'edited' : copy === undefined, adopt, overwrite: putBack });
+  if (write.edited) return { next: file.text, says: `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` };
+  const { next } = write;
+  const says = !chosen ? (own.trim() ? 'The base instructions come out. Its own instructions stay.' : `The base instructions come out of their block and stay as plain text, so ${name} is not left empty.`)
+    : putBack ? `Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`
+    : !file.exists ? `${name} is created, holding only the base instructions.`
     : next === file.text ? 'No change: it already has these base instructions.'
     : adopt ? `Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`
     : copy === undefined ? (own.trim() ? `The base instructions go after its ${plural(lineCount(own), 'line')} of its own.` : 'The base instructions are added.')
