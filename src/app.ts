@@ -24,8 +24,15 @@ export const state = {
   pluginResult: undefined as (PluginActionResult & { problem?: string }) | undefined,
   /** The plugin whose details are open, as marketplace source and plugin name. */
   pluginOpen: undefined as string | undefined,
+  /** The installed cell waiting for its confirming click to uninstall, and what that click will do. */
+  pluginConfirm: undefined as string | undefined,
+  pluginConfirmText: undefined as string | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
+  /** The Skills page: the table, or one skill's files and contents beside the list. */
+  skillsView: 'table' as 'table' | 'files',
+  /** What the last action did, shown as a band on the page it happened on until the next action or page. */
+  outcome: undefined as { page: Page; text: string; history?: boolean } | undefined,
   /** The window chooses the sidebar shape until the person uses the toggle. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -46,6 +53,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
 /** One piece of work at a time: every mutating control is disabled while it runs. */
 async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
+  state.outcome = undefined;
   state.busy = message;
   document.body.dataset.busy = 'true';
   announce(message);
@@ -77,6 +85,10 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   if (view) state.home = view;
   state.applied = result;
   if (!result.stopped) onDone();
+  const managed = changes.filter(change => change.managed).length;
+  // History holds what Apply all replaced (a chosen copy); new copies are undone by turning Managed off, which leaves them in place.
+  const replacedSome = result.results.some(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message));
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: [managed ? `${plural(managed, 'skill')} managed` : '', result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written` : 'nothing needed copying'].filter(Boolean).join(' · ') + (managed ? '. From now on, an edit in one tool spreads to the others.' : '.') + (replacedSome ? '' : ' To stop, turn Managed off: copies stay where they are.') };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -103,6 +115,8 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
 
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') { state.pluginResult = undefined; void loadPlugins(); }
+  // A new page starts clean: the last action's message and results belong to the page they happened on.
+  if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = undefined; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   state.page = page;
   state.find = '';
@@ -134,18 +148,21 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const result = await api().addMarketplace(source);
   if (result.view) state.plugins = result.view;
   state.pluginResult = result.problem ? { reports: [], problem: result.problem } : undefined;
+  if (!result.problem) state.outcome = { page: 'plugins', text: 'Marketplace added. Nothing was installed: click a tool’s box to install a plugin there.' };
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
 export const refreshMarketplace = (source: string) => busy('Refreshing the marketplace…', async () => {
   state.plugins = (await api().refreshMarketplace(source)) ?? state.plugins;
   state.pluginResult = undefined;
+  state.outcome = { page: 'plugins', text: 'Marketplace read again. Nothing was installed.' };
   announce('Marketplace read again. Nothing was installed.');
 });
 
 export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
   state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
   state.pluginResult = undefined;
+  state.outcome = { page: 'plugins', text: 'Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.' };
   announce('Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.');
 });
 
@@ -182,7 +199,11 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (view) state.home = view;
   state.history = await api().history();
   state.applied = result;
-  announce(result.stopped ?? `Restored in ${plural(result.results.filter(entry => entry.outcome === 'written').length, 'tool')}.`);
+  const restored = result.results.filter(entry => entry.outcome === 'written');
+  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+  const where = [...new Set(restored.map(entry => toolNames[entry.harness ?? ''] ?? entry.harness ?? ''))].filter(Boolean);
+  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: true, text: `${restored[0].item} restored${where.length ? ` in ${where.length > 2 ? `${where.slice(0, -1).join(', ')} and ${where.at(-1)}` : where.join(' and ')}` : ''}.` };
+  announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
 
 /** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
@@ -214,7 +235,8 @@ let refreshing = false;
 api().onSyncChanged(async () => {
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
-  try { const view = await api().refresh(); if (view) { state.home = view; rerender(); } } finally { refreshing = false; }
+  // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
+  try { const view = await api().refresh(); if (view) { state.home = view; announce(''); state.outcome = undefined; rerender(); } } finally { refreshing = false; }
 });
 
 // ---------- MCP servers ----------
@@ -225,6 +247,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   if (view) state.home = view;
   state.mcpResult = result;
   if (!result.stopped) onDone();
+  if (!result.stopped) state.outcome = { page: state.page, text: `${plural(changes.filter(change => change.managed).length, 'server')} managed · ${result.writes ? `${plural(result.writes, 'entry', 'entries')} written` : 'nothing needed writing'}.` };
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'entry', 'entries')} written.` : 'Applied. Nothing needed writing.'));
 });
 
@@ -236,6 +259,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   if (view) state.home = view;
   state.agentsResult = result;
   if (!result.stopped) onDone();
+  if (!result.stopped) state.outcome = { page: state.page, text: `${plural(changes.filter(change => change.managed).length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written` : 'nothing needed writing'}. From now on, an edit in one tool spreads to the others.` };
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
 
@@ -245,5 +269,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`);
+  if (!result.stopped) state.outcome = { page: state.page, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.` };
+  announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code.`);
 });

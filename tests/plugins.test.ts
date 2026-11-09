@@ -80,7 +80,7 @@ test('Each tool’s outcome per component follows the tested results', () => {
   const codex = Object.fromEntries(outcomes('codex-cli', components).map(item => [item.component, item.result]));
   assert.deepEqual(codex, { Skills: 'works', Commands: 'limited', Agents: 'ignored', Hooks: 'limited', 'MCP servers': 'fails' });
   assert.ok(outcomes('claude-cli', components).every(item => item.result === 'works'));
-  assert.equal(outcomes('copilot-cli', components).find(item => item.component === 'Commands')!.text, 'Work as skills');
+  assert.equal(outcomes('copilot-cli', components).find(item => item.component === 'Commands')!.text, 'become skills');
 });
 
 test('One repository is recognised however it was typed', () => {

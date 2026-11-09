@@ -187,25 +187,25 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string) => { if (present) list.push({ component, result, text }); };
   if (tool === 'claude-cli') {
-    add(components.skills, 'Skills', 'works', 'Work');
-    add(components.commands, 'Commands', 'works', 'Work');
-    add(components.agents, 'Agents', 'works', 'Work');
-    add(components.hooks, 'Hooks', 'works', 'Work; a hook failure is not an install error');
-    add(components.mcp, 'MCP servers', 'works', 'Work');
+    add(components.skills, 'Skills', 'works', 'work as they are');
+    add(components.commands, 'Commands', 'works', 'work as they are');
+    add(components.agents, 'Agents', 'works', 'work as they are');
+    add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
+    add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else if (tool === 'copilot-cli') {
-    add(components.skills, 'Skills', 'works', 'Work');
-    add(components.commands, 'Commands', 'limited', 'Work as skills');
-    add(components.agents, 'Agents', 'works', 'Work, as plugin:agent');
-    add(components.hooks, 'Hooks', 'limited', 'SessionStart works; others untested');
-    add(components.mcp, 'MCP servers', 'works', 'Work');
+    add(components.skills, 'Skills', 'works', 'work as they are');
+    add(components.commands, 'Commands', 'limited', 'become skills');
+    add(components.agents, 'Agents', 'works', 'work, named plugin:agent');
+    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others are not tested yet');
+    add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else {
-    add(components.skills, 'Skills', 'works', 'Work, as plugin:skill');
-    add(components.commands, 'Commands', 'limited', 'Converted to skills at install');
-    add(components.agents, 'Agents', 'ignored', 'Ignored: copied, never offered');
-    add(components.hooks, 'Hooks', 'limited', 'SessionStart after you review it in Codex; others untested');
-    add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'Won’t start: Codex does not expand ${CLAUDE_PLUGIN_ROOT}' : 'Untested');
+    add(components.skills, 'Skills', 'works', 'work, named plugin:skill');
+    add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
+    add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
+    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others are not tested yet');
+    add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in ${CLAUDE_PLUGIN_ROOT}' : 'are not tested yet');
   }
-  if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'Documented' : 'Untested' });
+  if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'is added to the path' : 'is not tested yet' });
   return list;
 }
 

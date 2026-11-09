@@ -17,6 +17,8 @@ import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 
 export const agentTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+/** The names the page uses for each tool. */
+const shown: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
 export interface NeutralAgent { name: string; description: string; prompt: string; fields: Record<string, unknown> }
@@ -241,7 +243,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const limits: Partial<Record<HarnessId, string>> = {};
     for (const tool of present) {
       const lost = losses(tool, origin);
-      if (lost.length) limits[tool] = `With limits: no equivalent here for ${lost.join(', ')} from ${harnesses[origin.tool].name}, so this tool gets the agent one-way. Any change here stays here.`;
+      if (lost.length) limits[tool] = `One-way from ${shown[origin.tool]}. ${shown[tool]} has no setting for ${shown[origin.tool]}'s ${lost.map(field => `“${field}”`).join(lost.length > 2 ? ', ' : ' or ')}, so it gets only the name, description and prompt; an edit made in ${shown[tool]} stays in ${shown[tool]}.`;
     }
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];

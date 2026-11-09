@@ -68,36 +68,37 @@ const practice = await a.run(`document.querySelector('.status-home').title`);
 // ---------- First run, homes and navigation ----------
 if (wanted('shell')) {
   begin('shell');
-  await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance). It opens on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
+  await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance): the Overview, on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
   await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
-  await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the list of skills with one skill\'s details.');
+  await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
   await a.click('#nav-tools'); await shot(a, 'tools-page', 'Clicked "Tools": which tools were found and where their files are.');
   await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
   await a.click('#nav-overview');
+  if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
   if (await a.has('#sidebar-toggle')) { await a.click('#sidebar-toggle'); await shot(a, 'sidebar-collapsed', 'Clicked the sidebar toggle (top left) to collapse the sidebar.'); await a.click('#sidebar-toggle'); }
-  await a.click('#home-actual'); await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" at the bottom left. (In this tour the "real home" is an empty throwaway folder on Linux, where real writes are not allowed: it shows the preview-only state.)');
-  await a.click('#home-fixture'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back.');
+  await a.click('#home-actual'); await a.click('#nav-skills'); await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" at the bottom left. (In this tour the "real home" is an empty throwaway folder on Linux, where real writes are not allowed: it shows the preview-only state.)');
+  await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
 }
 
 // ---------- Skills: manage, apply, differing copies, tool menus ----------
 if (wanted('skills')) {
   begin('skills');
-  await a.click('#nav-overview');
-  await shot(a, 'overview-start', 'The Overview before anything is managed. Rows are skills, columns are tools.');
+  await a.click('#nav-skills');
+  await shot(a, 'skills-start', 'The Skills page before anything is managed. Rows are skills, columns are tools.');
   await a.click('#tool-copilot-cli'); await shot(a, 'tool-menu', 'Clicked the "Copilot CLI" column header: its tool menu (Add all to another tool, Stop all).');
   await a.press?.('Escape'); await a.click('#tool-copilot-cli');
   await a.click('#manage-all'); await shot(a, 'manage-all-pending', 'Clicked "Manage all": changes are queued, not applied yet.');
   await a.click('#apply'); await shot(a, 'applied', 'Clicked "Apply all": the copies were written.');
   await a.click('#open-review'); await shot(a, 'review-copies-differ', 'Opened the "review" row, whose copies differ between tools: the choice of which copy to use.');
   if (await a.has('#use-review-claude-cli')) { await a.click('#use-review-claude-cli'); await shot(a, 'review-chosen-pending', 'Chose "Use Claude Code\'s copy": queued.'); await a.click('#apply'); await shot(a, 'review-applied', 'Clicked "Apply all".'); }
-  await a.click('#nav-skills'); await shot(a, 'skills-page-managed', 'The Skills page after managing.');
-  await a.click('#nav-overview');
+  await a.click('#open-standup'); await shot(a, 'details-synced', 'Opened standup, a managed skill whose copies are all the same.');
+  if (await a.has('#files-standup')) { await a.click('#files-standup'); await shot(a, 'files-view', 'Clicked "Files and contents" in its details.'); await a.click('#skills-table'); }
 }
 
 // ---------- Sync, notices and History ----------
 if (wanted('sync')) {
   begin('sync');
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
   if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
   edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
@@ -105,7 +106,7 @@ if (wanted('sync')) {
   await a.click('#nav-history'); await shot(a, 'history-with-edit', 'Clicked "History".');
   const undo = await a.run(`document.querySelector('.history-row button')?.id ?? ''`);
   if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo" on that edit.'); }
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
   await a.click('#sync-switch'); await shot(a, 'sync-off', 'Turned the Sync switch (status bar, bottom) off.');
   edit(join(practice, '.claude/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited with Sync off.\n'));
   await wait(4000); await a.settle(); await shot(a, 'sync-off-pending', 'With Sync off, a line was added to notes in Claude Code. A few seconds later.');
@@ -122,7 +123,7 @@ if (wanted('sync')) {
 if (wanted('mcp')) {
   begin('mcp');
   await a.click('#nav-mcp'); await shot(a, 'mcp-start', 'Clicked "MCP": each tool\'s user-wide MCP servers.');
-  await a.click('#manage-all'); await shot(a, 'mcp-manage-all', 'Clicked "Manage all".');
+  await a.click('#manage-all'); await shot(a, 'mcp-manage-all', 'Clicked "Manage 2" (Manage all): queued, not applied yet.');
   await a.click('#apply'); await shot(a, 'mcp-applied', 'Clicked "Apply all". Claude Code\'s settings file is written only by "Write now", with Claude Code quit.');
   if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await shot(a, 'mcp-write-now', 'Clicked "Write now".'); }
   edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
@@ -136,7 +137,8 @@ if (wanted('mcp')) {
 if (wanted('agents')) {
   begin('agents');
   await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents".');
-  await a.click('#manage-all'); await a.click('#apply'); await shot(a, 'agents-applied', 'Clicked "Manage all", then "Apply all".');
+  await a.click('#manage-all'); await shot(a, 'agents-pending', 'Clicked "Manage 2" (Manage all): queued, not applied yet.');
+  await a.click('#apply'); await shot(a, 'agents-applied', 'Clicked "Apply all".');
   await a.click('#open-code-reviewer'); await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold.');
   edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Edited in Codex.'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`);

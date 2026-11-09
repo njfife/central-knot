@@ -39,6 +39,8 @@ export interface SampleSkill {
   limits?: Partial<Record<Tool, string>>;
   /** Agents: one-way tools edited or deleted there, no longer updated. */
   stopped?: Tool[];
+  /** MCP: tools whose copy waits for an explicit write (Claude Code, Write now). */
+  waits?: Tool[];
 }
 
 export const sample: SampleSkill[] = [
@@ -88,21 +90,24 @@ if (new URLSearchParams(location.search).get('design') === 'large') {
 }
 
 /** What one cell of the table shows. */
-export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot';
+export type Cell = 'synced' | 'will-sync' | 'differs' | 'off' | 'present' | 'present-differs' | 'absent' | 'cannot' | 'edited' | 'waiting' | 'write-now';
 export type Sync = 'in-sync' | 'pending' | 'attention' | 'none';
 
 
 export function cellOf(skill: SampleSkill, tool: Tool): Cell {
   const has = skill.copies[tool] !== undefined;
   if (skill.cannot?.[tool] || (skill.held && !has)) return 'cannot';
+  // MCP: Claude Code's copy waits for Write now (MCP-02), whatever the others hold.
+  if (skill.managed && !skill.off.includes(tool) && skill.waits?.includes(tool)) return 'write-now';
   if (skill.separate) return has ? 'present' : 'absent';
   const counts = has && !skill.off.includes(tool);
   if (!skill.managed) return has ? (counts && copiesDiffer(skill) ? 'present-differs' : 'present') : 'absent';
   if (skill.off.includes(tool)) return has ? 'present' : 'absent';
   // Nothing can be copied here unless a tool it syncs to has a copy to start from.
+  // An edit waiting to spread (Sync off, or settling) is pending, not a choice to make: the edited copy, and the copies that get it.
+  if (skill.edited?.length) return skill.edited.includes(tool) ? 'edited' : 'waiting';
   if (!has) return comparedTools(skill).length ? 'will-sync' : 'absent';
-  // An edit waiting to spread is pending, not a choice to make.
-  return copiesDiffer(skill) ? (skill.edited?.length ? 'will-sync' : 'differs') : 'synced';
+  return copiesDiffer(skill) ? 'differs' : 'synced';
 }
 
 export function syncOf(skill: SampleSkill, toolList: Tool[] = tools): Sync {
@@ -111,7 +116,7 @@ export function syncOf(skill: SampleSkill, toolList: Tool[] = tools): Sync {
   if (skill.held) return skill.managed ? 'in-sync' : 'none';
   if (cells.includes('differs') || cells.includes('present-differs')) return 'attention';
   if (!skill.managed) return 'none';
-  if (cells.includes('will-sync')) return 'pending';
+  if (cells.some(cell => cell === 'will-sync' || cell === 'edited' || cell === 'waiting' || cell === 'write-now')) return 'pending';
   return 'in-sync';
 }
 

@@ -11,12 +11,12 @@ const list = (tools: string[]) => [...new Set(tools)].map(who).join(' and ');
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   switch (event.kind) {
-    case 'edit': return { glyph: 'pencil-line', text: `${who(event.winner?.tool)}'s edit spread to ${list(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
+    case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${list(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}'s.${order}`, action: 'Undo' };
-    case 'deleted': return { glyph: 'circle-minus', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, and removed from the tools it synced to.`, action: 'Restore' };
+    case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit was kept over a deletion in ${list(event.losers.map(loser => loser.tool))}.${order}` };
     case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}'s copy; it replaced ${list(event.losers.map(loser => loser.tool))}'s.`, action: 'Undo' };
-    case 'restored': return { glyph: 'undo-2', text: 'Restored an earlier version from History.', action: 'Undo' };
+    case 'restored': return { glyph: 'undo-2', text: `You undid a change: the earlier version is back${event.losers.length ? ` in ${list(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Redo' };
   }
 }
 
@@ -29,7 +29,18 @@ function choices(event: HistoryEvent) {
   return event.losers.filter(loser => loser.hash && loser.hash !== event.previous && loser.hash !== event.winner?.hash && !seen.has(loser.hash) && seen.add(loser.hash));
 }
 
-const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+/** Rows are grouped by day; each row shows its time, or "Just now". */
+const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'Just now' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }));
+const day = (iso: string) => {
+  const date = new Date(iso);
+  if (date.toDateString() === new Date().toDateString()) return 'Today';
+  if (date.toDateString() === new Date(Date.now() - 86_400_000).toDateString()) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+};
+/** What an Undo, Redo or Restore button will do, said before the click. */
+const actionHelp = (event: HistoryEvent, action: string) => (action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
+  : action === 'Redo' ? 'Undo the undo: put back the version that was replaced'
+    : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
 /** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */
 function actions(event: HistoryEvent, action?: string) {
@@ -37,18 +48,24 @@ function actions(event: HistoryEvent, action?: string) {
   if (options.length > 1 || (event.kind === 'kept-edit' && options.length)) {
     return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}'s`, name: `Use ${who(option.tool)}'s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
   }
-  return action ? button({ variant: 'outline', size: 'small', label: action, name: `${action} ${event.item}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) }) : h('span');
+  if (!action) return h('span');
+  const control = button({ variant: 'outline', size: 'small', label: action, name: `${action} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
+  control.title = actionHelp(event, action);
+  return control;
 }
 
 export function historyPage() {
   const events = state.history;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
   if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'When sync spreads an edit, settles competing edits or spreads a deletion on its own, it shows here, with Undo or Restore.'));
-  return h('div.page', {}, h('div.scroll', { id: 'history-scroll' }, h('ul.history-list', {}, [...events].reverse().map(event => {
+  const ordered = [...events].reverse();
+  const done = state.outcome?.page === 'history' ? h('div.bands', {}, h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, state.outcome.text))) : null;
+  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
-    return h('li.history-row', { 'data-kind': event.kind },
-      h('span.history-when', {}, when(event.at)),
+    const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
+    return [heading, h('li.history-row', { 'data-kind': event.kind },
+      h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', {}, event.item), h('span', {}, about.text)),
-      event.undoneBy ? h('span.history-done', {}, 'Undone') : actions(event, about.action));
+      event.undoneBy ? h('span.history-done', {}, 'Undone') : actions(event, about.action))];
   }))));
 }

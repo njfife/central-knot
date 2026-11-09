@@ -1,6 +1,6 @@
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { loadHome, loadPlugins, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
@@ -32,12 +32,20 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h('span.nav-count', { 'aria-hidden': 'true' }, String(count)));
 }
 
+const homeHelp: Record<HomeMode, string> = {
+  fixture: 'Practice copy: sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools.',
+  custom: 'Another folder: a home folder that contains .claude, .copilot or .codex, such as a backup or another account. Central Knot writes only inside it.',
+  actual: 'This Mac’s home: your real tools. Changes you apply here write to their folders.',
+};
+
 function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   const current = state.home?.mode === mode;
+  // A chosen folder shows its own name; choosing again picks another.
+  const shown = mode === 'custom' && current && state.home ? `${state.home.home.split('/').filter(Boolean).pop() ?? 'Folder'} (folder)` : label;
   return h('button.home-row', {
-    type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': label, title: label,
+    type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': shown, title: mode === 'custom' && current ? `${state.home!.home}\nClick to choose another folder.` : homeHelp[mode],
     disabled: !!state.busy, onclick: () => void loadHome(mode),
-  }, icon(glyph, 14), h('span.nav-label', {}, label));
+  }, icon(glyph, 14), h('span.nav-label', {}, shown));
 }
 
 function renderSidebar() {
@@ -65,7 +73,8 @@ function renderHeader(rail: boolean) {
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     h('h1.page-title', {}, titles[state.page]),
-    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Read again', id: 'header-refresh', disabled: !!state.busy || !state.home, onclick: () => void readAgain() })),
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),
   );
 }
 
@@ -76,23 +85,25 @@ function renderPage() {
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
-  if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only, Apply all does not write here', tone: '' };
-  if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Apply all writes to your real folders', tone: 'tone-warning' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Apply all writes only to this copy' : 'Apply all writes only inside this folder', tone: '' };
+  if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only: nothing is written here', tone: '' };
+  if (state.home?.mode === 'actual') return { glyph: 'triangle-alert', text: 'Changes write to your real tools', tone: 'tone-warning' };
+  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes write only to this practice copy' : 'Changes write only inside this folder', tone: '' };
 }
 
 function renderStatus() {
   const write = state.home && writeFact(state.home.manage);
   region('status-facts').replaceChildren(
     state.home
-      ? h('span.status-item.status-home', { title: state.home.home }, icon('eye', 14), h('span', {}, 'Reading ', h('span', { id: 'home-label' }, state.home.label)))
+      ? h('span.status-item.status-home', { title: state.home.home }, icon('eye', 14), h('span', {}, 'Home: ', h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), disabled: !!state.busy,
-      title: state.home.syncOn ? 'Sync is on: changes spread on their own. Click to turn it off.' : 'Sync is off: changes are noted and spread when it is on. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h(`span.sync-dot${state.home.syncOn ? '.on' : ''}`), h('span', {}, state.home.syncOn ? 'Sync on' : 'Sync off')) : '',
+    state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
+      title: state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now. Click to turn it on.',
+      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
+  // The result band already says what just happened; the status bar does not say it twice.
+  document.getElementById('announcement')?.classList.toggle('visually-hidden', !!state.outcome && state.outcome.page === state.page);
 }
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);

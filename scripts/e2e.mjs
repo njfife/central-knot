@@ -156,6 +156,9 @@ async function practiceFlow() {
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
   await wait(1500);
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
+  check('the Overview sums up every kind', (await a.exists('#overview-skills')) && (await a.exists('#overview-mcp')) && (await a.exists('#overview-agents')), await a.text('#page'));
+  check('the practice copy explains itself', (await a.text('.intro') ?? '').includes('practice copy'), await a.text('#page'));
+  await a.click('#overview-skills');
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is managed at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
   same('cells say what each tool has', [await cellState(a, 'release-notes', 'claude-cli'), await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'review', 'copilot-cli')], ['present', 'absent', 'present-differs']);
@@ -169,7 +172,7 @@ async function practiceFlow() {
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + group.querySelector('strong').textContent)`);
-  same('Add all groups for Claude Code', groups, ['new:1', 'same:1', 'different:1']);
+  same('Add all groups for Claude Code', groups, ['new: copied:1', 'already the same: start syncing:1', 'different:1']);
   same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2', false]);
   await a.click('#menu-conflicts-copilot-cli-claude-cli');
   const note = await a.text('#menu-conflicts-note-copilot-cli-claude-cli') ?? '';
@@ -225,7 +228,7 @@ async function practiceFlow() {
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
 
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
   let watched = false;
   for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readFileSync(standupPath('claude'), 'utf8').includes('watched'); }
@@ -237,12 +240,12 @@ async function practiceFlow() {
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
   writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited with Sync off.\n'));
   let shownPending = false;
-  for (let tries = 0; tries < 40 && !shownPending; tries++) { await wait(250); shownPending = (await cellState(a, 'standup', 'claude-cli')) === 'will-sync'; }
+  for (let tries = 0; tries < 40 && !shownPending; tries++) { await wait(250); shownPending = (await cellState(a, 'standup', 'claude-cli')) === 'edited'; }
   check('with Sync off the page shows the edit as pending on its own, without Read again', shownPending);
   await a.click('#header-refresh');
   check('with Sync off nothing spreads', !readFileSync(standupPath('copilot'), 'utf8').includes('Sync off'));
-  same('the edit shows as pending, not as a choice', [await cellState(a, 'standup', 'claude-cli'), await a.exists('#decide-standup')], ['will-sync', false]);
-  check('and a banner says Sync is off', (await a.text('.bands') ?? '').includes('Sync is off'));
+  same('the edit shows as waiting to spread, not as a choice', [await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'standup', 'copilot-cli'), await a.exists('#decide-standup')], ['edited', 'waiting', false]);
+  check('and a banner says automatic sync is off', (await a.text('.bands') ?? '').includes('Automatic sync is off'));
   check('Apply all does not claim it', !(await a.exists('#apply')), await a.text('.toolbar-end'));
   await a.shot('practice-sync-off');
   await a.click('#sync-now');
@@ -262,8 +265,8 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="deleted"] button').click()`);
   await a.settle();
   check('Restore brings standup back', existsSync(join(practice, '.claude/skills/standup/SKILL.md')) && existsSync(join(practice, '.copilot/skills/standup/SKILL.md')));
-  await a.click('#nav-overview');
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
+  await a.click('#nav-skills');
   same('differing copies untouched', [readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8')], [reviewClaude, reviewCopilot]);
   same('now synced', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'standup', 'claude-cli'), await cellState(a, 'notes', 'claude-cli')], ['synced', 'synced', 'synced']);
   same('managed after Apply all', await switchOn(a, 'release-notes'), true);
@@ -271,7 +274,7 @@ async function practiceFlow() {
 
   // Details open under a row.
   await a.click('#open-release-notes');
-  check('details explain each tool', (await a.text('.details')).includes('Synced'), await a.text('.details'));
+  check('details say every tool has the same copy', (await a.text('.details')).includes('Same copy in all 3 tools'), await a.text('.details'));
   await a.click('#close-release-notes');
 
   // Choose which copy to use.
@@ -340,8 +343,10 @@ async function practiceFlow() {
   same('focus stays on the switch', await a.run(`document.activeElement?.id`), 'switch-release-notes');
   if (await a.exists('#discard')) await a.click('#discard');
 
-  // Skills page: every skill in a list, and one skill's details with the same choices and Apply all as the Overview.
+  // Skills Files view: every skill in a list, and one skill's files and contents with the same choices and Apply all as the table.
   await a.click('#nav-skills');
+  await a.click('#open-standup');
+  await a.click('#files-standup');
   same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
   await a.click('#list-standup');
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
@@ -350,8 +355,8 @@ async function practiceFlow() {
   await a.click('#detail-switch-standup');
   check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
   await a.shot('practice-skills');
-  await a.click('#nav-overview');
-  same('the Overview shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
+  await a.click('#skills-table');
+  same('the table shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
   // Undoing a copy choice puts Managed back as it was before the choice.
@@ -369,12 +374,13 @@ async function practiceFlow() {
   await a.click('#open-review');
   same('no duplicate ids with details open', await a.run(`(() => { const ids = [...document.querySelectorAll('[id]')].map(node => node.id); return ids.filter((id, index) => ids.indexOf(id) !== index); })()`), []);
   await a.click('#open-review');
-  // Slash finds on the Skills page too.
-  await a.click('#nav-skills');
+  // Slash finds in the Files view too.
+  await a.click('#open-review');
+  await a.click('#files-review');
   await a.run(`document.activeElement?.blur()`);
   await a.press('/', 'Slash');
-  same('slash focuses find on the Skills page', await a.run(`document.activeElement?.id`), 'skills-find');
-  await a.click('#nav-overview');
+  same('slash focuses find in the Files view', await a.run(`document.activeElement?.id`), 'skills-find');
+  await a.click('#skills-table');
 
   // Keyboard and find.
   await a.press('/', 'Slash');
@@ -396,7 +402,7 @@ async function practiceFlow() {
   const tomlAfter = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   check('docs reached Codex, and config.toml kept its comment and the files table byte for byte', tomlAfter.startsWith(tomlBefore) && tomlAfter.includes('[mcp_servers.docs]') && tomlAfter.includes('url = "https://docs.example.test/mcp"'), tomlAfter);
   const claudeBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
-  check('Claude Code waits for Write now', (await a.text('.bands') ?? '').includes('Write now') && !JSON.parse(claudeBefore).mcpServers.files, await a.text('.bands'));
+  check('Claude Code waits for Write now', (await a.text('.bands') ?? '').includes('Claude Code doesn’t have files yet'.replace('’', "'")) && !JSON.parse(claudeBefore).mcpServers.files, await a.text('.bands'));
   await a.shot('practice-mcp');
   await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
@@ -418,9 +424,9 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', (await a.text('.details') ?? '').includes('With limits: no equivalent here for tools, model from Claude Code'), await a.text('.details'));
+  check('the details name the limits', (await a.text('.details') ?? '').includes('One-way from Claude Code. Copilot CLI has no setting for Claude Code’s “tools” or “model”'.replace('’', "'")), await a.text('.details'));
   await a.shot('practice-agents');
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
 
   // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.
   const market = join(scratch, 'market');
@@ -431,17 +437,17 @@ async function practiceFlow() {
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; })()`);
   await a.click('#add-marketplace');
-  check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added here'), await a.text('#plugins-scroll'));
+  check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added in Central Knot'), await a.text('#plugins-scroll'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#popen-0-ck-marker');
-  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Work, as plugin:skill'), await a.text('.plugin-details'));
+  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Skills work, named ck-marker:skill-name'), await a.text('.plugin-details'));
   await a.click('#pinstall-0-ck-marker');
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#forget-0');
   check('Remove from list forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
   // destroys the window outright (a real close only hides it), which is the stronger case: background work needs no window.
@@ -460,13 +466,14 @@ async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
   await a.click('#home-actual');
+  await a.click('#nav-skills');
   same('the disposable HOME is what "this Mac" reads', await a.run(`document.querySelector('.status-home').title`), HOME);
   same('real home is never the machine’s own', HOME.startsWith(scratch), true);
   await a.click('#nav-tools');
   const tools = await a.text('#tools-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
   check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
-  await a.click('#nav-overview');
+  await a.click('#nav-skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
@@ -526,6 +533,7 @@ async function realHomeFlow() {
   writeFileSync(record, '{ damaged');
   let b = await launch();
   await b.click('#home-actual');
+  await b.click('#nav-skills');
   check('damaged record is shown', (await b.text('.bands') ?? '').includes('damaged'), await b.text('.bands'));
   await b.click(`.ov-row[data-key="private-one"] .switch`);
   same('damaged record keeps Apply all off', await b.run(`document.querySelector('#apply')?.disabled ?? true`), true);
@@ -533,6 +541,7 @@ async function realHomeFlow() {
   writeFileSync(record, good);
   b = await launch(join(scratch, 'other-data'));
   await b.click('#home-actual');
+  await b.click('#nav-skills');
   await b.click(`.ov-row[data-key="private-one"] .switch`);
   same('lost settings ask to resume', (await b.text('#apply')).trim(), 'Resume and apply all');
   await applyAll(b);
@@ -557,6 +566,7 @@ async function crashFlow() {
   for (let round = 0; round < crashRounds; round++) {
     const a = await launch(join(scratch, 'crash-data'));
     await a.click('#home-actual');
+  await a.click('#nav-skills');
     // Until the choices are on record (a kill can land before Apply all saves them), choose again; after that, opening catches up.
     const record = join(HOME, '.central-knot/sync.json');
     const chosen = existsSync(record) && (() => { try { return Object.values(JSON.parse(readFileSync(record, 'utf8')).items).some(item => item.state === 'shared'); } catch { return false; } })();
@@ -576,6 +586,7 @@ async function crashFlow() {
   const onRecord = existsSync(join(HOME, '.central-knot/sync.json'));
   const a = await launch(join(scratch, 'crash-data'));
   await a.click('#home-actual');
+  await a.click('#nav-skills');
   // If every kill landed before the choices were saved, there is nothing to catch up: finish with a real Apply all.
   if (!onRecord) { await a.click('#manage-all'); await applyAll(a); }
   console.log(`crash finish: ${onRecord ? 'caught up on open' : 'no choices were saved before the kills; applied again'}`);

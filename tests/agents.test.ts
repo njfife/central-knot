@@ -49,8 +49,8 @@ test('Claude-only fields make the others one-way With limits; an edit there stay
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'tools: Read, Grep\nmodel: opus\n'));
     const view = await agentsView(box.context, tools);
-    assert.match(view.servers[0].limits?.['copilot-cli'] ?? '', /With limits: no equivalent here for tools, model from Claude Code/);
-    assert.match(view.servers[0].limits?.['codex-cli'] ?? '', /one-way/);
+    assert.match(view.servers[0].limits?.['copilot-cli'] ?? '', /One-way from Claude Code\. Copilot CLI has no setting for Claude Code's “tools” or “model”/);
+    assert.match(view.servers[0].limits?.['codex-cli'] ?? '', /One-way/);
     assert.equal(view.servers[0].limits?.['claude-cli'], undefined);
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
     const copilot = await read(box.home, '.copilot/agents/reviewer.agent.md');
