@@ -67,6 +67,7 @@ function renderSidebar() {
     navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
     navRow('instructions', 'Instructions', 'pencil-line'),
     navRow('plugins', 'Plugins', 'puzzle'),
+    h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
   );

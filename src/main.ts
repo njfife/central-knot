@@ -124,13 +124,17 @@ function showWindow() {
   window.show();
   window.focus();
 }
-function trayMenu() {
+/** One status line for both menus: where, and any news. */
+function statusLine() {
   const where = current?.label ?? 'No home open yet';
+  return unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
+}
+function trayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
-    { label: unseen ? `Sync made changes: open to see them · ${where}` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`, enabled: false },
+    { label: statusLine(), enabled: false },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
@@ -166,7 +170,7 @@ function appMenu() {
     { label: app.name, submenu: [
       { role: 'about' },
       // The same status line as the menu bar menu: where, and any news.
-      { label: unseen ? `Sync made changes: open to see them · ${current?.label ?? 'No home open yet'}` : `Home: ${current?.label ?? 'No home open yet'}`, enabled: false },
+      { label: statusLine(), enabled: false },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn, enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },

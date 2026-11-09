@@ -4,6 +4,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { lineDiff } from './diff.ts';
 import { storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
@@ -35,18 +36,18 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
   }
   const notes: string[] = [];
   try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
-  notes.push('The Copilot app may not read this file; that isn’t confirmed yet.');
+  notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
   return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
 }
 
-async function versions(home: string, tool: HarnessId) {
+async function versions(home: string, tool: HarnessId, now = '') {
   try {
     const names = (await readdir(versionsFolder(home, tool))).filter(name => name.endsWith('.md')).sort().reverse();
     // Each version says what it was: its first non-empty line and its length, so several saves a day can be told apart.
     return await Promise.all(names.map(async name => {
       const text = (await readText(join(versionsFolder(home, tool), name))) ?? '';
       const lines = text.replace(/\n$/, '').split('\n');
-      return { id: name, at: new Date(Number(name.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0 };
+      return { id: name, at: new Date(Number(name.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0, differs: lineDiff(text, now).filter(line => line.kind !== 'same').length };
     }));
   } catch { return []; }
 }
@@ -60,7 +61,7 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
-    files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: text === undefined ? '' : sha(text), readers, notes, nextStep: 'Start a new session to use the change.', versions: await versions(context.home, snapshot.harness) });
+    files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: text === undefined ? '' : sha(text), readers, notes, nextStep: 'Start a new session to use the change.', versions: await versions(context.home, snapshot.harness, text ?? '') });
   }
   return files;
 }

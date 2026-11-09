@@ -70,15 +70,25 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
       h('p.details-status', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : h('span', {}, `Contains ${summary}`, ...(skillList ? [': ', ...skillNames.slice(0, 2).flatMap((skill, index) => [index ? ', ' : '', h('code.plugin-name', {}, skill)]), skillNames.length > 2 ? ` +${skillNames.length - 2} more` : ''] : [])))),
     // One caption for the grid: what each tool does with it once installed (a card already installed says so on its heading).
     parts ? h('p.plugin-grid-caption', {}, 'What each tool does with it, once installed:') : null,
-    parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
-      // Status on the heading; what installing would do under a label of its own.
-      h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-        entry.states[plugin.name]?.[tool]?.state === 'installed' ? h('span.plugin-card-state.plugin-card-installed', {}, 'Installed') : !view.clis[tool] && view.tools.some(other => view.clis[other]) ? h('span.plugin-card-state', {}, 'Command-line tool not found') : null),
-      // One line per outcome, led by when it applies: "When installed: skills keep their own names."
-      h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, ...(outcome.component === 'Skills' && skillNames.length === 1
-          ? ['Skill is called ', h('code.plugin-name', {}, /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill)]
-          : namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill)))))))))) : null);
+    parts ? outcomesBlock(view, plugin, entry, skillNames, firstSkill) : null);
+}
+
+/** What installing does in each tool. Tools that behave the same share one line, so the one real difference stands out. */
+function outcomesBlock(view: PluginsView, plugin: PluginView, entry: MarketplaceView, skillNames: string[], firstSkill: string | undefined) {
+  const line = (outcome: Outcome) => outcome.component === 'Skills' && skillNames.length === 1
+    ? ['Skill name: ', h('code.plugin-name', { title: /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill }, /plugin:skill/.test(outcome.text) ? `${plugin.name}:${firstSkill}` : firstSkill)]
+    : namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill);
+  // A naming fact needs no tick; ticks and marks stay for outcomes that are limited, ignored or fail.
+  const mark = (outcome: Outcome) => outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]);
+  const state = (tool: HarnessId) => entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : !view.clis[tool] && view.tools.some(other => view.clis[other]) ? 'Command-line tool not found' : '';
+  const groups = new Map<string, HarnessId[]>();
+  for (const tool of view.tools) {
+    const key = JSON.stringify([(plugin.outcomes[tool] ?? []).map(outcome => [outcome.component, outcome.result, outcome.text]), state(tool)]);
+    groups.set(key, [...(groups.get(key) ?? []), tool]);
+  }
+  return h('ul.plugin-outcome-list', {}, [...groups.values()].map(tools => h('li.plugin-outcome-row', {},
+    h('span.plugin-outcome-tools', {}, tools.map(tool => brandMark(tool, 14)), h('strong', {}, tools.map(tool => names[tool]).join(', ')), state(tools[0]) ? h('span.plugin-card-state', {}, state(tools[0])) : null),
+    h('span.plugin-outcome-what', {}, (plugin.outcomes[tools[0]] ?? []).map(outcome => h('span.plugin-outcome-item', {}, mark(outcome), ...line(outcome)))))));
 }
 
 // Escape takes back an armed uninstall, wherever focus is.
@@ -205,7 +215,7 @@ function reports() {
 export function pluginsPage() {
   const view = state.plugins;
   if (!view) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
-  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: owner/repo, Git URL or folder (for example, owner/plugins)', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
+  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: owner/repo, Git URL or folder path', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
     oninput: (event: Event) => { state.marketDraft = (event.target as HTMLInputElement).value; const addButton = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (addButton) addButton.disabled = !!state.busy || !state.marketDraft.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); } }) as HTMLInputElement;
   const add = () => { const text = input.value.trim(); if (text) void addMarketplace(text); };

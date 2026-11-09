@@ -143,7 +143,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
   const firstApply = !readFlag('ck-applied-once');
   writeFlag('ck-applied-once');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' From now on, an edit in one tool spreads to the others.' : ''), item: singleName, items: newItems,
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : ''), item: singleName, items: newItems,
     act: addedNow.length ? addedUndo(addedNow) : chosenNow.length ? choiceUndo(chosenNow) : undefined };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
@@ -308,6 +308,8 @@ export const loadHistory = () => busy('Reading History…', async () => {
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
   const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
+  // The notice for an undone event has done its job; its result band says what happened.
+  if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   if (view) state.home = view;
   state.history = await api().history();
@@ -498,12 +500,9 @@ api().onSyncChanged(async () => {
       state.home = view; announce('');
       const outcome = state.outcome;
       if (!outcome?.act) state.outcome = undefined;
-      else {
-        // A sync that touched an item this Undo covers: the Undo could stop halfway, so it moves to History, said plainly.
-        const covered = new Set([outcome.item, ...(outcome.items ?? [])].filter(Boolean).map(name => name!.toLowerCase()));
-        const touched = [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].filter(notice => covered.has(notice.item.toLowerCase()));
-        if (touched.length) state.outcome = { ...outcome, act: undefined, history: true, text: `${outcome.text} ${touched[0].item} changed since, so its Undo is in History.` };
-      }
+      // A sync notice is now the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
+      // different events, one above the other, is the one thing here that would mislead.
+      else if ([...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].length) state.outcome = undefined;
       rerender();
     }
   } finally { refreshing = false; }
@@ -567,7 +566,7 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   state.mcpResult = result;
   const written = result.claudeWritten ?? [];
   if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
-    act: written.length ? { label: 'Undo', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
+    act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });
 

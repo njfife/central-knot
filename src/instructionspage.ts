@@ -10,6 +10,17 @@ export { lineDiff } from './diff.ts';
 const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
+/** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
+function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
+  if (line.kind === 'same') return [line.text];
+  const index = diff.indexOf(line as never);
+  const partner = line.kind === 'removed' ? diff[index + 1] : diff[index - 1];
+  if (!partner || partner.kind === line.kind || partner.kind === 'same') return [line.text];
+  const mine = line.text.split(/(\s+)/), theirs = partner.text.split(/(\s+)/);
+  const parts = line.kind === 'removed' ? lineDiff(mine.join('\n'), theirs.join('\n')) : lineDiff(theirs.join('\n'), mine.join('\n'));
+  const keep = line.kind === 'removed' ? 'removed' : 'added';
+  return parts.filter(part => part.kind === 'same' || part.kind === keep).map(part => part.kind === 'same' ? part.text : h('span.ins-word', {}, part.text));
+}
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const ago = (at: string) => {
   const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000);
@@ -55,10 +66,11 @@ function editor(file: InstructionFile) {
         ? h('button.ins-fold', { type: 'button', onclick: () => { edit.fullDiff = true; rerender(); } }, `… ${plural(line.count, 'unchanged line')} · show`)
         : h(`span.ins-line.ins-${line.kind}`, {},
           h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''),
-          h('span.ins-code', {}, `${line.text}\n`)))),
+          h('span.ins-code', {}, ...words(line, diff), '\n')))),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
         button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
-        button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } })));
+        button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } }),
+        edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.stage = 'edit'; edit.confirmDiscard = true; rerender(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
@@ -102,11 +114,13 @@ function card(file: InstructionFile) {
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
   const otherDirty = !!other && state.instructionEdit!.text !== other.text;
-  const lockedWhy = otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
+  const readOnly = !!state.home && !state.home.manage.access.allowed;
+  const lockedWhy = readOnly ? 'Saving is off in this home.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const preview = file.text.replace(/\n$/, '').split('\n');
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
-      file.exists ? null : h('span.ins-missing', {}, 'No file yet'),
+      file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
+      !editing && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text) ? h('span.ins-missing.ins-saved', {}, 'Saved just now') : null,
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === file.text }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
@@ -116,7 +130,7 @@ function card(file: InstructionFile) {
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
+          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
             const open = state.instructionEdit, openFile = open && state.instructions?.find(entry => entry.tool === open.tool);
             // Typed since the page was drawn: ask on that editor rather than drop the draft.
             if (open && openFile && open.text !== openFile.text) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
@@ -125,7 +139,7 @@ function card(file: InstructionFile) {
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
-        h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.lines} ${version.lines === 1 ? 'line' : 'lines'}${version.firstLine ? ` · ${version.firstLine}` : ''}`)),
+        h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
         button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || !!state.instructionEdit, attrs: state.instructionEdit ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 

@@ -340,7 +340,7 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
 /** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   if (context.mode === 'actual') {
-    if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: copying into real folders is on only on macOS in this version.' };
+    if (!context.allowActualWrites) return { allowed: false, reason: 'Preview only: writing to real folders works only on macOS in this version. You can look around; nothing is written.' };
     for (const id of Object.keys(harnesses) as HarnessId[]) {
       const override = context.overrides?.[id];
       if (override !== undefined && !isAbsolute(override)) return { allowed: false, reason: `Preview only: ${harnesses[id].configEnv} is not an absolute path, so its folder is unknown.` };
