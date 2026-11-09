@@ -1368,9 +1368,9 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-facts dd { display: flex; min-width: 0; }
 .repo-commit, .repo-latest { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
 .repo-sha { flex: none; }
-.repo-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-subject { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .repo-when { flex: none; font-size: 12px; line-height: 16px; }
-.repo-new { flex: none; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--accent-ink); }
+.repo-new { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .repo-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 24px 32px; align-items: start; }
 .repo-side { display: flex; flex-direction: column; min-width: 0; }
 .repo-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
@@ -1383,11 +1383,13 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
 .repo-row-note > svg { flex: none; align-self: center; }
-.repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
+.repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
 .repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
 .repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--line); }
 .repo-side-note > svg { flex: none; align-self: center; }
 .repo-activity { color: var(--ink); }
+.repo-activity-part { white-space: nowrap; }
+.repo-stuck-count { margin-left: 6px; font-weight: 500; color: var(--warning); text-transform: none; letter-spacing: 0; }
 .repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
 .repo-change-added { color: var(--success); }
 .repo-change-removed { color: var(--danger); }
@@ -1400,7 +1402,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-start { width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
 .repo-start-side { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; padding: 0 4px; }
 /* Wide windows: the form and what goes where sit side by side, so the start page uses the room instead of a narrow column. */
-@container (min-width: 960px) { .repo-start { width: min(1120px, 100%); display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
+@container (min-width: 960px) { .repo-start { width: min(1120px, 100%); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
 .repo-connect { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; }
 .repo-field-hint { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }

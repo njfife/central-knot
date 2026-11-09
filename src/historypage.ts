@@ -20,7 +20,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   // Pull from the git repo: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
-    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}; it replaced ${list(event.losers.map(loser => loser.tool))}’s copy.`, action: 'Undo' };
+    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
     if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${list(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Undo' };
     if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
   }
