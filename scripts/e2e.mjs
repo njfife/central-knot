@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -154,39 +154,39 @@ const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
 // ---------- Fit: nothing is cut off ----------
 // In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
-// ancestor cuts. A control that a scroll area can bring into view is reachable, so only a cut that no scrolling undoes
-// counts. Also each region that scrolls sideways (the plugin category chips included), each fitted bar whose contents
-// run into its padding, and an open menu outside its scroll area. Empty when everything fits.
+// ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
+// still be visible within every clipping boundary outside it, up to the window. Also each region that scrolls sideways,
+// each bar the app's own fitting (dom.ts fitBars) marks as still too wide, and an open menu outside its scroll area.
+// Empty when everything fits.
 const CUT_OFF = `(() => {
   const out = [];
   const label = node => node.id || node.getAttribute('aria-label') || (node.textContent || '').trim().slice(0, 40) || String(node.className);
-  const across = (box, edge) => box.left >= edge.left - 1 && box.right <= edge.right + 1;
-  const within = (box, edge) => box.top >= edge.top - 1 && box.bottom <= edge.bottom + 1;
-  const scrolls = (node, style, axis) => ['auto', 'scroll'].includes(style[axis === 'x' ? 'overflowX' : 'overflowY']) && (axis === 'x' ? node.scrollWidth > node.clientWidth + 1 : node.scrollHeight > node.clientHeight + 1);
+  const inside = (box, edge, axis) => axis === 'x' ? box.left >= edge.left - 1 && box.right <= edge.right + 1 : box.top >= edge.top - 1 && box.bottom <= edge.bottom + 1;
+  const overflow = (style, axis) => style[axis === 'x' ? 'overflowX' : 'overflowY'];
+  const scrolls = (node, style, axis) => ['auto', 'scroll'].includes(overflow(style, axis)) && (axis === 'x' ? node.scrollWidth > node.clientWidth + 1 : node.scrollHeight > node.clientHeight + 1);
+  const view = { left: 0, right: innerWidth, top: 0, bottom: innerHeight };
   for (const node of document.querySelectorAll('button, [role="switch"], input:not(.hidden-input), .chip, .ov-tool-head, .plugin-tool-name')) {
-    const box = node.getBoundingClientRect();
-    if (box.width < 2 || box.height < 2) continue;
-    if (!across(box, { left: 0, right: innerWidth })) { out.push('off the window: ' + label(node)); continue; }
-    let reachable = { x: false, y: false }, cut = '';
+    const own = node.getBoundingClientRect();
+    if (own.width < 2 || own.height < 2) continue;
+    // What must be visible on each axis: the control itself, until a scroll area can bring it into view; then that area.
+    const subject = { x: own, y: own };
+    let cut = '';
     for (let up = node.parentElement; up && up !== document.body && !cut; up = up.parentElement) {
       const style = getComputedStyle(up), edge = up.getBoundingClientRect();
       for (const axis of ['x', 'y']) {
-        if (reachable[axis] || style[axis === 'x' ? 'overflowX' : 'overflowY'] === 'visible') continue;
-        if (scrolls(up, style, axis)) reachable[axis] = true;
-        else if (!(axis === 'x' ? across(box, edge) : within(box, edge))) cut = (axis === 'x' ? 'cut sideways by ' : 'cut off below or above by ') + (up.id || up.className);
+        if (cut || overflow(style, axis) === 'visible') continue;
+        if (scrolls(up, style, axis)) subject[axis] = edge;
+        else if (!inside(subject[axis], edge, axis)) cut = (axis === 'x' ? 'cut sideways by ' : 'cut off below or above by ') + (up.id || up.className);
       }
     }
-    if (!cut && !reachable.y && (box.top < -1 || box.bottom > innerHeight + 1)) cut = 'below the window';
+    for (const axis of ['x', 'y']) if (!cut && !inside(subject[axis], view, axis)) cut = axis === 'x' ? 'off the window' : 'below or above the window';
     if (cut) out.push(cut + ': ' + label(node));
   }
   for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
-  for (const bar of document.querySelectorAll('.fit-bar')) {
-    const inner = bar.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).paddingRight);
-    if ([...bar.children].some(child => child.getBoundingClientRect().right > inner + 0.5)) out.push('runs into its padding: ' + bar.className);
-  }
+  for (const bar of document.querySelectorAll('.fit-bar[data-overflows]')) out.push('too wide even when fitted: ' + bar.className);
   for (const menu of document.querySelectorAll('.tool-menu')) {
     const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
-    if (!within(box, area) || !across(box, area)) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
+    if (!inside(box, area, 'x') || !inside(box, area, 'y')) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
   }
   return out;
 })()`;
@@ -234,6 +234,17 @@ async function practiceFlow() {
   const reviewClaude = readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8');
   const reviewCopilot = readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8');
 
+  // The sweep itself: a button in a scroll area that an outer clipping box hides must be reported, not passed as scrollable.
+  const fixture = await a.run(`(() => {
+    const outer = document.createElement('div'), inner = document.createElement('div'), tall = document.createElement('div'), button = document.createElement('button');
+    for (const [node, props] of [[outer, { position: 'fixed', left: '0', top: '0', width: '200px', height: '40px', overflow: 'hidden' }], [inner, { marginTop: '60px', height: '120px', overflow: 'auto' }], [tall, { height: '400px' }]]) Object.assign(node.style, props);
+    button.id = 'clip-fixture-button'; button.textContent = 'Hidden';
+    tall.append(button); inner.append(tall); outer.append(inner); document.body.append(outer);
+    const found = ${CUT_OFF};
+    outer.remove();
+    return found;
+  })()`);
+  check('the cut-off sweep reports a scroll area its outer box clips', fixture.some(line => line.endsWith('clip-fixture-button')), fixture);
   // An open column menu fits at the smallest window, and keeps fitting while the window shrinks and grows under it.
   await fitsAtMinimum(a, 'Skills with Codex’s menu open', async () => { if (!(await a.exists('.tool-menu'))) await a.click('#tool-codex-cli'); });
   await a.click('#tool-codex-cli');
@@ -380,6 +391,13 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   check('a Pi folder makes Pi a fourth column', await a.exists('#tool-pi-cli') && await a.exists('#undo-review'));
   await fitsAtMinimum(a, 'a chosen copy waiting, with four tools');
+  // Keeping separate copies is a choice waiting too; its short form keeps Change in the narrowest table.
+  await a.click('#undo-review');
+  await a.click('#separate-review');
+  check('keeping separate waits for Apply all', ((await a.text('.ov-row[data-key="review"] .decided')) ?? '').includes('Keeping separate'));
+  await fitsAtMinimum(a, 'keeping separate copies waiting, with four tools');
+  await a.click('#undo-review');
+  await a.click('#use-review-copilot-cli');
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.click('#header-refresh');
   const nameFits = await a.run(`(() => { const cell = document.querySelector('.ov-row[data-key="review"] .ov-name'); return cell.scrollWidth <= cell.clientWidth + 1 && cell.getBoundingClientRect().height < 44; })()`);
@@ -471,6 +489,27 @@ async function practiceFlow() {
   await a.shot('practice-skills');
   await a.press('Escape');
   check('Escape leaves the Files view for the table', !(await a.exists('.split')) && await a.exists('.ov-row[data-key="standup"]'));
+  // A later skill chosen in the side-by-side Files view stays in view when the window narrows into the stacked list.
+  for (let n = 1; n <= 6; n++) { mkdirSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true }); writeFileSync(join(practice, `.claude/skills/zz-${n}/SKILL.md`), text(`zz-${n}`)); }
+  await a.click('#header-refresh');
+  if (!(await a.exists('#files-standup'))) await a.click('#open-standup');
+  await a.click('#files-standup');
+  await a.click('#list-zz-6');
+  await sizeTo(a, 860, 560);
+  check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
+  await fullSize(a);
+  await a.press('Escape');
+  for (let n = 1; n <= 6; n++) rmSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  // A large display docks an open row's details beside the table, and nothing on it is cut off; laptop full screen docks too.
+  await sizeTo(a, 2560, 1440);
+  if (!(await a.exists('.ov-row.open[data-key="standup"]'))) await a.click('#open-standup');
+  check('at 2560 the details dock beside the table', await a.exists('.ov-page.docked .dock .details') && !(await a.exists('.ov-row + .details')));
+  same('nothing cut off at 2560×1440 with details docked', await a.run(CUT_OFF), []);
+  await sizeTo(a, 1728, 1117);
+  check('at 1728 the details dock too', await a.exists('.dock .details'));
+  await a.click('#dock-close');
+  await fullSize(a);
   same('the table shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
@@ -589,6 +628,15 @@ async function practiceFlow() {
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
+  // A tool that goes away while Plugins is open leaves its column on Refresh, and comes back with its folder.
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 2; tries++) await wait(100);
+  same('Refresh on Plugins drops a tool that went away', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 2);
+  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
+  same('and brings it back when its folder returns', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));

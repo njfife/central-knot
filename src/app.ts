@@ -2,13 +2,16 @@ import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
-import { presentTools } from './presence.ts';
+import { machineNames } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+
+/** This computer's home ("This Mac’s home") and the machine in a sentence ("this Mac"), named as the main process names them. */
+export const { home: realHomeName, machine: thisMachine } = machineNames(navigator.userAgent.includes('Mac'));
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -40,6 +43,8 @@ export const state = {
   undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
   seenNotices: new Set<string>(),
+  /** Whether the content is wide enough to dock an open row's details beside its table; set by the renderer's layout. */
+  wide: false,
   /** The window chooses the sidebar shape until the person uses the toggle, which holds until the window crosses the rail breakpoint. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -56,6 +61,8 @@ export const rerender = () => {
 export function announce(text: string, quiet = false) {
   const region = document.getElementById('announcement')!;
   region.textContent = text;
+  // The status bar may cut a long message; its tooltip has it whole.
+  region.title = text;
   // A quiet announcement is for screen readers only: the page already shows the same thing.
   region.dataset.quiet = quiet ? 'true' : '';
 }
@@ -187,8 +194,8 @@ function loadPageData(page: Page, fresh = false): Promise<void> | undefined {
   if (page === 'plugins') return loadPlugins(fresh);
 }
 
-/** The open home's tools (presence.ts), for page wording: the Overview and empty pages name them, and "all tools" counts them. */
-export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.home.snapshots) : []);
+/** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
+export const homeTools = (): HarnessId[] => state.home?.manage.tools ?? [];
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);

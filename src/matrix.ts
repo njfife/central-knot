@@ -4,7 +4,7 @@
 import { brandMark } from './brand.ts';
 import { andList, orList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, fitInView, h, icon, middle, pendingCount, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -177,11 +177,6 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
 };
 
 
-function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
-    h('span.switch-knob'));
-}
-
 const smallAction = (label: string, id: string, onclick: () => void, extra = '') =>
   h(`button.text-action${extra}`, { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); onclick(); } }, label);
 
@@ -223,7 +218,7 @@ function changeBar(bulk = true) {
     // In a crowded toolbar the count shortens to "2 changes"; the full summary stays its tooltip and Apply all's.
     return h('div.apply', {}, manageAll,
       pendingCount(pending, plural(count, 'change')),
-      button({ variant: 'ghost', size: 'small', icon: 'x', collapse: true, label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), attrs: { title: `${pending}. Nothing is written until Apply all.` }, onclick: applyAll }));
   }
   if (waiting) return h('div.apply', {}, manageAll, h('span.apply-count.apply-quiet', {}, `${waiting} to sync`), button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), onclick: applyAll }));
@@ -293,7 +288,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const oneWay = !!skill.limits?.[tool] && on;
   const limited = oneWay ? ', one-way (with limits)' : '';
   const becomesSource = kind === 'agents' && pending && on && skill.oneWay?.from === tool && !committedOf(skill.key).managed;
-  const text = skill.cannot?.[tool] ?? (becomesSource ? `${names[tool]}: becomes the source on Apply all; edits made in ${names[tool]} go to ${andList(Object.keys(skill.limits ?? {}).filter(entry => !skill.off.includes(entry as Tool)).map(entry => names[entry as Tool]))}` : null) ?? `${names[tool]}: ${state === 'will-sync' && skill.copies[tool] === undefined ? 'Gets a new copy on Apply all' : replaces ? 'Its copy is replaced on Apply all (kept in History)' : look.label}${limited}${pending ? ' (not applied yet)' : ''}`;
+  const text = skill.cannot?.[tool] ?? (becomesSource ? `${names[tool]}: becomes the source on Apply all; edits made in ${names[tool]} go to ${andList(Object.keys(skill.limits ?? {}).filter(entry => !skill.off.includes(entry as Tool)).map(entry => names[entry as Tool]))}` : null) ?? `${names[tool]}: ${state === 'will-sync' && skill.copies[tool] === undefined ? 'Gets a new copy on Apply all' : replaces ? 'Its copy is replaced on Apply all (kept in History)' : pending && wasOn && !on ? 'Stops syncing on Apply all; its copy stays' : `${look.label}${limited}${pending ? ' (not applied yet)' : ''}`}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
     h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
@@ -354,6 +349,20 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
   return base.copies[tool] !== undefined && base.copies[tool] !== base.copies[chosen];
 }
 
+/** Where an item's details are drawn: under its row, docked beside the table, or in the Skills page's Files view. */
+type Placement = 'row' | 'dock' | 'files';
+
+/**
+ * A skill's own actions, kept together under its heading rather than at the panel's far edges: Files and contents (not
+ * while a copy choice is open: the choice has its own Read both copies), and Delete everywhere once it is managed.
+ */
+function itemActions(skill: SampleSkill, choosing: boolean) {
+  if (designMode || kind !== 'skills') return null;
+  const files = choosing ? null : smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); });
+  const remove = deleteAction(skill);
+  return files || remove ? h('div.details-actions', {}, files, remove) : null;
+}
+
 /** Delete everywhere (DEL-02) for a managed skill: two clicks, the second naming what goes. */
 function deleteAction(skill: SampleSkill) {
   if (designMode || kind !== 'skills' || !committedOf(skill.key).managed) return null;
@@ -372,13 +381,14 @@ function convertBlock(skill: SampleSkill) {
     smallAction('Convert to a Pi skill', `convert-${skill.key}`, () => void convertAgent(skill.key, skill.name ?? skill.key)));
 }
 
-/** Tool rows, with tools that say exactly the same thing (an agent's receiving copies) folded into one row naming them all. */
+/** Tool rows, with tools that say exactly the same thing folded into one row naming them all ("All 4 tools"). */
 function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
-  if (kind !== 'agents') return toolList().map(toolRow);
+  // MCP rows each carry their tool's settings file, so they never fold together.
+  if (kind === 'mcp') return toolList().map(toolRow);
   const byLine = new Map<string, Tool[]>();
   for (const tool of toolList()) { const line = toolLine(skill, tool); byLine.set(line, [...(byLine.get(line) ?? []), tool]); }
   return [...byLine].map(([line, tools]) => tools.length === 1 ? toolRow(tools[0])
-    : h('div.details-tool', {}, h('div.details-tool-head', {}, h('span.details-tool-label', {}, ...tools.map(tool => brandMark(tool, 14)), h('strong', {}, andList(tools.map(tool => names[tool])))), h('span.details-tool-line', {}, line))));
+    : h('div.details-tool', {}, h('div.details-tool-head', {}, h('span.details-tool-label', {}, ...tools.map(tool => brandMark(tool, 14)), h('strong', {}, tools.length > 2 && tools.length === toolList().length ? `All ${tools.length} tools` : andList(tools.map(tool => names[tool])))), h('span.details-tool-line', {}, line))));
 }
 
 /** Where each copy lives, folded away: paths matter less than what each tool has. `extra` folds in more about them (Files view). */
@@ -391,11 +401,12 @@ function wherePaths(skill: SampleSkill, extra: Node[] = []) {
 }
 
 /** One file: the tool's name, its path in full, and a way to find it in the file manager. */
-function pathLine(tool: Tool, path: string, bare = false) {
-  return h(`p.details-path-line${bare ? '.details-path-bare' : ''}`, {}, bare ? null : brandMark(tool, 12), bare ? null : h('span.details-path-tool', {}, names[tool]),
-    h('code.details-path-full', { title: path }, shownPath(path)),
-    designMode ? null : h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder'));
+function pathLine(tool: Tool, path: string) {
+  return h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path-tool', {}, names[tool]), pathText(shownPath(path), path), showInFolder(path));
 }
+
+/** Show in folder: reveals a file in the file manager; nothing is opened or changed. None in the design preview. */
+const showInFolder = (path: string) => (designMode ? null : h('button.inline-link.details-path-show', { type: 'button', title: 'Show this file in the file manager; nothing is opened or changed', onclick: (event: Event) => { event.stopPropagation(); showFile(path); } }, 'Show in folder'));
 
 function limitedFields(skill: SampleSkill) {
   return skill.oneWay ? skill.oneWay.lost.map(field => `“${field}”`).join(skill.oneWay.lost.length > 2 ? ', ' : ' or ') : 'other';
@@ -460,7 +471,8 @@ function oneWayStatus(skill: SampleSkill): string {
 }
 
 /** Everything about one item, opened in place under its row. Differing copies put the choice first. */
-function details(skill: SampleSkill, closable = true, where: Node[] = []) {
+function details(skill: SampleSkill, placement: Placement = 'row', where: Node[] = []) {
+  const inFiles = placement === 'files';
   const draft = view.draft.get(skill.key);
   const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
   const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
@@ -474,11 +486,13 @@ function details(skill: SampleSkill, closable = true, where: Node[] = []) {
   // MCP keeps one layout in every state (a row per tool with its status and settings file), so it never takes the one-line form.
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
   const paused = '';
+  // MCP: each tool's row is a grid of its settings file and Show in folder, the links in one column; its status and
+  // Claude Code's Write step sit under them.
+  const settingsFile = (tool: Tool) => (kind === 'mcp' && skill.paths?.[tool] ? [pathText(shownPath(skill.paths[tool]!), skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
   const toolRow = (tool: Tool) => h('div.details-tool', {},
     h('div.details-tool-head', {}, h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
+      ...settingsFile(tool),
       h('span.details-tool-line', {}, toolLine(skill, tool),
-        // MCP: the settings file sits on the same line as the status, and Claude Code's row can finish the Write step itself.
-        kind === 'mcp' && skill.paths?.[tool] ? pathLine(tool, skill.paths[tool]!, true) : null,
         kind === 'mcp' && skill.managed && !draft && tool === 'claude-cli' && skill.waits?.includes(tool) ? h('span.details-tool-actions', {}, button({ variant: 'outline', size: 'small', label: 'Write to Claude Code', id: `write-claude-row-${skill.key}`, onclick: () => void writeClaudeNow([skill.key]) })) : null,
         // Deciding later keeps both choices: once the notice is put aside, the stopped copy's row offers them.
         kind === 'agents' && skill.managed && skill.oneWay && !draft?.resolve && stoppedLive(skill).includes(tool) && state.dismissed.has(`stopped:${skill.key}:${tool}`)
@@ -489,11 +503,12 @@ function details(skill: SampleSkill, closable = true, where: Node[] = []) {
   // The Write step already sits in the band above whenever an entry waits, so the details only say it, once, in Claude Code's row.
   const waitsHere = false;
   return h(`div.compare.details${differs ? '.details-differs' : ''}${kind === 'mcp' ? '.details-mcp' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
-    closable && differs && !draft ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null,
+    placement === 'row' && differs && !draft ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null,
     h('div.details-head', {},
-      (!closable && allSame) || (differs && !skill.managed && !draft) ? null : h('p.details-status', {}, allSame ? (kind === 'mcp' ? `Synced in ${andList(toolList().map(tool => names[tool]))}` : `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}`) : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
-      kind !== 'mcp' && skill.description && !(differs && !draft) && closable ? h('p.details-description', {}, skill.description) : null,
-      kind === 'mcp' && skill.description ? definition(skill.description) : null),
+      (inFiles && allSame) || (differs && !skill.managed && !draft) ? null : h('p.details-status', {}, allSame ? (kind === 'mcp' ? `Synced in ${andList(toolList().map(tool => names[tool]))}` : `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}`) : status, draft && !inFiles ? h('span.details-pending', {}, ' · not applied yet') : null),
+      kind !== 'mcp' && skill.description && !(differs && !draft) && !inFiles ? h('p.details-description', {}, skill.description) : null,
+      kind === 'mcp' && skill.description ? definition(skill.description) : null,
+      inFiles ? null : itemActions(skill, differs && !draft)),
     differs ? compareChoices(skill) : null,
     waitsHere ? h('div.details-waits', {}, icon('clock', 14, 'tone-warning'),
       h('span', {}, `${skill.copies['claude-cli'] === undefined ? 'Claude Code doesn’t have it yet.' : 'Claude Code has an older copy.'}${state.home?.mode === 'fixture' ? '' : ' Quit Claude Code first.'}`),
@@ -504,22 +519,10 @@ function details(skill: SampleSkill, closable = true, where: Node[] = []) {
     (skill.extra ?? []).length ? h('div.details-extra', {}, (skill.extra ?? []).map(extra => h('p.details-extra-line', {}, icon(extra.same ? 'check' : 'diff', 12, extra.same ? 'tone-muted' : 'tone-warning'),
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
-    allSame
-      ? (!closable ? h('div.details-where-row', {}, wherePaths(skill, where), deleteAction(skill)) : wherePaths(skill, where))
+    allSame ? wherePaths(skill, where)
       : differs && !draft ? wherePaths(skill, where) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : wherePaths(skill, where)],
     kind === 'agents' ? convertBlock(skill) : null,
-    kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
-    // Only skills have foot actions (Files, Delete everywhere); other kinds end at the last line, with no empty foot.
-    kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
-      h('span.compare-foot-start', {},
-        // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
-        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
-      // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
-      !designMode && kind === 'skills' && committedOf(skill.key).managed
-        ? view.confirmDelete === skill.key
-          ? smallAction(`Delete ${skill.name ?? skill.key} from every tool`, `delete-confirm-${skill.key}`, () => { view.confirmDelete = undefined; void deleteEverywhereKey(skill.key); }, '.text-danger')
-          : smallAction('Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger')
-        : null));
+    kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null)
 }
 
 /** The decision for differing copies: each choice says everything Apply all will do with it. */
@@ -559,8 +562,8 @@ function compareChoices(skill: SampleSkill) {
       ': each tool keeps its own, nothing is copied, and Central Knot stops flagging ', h('strong.item-name', {}, skill.name ?? skill.key), '.'));
 }
 
-/** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets .wide). */
-const docked = () => document.body.classList.contains('wide');
+/** Whether an open row's details dock beside the table: the content is wide enough (renderer.ts sets state.wide). */
+const docked = () => state.wide;
 
 /**
  * The open row's details in a panel beside the table: its name and a close button, then everything the inline details
@@ -572,7 +575,7 @@ function itemDock(skill: SampleSkill) {
     h('header.dock-head', {},
       h('div.dock-title', {}, h('h2', {}, middle(name)), h('p', {}, nouns[kind][0])),
       closeButton(() => { view.comparing = undefined; rerender(); }, { id: 'dock-close', label: `Close details for ${name}`, title: 'Close' })),
-    h('div.scroll.dock-scroll', { id: 'dock-scroll' }, details(skill)));
+    h('div.scroll.dock-scroll', { id: 'dock-scroll' }, details(skill, 'dock')));
 }
 
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
@@ -606,8 +609,9 @@ function row(skill: SampleSkill) {
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping separate copies, on Apply all' : `Every tool will use ${names[decided]}’s copy, on Apply all` },
-          decided === 'separate' ? h('span', {}, 'Keeping separate')
-            : resumeOnly ? h('span', {}, 'Resumes on Apply all')
+          // Each choice has a short form for a narrow table (style.css): the long words step aside, the action stays.
+          decided === 'separate' ? [h('span.decided-what', {}, 'Keeping separate'), h('span.decided-short', {}, 'Separate')]
+            : resumeOnly ? [h('span.decided-what', {}, 'Resumes on Apply all'), h('span.decided-short', {}, 'Resumes')]
             : [h('span.decided-uses', {}, 'Uses'), brandMark(decided, 12), h('span.decided-what', {}, `${names[decided]}’s copy`)],
           h('button.decided-undo', { type: 'button', id: `undo-${skill.key}`, 'aria-label': resumeOnly ? 'Cancel this' : 'Change this choice', title: resumeOnly ? 'Cancel: keep the edited copy' : 'Change this choice', onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); view.comparing = resumeOnly ? view.comparing : skill.key; rerender(); } }, h('span', {}, resumeOnly ? 'Cancel' : 'Change'))) : null,
         // The description fills the row's spare width and gives way first when the window narrows.
@@ -629,6 +633,8 @@ function legend(list: SampleSkill[]) {
     return state === 'synced' && view.draft.has(skill.key) && cellOf(committedOf(skill.key), tool) !== 'synced' ? 'will-sync' as Cell : state;
   })));
   const replaced = list.some(skill => toolList().some(tool => replacedOnApply(skill, tool)));
+  // A tool switched off for a managed item, waiting for Apply all: drawn with the same blue dashed edge as any change.
+  const stops = list.some(skill => { const base = committedOf(skill.key); return view.draft.has(skill.key) && toolList().some(tool => base.managed && !base.off.includes(tool) && (!skill.managed || skill.off.includes(tool))); });
   const source = kind === 'agents' && list.some(skill => skill.managed && skill.oneWay);
   const oneWay = list.some(skill => skill.managed && Object.keys(skill.limits ?? {}).length);
   const oneWaySwatch = h('span.legend-cell.legend-plain', { 'aria-hidden': 'true' });
@@ -643,6 +649,7 @@ function legend(list: SampleSkill[]) {
     seen.has('will-sync') ? entry('Starts syncing on Apply all', swatch('will-sync', true)) : null,
     fresh ? entry('New copy on Apply all', plus) : null,
     replaced ? entry('Replaced on Apply all (kept in History)', (() => { const mark = swatch('will-sync', true); mark.replaceChildren(icon('refresh-cw', 11)); return mark; })()) : null,
+    stops ? entry('Stops syncing on Apply all', (() => { const mark = swatch('present', false); mark.classList.add('cell-pending-edit'); return mark; })()) : null,
     seen.has('edited') ? entry('Edited in that tool', swatch('edited', true)) : null,
     seen.has('waiting') ? entry('Waiting for sync', swatch('waiting', true)) : null,
     source ? entry('Source (one-way)', h('span.legend-cell.legend-plain', { 'aria-hidden': 'true' }, h('span.cell-source-mark'))) : null,
@@ -712,12 +719,17 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
   const replaced = toolList().filter(tool => plan.differ.some(entry => entry.replaced.includes(tool)));
   const unavailable = [...plan.skip, ...plan.blocked];
   const showWhy = view.addReasons.has(key);
-  const idle = !count && !plan.differ.length;
-  const label = count ? `${copies ? 'Add' : 'Manage'} ${count}` : 'Add';
+  // A destination with nothing to change is one line: its name and what it already has.
+  if (!count && !plan.differ.length) {
+    const why = unavailable.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.reason}`).join('\n');
+    return h('div.add-target.add-target-done', { 'data-target': to },
+      h('div.tool-menu-row', {}, brandMark(to, 16), h('span.tool-menu-name', {}, names[to]),
+        h('span.tool-menu-count', { title: why || undefined }, [plan.synced.length ? `${plan.synced.length} synced` : 'Nothing to add', unavailable.length ? `${unavailable.length} can’t` : ''].filter(Boolean).join(' · '))));
+  }
+  const label = `${copies ? 'Add' : 'Manage'} ${count}`;
   return h(`div.add-target${conflicts ? '.add-target-conflicts' : ''}`, { 'data-target': to },
     h('div.tool-menu-row', {},
       brandMark(to, 16), h('span.tool-menu-name', {}, names[to]),
-      idle ? h('span.tool-menu-count', {}, plan.synced.length ? 'Has them all' : 'Nothing to add') : null,
       button({ variant: count ? 'outline' : 'ghost', size: 'small', label, name: `${copies ? 'Add' : 'Manage'} ${count} ${names[from]} skills in ${names[to]}`, id: `menu-add-${from}-${to}`, disabled: !count,
         onclick: () => { send(from, to, list, conflicts); view.toolMenu = undefined; rerender(); } })),
     h('div.add-groups', {},
@@ -732,7 +744,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
       unavailable.length > 20 ? h('li', {}, `and ${unavailable.length - 20} more`) : null) : null,
     plan.differ.length ? h('div.add-conflict', {},
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}’s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
-        swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ${names[from]}’s copy would replace this one` : `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: added from ${names[from]}’s copy; ${andList(plan.differ[0].replaced.map(tool => `${names[tool]}’s`))} is replaced too` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
+        swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ${names[from]}’s copy would replace this one` : `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: added from ${names[from]}’s copy` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
       toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
@@ -745,10 +757,13 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   // Stop all: every managed skill stops syncing to this tool. Copies already there stay as they are.
   const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   const noun = (n: number) => (n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
+  const elsewhere = [...new Set(others(tool).flatMap(target => planAdd(tool, target, list).differ.flatMap(entry => entry.replaced.filter(other => other !== target))))];
   return fitInView(h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
     h('p.tool-menu-label', {}, `Add ${names[tool]}’s ${kind === 'mcp' ? 'MCP servers' : nouns[kind][1].toLowerCase()} to…`),
     others(tool).map(target => addRow(tool, target, list)),
+    // A differing copy that adding replaces in yet another tool is said once here, not in each row it comes from.
+    elsewhere.length ? h('p.tool-menu-foot', { id: `menu-elsewhere-${tool}` }, `Including a ${noun(1)} whose copies differ also replaces ${andList(elsewhere.map(other => `${names[other]}’s copy`))}, kept in History.`) : null,
     h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.'),
     // Stopping only exists once something syncs to this tool; before that, the foot would be a dead control.
     !syncingHere.length ? null : h('div.tool-menu-stop', {},
@@ -1184,14 +1199,22 @@ const miniCell = (skill: SampleSkill, tool: Tool) => {
 /** The skill whose row was last scrolled into view, so the list moves only when the selection changes. */
 let revealed: string | undefined;
 
-/** Scrolls the skills list just enough to show the selected row (a short stacked list can hide it), moving nothing else. */
+/**
+ * Scrolls the skills list just enough to show the selected row below its sticky header, moving nothing else. A short
+ * stacked list can hide it: when the selection changes, and whenever the list resizes (the window narrowing into the
+ * stacked layout, say).
+ */
 function revealSelected() {
   const list = document.getElementById('skills-list'), row = list?.querySelector('.list-row.selected');
   if (!list || !row) return;
   const area = list.getBoundingClientRect(), box = row.getBoundingClientRect();
-  if (box.top < area.top) list.scrollTop -= area.top - box.top;
-  else if (box.bottom > area.bottom) list.scrollTop += box.bottom - area.bottom;
+  const top = area.top + (list.querySelector('.list-head')?.getBoundingClientRect().height ?? 0), bottom = area.top + list.clientHeight;
+  if (box.top < top) list.scrollTop -= top - box.top;
+  else if (box.bottom > bottom) list.scrollTop += box.bottom - bottom;
 }
+
+/** Watches the skills list drawn last, so a resize keeps its selected row in view. */
+const listWatcher = new ResizeObserver(revealSelected);
 
 /** A list of every skill beside (or, in narrow content, above) one skill's details: the same choices as the table, and the same Apply all. `more` adds files and contents. */
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
@@ -1219,10 +1242,11 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const skill = shownDetail;
   const draft = view.draft.get(skill.key);
   if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }
+  requestAnimationFrame(() => { listWatcher.disconnect(); const list = document.getElementById('skills-list'); if (list) listWatcher.observe(list); });
   const { where, contents } = more(skill.key);
   return h('div.page.split', {},
     h('div.list-column', {},
-      h('div.toolbar.list-toolbar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
+      h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
       // The header rides inside the list's scroll area, so it has the rows' exact width, gutter and columns.
       h('div.scroll.list-scroll', { id: 'skills-list' },
         h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
@@ -1231,12 +1255,14 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       h('div.pane-header.fit-bar', {},
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Not applied yet')
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}` : skill.managed ? 'Managed' : 'Unmanaged')),
+        // The skill's own controls sit beside its name; the changes waiting for Apply all keep the bar's far end.
         h('div.detail-actions', {},
           h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
           toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
-          changeBar(false))),
+          deleteAction(skill)),
+        h('div.detail-pending', {}, changeBar(false))),
       notices(),
-      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false, where), ...contents)));
+      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, 'files', where), ...contents)));
 }
 
 // Escape in a find box clears it.

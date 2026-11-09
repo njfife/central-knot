@@ -1,7 +1,7 @@
 // Plugins: browse marketplaces, choose which plugins go to which tools, then Apply all.
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
-import { rerender, showPage, state as app } from './app.ts';
+import { readAgain, rerender, showPage, state as app } from './app.ts';
 import { button, closeButton, emptyState, h, icon, pendingCount, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
@@ -86,7 +86,7 @@ function categoryChips(entry: MarketplaceView, categories: string[]) {
       category ?? 'All', h('span.market-chip-count', {}, String(count(category))))));
 }
 
-/** The find box (for more than 8 plugins) and category chips (for more than one category), shown in the toolbar. */
+/** The find box (for more than 8 plugins) and category chips (for more than one category), above the plugin table. */
 function filters(entry: MarketplaceView): HTMLElement | null {
   const categories = categoriesOf(entry);
   const parts = [entry.plugins.length > FIND_FROM ? findBox(entry) : null, categories.length > 1 ? categoryChips(entry, categories) : null].filter(Boolean) as HTMLElement[];
@@ -98,9 +98,10 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // One hint line per tool that can't take this marketplace, in the words its boxes use (pluginstatus.blocked).
   const reasons = view.tools.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
   const someCan = view.canWrite && reasons.length < view.tools.length;
-  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Plugin'),
+  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
+    filters(entry),
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') }))) : null,
     shown.length
@@ -180,7 +181,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
     const pending = [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
     return h('div.apply', {},
       pendingCount(pending, plural(counts.plugins, 'change')),
-      button({ variant: 'ghost', size: 'small', icon: 'x', collapse: true, label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, attrs: { title: `${pending}. Nothing runs until Apply all.` }, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
   const last = market.lastRun;
@@ -220,9 +221,9 @@ function problemBand(lines: ResultLine[]) {
 const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined);
 
 /**
- * The toolbar, always there once a marketplace is listed, so the page never jumps. Its left part lines up with the
- * marketplace column's content: where the person is inside a plugin (← team-tools › document-tools), or, on the Plugins
- * tab, the marketplace's filters. At the right, toolbarRight. With no marketplaces it shows only when toolbarRight has something.
+ * The toolbar over the marketplace pane (beside the list of marketplaces, which runs the full height), always there once
+ * a marketplace is listed, so the page never jumps: where the person is inside a plugin (← team-tools › document-tools)
+ * at the left, toolbarRight at the right. With no marketplaces it spans the page and shows only when toolbarRight has something.
  */
 function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
   const right = toolbarRight(lines);
@@ -232,9 +233,9 @@ function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
-    : market.nav.tab === 'plugins' ? filters(shown) : null;
+    : null;
   // An empty toolbar keeps its height (nothing below moves) but loses its rule, so it reads as margin.
-  return h(`div.toolbar.plugins-toolbar.plugins-toolbar-aligned.fit-bar${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
+  return h(`div.toolbar.plugins-toolbar.fit-bar${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */
@@ -245,8 +246,10 @@ export function pluginsPage() {
   const view = market.view;
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.activity ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
   // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
-  if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Tools shows what this home has.',
-    button({ variant: 'outline', label: 'See Tools', id: 'plugins-no-tools', onclick: () => showPage('tools') })));
+  if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Refresh finds it.',
+    h('div.empty-actions', {},
+      button({ variant: 'outline', icon: 'refresh-cw', label: 'Refresh', name: 'Read this home again', id: 'plugins-no-tools-refresh', disabled: !!app.busy, onclick: () => void readAgain() }),
+      button({ variant: 'link', label: 'See Tools', id: 'plugins-no-tools', onclick: () => showPage('tools') }))));
   const shown = current();
   const lines = market.lastRun ? resultLines(market.lastRun.done, market.lastRun.undo) : [];
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
@@ -254,14 +257,15 @@ export function pluginsPage() {
     h('div.market-empty-add', {},
       addBox(true),
       h('div.market-examples', {}, h('span', {}, 'Or try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
-      view.tools.length ? h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.map(tool => names[tool]))} show up here by themselves.`) : null));
+      h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
-    toolbar(shown?.entry, lines),
+    shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band)) : null,
       problemBand(lines)),
     shown
-      ? h('div.market-layout', {}, marketList(view, shown.entry), h('div.scroll.market-main', { id: 'plugins-scroll' }, marketPage(view, shown.entry, shown.index)))
+      ? h('div.market-layout', {}, marketList(view, shown.entry),
+        h('div.market-pane', {}, toolbar(shown.entry, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, marketPage(view, shown.entry, shown.index))))
       : h('div.scroll.market-main', { id: 'plugins-scroll' }, empty));
 }

@@ -17,6 +17,7 @@ import { instructionsView, instructionVersion, saveInstruction } from './instruc
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HomeMode, HomeView, Snapshot, SyncNotice } from './types.ts';
+import { machineNames } from './machine.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
@@ -101,7 +102,11 @@ async function saveAppSettings(change: Partial<AppSettings>) {
   await writeFile(appSettingsPath(), `${JSON.stringify(appSettings, null, 2)}\n`);
 }
 const appearances: Appearance[] = ['system', 'light', 'dark'];
-const preferences = (): AppPreferences => ({ appearance: appSettings.appearance ?? 'system' });
+/** The settings the Settings page shows: the appearance, and Start at sign-in as the menus show it. */
+const preferences = (): AppPreferences => ({
+  appearance: appSettings.appearance ?? 'system',
+  signIn: { offered: process.platform !== 'linux', available: canStartAtSignIn(), on: startsAtSignIn() },
+});
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
  * light and dark styles follow it; the window's own background (seen while it draws) follows too.
@@ -131,6 +136,12 @@ async function firstSignIn() {
   applySignIn();
 }
 const startsAtSignIn = () => canStartAtSignIn() && app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
+/** Turns Start at sign-in on or off: the one way the menus, the first-close note and the Settings page change it. */
+async function setStartAtSignIn(on: boolean) {
+  await saveAppSettings({ startAtSignIn: on });
+  applySignIn();
+  refreshTray();
+}
 const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
 
 let tray: Tray | undefined;
@@ -161,7 +172,7 @@ function trayMenu() {
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: process.platform !== 'linux',
-      click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
+      click: item => void setStartAtSignIn(item.checked) },
     { type: 'separator' },
     { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
   ]);
@@ -198,7 +209,7 @@ function appMenu() {
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
-        click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
+        click: item => void setStartAtSignIn(item.checked) },
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' },
@@ -268,7 +279,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
@@ -365,7 +376,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     }
     // A chosen folder is called by its own name everywhere: status bar, results and sidebar.
     next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
-  } else if (mode === 'actual') next = { mode, home: homedir(), label: process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home' };
+  } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform === 'darwin').home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;
@@ -452,7 +463,7 @@ function createWindow(show: boolean) {
         detail: syncing ? `Open it again from its ${icon} icon, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
         ...(canStartAtSignIn() ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: startsAtSignIn() } : {}),
       }).then(({ response, checkboxChecked }) => {
-        if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void saveAppSettings({ startAtSignIn: checkboxChecked }).then(() => { applySignIn(); refreshTray(); });
+        if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void setStartAtSignIn(checkboxChecked);
         if (response === 1) { quitting = true; app.quit(); }
       });
     }
@@ -488,6 +499,11 @@ app.whenReady().then(async () => {
     if (!appearances.includes(appearance as Appearance)) throw new Error('Invalid appearance.');
     await saveAppSettings({ appearance: appearance as Appearance });
     applyAppearance();
+    return preferences();
+  });
+  handle('settings:sign-in', async on => {
+    if (typeof on !== 'boolean' || !canStartAtSignIn()) throw new Error('Start at sign-in can’t be changed here.');
+    await setStartAtSignIn(on);
     return preferences();
   });
   handle('discovery:select', async mode => {

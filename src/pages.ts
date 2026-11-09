@@ -1,11 +1,11 @@
-import { announce, homeToolNames, homeTools, loadHome, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { announce, homeToolNames, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
 import { absentTools, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
-import { andList, orList, realHomeName, thisMachine } from './words.ts';
+import { andList, orList } from './words.ts';
 
 // ---------- Overview ----------
 
@@ -26,11 +26,11 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 /**
- * An empty page's way forward. `able` is this home's tools that can hold this kind of item (the kind's own view lists only
+ * An empty page's way forward. `holders` is this home's tools that can hold this kind of item (the kind's own view lists only
  * present tools), so the hint never names a tool that isn't here or couldn't take one; `noun` is the kind ("agents").
  */
-function addHint(able: HarnessId[], noun: string) {
-  if (able.length) return `Add one in ${orList(able.map(toolName))}, then Refresh, or choose another home at the bottom left.`;
+function addHint(holders: HarnessId[], noun: string) {
+  if (holders.length) return `Add one in ${orList(holders.map(toolName))}, then Refresh, or choose another home at the bottom left.`;
   const here = homeToolNames();
   return here.length ? `${andList(here)} can’t hold ${noun}. Choose another home at the bottom left.` : 'No tools were found in this home. Choose another home at the bottom left.';
 }
@@ -266,10 +266,14 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
 
 /** On This Mac's home, the tools that were looked for and not found: said once, as information, never as a card to act on. */
 function notFoundLine(home: HomeView) {
+  if (home.mode !== 'actual' || !absentTools(home.snapshots).length) return null;
+  return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'), notFoundText(home));
+}
+
+/** The sentence naming the tools This Mac's home looked for and didn't find. */
+function notFoundText(home: HomeView) {
   const missing = absentTools(home.snapshots).map(toolName);
-  if (home.mode !== 'actual' || !missing.length) return null;
-  return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'),
-    `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`);
+  return `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`;
 }
 
 export function toolsPage() {
@@ -280,7 +284,7 @@ export function toolsPage() {
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    present.length ? cardGrid(present.map(snapshot => toolCard(snapshot, home)))
-      : home.mode === 'actual' ? null : emptyState('boxes', 'No tool folders here', `No tool folders were found in ${home.label}. Choose another home at the bottom left.`),
-    notFoundLine(home)));
+    present.length ? [cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home)]
+      : emptyState('boxes', home.mode === 'actual' ? `No tools found on ${thisMachine}` : 'No tool folders here',
+        home.mode === 'actual' ? notFoundText(home) : `No tool folders were found in ${home.label}. Choose another home at the bottom left.`)));
 }

@@ -45,10 +45,17 @@ export function button(options: ButtonOptions): HTMLElement {
   const { variant = 'outline', size = 'default', label, name } = options;
   const iconSize = size === 'default' ? 16 : 14;
   const collapses = !!(options.collapse && options.icon && label);
+  // A collapsible button keeps its tooltip text aside (data-tip); fitBars shows it only while the label is hidden.
   return h(`button.btn.${variant}.${size}${label ? '' : '.square'}${collapses ? '.collapsible' : ''}`, {
     type: 'button', id: options.id, disabled: options.disabled, onclick: options.onclick,
-    'aria-label': name, title: label && !collapses ? undefined : name ?? label, ...options.attrs,
+    'aria-label': name, title: label ? undefined : name, 'data-tip': collapses ? name ?? label : undefined, ...options.attrs,
   }, options.icon && icon(options.icon, iconSize), label && h('span.btn-label', {}, label));
+}
+
+/** An on/off switch named `label`; a click reports the new state and goes no further (a table row behind it stays closed). */
+export function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string): HTMLElement {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+    h('span.switch-knob'));
 }
 
 /** Keeps the start and the distinguishing tail: the start ellipsizes, the tail stays. */
@@ -146,6 +153,14 @@ export function fitBars(): void {
     for (const step of FIT_STEPS) {
       if (!overflows(bar)) break;
       bar.classList.add(step);
+    }
+    // Still too wide after every step: marked, so tests (scripts/e2e.mjs) read the same measurement instead of a copy of it.
+    bar.toggleAttribute('data-overflows', overflows(bar));
+    // A button showing only its icon gets its label as a tooltip; one whose label shows needs none (a title it was given stays).
+    const iconsOnly = bar.classList.contains('bar-icons');
+    for (const button of bar.querySelectorAll<HTMLElement>('.btn[data-tip]')) {
+      if (iconsOnly && !button.title) { button.title = button.dataset.tip!; button.dataset.tipShown = ''; }
+      else if (!iconsOnly && 'tipShown' in button.dataset) { button.removeAttribute('title'); delete button.dataset.tipShown; }
     }
   }
 }

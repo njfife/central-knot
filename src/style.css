@@ -55,6 +55,7 @@
   --scrollbar: 0px;
   /* A padded scroll area's right padding: 16px from its edge, the scrollbar's width given back (renderer.ts sets --scrollbar). */
   --row-hover: color-mix(in oklab, var(--accent) 7%, var(--hover));
+  --row-stripe: color-mix(in oklab, var(--ink) 3%, transparent);
   --pad-end: max(0px, calc(16px - var(--scrollbar)));
   --sidebar-width: 208px;
   --rail-width: 56px;
@@ -281,7 +282,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .bar-short .chip { padding: 0 8px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
 .bar-wrap .toolbar-end { border-left: 0; }
-.pane-header.bar-wrap { flex-wrap: wrap; }
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
@@ -347,18 +347,20 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
 /* A narrow table: tighter columns, so names keep their room, and a chosen copy shows as its tool's mark and Change, the
    full choice in its tooltip; the description stays in the name's tooltip. Four tools need it sooner (dom.ts data-tools). */
-@container table (width < 780px) {
-  .ov { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
-  .ov .ov-name-about, .ov .decided-uses, .ov .decided-what { display: none; }
-}
-@container table (width < 900px) {
-  .ov[data-tools="4"] { --ov-columns: minmax(160px, 1fr) 72px repeat(4, 92px); }
-  .ov[data-tools="4"] .ov-name-about, .ov[data-tools="4"] .decided-uses, .ov[data-tools="4"] .decided-what { display: none; }
+@container table (width < 780px) { .ov { --narrow: 1; } }
+@container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
+.decided-short { display: none; }
+@container style(--narrow: 1) {
+  .ov .ov-row { grid-template-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
+  .ov-name-about, .decided-uses, .decided-what { display: none; }
+  .decided-short { display: inline; }
 }
 
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
 .ov-row:not(.ov-head) { cursor: pointer; }
 .ov-row:not(.ov-head):hover, .history-row:hover { background: var(--row-hover); }
+/* A wide table stripes every other row, so the eye can follow a row from its name across to its tools. */
+@container table (width >= 1400px) { [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open) { background: var(--row-stripe); } }
 .ov-row.open { background: var(--chrome); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
@@ -417,6 +419,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-waiting.cell-on { background: var(--cell-warn); }
 .cell-present { color: var(--ink); }
 .ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; border-color: var(--ink-faint); }
+/* Every change waiting for Apply all wears the same blue dashed edge, a removal as much as an addition. */
+.cell-button.cell-pending-edit, .legend-cell.cell-pending-edit { border-style: dashed; border-color: var(--accent); }
 .legend-cell.cell-absent { border-style: dotted; }
 .cell-cannot { background: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px); }
 .cell-working { border-style: dashed; color: var(--accent); }
@@ -492,7 +496,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .dock-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .dock-scroll { padding: 12px var(--pad-end) 16px 16px; }
 .dock .details { margin: 0; padding: 0; background: none; box-shadow: none; }
-.dock .details-close { display: none; }
 .dock .details-tool-head { grid-template-columns: minmax(120px, 40%) minmax(0, 1fr); }
 
 /* ---------- A row's details, opened under it ---------- */
@@ -513,8 +516,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-tool { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .details-tool:last-child { border-bottom: 0; }
 .details-tool-head { display: grid; grid-template-columns: 196px minmax(0, 1fr); align-items: baseline; gap: 8px; min-width: 0; font-size: 12.5px; }
-.details-mcp .details-tool-head { grid-template-columns: 150px minmax(0, 1fr); }
-.details-mcp .details-tools { width: fit-content; max-width: 100%; }
 .details-tool-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .details-tool-line { min-width: 0; color: var(--ink-soft); }
 .details-tool-actions { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-left: 8px; vertical-align: middle; }
@@ -529,19 +530,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-paths summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .details-paths summary::-webkit-details-marker { display: none; }
 .details-paths[open] summary svg { transform: rotate(90deg); }
-.details-path-line { display: flex; align-items: center; gap: 8px; margin: 4px 0 0 16px; }
-.details-path-bare { margin: 2px 0 0; }
-.details-tool-line > .details-path-bare { display: inline-flex; margin: 0 0 0 10px; vertical-align: baseline; }
-.details-path-tool { min-width: 92px; color: var(--ink-soft); }
-.details-path-full { font-family: var(--mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
-.details-path-show { margin-left: 4px; font-size: 12px; }
-.details-where-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* A file per line: its tool, its path (cut by the space it has), and Show in folder in one aligned column. */
+.details-path-line { display: grid; grid-template-columns: 12px 92px minmax(0, 1fr) auto; align-items: center; gap: 8px; margin: 4px 0 0 16px; }
+.details-path-tool { color: var(--ink-soft); }
+.details-path-line > .path-text, .details-mcp .details-tool-head > .path-text { color: var(--ink); }
+.details-path-show { font-size: 12px; white-space: nowrap; }
+.details-mcp .details-tool-head { grid-template-columns: 150px minmax(0, 1fr) auto; }
+.details-mcp .details-tool-head > .details-tool-line { grid-column: 2 / -1; }
+.details-mcp .details-tool-head > .details-tool-line:empty { display: none; }
 .where-cards { margin: 8px 0 0 16px; }
 .convert-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.compare-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: -6px; }
-.details-differs .compare-foot:has(.compare-foot-start:empty) { display: none; }
-.compare-foot-start { display: inline-flex; align-items: center; gap: 8px; }
-.compare-foot-start > .text-action { padding-left: 0; }
+/* A skill's own actions, together under its heading. */
+.details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
+.details-actions > .text-action { padding-left: 0; padding-right: 0; }
 
 /* Differing copies: the question, then one card per copy, each saying what choosing it does. */
 .compare-title { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; font-size: 12.5px; }
@@ -580,17 +581,17 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .mini-cell { width: 16px; height: 16px; }
 .detail-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .pane-header { flex: none; min-height: 61px; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
-.pane-title { flex: 1; min-width: 0; }
+.pane-title { flex: 0 1 auto; min-width: 0; }
 .pane-title h2 { font-size: 14px; line-height: 20px; font-weight: 600; }
 .pane-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.detail-actions { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.detail-actions { display: flex; align-items: center; gap: 12px; margin-left: 16px; }
+.detail-pending { margin-left: auto; }
 .detail-switch-label { margin-right: -4px; font-size: 13px; color: var(--ink-soft); }
 .detail-scroll { display: flex; flex-direction: column; gap: 24px; padding: 12px var(--pad-end) 12px 16px; user-select: text; }
 .detail-scroll > * { flex: none; min-width: 0; max-width: 100%; }
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .detail-scroll > .details { margin: 4px 0 0; padding: 4px 0 8px; box-shadow: none; background: none; }
-.detail-scroll .details-where-row { align-items: center; }
 /* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
@@ -633,7 +634,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .intro #intro-dismiss { margin-left: auto; }
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 .kind-cards { display: flex; flex-wrap: wrap; gap: 12px; }
-.kind-cards > .kind-card { flex: 1 1 240px; min-width: 0; }
+.kind-cards > .kind-card { flex: 1 1 0; min-width: 180px; }
 .kind-card { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
 .kind-card-main { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 14px 16px 6px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .kind-card-main:hover, .kind-card-main:focus-visible { background: var(--selected-row); }
@@ -654,14 +655,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cards-scroll { container: cards / inline-size; display: flex; flex-direction: column; gap: 16px; padding: 12px var(--pad-end) 16px 16px; }
 .cards-scroll > * { flex: none; }
 /*
- * Cards fill each row and match its height. The columns come from the width (each card at least 720px) and the count
+ * Cards fill each row and match its height. The columns come from the width (each card at least about 470px) and the count
  * (dom.ts cardGrid), so four go 2×2 or four across, three go three across, and a row's last card stretches to fill it.
  */
 .card-grid { --cols: 1; display: flex; flex-wrap: wrap; gap: 16px; }
 .card-grid > .card { flex: 1 1 calc((100% - (var(--cols) - 1) * 16px) / var(--cols)); min-width: 0; }
-@container cards (width >= 1456px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
-@container cards (width >= 2192px) { .card-grid[data-count="3"] { --cols: 3; } }
-@container cards (width >= 2928px) { .card-grid[data-count="4"] { --cols: 4; } }
+@container cards (width >= 960px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
+@container cards (width >= 1800px) { .card-grid[data-count="3"] { --cols: 3; } }
+@container cards (width >= 2400px) { .card-grid[data-count="4"] { --cols: 4; } }
 .tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .tool-head .middle { flex: 1; color: var(--ink-soft); }
@@ -717,7 +718,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 .history-list { list-style: none; margin: 0; padding: 0 var(--pad-end) 0 16px; }
 .history-day { list-style: none; padding: 14px 16px 4px 0; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-.history-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: start; gap: 12px; margin: 0 -8px; padding: 10px 8px; border-radius: 6px; box-shadow: inset 0 -1px 0 var(--line); }
+.history-row { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: start; gap: 12px; padding: 10px 0; box-shadow: inset 0 -1px 0 var(--line); }
 .history-entry { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; min-width: 0; }
 .history-entry > .history-what { flex: 0 1 auto; }
 .history-row > .history-when { padding-top: 2px; }
@@ -777,17 +778,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-tab { all: unset; padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
 .market-tab.selected { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
 .market-item:focus-visible, .market-tab:focus-visible, .market-chip:focus-visible, .market-example:focus-visible, .crumb-link:focus-visible, .plugin-row-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: 4px; }
-/* The toolbar: filters or where you are, lined up over the marketplace page; at the right, what is chosen or just happened. */
+/* The toolbar over the marketplace pane: where you are at the left; at the right, what is chosen or just happened. */
 .plugins-toolbar { gap: 12px; }
-.plugins-toolbar-aligned { padding-left: calc(var(--market-list-width) + var(--market-gutter)); }
+.market-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.plugins-toolbar { padding-left: var(--market-gutter); padding-right: var(--market-gutter); }
 .plugins-toolbar.toolbar-quiet { border-bottom-color: transparent; background: transparent; }
 .toolbar-spacer { flex: 1 1 auto; }
-.market-filter { display: flex; align-items: center; gap: 10px; flex: 1 0 auto; }
+/* The marketplace's find box and category chips, above its plugin table; chips wrap rather than scroll sideways. */
+.market-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 12px; }
 .market-filter .market-find { flex: none; width: 220px; height: 26px; }
 .market-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-/* No hidden sideways scroll: when filters and a result don't fit one line, the result moves to its own line (fitBars),
-   and filters that still don't fit wrap. */
-.bar-wrap .market-filter, .bar-wrap .toolbar-result { flex-shrink: 1; min-width: 0; }
+/* A result that doesn't fit beside where you are takes its own line (fitBars). */
+.bar-wrap .toolbar-result { flex-shrink: 1; min-width: 0; }
 .plugins-toolbar.bar-wrap { padding-top: 6px; padding-bottom: 6px; }
 .market-chip { all: unset; flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; color: var(--ink-soft); cursor: pointer; }
 .market-chip.selected { border-color: var(--accent); color: var(--accent-ink); background: color-mix(in oklab, var(--accent) 10%, transparent); }
@@ -824,11 +826,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-head h2 { display: inline; margin-right: 8px; }
 .plugin-id { font-size: 12px; color: var(--ink-faint); }
 .plugin-name { display: inline-block; max-width: 100%; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
-.plugin-panel { width: fit-content; max-width: 100%; margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.plugin-page { container: plugin / inline-size; }
+.plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
-.plugin-tool-rows > .btn { margin-left: 8px; }
+.plugin-tool-rows { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)) auto; align-items: center; gap: 8px 24px; }
+.plugin-tool-rows > .btn { justify-self: end; }
+@container plugin (width < 720px) {
+  .plugin-tool-rows { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .plugin-tool-rows > .btn { justify-self: start; }
+}
+/* From 1400px of page, what it holds and how each tool takes it sit beside the README; below that, one above the other. */
+.plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
+@container plugin (width >= 1400px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -868,7 +878,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .market-add-head { display: none; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
-  .plugins-toolbar-aligned { padding-left: 16px; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
@@ -892,7 +901,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .md-image { color: var(--ink-faint); font-style: italic; }
 
 /* ---------- Settings: Central Knot's own preferences ---------- */
-.settings-scroll { padding: 20px var(--pad-end) 32px 16px; }
+.settings-scroll { container: cards / inline-size; padding: 20px var(--pad-end) 32px 16px; }
 .settings-section h2 { margin: 0 0 4px; font-size: 14px; font-weight: 650; }
 .settings-hint { margin: 0 0 12px; max-width: var(--measure); font-size: 12.5px; color: var(--ink-soft); }
 .appearance-choices { display: flex; flex-wrap: wrap; gap: 10px; }

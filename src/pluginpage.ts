@@ -1,7 +1,7 @@
 // One plugin's page: what it is, where to install it, what it holds (read from its files), what each tool does with it,
 // and its README.
 import { rerender, state as app } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { button, h, icon, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
@@ -65,12 +65,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
-    // The button for every tool at once sits right after the tools it chooses, not at the panel's far edge.
-    h('div.plugin-tool-rows', {}, view.tools.map(tool => {
+    // The tools share the panel's width evenly; the button for all of them closes the row, at its right edge.
+    withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
-    }), allButton));
+    }), allButton), view.tools.length));
 }
 
 /**
@@ -131,7 +131,10 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
     installPanel(view, entry, plugin, marketIndex, components),
-    contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
-    components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
-    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);
+    // What it holds and how each tool takes it, beside the README on a wide page (style.css), one above the other otherwise.
+    h('div.plugin-columns', {},
+      h('div.plugin-column', {},
+        contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
+        components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null),
+      detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null));
 }

@@ -79,6 +79,8 @@ export interface DesktopApi {
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
+  /** Turns Start at sign-in on or off, as the menus do. */
+  setStartAtSignIn(on: boolean): Promise<AppPreferences>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
@@ -379,5 +381,9 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance }
+export interface AppPreferences {
+  appearance: Appearance;
+  /** Start at sign-in, as the menus show it: offered on this system, changeable in this build (an installed app), and on. */
+  signIn: { offered: boolean; available: boolean; on: boolean };
+}
 

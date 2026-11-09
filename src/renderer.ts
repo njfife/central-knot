@@ -1,11 +1,9 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
-import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { loadHome, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
-import { realHomeName } from './words.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
@@ -16,11 +14,11 @@ const region = (id: string) => document.getElementById(id)!;
 const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
-/** From this content width, an open row's details dock beside its table (matrix.ts) instead of opening under the row. */
-const DOCK_FROM = 1600;
+/** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
+const DOCK_FROM = 1200;
 
 /**
- * The window decides the frame: the sidebar or its rail, and whether the content is wide enough to dock details (.wide).
+ * The window decides the frame: the sidebar or its rail, and whether the content is wide enough to dock details (state.wide).
  * Inside the content area, style.css adapts to the content's own width (narrow tables, stacked two-pane pages) and
  * fitBars shortens a bar only when it overflows, so a resize redraws only when one of these two changes.
  */
@@ -28,7 +26,7 @@ function applyLayout(): { rail: boolean; wide: boolean } {
   const rail = state.sidebar ? state.sidebar === 'rail' : window.innerWidth < RAIL_BELOW;
   document.body.classList.toggle('rail', rail);
   const wide = document.getElementById('main')!.clientWidth >= DOCK_FROM;
-  document.body.classList.toggle('wide', wide);
+  state.wide = wide;
   return { rail, wide };
 }
 
@@ -96,9 +94,8 @@ function renderHeader(rail: boolean) {
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
     h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
-    // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
-    // Settings are the app's own: there is nothing in the home to read again there.
-    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),
   );
 }
@@ -163,9 +160,9 @@ let narrowWindow = window.innerWidth < RAIL_BELOW;
 window.addEventListener('resize', () => {
   // A toggled shape holds at the size it was chosen; crossing the breakpoint hands the choice back to the window.
   if ((window.innerWidth < RAIL_BELOW) !== narrowWindow) { narrowWindow = !narrowWindow; state.sidebar = undefined; }
-  const before = ['rail', 'wide'].map(name => document.body.classList.contains(name));
+  const before = { rail: document.body.classList.contains('rail'), wide: state.wide };
   const { rail, wide } = applyLayout();
-  if (rail !== before[0] || wide !== before[1]) render();
+  if (rail !== before.rail || wide !== before.wide) render();
 });
 
 // Bars refit whenever the content area changes width (a resize, the sidebar's shape) and once the fonts have loaded.

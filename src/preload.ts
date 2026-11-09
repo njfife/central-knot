@@ -25,6 +25,7 @@ const api: DesktopApi = {
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setAppearance: appearance => ipcRenderer.invoke('settings:appearance', appearance),
+  setStartAtSignIn: on => ipcRenderer.invoke('settings:sign-in', on),
   onNavigate: callback => { ipcRenderer.on('navigate', (_event, page) => callback(String(page))); },
   restore: (eventId, resume, home, choice) => ipcRenderer.invoke('history:restore', eventId, resume, home, choice),
   deleteEverywhere: (key, resume, home) => ipcRenderer.invoke('manage:delete-everywhere', key, resume, home),
