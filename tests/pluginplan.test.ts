@@ -21,7 +21,7 @@ test('Install in all queues every tool, and a second click clears them all', () 
   const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0 });
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, skillsOff: 0, skillsOn: 0 });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });
@@ -86,6 +86,7 @@ test('A run goes on past a step that throws, and a refusal stops it with the res
       return { reports: tools.map(tool => ({ tool, outcome: 'installed' as const, message: '', runs: [], changed: true })) };
     },
     uninstall: async () => ({ reports: [] }),
+    setSkill: async () => ({ reports: [] }),
   };
   const result = await runPlan(ops, api, '/home');
   assert.deepEqual(seen, ['pdf', 'docx', 'xlsx']);
@@ -124,3 +125,33 @@ test('After a run, what ran leaves the draft, the rest stays chosen, and the too
   assert.deepEqual(resultParts(lines, false, { short: true }), [{ plugin: 'pdf', source: 'anthropics/skills' }, ': installed in 3 tools', '.']);
 });
 
+test('A skill’s switch is its own choice: it runs between installs and removals, its Undo turns it back, and the report names the skill', () => {
+  const off = (tool: HarnessId, skill = 'pdf-reader'): PluginOp => ({ ...op('docs', tool, 'skill-off'), skill });
+  const draft: PluginDraft = new Map();
+  toggle(draft, op('docs', 'codex-cli', 'remove'));
+  toggle(draft, off('codex-cli'));
+  toggle(draft, off('codex-cli', 'spreadsheet'));
+  assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli'), 'remove', 'the plugin’s own choice stays');
+  assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli', 'pdf-reader'), 'skill-off');
+  toggle(draft, off('codex-cli', 'spreadsheet'));
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 0, removals: 1, skillsOff: 1, skillsOn: 0 });
+  assert.deepEqual(batches([...draft.values(), op('docs', 'claude-cli')]).map(step => [step.action, step.skill]), [['install', undefined], ['skill-off', 'pdf-reader'], ['remove', undefined]]);
+  const done = (tool: HarnessId, outcome: 'skill-off' | 'skill-on', changed?: boolean): PluginDone => ({ ...off(tool), action: outcome, report: { tool, outcome, message: '', runs: [], changed } });
+  const run = [done('codex-cli', 'skill-off', true), done('copilot-cli', 'skill-off', true), done('claude-cli', 'skill-off')];
+  assert.deepEqual(reverse(run).map(back => [back.tool, back.action, back.skill]), [['codex-cli', 'skill-on', 'pdf-reader'], ['copilot-cli', 'skill-on', 'pdf-reader']]);
+  assert.equal(resultLines(run)[0]!.text, 'pdf-reader turned off in Codex and Copilot CLI; pdf-reader already off in Claude Code');
+  assert.equal(resultLines([done('codex-cli', 'skill-on', true)], true)[0]!.text, 'pdf-reader back on in Codex');
+});
+
+test('A skill’s switch is dropped once it means nothing: not installed there, already as chosen, held off, or a tool with no such switch', () => {
+  const draft: PluginDraft = new Map();
+  const choose = (tool: HarnessId, skill: string, action: PluginOp['action']) => toggle(draft, { ...op('docs', tool, action), skill });
+  choose('codex-cli', 'keep', 'skill-off');
+  choose('codex-cli', 'already', 'skill-off');
+  choose('codex-cli', 'held', 'skill-on');
+  choose('copilot-cli', 'keep', 'skill-off');
+  choose('claude-cli', 'keep', 'skill-off');
+  prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli', 'copilot-cli'], clis: { 'claude-cli': true, 'codex-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins: [{ name: 'docs', description: '' }],
+    states: { docs: { 'claude-cli': { state: 'installed', path: '/c' }, 'codex-cli': { state: 'installed', path: '/x', skillsOff: [{ skill: 'already' }, { skill: 'held', held: 'every skill named held' }] } } } }] });
+  assert.deepEqual([...draft.values()].map(entry => `${entry.tool} ${entry.skill}`), ['codex-cli keep']);
+});

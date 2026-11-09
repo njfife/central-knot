@@ -62,6 +62,12 @@ export const pathText = (text: string, full = text) => {
   return node;
 };
 
+/** An on/off switch; a click asks `onchange` for the other position and goes no further up the page. `label` is its name and tooltip. */
+export function switchControl(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+    h('span.switch-knob'));
+}
+
 export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
   return h('label.tick', {},
     h('input.hidden-input', {

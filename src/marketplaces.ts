@@ -12,7 +12,7 @@ import * as engine from './plugins.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
 import { heldReason } from './pluginstatus.ts';
-import { isFolder, isHttps, onlyAllowed } from './values.ts';
+import { SAFE_NAME, isFolder, isHttps, onlyAllowed } from './values.ts';
 import { toolNames } from './words.ts';
 
 /** What the marketplace feature needs from the app around it. */
@@ -35,6 +35,7 @@ export interface MarketplaceEngine {
   readRemotePlugin: typeof engine.readRemotePlugin;
   install: typeof engine.install;
   uninstall: typeof engine.uninstall;
+  setSkill: typeof engine.setSkill;
 }
 
 /**
@@ -52,7 +53,7 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   }
   return found;
 }
-const realEngine: MarketplaceEngine = { findClis, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall };
+const realEngine: MarketplaceEngine = { findClis, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, setSkill: engine.setSkill };
 
 const toolIds = (value: unknown): HarnessId[] => onlyAllowed(value, engine.pluginTools);
 /** Reports go to the page without each run's file bytes (kept only for the record here); the page never reads them. */
@@ -250,13 +251,20 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) };
   }
 
-  return { view, detail, readme, add, refresh, forget, install, uninstall };
+  /** One tool's own switch for one skill of an installed plugin (ENB-06). `marketName` and `source` as for uninstall. */
+  async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: unknown): Promise<PluginActionResult> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped, reports: [] };
+    return { reports: withoutFileBytes([await use.setSkill(await context({ clis: true }), marketName, plugin, skill, tool, on, source)]) };
+  }
+
+  return { view, detail, readme, add, refresh, forget, install, uninstall, setSkill };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
 const isText = (value: unknown, max = 2000): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
-const isName = (value: unknown): value is string => typeof value === 'string' && engine.SAFE_NAME.test(value);
+const isName = (value: unknown): value is string => typeof value === 'string' && SAFE_NAME.test(value);
 
 /**
  * The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. `handle`
@@ -280,5 +288,10 @@ export function registerMarketplaces({ handle, handleRead }: { handle: Handle; h
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && ids.length ? markets.uninstall(source, marketplace, plugin, ids[0]!, home) : refused(tool);
+  });
+  // A skill's name reaches Copilot CLI's command line as plugin:skill, so it must be a name too, never an option.
+  handle('plugins:skill', async (source, marketplace, plugin, skill, tool, on, home) => {
+    const ids = toolIds([tool]);
+    return open() && isText(source) && isName(marketplace) && isName(plugin) && isName(skill) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
 }

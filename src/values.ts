@@ -30,3 +30,6 @@ export const isHttps = (value: unknown): value is string => typeof value === 'st
 
 /** True when a marketplace source names a folder on this computer (an absolute path), not a URL or owner/repo. */
 export const isFolder = (source: string) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(source.trim());
+
+/** A marketplace, plugin or skill name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
+export const SAFE_NAME = /^[\w][\w.-]{0,199}$/;

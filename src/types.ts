@@ -109,6 +109,8 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
+  setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -267,7 +269,13 @@ export interface Catalog {
   copilotRefuses?: string;
 }
 
-export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+/**
+ * One of an installed plugin's skills that a tool has turned off (ENB-06), by its name (SKILL.md's, or its folder's).
+ * `held`: why it can't be turned back on from here: the switch holding it off isn't this plugin's own.
+ */
+export interface SkillOff { skill: string; held?: string }
+
+export type InstallState = { state: 'installed'; path: string; live?: boolean; /** Its skills this tool has turned off. */ skillsOff?: SkillOff[] } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -276,7 +284,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;

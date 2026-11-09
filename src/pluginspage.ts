@@ -164,7 +164,7 @@ function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
   const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) });
-  undo.title = 'Reverses what changed, through each tool’s own command: uninstalls what was installed and reinstalls what was uninstalled.';
+  undo.title = 'Reverses what changed, through each tool’s own command or switch: uninstalls what was installed, reinstalls what was uninstalled and turns each skill back as it was.';
   return undo;
 }
 
@@ -178,7 +178,8 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
   if (counts.plugins) {
     return h('div.apply', {},
-      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ')),
+      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
+        counts.skillsOff ? `${plural(counts.skillsOff, 'skill')} to turn off` : '', counts.skillsOn ? `${plural(counts.skillsOn, 'skill')} to turn on` : ''].filter(Boolean).join(' · ')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }

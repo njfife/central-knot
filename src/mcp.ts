@@ -88,7 +88,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   try { text = await readFile(file, 'utf8'); } catch (error) { return { entries: [], exists: false, problem: errorCode(error) === 'ENOENT' ? undefined : `${file} could not be read.` }; }
   try {
     if (tool === 'codex-cli') {
-      const tables = readTomlTables(text);
+      // `[[…]]` blocks (Codex's `[[skills.config]]`) are never servers.
+      const tables = readTomlTables(text).filter(table => !table.array);
       const entries: McpEntry[] = [];
       // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
       // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.

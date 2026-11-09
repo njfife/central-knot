@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -303,5 +303,71 @@ esac
     assert.deepEqual([removed.outcome, removed.changed], ['uninstalled', true], removed.message);
     const back = await install(context, catalog, 'marker', 'claude-cli');
     assert.deepEqual(back.runs.map(run => run.command), ['claude plugin install marker@ck-test-market --scope user'], 'the marketplace Claude Code recorded is found, so it isn’t added twice');
+  } finally { await box.cleanup(); }
+});
+
+/** Every file under `folder` with its bytes, to show nothing in it changed. */
+async function files(folder: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const name of await readdir(folder, { recursive: true, withFileTypes: true })) if (name.isFile()) out[join(name.parentPath, name.name)] = await readFile(join(name.parentPath, name.name), 'utf8');
+  return out;
+}
+
+test('Codex turns one skill of a plugin off by name in config.toml and back on to the same bytes, and the plugin’s files never change', async () => {
+  const box = await sandbox();
+  try {
+    const copy = join(box.home, '.codex/plugins/cache/ck-test-market/full/1.0.0');
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
+    await put(join(copy, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
+    const original = '# mine\nmodel = "o3"\n\n[marketplaces.ck-test-market]\nsource = "/m"\n\n[plugins."full@ck-test-market"]\nenabled = true\n\n[[skills.config]]\npath = "/elsewhere/SKILL.md"\nenabled = false\n';
+    const config = join(box.home, '.codex/config.toml');
+    await put(config, original);
+    const plugin = await files(copy);
+    const off = await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m');
+    assert.deepEqual([off.outcome, off.changed], ['skill-off', true], off.message);
+    assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skillsOff: [{ skill: 'one' }] });
+    assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m')).changed, undefined, 'already off is not a change');
+    const on = await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', true, '/m');
+    assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);
+    assert.equal(await readFile(config, 'utf8'), original);
+    // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes it.
+    await writeFile(config, `${original}\n[[skills.config]]\npath = "${join(copy, 'skills/two/SKILL.md')}"\nenabled = false\n`);
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skillsOff: [{ skill: 'second' }] });
+    assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'second', 'codex-cli', true, '/m')).outcome, 'skill-on');
+    assert.equal(await readFile(config, 'utf8'), original);
+    assert.deepEqual(await files(copy), plugin);
+  } finally { await box.cleanup(); }
+});
+
+test('Copilot CLI’s skill switch counts only once its settings say so; a bare name it turned off is held; Claude Code has no switch', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const copy = join(box.home, '.copilot/installed-plugins/ck-test-market/full');
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\n---\nB\n');
+    await put(join(box.home, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'full', marketplace: 'ck-test-market', cache_path: copy }] }));
+    const settings = join(box.home, '.copilot/settings.json');
+    // A stand-in for `copilot skill disable|enable NAME`: it records the name in disabledSkills, except "quiet", which it ignores
+    // and still exits 0, as the real one does with a name it doesn't know.
+    const bin = join(box.base, 'bin');
+    await put(join(bin, 'copilot'), `#!/bin/sh
+[ "$3" = "full:quiet" ] && exit 0
+[ "$2" = "disable" ] && printf '{"disabledSkills":["%s"]}' "$3" > "$HOME/.copilot/settings.json"
+[ "$2" = "enable" ] && printf '{"disabledSkills":[]}' > "$HOME/.copilot/settings.json"
+exit 0
+`);
+    execFileSync('chmod', ['+x', join(bin, 'copilot')]);
+    const context = { ...box.context, binaries: { 'copilot-cli': join(bin, 'copilot') } as PluginContext['binaries'] };
+    const off = await setSkill(context, 'ck-test-market', 'full', 'one', 'copilot-cli', false, '/m');
+    assert.deepEqual([off.outcome, off.changed, off.runs[0]?.command], ['skill-off', true, 'copilot skill disable full:one'], off.message);
+    assert.deepEqual(await installState(context, 'copilot-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skillsOff: [{ skill: 'one' }] });
+    assert.equal((await setSkill(context, 'ck-test-market', 'full', 'one', 'copilot-cli', true, '/m')).outcome, 'skill-on');
+    assert.equal((await setSkill(context, 'ck-test-market', 'full', 'quiet', 'copilot-cli', false, '/m')).outcome, 'failed', 'exit 0 with nothing recorded is not a change');
+    await writeFile(settings, JSON.stringify({ disabledSkills: ['one'] }));
+    const held = await setSkill(context, 'ck-test-market', 'full', 'one', 'copilot-cli', true, '/m');
+    assert.deepEqual([held.outcome, held.runs.length], ['failed', 0]);
+    assert.match(held.message, /every skill named “one”/);
+    const claude = await setSkill(context, 'ck-test-market', 'full', 'one', 'claude-cli', false, '/m');
+    assert.deepEqual([claude.outcome, claude.message], ['failed', 'Claude Code can’t turn off one skill of a plugin, only the whole plugin.']);
   } finally { await box.cleanup(); }
 });

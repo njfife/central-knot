@@ -2,6 +2,7 @@
 // it, whether it is installed there, and a short summary of what it holds.
 import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
+import { SAFE_NAME } from './values.ts';
 import { toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
@@ -9,7 +10,7 @@ export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line 
 /** The same, as the reason nothing can run there. */
 export const noCli = (tool: HarnessId) => `${cliMissing(tool)}, so its plugin commands can’t run.`;
 /** Why nothing can change in a home that is only previewed. */
-export const PREVIEW_ONLY = 'Preview only: nothing can be installed or uninstalled in this home.';
+export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.';
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
@@ -43,6 +44,33 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
+
+/**
+ * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
+ * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Codex keeps the switch in
+ * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
+ */
+export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
+  'claude-cli': 'Claude Code can’t turn off one skill of a plugin, only the whole plugin.',
+};
+
+/**
+ * Why one skill of this plugin can't be turned off or on in this tool here, if it can't (only asked where the plugin is
+ * installed): the tool has no such switch, the skill's name can't go on a command line, Copilot CLI's command is missing,
+ * or writing isn't allowed in this home.
+ */
+export function cantSwitchSkill(view: PluginsView, tool: HarnessId, skill: string): string | undefined {
+  if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
+  if (!SAFE_NAME.test(skill)) return 'Its name has characters Central Knot doesn’t pass to a tool’s command.';
+  if (!view.canWrite) return PREVIEW_ONLY;
+  return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
+}
+
+/** Whether a tool has this skill of an installed plugin turned off, and the switch's own record of it. */
+export const skillOff = (entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string) => {
+  const state = stateOf(entry, plugin, tool);
+  return state.state === 'installed' ? state.skillsOff?.find(off => off.skill === skill) : undefined;
+};
 
 /** Tools this plugin can be uninstalled from here: installed there, nothing in the way. */
 export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>

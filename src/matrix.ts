@@ -4,7 +4,7 @@
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, middle, switchControl, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -176,10 +176,6 @@ const cellLook: Record<Cell, { glyph?: IconName; tone: string; label: string }> 
 };
 
 
-function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string) {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
-    h('span.switch-knob'));
-}
 
 const smallAction = (label: string, id: string, onclick: () => void, extra = '') =>
   h(`button.text-action${extra}`, { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); onclick(); } }, label);
@@ -603,7 +599,7 @@ function row(skill: SampleSkill) {
             : resumeOnly ? h('span', {}, 'Resumes on Apply all')
             : [h('span.decided-uses', {}, 'Uses'), brandMark(decided, 12), h('span', {}, `${names[decided]}’s copy`)],
           h('button.decided-undo', { type: 'button', id: `undo-${skill.key}`, 'aria-label': resumeOnly ? 'Cancel this' : 'Change this choice', title: resumeOnly ? 'Cancel: keep the edited copy' : 'Change this choice', onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); view.comparing = resumeOnly ? view.comparing : skill.key; rerender(); } }, h('span', {}, resumeOnly ? 'Cancel' : 'Change'))) : null),
-      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => { if (on && attention && !decided && !skill.managed) { view.comparing = undefined; openRow(skill.key); return; } setManaged([skill.key], on); }, !!skill.held, `switch-${skill.key}`)),
+      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, switchControl(skill.managed, `Manage ${skill.name ?? skill.key}`, on => { if (on && attention && !decided && !skill.managed) { view.comparing = undefined; openRow(skill.key); return; } setManaged([skill.key], on); }, !!skill.held, `switch-${skill.key}`)),
       toolList().map(tool => cell(skill, tool)),
       h('div.ov-fill')),
     view.comparing === skill.key ? details(skill) : null,
@@ -726,7 +722,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}’s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
         swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ${names[from]}’s copy would replace this one` : `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: added from ${names[from]}’s copy; ${andList(plan.differ[0].replaced.map(tool => `${names[tool]}’s`))} is replaced too` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
-      toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
+      switchControl(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
       h('span', {}, `You accept ${names[from]}’s copy: on Apply all, every tool ${plan.differ.length === 1 ? 'it syncs' : `these ${plan.differ.length} sync`} to uses it. The differing ${replaced.length === 1 && plan.differ.length === 1 ? 'copy' : 'copies'} in ${andList(replaced.map(tool => names[tool]))} ${replaced.length === 1 && plan.differ.length === 1 ? 'is' : 'are'} replaced; Central Knot’s store keeps ${replaced.length === 1 && plan.differ.length === 1 ? 'it' : 'them'}.`)) : null);
 }
@@ -1212,7 +1208,7 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}` : skill.managed ? 'Managed' : 'Unmanaged')),
         h('div.detail-actions', {},
           h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
-          toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
+          switchControl(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
           changeBar(false))),
       notices(),
       h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, false), ...more(skill.key))));

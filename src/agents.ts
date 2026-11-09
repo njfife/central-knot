@@ -61,7 +61,7 @@ function fromToml(name: string, text: string): NeutralAgent | undefined {
   // No prompt: an empty file, or one cut off mid-save. Not an agent (yet), so it is held, never read as an edit that empties the others.
   if (value('developer_instructions') === undefined) return undefined;
   const fields: Record<string, unknown> = Object.fromEntries(root.entries.filter(entry => !['name', 'description', 'developer_instructions'].includes(entry.key)).map(entry => [entry.key, entry.value]));
-  for (const table of tables.slice(1)) fields[`[${table.path.join('.')}]`] = true;
+  for (const table of tables.slice(1)) fields[table.array ? `[[${table.path.join('.')}]]` : `[${table.path.join('.')}]`] = true;
   return { name: value('name') || name, description: value('description') ?? '', prompt: value('developer_instructions') ?? '', fields };
 }
 
