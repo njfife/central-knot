@@ -53,3 +53,13 @@ export function writeMarket(root, name = 'team-tools') {
   skill(root, 'skills', 'hello', 'Says hello, as a first example.');
   skill(root, 'skills', 'unlisted', 'Not part of any plugin entry.');
 }
+
+/**
+ * A plugin as Claude Code records it once installed, in `home`: its entry in plugins/installed_plugins.json and its copy
+ * in the plugin cache, holding `files` (path → text). Used to show an installed copy that is another version.
+ */
+export function writeClaudeInstall(home, marketName, plugin, version, files) {
+  const installPath = join(home, '.claude/plugins/cache', marketName, plugin, version);
+  for (const [path, text] of Object.entries(files)) file(installPath, path, text);
+  file(home, '.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { [`${plugin}@${marketName}`]: [{ scope: 'user', installPath, version }] } }, null, 2));
+}

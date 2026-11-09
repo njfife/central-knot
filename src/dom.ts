@@ -88,3 +88,18 @@ export function withToolCount(table: HTMLElement, count: number): HTMLElement {
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */
 export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dismiss', title = label, look = '' }: { id?: string; label?: string; title?: string; look?: string } = {}) =>
   h(`button.band-dismiss${look}`, { type: 'button', id, 'aria-label': label, title, onclick }, icon('x', 12));
+
+/**
+ * A file's text as written, one block per distinct text. When the copies differ, each block is named by the copies that
+ * hold it (a skill's copies in each tool, a plugin's copy in the marketplace and in each tool). Ids are `${id}-0`, `-1`….
+ */
+export function fileText(id: string, label: string, copies: { who: string; text: string }[]): HTMLElement[] {
+  const distinct = new Map<string, string[]>();
+  for (const copy of copies) distinct.set(copy.text, [...(distinct.get(copy.text) ?? []), copy.who]);
+  return [...distinct].map(([text, holders], index) => {
+    const who = holders.join(', ');
+    return h('div.content-block', {},
+      distinct.size > 1 && h('p.content-owner', {}, who),
+      h('pre.content.mono', { tabindex: '0', id: `${id}-${index}`, 'aria-label': `${label}, ${who}` }, text));
+  });
+}

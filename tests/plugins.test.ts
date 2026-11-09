@@ -176,12 +176,18 @@ test('Installed means files where the tool records them; a record with no files 
     // A settings file saved with a byte-order mark is read like any other.
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), `\uFEFF${JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache }] } })}`);
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'p')).state, 'installed');
+    // Its version is the one the tool records; Claude Code's "unknown" falls back to the copy's plugin.json.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: '1.0.0' }] } }));
+    assert.deepEqual(await installState(box.context, 'claude-cli', 'm', 'p'), { state: 'installed', path: cache, version: '1.0.0' });
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'unknown' }] } }));
+    await put(join(cache, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p', version: '0.9.1' }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
 
     const copied = join(box.home, '.copilot/installed-plugins/m/p');
-    await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', cache_path: copied, enabled: true }] })}`);
+    await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', version: '2.1.0', cache_path: copied, enabled: true }] })}`);
     assert.equal((await installState(box.context, 'copilot-cli', 'm', 'p')).state, 'not-known');
     await put(join(copied, 'skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'copilot-cli', 'm', 'p')).state, 'installed');
+    assert.deepEqual(await installState(box.context, 'copilot-cli', 'm', 'p'), { state: 'installed', path: copied, version: '2.1.0' });
 
     const live = join(box.base, 'live-market');
     await marketplace(live);
@@ -192,7 +198,7 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.codex/config.toml'), '[plugins."p@m"]\nenabled = true\n');
     assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'not-known');
     await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
-    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'installed');
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/1.0.0'), version: '1.0.0' });
   } finally { await box.cleanup(); }
 });
 

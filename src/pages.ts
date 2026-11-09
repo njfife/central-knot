@@ -1,5 +1,5 @@
 import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
-import { button, emptyState, h, icon, pathText, section } from './dom.ts';
+import { button, emptyState, fileText, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
@@ -139,16 +139,8 @@ function fileCard(key: string, { tool, skill }: Found, index: number) {
 }
 
 /** One block per distinct content, named by the copies that hold it. */
-function contents(key: string, copies: Found[]) {
-  const distinct = new Map<string, Found[]>();
-  for (const copy of copies) distinct.set(copy.skill.content, [...(distinct.get(copy.skill.content) ?? []), copy]);
-  return [...distinct].map(([content, holders], index) => {
-    const who = holders.map(holder => `${toolName(holder.tool)} (${holder.skill.rootLabel})`).join(', ');
-    return h('div.content-block', {},
-      distinct.size > 1 && h('p.content-owner', {}, who),
-      h('pre.content.mono', { tabindex: '0', id: `content-${key}-${index}`, 'aria-label': `Skill contents, ${who}` }, content));
-  });
-}
+const contents = (key: string, copies: Found[]) =>
+  fileText(`content-${key}`, 'Skill contents', copies.map(({ tool, skill }) => ({ who: `${toolName(tool)} (${skill.rootLabel})`, text: skill.content })));
 
 export function skillsPage() {
   const home = state.home;

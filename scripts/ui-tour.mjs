@@ -2,11 +2,11 @@
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -179,6 +179,54 @@ if (wanted('plugins')) {
   await a.click('#plugin-back');
   await a.click('#popen-0-spark'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted:not(:empty)') && !/Reading/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 60000); await shot(a, 'plugin-page-remote', 'Opened "spark", whose files live in GitHub’s copilot-plugins repository (read from there).');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of Apply all.'); }
+}
+
+// ---------- Plugin versions and skill text ----------
+if (wanted('plugin-versions')) {
+  begin('plugin-versions');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // Claude Code has document-tools 1.1.0, whose pdf-reader skill was worded differently; Codex has the marketplace's 1.2.0.
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.1.0', {
+    'skills/pdf-reader/SKILL.md': '---\nname: pdf-reader\ndescription: "Reads PDF files and pulls out text."\n---\n\nOpen the PDF and copy out its text.\n',
+    'skills/spreadsheet/SKILL.md': readFileSync(join(market, 'plugins/document-tools/skills/spreadsheet/SKILL.md'), 'utf8'),
+  });
+  cpSync(join(market, 'plugins/document-tools'), join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'), { recursive: true });
+  edit(join(practice, '.codex/config.toml'), text => `${text.replace(/\n*$/, '\n')}\n[plugins."document-tools@team-tools"]\nenabled = true\n`);
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  // Added already by the plugins feature: read again, so the installs written above show.
+  if (await a.has('#refresh-0')) { await a.click('#refresh-0'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+  else {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await shot(a, 'list-versions', 'The team-tools marketplace (a local folder). Claude Code has document-tools 1.1.0; Codex has 1.2.0, the version the marketplace offers. Copilot CLI isn\'t installed on this machine.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pfile-0-skills-pdf-reader')`);
+  await shot(a, 'plugin-versions', 'Clicked the "document-tools" row.');
+  await a.click('#pfile-0-skills-pdf-reader');
+  await shot(a, 'skill-open', 'Clicked "pdf-reader" under Skills: its SKILL.md. Claude Code\'s copy (1.1.0) differs from the marketplace\'s and Codex\'s (1.2.0), so each text shows, named.');
+  await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-open-scrolled', 'Scrolled down to the opened SKILL.md.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-same-everywhere', 'Also opened "spreadsheet", which is the same in every copy: one block, unnamed.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').focus()`);
+  await shot(a, 'keyboard-focus', 'Closed "spreadsheet" again; the keyboard focus is on its name.');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`);
+    await a.theme('dark'); await shot(a, `plugin-${width}-dark`, `document-tools with pdf-reader open, at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `plugin-${width}-light`, `The same, light.`);
+    if (width === 860 || width === 2560) { await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle(); await shot(a, `plugin-${width}-file-light`, `At ${width}×${height}, scrolled to the opened SKILL.md.`); await a.theme('dark'); }
+  }
+  await a.theme('dark');
+  await a.click('#plugin-back');
+  await size(860, 560); await shot(a, 'list-860', 'Back to the marketplace list at 860×560.');
+  await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
+  await size(1280, 800); await a.theme('dark');
 }
 
 // ---------- Instructions ----------

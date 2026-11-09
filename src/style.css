@@ -1215,7 +1215,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The empty page: the add box in the middle, above the examples */
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
-.market-page, .plugin-page { max-width: 900px; }
 .market-page-title { display: flex; align-items: center; gap: 12px; }
 .market-page-title h2, .plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
 .market-page-actions { margin-left: auto; display: flex; gap: 4px; }
@@ -1261,8 +1260,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-row:hover { background: var(--hover); }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px 8px 0; min-width: 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
-.plugin-row-open { all: unset; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
-.plugin-row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.plugin-row-open { all: unset; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; max-width: 100%; cursor: pointer; }
+.plugin-row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .plugin-chip { font-size: 11px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-faint); }
 .plugin-row-about { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-holds { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1283,7 +1282,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel-head .btn { margin-left: auto; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
-.plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
+/* One column per tool, sharing the panel's width; they stack as the window narrows */
+.plugin-tool-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: center; gap: 8px 28px; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool .ov-cell { width: auto; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
@@ -1314,6 +1314,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .part-more:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
 .plugin-parts li.clamped .part-more { display: inline; }
 .plugin-part-what.mono { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+/* A skill, command or agent whose name opens its file, shown as the Skills page shows a skill's SKILL.md */
+.plugin-file-toggle { all: unset; justify-self: start; display: inline-flex; align-items: center; gap: 4px; min-width: 0; cursor: pointer; color: var(--ink); }
+.plugin-file-toggle .icon { flex: none; color: var(--ink-faint); }
+.plugin-file-toggle:hover .plugin-name { text-decoration: underline; }
+.plugin-file-toggle:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; border-radius: 3px; }
+.plugin-file { grid-column: 1 / -1; margin: 4px 0 8px 16px; min-width: 0; }
+/* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
+.plugin-row-version { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; font-weight: 400; color: var(--ink-faint); }
+.plugin-version-differs { display: inline-flex; align-items: center; gap: 4px; color: var(--warning); }
 .plugin-muted { color: var(--ink-faint); font-size: 12.5px; margin: 6px 0 0; }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* README text */

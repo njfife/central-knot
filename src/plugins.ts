@@ -6,7 +6,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
-import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
+import { MANIFEST, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
@@ -223,7 +223,11 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // where it starts ("./plugins/formatter", "../shared") is taken from the marketplace's root as written.
     const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
     // A path outside the marketplace, through a link or not, is not read.
-    if (await inside(root, folder)) { plugin.folder = folder; if (counts) plugin.components = await componentsOf(folder, item, root); }
+    if (await inside(root, folder)) {
+      plugin.folder = folder;
+      plugin.version ??= text((await pluginManifest(folder, root))?.version) || undefined;
+      if (counts) plugin.components = await componentsOf(folder, item, root);
+    }
   }
   return plugin;
 }
@@ -325,6 +329,15 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
   return registered && !sameSource(registered, source) ? registered : undefined;
 }
 
+/**
+ * The version of a tool's installed copy: what the tool recorded, else what the copy's plugin.json says. Claude Code
+ * records "unknown" for a plugin that gives none.
+ */
+async function copyVersion(recorded: unknown, path: string): Promise<string | undefined> {
+  const said = text(recorded);
+  return said && said !== 'unknown' ? said : text((await pluginManifest(path))?.version) || undefined;
+}
+
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
 export async function installState(context: PluginContext, tool: HarnessId, marketplace: string, plugin: string): Promise<InstallState> {
   const root = configRootOf(context, tool);
@@ -336,13 +349,13 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
     const path = text(user?.installPath);
     if (!path) return { state: 'not-installed' };
-    return (await hasFiles(path)) ? { state: 'installed', path } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+    return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
   }
   if (tool === 'copilot-cli') {
     const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
     const entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
     const cache = text(entry?.cache_path);
-    if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+    if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache, version: await copyVersion(entry?.version, cache) } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
     // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
     const settings = await recordJson(context, join(root, 'settings.json'));
     const enabled = record(settings?.enabledPlugins)?.[id] === true;
@@ -350,15 +363,17 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     const folderPath = text(source?.path);
     if (enabled && source?.source === 'directory' && folderPath) {
       const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
-      const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
-      return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+      const listed = catalog.plugins.find(item => item.name === plugin);
+      const folder = listed?.folder;
+      return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true, version: listed.version } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
     }
     return { state: 'not-installed' };
   }
   if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const versions = await readdir(cache).catch(() => [] as string[]);
-  for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version) };
+  // Codex keeps each copy in a folder named for its version.
+  for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version), version };
   return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
 }
 

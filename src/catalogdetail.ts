@@ -69,7 +69,7 @@ async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
     const body = await textInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
     const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
+    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body });
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
@@ -87,7 +87,7 @@ async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
       const body = await textInside(root, file);
       if (body === undefined) continue;
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '' });
+      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));
@@ -99,6 +99,9 @@ function serverRuns(server: unknown): string {
   if (!entry) return '';
   return text(entry.url) || [text(entry.command), ...(strings(entry.args) ?? [])].filter(Boolean).join(' ');
 }
+
+/** A plugin's own .claude-plugin/plugin.json as an object, or undefined when it has none. */
+export const pluginManifest = (folder: string, root = folder) => jsonInside(root, join(folder, '.claude-plugin/plugin.json'));
 
 /**
  * One plugin section (hooks, MCP servers, LSP servers): its default file in the plugin folder, merged with what the
@@ -119,7 +122,7 @@ async function section(root: string, folder: string, named: unknown, key: string
  * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginContents> {
-  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
+  const pluginJson = (await pluginManifest(folder, root)) ?? {};
   // The marketplace entry wins over plugin.json, as the tools read it.
   const declared = { ...pluginJson, ...entry };
   const listed = (key: string) => strings(declared[key])?.map(path => resolve(folder, path));
@@ -135,6 +138,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
+    version: text(declared.version) || undefined,
   };
 }
 

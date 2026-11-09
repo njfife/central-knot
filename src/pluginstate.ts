@@ -42,7 +42,7 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
-  /** Part descriptions opened with "Show more", by plugin key and part, so a redraw keeps them open. */
+  /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open. */
   opened: new Set<string>(),
   /** What is typed in the add box, kept through loading and errors. */
   draftSource: '',

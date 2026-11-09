@@ -1,14 +1,14 @@
-// One plugin's page: what it is, where to install it, what it holds (read from its files), what each tool does with it,
-// and its README.
+// One plugin's page: what it is and which version each tool has, where to install it, what it holds (each skill, command
+// and agent's file as written), what each tool does with it, and its README.
 import { rerender, state as app } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { button, fileText, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, limitNote, missingTools, removableTools, unavailable } from './pluginstatus.ts';
+import { installed, installedVersion, limitNote, missingTools, removableTools, unavailable, versionDiffers } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
 const tone: Record<Outcome['result'], string> = { works: 'tone-muted', limited: 'tone-warning', ignored: 'tone-faint', fails: 'tone-danger', unknown: 'tone-faint' };
@@ -35,12 +35,18 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
     h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
 }
 
+/** "Installed · 1.2.0"; when the tool has another version than the marketplace offers, says so in the warning tone. */
+function installedLine(version: string | undefined, offered: string | undefined) {
+  if (!versionDiffers(version, offered)) return version ? `Installed · ${version}` : 'Installed';
+  return h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Installed · ${version}, marketplace has ${offered}`);
+}
+
 /**
  * Where to install it: a box per tool with a second line that is always there (so the card never changes height), and
  * at the right of the heading row (always the same height) one button: choose it for every tool still without it, or,
- * once every tool has it, choose to uninstall it from all of them.
+ * once every tool has it, choose to uninstall it from all of them. An installed tool's line names its version.
  */
-function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, components?: Components) {
+function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, offered: string | undefined, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
   const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
   // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
@@ -48,7 +54,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
-    if (installed(entry, plugin.name, tool)) return 'Installed';
+    if (installed(entry, plugin.name, tool)) return installedLine(installedVersion(entry, plugin.name, tool), offered);
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
@@ -67,7 +73,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'), allButton),
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
-      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
+      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, offered),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
     })));
 }
@@ -92,18 +98,64 @@ function markClamped(): void {
   }
 }
 
-const group = (owner: string, title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(`${owner}\u0000${title}`, parts.map(part => ({ name: part.name, text: part.description })))) : null;
+/** A skill, command or agent as listed: its name, what it says it does, and its file in each copy that has one. */
+interface FilePart { name: string; description: string; copies: { who: string; text: string }[] }
+type FileKind = 'skills' | 'commands' | 'agents';
 
-/** The plugin's parts by name, with what each says it does. `owner` (its plugin key) keeps each part's "Show more" its own. */
-function contentsBlock(owner: string, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean) {
+/**
+ * One kind of part across the marketplace's copy and each tool's installed copy, by name. Each copy is named with its
+ * version ("Marketplace · 1.2.0", "Claude Code · 1.1.0"), so a file that changed between versions shows each text.
+ */
+function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | undefined): FilePart[] {
+  const named = (who: string, version?: string) => (version ? `${who} · ${version}` : who);
+  const sources = [{ who: named('Marketplace', offered), parts: detail[kind] },
+    ...Object.entries(detail.installed ?? {}).map(([tool, copy]) => ({ who: named(names[tool as HarnessId], copy.version), parts: copy[kind] }))];
+  const byName = new Map<string, FilePart>();
+  for (const { who, parts } of sources) {
+    for (const part of parts) {
+      if (!byName.has(part.name)) byName.set(part.name, { name: part.name, description: part.description, copies: [] });
+      if (part.text !== undefined) byName.get(part.name)!.copies.push({ who, text: part.text });
+    }
+  }
+  return [...byName.values()].sort((first, second) => first.name.localeCompare(second.name));
+}
+
+const fileNames: Record<FileKind, string> = { skills: 'SKILL.md', commands: 'command file', agents: 'agent file' };
+
+/**
+ * One group of skills, commands or agents. Each name opens its file as written, the same view the Skills page gives a
+ * standalone skill; a description stays at two lines, since the file holds it whole. `id` prefixes each part's ids.
+ */
+function fileGroup(owner: string, id: string, title: string, kind: FileKind, parts: FilePart[]) {
+  if (!parts.length) return null;
+  return h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), h('ul.plugin-parts', {}, parts.map(part => {
+    const key = `${owner}\u0000${kind}\u0000${part.name}`;
+    const open = market.opened.has(key);
+    const file = `${part.name} ${fileNames[kind]}`;
+    const name = part.copies.length
+      ? h('button.plugin-file-toggle', { type: 'button', id: `${id}-${kind}-${part.name}`, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${file}`,
+        onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } }, icon(open ? 'chevron-down' : 'chevron-right', 12), h('code.plugin-name', {}, part.name))
+      : h('code.plugin-name', {}, part.name);
+    return h('li', {}, name,
+      h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', {}, part.description) : null),
+      open ? h('div.plugin-file', {}, fileText(`${id}-${kind}-${part.name}-text`, file, part.copies)) : null);
+  })));
+}
+
+/**
+ * The plugin's parts by name, with what each says it does; skills, commands and agents open their files. `owner` (its
+ * plugin key) keeps what is opened its own; `id` prefixes element ids.
+ */
+function contentsBlock(owner: string, id: string, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean, offered: string | undefined) {
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
   if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
-  const empty = !detail.skills.length && !detail.commands.length && !detail.agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
+  const skills = filePartsOf('skills', detail, offered), commands = filePartsOf('commands', detail, offered), agents = filePartsOf('agents', detail, offered);
+  const empty = !skills.length && !commands.length && !agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem) : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
-    group(owner, 'Skills', detail.skills), group(owner, 'Commands', detail.commands), group(owner, 'Agents', detail.agents),
+    fileGroup(owner, id, 'Skills', 'skills', skills), fileGroup(owner, id, 'Commands', 'commands', commands), fileGroup(owner, id, 'Agents', 'agents', agents),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,
@@ -117,10 +169,12 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   // A plugin kept elsewhere has no counts from the catalog; once its files are read, its contents give them.
   const components = plugin.components ?? (detail && !detail.problem ? componentsFrom(detail) : undefined);
   const title = pluginTitle(plugin);
-  const facts: (string | HTMLElement)[] = [plugin.version && `Version ${plugin.version}`, plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
+  // The catalog's version, else the one its plugin.json gives once read (a plugin kept in another repository).
+  const offered = plugin.version ?? detail?.version;
+  const facts: (string | HTMLElement)[] = [offered && `Version ${offered}`, plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
   if (plugin.homepage) facts.push(button({ variant: 'link', size: 'micro', label: 'Website', id: 'plugin-homepage', onclick: () => openLink(plugin.homepage!) }));
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
-  const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
+  const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents].map(({ name, description }) => ({ name, description })) : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
   requestAnimationFrame(markClamped);
   return h('article.plugin-page', { 'aria-label': title },
@@ -129,8 +183,8 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
-    installPanel(view, entry, plugin, marketIndex, components),
-    contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
+    installPanel(view, entry, plugin, marketIndex, offered, components),
+    contentsBlock(pluginKey(entry.source, plugin.name), `pfile-${marketIndex}`, plugin, detail, reading, offered),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
     detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);
 }

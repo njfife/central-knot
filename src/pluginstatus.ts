@@ -80,3 +80,21 @@ export const categoriesOf = (entry: MarketplaceView) => [...new Set(entry.plugin
 
 /** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
 export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));
+
+/** A version as compared: no leading "v", no build suffix after "+", no commit hash after "-" (Codex names a copy 0.1.13-77c10e110b37). */
+const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-[0-9a-f]{7,40}$/i, '');
+/** Whether two versions name the same release (see releaseOf). */
+export const sameVersion = (first: string, second: string) => releaseOf(first) === releaseOf(second);
+
+/** The version a tool has installed, when it is installed there and its version is known. */
+export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  const status = stateOf(entry, plugin, tool);
+  return status.state === 'installed' ? status.version : undefined;
+}
+
+/** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
+export const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && !sameVersion(installed, offered);
+
+/** Tools whose installed copy is another version than `offered`, with that version. */
+export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined) =>
+  view.tools.flatMap(tool => { const version = installedVersion(entry, plugin, tool); return versionDiffers(version, offered) ? [{ tool, version: version! }] : []; });

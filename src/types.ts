@@ -267,7 +267,7 @@ export interface Catalog {
   copilotRefuses?: string;
 }
 
-export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+export type InstallState = { state: 'installed'; path: string; live?: boolean; /** The version the tool records for its copy, or its copy's plugin.json gives. */ version?: string } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -304,8 +304,8 @@ export interface MarketplaceView {
   copilotRefuses?: string;
 }
 
-/** One named part of a plugin (a skill, command or agent) with what it says it does. */
-export interface NamedPart { name: string; description: string }
+/** One named part of a plugin (a skill, command or agent) with what it says it does, and its whole file (SKILL.md or NAME.md) as written. */
+export interface NamedPart { name: string; description: string; text?: string }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
   skills: NamedPart[];
@@ -320,9 +320,18 @@ export interface PluginContents {
   lspServers: string[];
   /** A top-level bin/ folder (account routes refuse it). */
   bin: boolean;
+  /** The version its marketplace entry or plugin.json gives (the entry wins, as the tools read it). */
+  version?: string;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
-export interface PluginDetail extends PluginContents { readme?: string; problem?: string }
+export interface PluginDetail extends PluginContents {
+  readme?: string;
+  problem?: string;
+  /** Each tool's installed copy, read from where that tool keeps it: its version and its parts with their files. */
+  installed?: Partial<Record<HarnessId, InstalledCopy>>;
+}
+/** What one tool has installed of a plugin, read from that tool's own copy. */
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'version'>;
 
 export interface PluginsView {
   home: string;

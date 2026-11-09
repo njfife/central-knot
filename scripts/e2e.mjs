@@ -6,7 +6,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -484,6 +484,8 @@ async function practiceFlow() {
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
+  // Claude Code has an older issue-tracker (1.9.0, its triage skill worded differently); the marketplace offers 2.0.0.
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n' });
   await a.click('#nav-plugins');
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -497,6 +499,14 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
   await a.click('#market-tab-plugins');
+  check('a row shows the version offered, and a tool that has another', /2\.0\.0/.test(await a.text('[data-plugin="issue-tracker"] .plugin-row-version')) && (await a.text('[data-plugin="issue-tracker"] .plugin-version-differs')).includes('Claude Code has 1.9.0'), await a.text('[data-plugin="issue-tracker"]'));
+  await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
+  check('the plugin page says which version Claude Code has', (await a.text('.plugin-panel')).includes('Installed · 1.9.0, marketplace has 2.0.0'), await a.text('.plugin-panel'));
+  await a.click('#pfile-0-skills-triage');
+  same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent.trim().split("\\n").pop()]'),
+    [['Marketplace · 2.0.0', 'Follow the steps.'], ['Claude Code · 1.9.0', 'The old steps.']]);
+  await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
   check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('Runs on PreToolUse'), await a.text('.plugin-page'));

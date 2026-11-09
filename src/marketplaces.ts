@@ -4,12 +4,12 @@
 import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { marketplacePage, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
+import { marketplacePage, pluginContents, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
-import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
 import { heldReason } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed } from './values.ts';
@@ -113,19 +113,31 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { catalog: older, problem: read.problem, stale: !!older };
   }
 
-  /** The tools' states for one marketplace's plugins. A tool holding another marketplace under this name is left alone. */
-  async function statesFor(ctx: engine.PluginContext, tools: HarnessId[], catalog: Catalog, source: string): Promise<MarketplaceView['states']> {
+  /** The tools' states for the given plugins of one marketplace. A tool holding another marketplace under this name is left alone. */
+  async function statesFor(ctx: engine.PluginContext, tools: HarnessId[], catalog: Catalog, source: string, plugins = catalog.plugins): Promise<MarketplaceView['states']> {
     const held = new Map<HarnessId, InstallState>();
     for (const tool of tools) {
       const other = await engine.heldBy(ctx, tool, catalog.name, source);
       if (other) held.set(tool, { state: 'held', reason: heldReason(tool, catalog.name, other) });
     }
     const states: MarketplaceView['states'] = {};
-    for (const plugin of catalog.plugins) {
+    for (const plugin of plugins) {
       const pairs = await Promise.all(tools.map(async tool => [tool, held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name)] as const));
       states[plugin.name] = Object.fromEntries(pairs);
     }
     return states;
+  }
+
+  /** Each tool's installed copy of one plugin, read from the folder that tool keeps it in (its parts listed as the marketplace entry lists them). */
+  async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
+    const tools = (await host.tools()).filter(tool => engine.pluginTools.includes(tool));
+    const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
+    const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
+      if (state?.state !== 'installed') return undefined;
+      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path);
+      return [tool, { skills, commands, agents, version: state.version }] as const;
+    }));
+    return Object.fromEntries(copies.filter(copy => !!copy));
   }
 
   /** One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page. */
@@ -161,13 +173,24 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly };
   }
 
-  /** A plugin's contents and README: from the marketplace's files, or from its own repository when it lives elsewhere. */
+  /**
+   * A plugin's contents and README, from the marketplace's files or, when it lives elsewhere, its own repository; with
+   * each tool's installed copy, which may be another version.
+   */
   async function detail(source: string, plugin: string): Promise<PluginDetail | null> {
     const ctx = await context();
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     const item = catalog?.plugins.find(entry => entry.name === plugin);
     if (!catalog?.root || !item) return null;
-    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, catalog.root, resolve(item.folder) !== resolve(catalog.root));
+    const [offered, installed] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item)]);
+    if (offered) return { ...offered, installed };
+    // Files the marketplace can't give (an npm or pip package) may still be read from a tool that installed it.
+    return Object.keys(installed).length ? { ...empty, installed, problem: 'Its files live outside this marketplace, so its skills, commands and agents are read from the tools that installed it.' } : null;
+  }
+
+  /** What the marketplace offers of one plugin: from its own folder, or read from the repository it is kept in. */
+  async function offeredDetail(ctx: engine.PluginContext, root: string, item: CatalogPlugin): Promise<PluginDetail | null> {
+    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, resolve(item.folder) !== resolve(root));
     if (!item.remote) return null;
     const copy = await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { ...empty, problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };

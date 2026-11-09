@@ -17,12 +17,14 @@ test('Paths an entry or plugin.json lists are read instead of the default folder
   try {
     for (const name of ['hello', 'unlisted']) await put(join(root, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: Says ${name}\n---\n`);
     await put(join(root, 'tools/notes.md'), '---\ndescription: Takes notes\n---\n');
-    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.9.0', hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
     await put(join(root, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
     await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
-    const contents = await pluginContents(root, { source: './', strict: false, skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
-    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello' }]);
-    assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes' }]);
+    const contents = await pluginContents(root, { source: './', strict: false, version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
+    // Each part carries its whole file as written; the entry's version wins over plugin.json's, as the tools read it.
+    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n' }]);
+    assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n' }]);
+    assert.equal(contents.version, '1.0.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
   } finally { await cleanup(); }
