@@ -129,8 +129,10 @@ export const waiting = (view: Extract<RepoView, { connected: true }>) => ({ pull
 function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string) => h('span.repo-state-part', {}, icon(glyph, 14, tone), h('span', {}, text));
   const { pull: incoming, push: outgoing } = waiting(view);
+  const stuck = [...view.incoming, ...view.outgoing].filter(change => change.held).length;
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
     : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo')]
+    : !incoming && !outgoing && stuck ? [part('triangle-alert', 'tone-warning', `Up to date, except ${plural(stuck, 'item')} that can’t move`)]
     : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
     : [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', 'tone-accent', `${outgoing} to push`) : null];
   return h('span.repo-state', { id: 'repo-state', role: 'status' }, parts);
@@ -213,7 +215,8 @@ export function repoPage(): HTMLElement {
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
     h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo',
       `Your Managed ${carried(view.withBase)} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
-      h('div.repo-start', {}, connectForm(view.access.allowed), layout(view.withBase),
-        h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.',
-          ' ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.')))));
+      h('div.repo-start', {}, connectForm(view.access.allowed),
+        h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(view.withBase),
+          h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.',
+            ' ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.'))))));
 }

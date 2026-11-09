@@ -231,6 +231,9 @@ if (wanted('repo')) {
   await shot(a, 'repo-connected-dark', 'Clicked "Connect". The repo’s skill, MCP server and agent wait under "From the repo"; this computer’s Managed items wait under "From this computer". Nothing in the tools changed.');
   await a.theme('light'); await shot(a, 'repo-connected-light', 'The same, light.'); await a.theme('dark');
   await sizes('repo-connected', 'Connected, with changes both ways.');
+  await a.theme('light'); await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await shot(a, 'repo-connected-860-light', 'Connected, light, at 860×560.');
+  await a.theme('dark'); await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await a.click('#repo-pull');
   await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
   await shot(a, 'repo-pulled', 'Clicked "Pull 3": the repo’s three items are now in the tools, Managed. Only this computer’s changes remain, ready to push.');
