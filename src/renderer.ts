@@ -6,8 +6,9 @@ import { loadHome, readAgain, readInstructionsQuietly, startHome, rerender, sele
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
-import { harnessesPage, refreshHarnessExtras } from './harnesspage.ts';
+import { harnessesPage, harnessTitle, refreshHarnessExtras } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
+import { fitOpenMenu } from './matrix.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import type { HomeMode, ManageView } from './types.ts';
@@ -93,7 +94,7 @@ function renderHeader(rail: boolean) {
     }),
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
-    h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
+    h('h1.page-title', {}, (state.page === 'harnesses' && harnessTitle()) || titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
@@ -149,6 +150,7 @@ function render() {
   renderPage();
   applyLayout();
   renderStatus();
+  fitOpenMenu();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   if (focused) document.getElementById(focused)?.focus();
   if (state.home) document.body.dataset.ready = 'true';

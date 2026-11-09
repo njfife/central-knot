@@ -1367,17 +1367,21 @@ button.harness-card-main:focus-visible { outline: 2px solid var(--focus); outlin
 .harness-card-path { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; padding: 0 16px 14px; }
 .harness-card-next { font-size: 12px; color: var(--ink-soft); }
 
-.harness-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 57px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
-.harness-head .pane-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.harness-head .pane-title .mono { font-size: 12px; }
-.harness-crumb { display: flex; align-items: center; gap: 8px; flex: none; font-size: 13px; }
+/* A harness's page: the window header carries "Harnesses / <harness>"; below it one bar holds the tabs and the switcher. */
+.page-title:has(.title-crumb) { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.title-crumb { flex: none; font-size: 16px; font-weight: 600; }
+.title-crumb:disabled { opacity: 0.5; cursor: default; }
+.title-harness { flex: none; }
+.title-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink-soft); margin-left: 4px; }
+.harness-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.harness-bar > .harness-tabs { flex: 1; min-width: 0; border-bottom: 0; }
 .harness-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--hover); }
 .harness-switch-item { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
 .harness-switch-item:hover:not(:disabled) { color: var(--ink); }
 .harness-switch-item:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
 .harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-tabs { flex: none; display: flex; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.harness-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; border-bottom: 1px solid var(--line); }
 /* The tabs look like the marketplace tabs (shared rules above); here they are inline-flex for the count, and never wrap. */
 .harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .harness-tab:hover:not(:disabled) { color: var(--ink); }
@@ -1397,18 +1401,35 @@ button.harness-card-main:focus-visible { outline: 2px solid var(--focus); outlin
 .harness-path .middle { min-width: 0; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips), and the path leaves the title. */
 @media (max-width: 1180px) { .harness-switch-name { display: none; } }
-@media (max-width: 1000px) { .harness-head-path { display: none; } }
+@media (max-width: 1000px) { .title-note { display: none; } }
 /* A harness's page uses the window's width: the table, its toolbar and bands reach the edge, the name column takes the
    free space (with the description), and the tool columns keep a steady width. */
 .page-harnesses #header { padding-right: 16px; }
 .harness-page .ov, .harness-page .legend, .harness-page .details { max-width: none; }
-.harness-page .ov { --ov-columns: minmax(220px, 1fr) 76px repeat(var(--tool-count, 3), 132px) 16px; }
+.harness-page .ov { --ov-columns: minmax(170px, 300px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr); }
+/* Rows grow to hold the whole description, which sits beside the tool columns so a row's name, state and boxes stay together. */
+.harness-page .ov-row:not(.ov-head) { height: auto; min-height: 40px; }
+.ov-desc { display: block; padding: 8px 16px 8px 12px; font-size: 12px; line-height: 16px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
-.ov-name-desc { flex: 1 1 0; min-width: 0; margin-left: 4px; font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 1100px) { .ov-name-desc { display: none; } }
+/* Narrow: the description stays in the row's details, so the tool columns keep their room. */
+@media (max-width: 1100px) { .ov-desc { display: none; } }
 /* The harness's own column is the page's subject: its header sits on a quiet fill. Its instruction card spans the pane. */
 .tool-head-focus .tool-head-button { background: var(--hover); }
 .harness-page .ins-card { max-width: none; }
 /* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
 .harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
 .harness-page .toolbar-end { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+/* Menus stay inside the window (fitOpenMenu sets these after each draw). */
+.tool-menu { translate: var(--menu-shift, 0) 0; max-height: min(72vh, 620px, var(--menu-room, 620px)); }
+/* Opened from the toolbar's Add from…: under that button, its right edge on the button's. */
+.add-from { position: relative; }
+.add-from > .tool-menu { left: auto; right: 0; transform: none; top: calc(100% + 6px); }
+.harness-page .toolbar-end { border-left: 0; padding-left: 0; }
+/* The whole card shows hover and focus, not just its upper part. */
+.harness-card { container-type: inline-size; }
+.harness-card:has(> .harness-card-main:hover) { background: var(--hover); }
+button.harness-card-main:hover { background: transparent; }
+.harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+button.harness-card-main:focus-visible { outline: 0; }
+/* A wide card lays its counts out in two columns of rows, so its width is used. */
+@container (min-width: 560px) { .harness-counts { grid-template-columns: repeat(2, max-content minmax(2ch, max-content) minmax(0, 1fr)); } }

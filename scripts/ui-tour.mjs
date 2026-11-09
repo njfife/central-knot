@@ -229,7 +229,20 @@ if (wanted('harnesses')) {
   await sizes('claude-about', 'The About tab.');
   await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
   await a.theme('light'); await shot(a, 'copilot-skills-light', 'The same, light appearance.'); await a.theme('dark');
-  await a.click('#harness-back'); await shot(a, 'back', 'Clicked "Harnesses" in the page’s breadcrumb.');
+  await a.click('#harness-back'); await shot(a, 'back', 'Clicked "Harnesses" in the header’s breadcrumb.');
+  // A fourth harness: Pi, with one skill of its own, so the table has four tool columns.
+  const piSkill = join(practice, '.pi/agent/skills/pi-notes');
+  mkdirSync(piSkill, { recursive: true });
+  writeFileSync(join(piSkill, 'SKILL.md'), '---\nname: pi-notes\ndescription: Notes kept in Pi only.\n---\n\nWrite short notes.\n');
+  await a.click('#header-refresh'); await a.settle();
+  await shot(a, 'four-list', 'Added a Pi skills folder with one skill to the practice copy, then clicked Refresh: four harnesses.');
+  await a.click('#harness-pi-cli'); await a.click('#harness-tab-skills');
+  for (const [width, height] of [[860, 560], [1280, 800]]) { await size(width, height); await shot(a, `pi-skills-${width}`, `Pi's page, Skills tab, with four tool columns. Window ${width}×${height}.`); }
+  await size(860, 560);
+  const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
+  if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi has no agents of its own.');
+  await size(1280, 800);
 }
 
 a.quit();

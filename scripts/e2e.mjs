@@ -183,7 +183,7 @@ async function harnessFlow() {
   await a.click('#harness-tab-instructions');
   check('its instruction file is there to edit', await a.exists('#ins-edit-copilot-cli'), await a.text('.harness-page'));
   await a.click('#harness-switch-codex-cli');
-  check('the switcher moves to another harness', (await a.text('.harness-head h2')) === 'Codex', await a.text('.harness-head'));
+  check('the switcher moves to another harness', (await a.text('.title-harness')) === 'Codex', await a.text('#header'));
   await a.click('#harness-back');
   check('back returns to every harness', await a.exists('#harnesses-scroll'));
   // Another home: the instruction file shown is that home's, not the practice copy's.

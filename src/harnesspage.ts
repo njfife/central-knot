@@ -147,6 +147,7 @@ function tabs(home: HomeView, tool: HarnessId) {
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },
     (Object.keys(tabLabel) as HarnessTab[]).map(tab => { const shown = count(tab); return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}`, {
       type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
+      title: shown === undefined ? undefined : `${shown} in ${names[tool]}`,
       onclick: () => { state.harnessTab = tab; state.outcome = undefined; announce(''); rerender(); },
     }, tabLabel[tab], shown === undefined ? null : h('span.harness-tab-count', {}, String(shown))); }));
 }
@@ -182,7 +183,7 @@ function instructionsTab(tool: HarnessId) {
   return h('div.page', {}, instructionBands(),
     h('div.scroll.harness-scroll', { id: 'harness-body' },
       !state.instructions ? instructionsNotRead()
-        : file ? [h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `${names[tool]} reads this file when a session starts. Changes are reviewed before saving, and earlier versions are kept. `,
+        : file ? [h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
           button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file)]
           : h('p.empty', {}, `${names[tool]} has no instruction file Central Knot reads.`)));
 }
@@ -211,7 +212,9 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
   const disclosed = home.manage.writes[tool];
   const roots = new Map(snapshot.skills.map(skill => [dirname(skill.directory), skill.rootLabel]));
   const issues = snapshot.discovery === 'missing' ? [] : snapshot.issues;
-  const path = (value: string) => pathText(shownPath(value), value);
+  // Every path can be copied, as on the old Tools card's folder line.
+  let copies = 0;
+  const path = (value: string) => h('span.harness-path', {}, pathText(shownPath(value), value), copyButton(value, 'path', `copy-path-${tool}-${copies++}`));
   const fileFor = (kind: 'mcp' | 'agents') => kindView(home, kind).facts.map(item => item.copies[tool]?.directory).find(Boolean);
   const mcpFile = fileFor('mcp'), agentFile = fileFor('agents');
   const ins = instructionOf(tool);
@@ -220,17 +223,17 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
       section('Detection', h('dl.facts', {},
         ...fact('Status', detectionLine(snapshot, home)),
         ...(home.mode === 'actual' && snapshot.detection !== 'Installed' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
-        ...fact('Reads it', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))))),
+        ...fact('Read by', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))))),
       issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue))))),
     h('div.harness-about-column', {},
       section('Files and folders', h('dl.facts', {},
-        ...fact('Config folder', h('span.harness-path', {}, path(snapshot.root), copyButton(snapshot.root, `folder for ${names[tool]}`, `copy-root-${tool}`))),
+        ...fact('Config folder', path(snapshot.root)),
         ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
-        ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
+        ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span.harness-path', {}, path(disclosed.to), h('span.tone-faint', {}, '(empty; new skills go here)'))) : []),
         ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : []),
         ...(tally(home, 'mcp', tool).supported ? fact('MCP servers file', mcpFile ? path(mcpFile) : h('span.tone-faint', {}, '— (no MCP servers found)')) : []),
         ...(tally(home, 'agents', tool).supported ? fact('Agents folder', agentFile ? path(dirname(agentFile)) : h('span.tone-faint', {}, '— (no agents found)')) : []),
-        ...(ins ? fact('Instructions', h('span', {}, path(ins.path), ins.exists ? null : h('span.tone-faint', {}, ' (no file yet)'))) : [])))))));
+        ...(ins ? fact('Instructions', h('span.harness-path', {}, path(ins.path), ins.exists ? null : h('span.tone-faint', {}, '(no file yet)'))) : [])))))));
 }
 
 function oneHarness(snapshot: Snapshot, home: HomeView) {
@@ -239,16 +242,29 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   const body = tab === 'skills' || tab === 'mcp' || tab === 'agents' ? kindTab(home, tab, tool)
     : tab === 'instructions' ? instructionsTab(tool) : tab === 'plugins' ? pluginsTab(tool) : aboutTab(snapshot, home);
   body.classList.add('harness-tab-body');
-  return h('div.page.harness-page', {},
-    h('div.harness-head', {},
-      h('div.harness-crumb', {},
-        // The header above already says Harnesses: the way back is the arrow alone.
-        button({ variant: 'ghost', size: 'small', icon: 'arrow-left', name: 'Back to every harness', id: 'harness-back', disabled: !!state.busy, onclick: () => { state.harness = undefined; state.outcome = undefined; announce(''); rerender(); document.getElementById(`harness-${tool}`)?.focus(); } })),
-      brandMark(tool, 18),
-      h('div.pane-title', {}, h('h2', {}, names[tool]), h('p', {}, detectionLine(snapshot, home), h('span.harness-head-path', {}, ' · ', h('span.mono', { title: snapshot.root }, shownPath(snapshot.root))))),
-      switcher(home, tool)),
-    tabs(home, tool),
-    body);
+  // The window's header names the harness (harnessTitle); its tabs and the switcher to the others share one row below it.
+  return h('div.page.harness-page', {}, h('div.harness-bar', {}, tabs(home, tool), switcher(home, tool)), body);
+}
+
+/** The harness whose page is open, if it is still in this home and found; otherwise the list shows (and the choice is let go). */
+function openSnapshot(home: HomeView): Snapshot | undefined {
+  const snapshot = state.harness && found(home, state.harness) ? home.snapshots.find(entry => entry.harness === state.harness) : undefined;
+  if (!snapshot) state.harness = undefined;
+  return snapshot;
+}
+
+/** The header title on a harness's page: "Harnesses" as the way back, then the harness and how it was found. Undefined on the list. */
+export function harnessTitle(): Node[] | undefined {
+  const snapshot = state.home && openSnapshot(state.home);
+  if (!snapshot || !state.home) return undefined;
+  const tool = snapshot.harness;
+  return [
+    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy,
+      onclick: () => { state.harness = undefined; state.outcome = undefined; announce(''); rerender(); document.getElementById(`harness-${tool}`)?.focus(); } }, icon('arrow-left', 14), 'Harnesses'),
+    h('span.crumb-sep', { 'aria-hidden': 'true' }, '/'),
+    brandMark(tool, 16), h('span.title-harness', {}, names[tool]),
+    h('span.title-note', { title: snapshot.root }, detectionLine(snapshot, state.home)),
+  ];
 }
 
 export function harnessesPage() {
@@ -258,7 +274,6 @@ export function harnessesPage() {
   readInstructionsQuietly();
   peekPlugins();
   // A harness from another home, or one no longer found, falls back to the list.
-  const snapshot = state.harness && found(home, state.harness) ? home.snapshots.find(entry => entry.harness === state.harness) : undefined;
-  if (!snapshot) state.harness = undefined;
+  const snapshot = openSnapshot(home);
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);
 }

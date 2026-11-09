@@ -81,6 +81,8 @@ const newView = () => ({
   comparing: undefined as string | undefined,
   /** The tool whose header menu is open. */
   toolMenu: undefined as Tool | undefined,
+  /** The menu was opened from a harness page's "Add from…" button, so it opens under that button. */
+  toolMenuFromToolbar: false,
   /** Menu rows ("from>to") where Add also takes differing copies. Each menu opens with none. */
   addConflicts: new Set<string>(),
   /** Menu rows whose list of skills that can't be added is open. */
@@ -98,7 +100,7 @@ let draftHomes: Partial<Record<Kind, string>> = {};
 
 // A click elsewhere or Escape closes a tool menu.
 document.addEventListener('click', () => { if (view.toolMenu) { view.toolMenu = undefined; rerender(); } });
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { const tool = view.toolMenu; view.toolMenu = undefined; rerender(); document.getElementById(`tool-${tool}`)?.focus(); } });
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && view.toolMenu) { const opener = view.toolMenuFromToolbar ? 'harness-add-from' : `tool-${view.toolMenu}`; view.toolMenu = undefined; rerender(); document.getElementById(opener)?.focus(); } });
 
 const committedOf = (key: string) => committedList().find(skill => skill.key === key)!;
 
@@ -236,7 +238,7 @@ function changeBar(bulk = true) {
   const word = (n: number) => (kind === 'mcp' ? (n === 1 ? 'MCP server' : 'MCP servers') : n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
   // On a harness's page the count names what it covers: only what that harness has.
   const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
-  const manageAll = bulk && variant !== 'c' && ready.length ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
@@ -619,8 +621,6 @@ function row(skill: SampleSkill) {
         h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); openRow(skill.key); } },
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.name ?? skill.key),
-        // A harness's page gives the name column the free width, so the description fills it.
-        focus && skill.description ? h('span.ov-name-desc', {}, skill.description) : null,
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
@@ -631,7 +631,8 @@ function row(skill: SampleSkill) {
           h('button.decided-undo', { type: 'button', id: `undo-${skill.key}`, 'aria-label': resumeOnly ? 'Cancel this' : 'Change this choice', title: resumeOnly ? 'Cancel: keep the edited copy' : 'Change this choice', onclick: (event: Event) => { event.stopPropagation(); resolve(skill.key, undefined); view.comparing = resumeOnly ? view.comparing : skill.key; rerender(); } }, h('span', {}, resumeOnly ? 'Cancel' : 'Change'))) : null),
       h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => { if (on && attention && !decided && !skill.managed) { view.comparing = undefined; openRow(skill.key); return; } setManaged([skill.key], on); }, !!skill.held, `switch-${skill.key}`)),
       toolList().map(tool => cell(skill, tool)),
-      h('div.ov-fill')),
+      // On a harness's page the free width after the tool columns holds the description, in full.
+      h('div.ov-fill', {}, focus && skill.description ? h('span.ov-desc', {}, skill.description) : null)),
     view.comparing === skill.key ? details(skill) : null,
   ];
 }
@@ -781,19 +782,40 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
       button({ variant: 'ghost', size: 'small', label: 'Stop syncing here', name: `Stop syncing all ${syncingHere.length} ${noun(syncingHere.length)} to ${names[tool]}`, id: `menu-stop-${tool}`, disabled: !syncingHere.length, onclick: () => { setTool(syncingHere.map(skill => skill.key), tool, false); view.toolMenu = undefined; rerender(); } })));
 }
 
-/** A harness's page: the same menu as its column header, from the toolbar, so bringing items in is never hidden. */
-function addFromButton(tool: Tool) {
-  return button({ variant: 'outline', size: 'small', icon: 'plus', label: 'Add from…', name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from', attrs: { 'aria-expanded': String(view.toolMenu === tool), 'aria-haspopup': 'dialog' },
-    onclick: event => toggleToolMenu(event, tool) });
+/** A harness's page: the same menu as its column header, from the toolbar and opening under it, so bringing items in is never hidden. */
+function addFromButton(tool: Tool, list: SampleSkill[]) {
+  const open = view.toolMenu === tool && view.toolMenuFromToolbar;
+  return h('span.add-from', {},
+    button({ variant: 'outline', size: 'small', icon: 'plus', label: 'Add from…', name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from', attrs: { 'aria-expanded': String(open), 'aria-haspopup': 'dialog' },
+      onclick: event => toggleToolMenu(event, tool, true) }),
+    open ? toolMenu(tool, list) : null);
 }
 
-/** Opens or closes a tool's menu; each opening starts with no differing copies included and no reasons shown. */
-function toggleToolMenu(event: Event, tool: Tool) {
+/** Opens or closes a tool's menu (under the toolbar's Add from… when `fromToolbar`); each opening starts with no differing copies included and no reasons shown. */
+function toggleToolMenu(event: Event, tool: Tool, fromToolbar = false) {
   event.stopPropagation();
-  view.toolMenu = view.toolMenu === tool ? undefined : tool;
+  view.toolMenu = view.toolMenu === tool && view.toolMenuFromToolbar === fromToolbar ? undefined : tool;
+  view.toolMenuFromToolbar = fromToolbar;
   view.addConflicts.clear();
   view.addReasons.clear();
   rerender();
+}
+
+/**
+ * Keeps an open tool menu inside the window: moved sideways if it would run off an edge, and no taller than the room below it
+ * (it scrolls inside). Run after each draw, since a draw makes the menu anew.
+ */
+export function fitOpenMenu() {
+  const menu = document.querySelector<HTMLElement>('.tool-menu');
+  if (!menu) return;
+  menu.style.removeProperty('--menu-shift');
+  const box = menu.getBoundingClientRect();
+  // Inside a scrolling table the limit is that region's visible width (left of its scrollbar), so no sideways scroll appears.
+  const region = menu.closest<HTMLElement>('.scroll');
+  const right = region ? region.getBoundingClientRect().left + region.clientWidth : window.innerWidth;
+  const shift = Math.max(8 - box.left, Math.min(0, right - 8 - box.right));
+  if (shift) menu.style.setProperty('--menu-shift', `${shift}px`);
+  menu.style.setProperty('--menu-room', `${Math.max(160, window.innerHeight - box.top - 36)}px`);
 }
 
 /** Moving to another harness starts its tables closed: no row details or menu carried over from the last one. */
@@ -803,7 +825,7 @@ export function closeOpenRows() { for (const each of Object.values(views)) { eac
 function toolHead(tool: Tool, list: SampleSkill[]) {
   const count = sendable(other(tool), tool, list).length;
   if (variant === 'b') {
-    const open = view.toolMenu === tool;
+    const open = view.toolMenu === tool && !view.toolMenuFromToolbar;
     return h(`div.ov-cell.ov-tool-head.tool-head-b${tool === focus ? '.tool-head-focus' : ''}`, { role: 'columnheader' },
       h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: tool === focus ? `Options for ${names[tool]}: add other tools’ ${nouns[kind][1].toLowerCase()} here, or stop syncing here` : `Options for ${names[tool]}: copy its ${nouns[kind][1].toLowerCase()} to other tools, or stop syncing here`, onclick: (event: Event) => toggleToolMenu(event, tool) },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
@@ -844,7 +866,10 @@ function section(label: string, list: SampleSkill[], after: number) {
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
         // A move is told once: on the section it joins, or on Unmanaged when everything there joins Managed.
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
-          : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} become Managed on Apply all`) : null,
+          : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
+        // Items only other tools have, turned on here: told on their own section, so the counts add up.
+        focus && label === `Not in ${names[focus]}` && list.some(skill => skill.managed && !committedOf(skill.key).managed)
+          ? h('span.ov-section-after', {}, (n => `· ${n} ${n === 1 ? 'becomes' : 'become'} Managed on Apply all`)(list.filter(skill => skill.managed && !committedOf(skill.key).managed).length)) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
@@ -1197,7 +1222,7 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   const here = shown.filter(inFocus), away = shown.filter(skill => !inFocus(skill));
   managedDrawn = here.some(skill => committedOf(skill.key).managed);
   return h('div.page.ov-page', { 'data-variant': variant },
-    h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus) : null, changeBar())),
+    h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus, shown) : null, changeBar())),
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
