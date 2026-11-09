@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSyn
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { writeMarket } from './fixture-market.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -164,16 +165,19 @@ if (wanted('agents')) {
 if (wanted('plugins')) {
   begin('plugins');
   const market = join(scratch, 'market');
-  mkdirSync(join(market, '.claude-plugin'), { recursive: true });
-  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team-tools', owner: { name: 'Team' }, plugins: [{ name: 'code-helpers', source: './plugins/code-helpers', version: '1.2.0', description: 'Review and release helpers' }] }));
-  mkdirSync(join(market, 'plugins/code-helpers/skills/release-check'), { recursive: true });
-  writeFileSync(join(market, 'plugins/code-helpers/skills/release-check/SKILL.md'), '---\nname: release-check\ndescription: Checks a release.\n---\n\nCheck it.\n');
-  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace. (No tool CLIs are installed in this tour, so installs are not possible here.)');
-  if (await a.has('#marketplace-source')) {
-    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder and clicked Add.');
-    if (await a.has('#popen-0-code-helpers')) { await a.click('#popen-0-code-helpers'); await shot(a, 'plugin-details', 'Opened the plugin\'s details.'); }
-  }
+  writeMarket(market);
+  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
+  await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
+  await a.click('#market-tab-plugins');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`); await shot(a, 'plugin-page', 'Clicked the "document-tools" row.');
+  if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await shot(a, 'plugin-chosen', 'Clicked "Choose all 3".'); }
+  if (await a.has('#plugins-apply:not([disabled])')) { await a.click('#plugins-apply'); await waitFor(a, `!document.body.dataset.busy`); await a.settle(); await shot(a, 'plugins-applied', 'Clicked "Apply all". Each tool installed it with its own command.'); }
+  await a.click('#plugin-back');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `!!document.querySelector('.plugin-group')`); await shot(a, 'plugin-page-mcp', 'Went back and opened "issue-tracker", which runs an MCP server.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-remote-notes'); await shot(a, 'plugin-page-remote', 'Went back and opened "remote-notes", whose files live in another repository.');
 }
 
 // ---------- Instructions ----------

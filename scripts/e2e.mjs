@@ -6,6 +6,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { writeMarket } from './fixture-market.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -480,25 +481,41 @@ async function practiceFlow() {
   check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
-  // Plugins: a folder marketplace is read and shown per tool; an install the tool refuses is reported, never claimed.
+  // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
-  mkdirSync(join(market, '.claude-plugin'), { recursive: true });
-  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-test-market', owner: { name: 'e2e' }, plugins: [{ name: 'ck-marker', source: './plugins/ck-marker', version: '1.0.0', description: 'Marker' }] }));
-  skill(join(market, 'plugins/ck-marker/skills'), 'ck-marker-skill');
+  writeMarket(market, 'ck-test-market');
   await a.click('#nav-plugins');
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
-  check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added in Central Knot'), await a.text('#plugins-scroll'));
-  same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
-  await a.click('#popen-0-ck-marker');
-  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('ck-marker:ck-marker-skill'), await a.text('.plugin-details'));
-  await a.click('#pinstall-0-ck-marker');
+  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
+  check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="remote-notes"]')).includes('From GitHub · example/remote-notes/plugin'), await a.text('[data-plugin="remote-notes"]'));
+  same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
+  await a.click('#market-tab-about');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
+  check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme')).includes('What is inside') && !(await a.text('.plugin-readme')).includes('<p') && await a.exists('.plugin-readme .md-link'), await a.text('.plugin-readme'));
+  await a.click('#market-tab-plugins');
+  await a.click('#popen-0-release-helper');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);
+  check('a plugin page names what it holds', /release-notes[\s\S]*Drafts release notes/.test(await a.text('.plugin-page')) && (await a.text('.plugin-page')).includes('release-reviewer') && (await a.text('.plugin-page')).includes('Runs on PreToolUse'), await a.text('.plugin-page'));
+  await a.click('#plugin-back');
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
+  check('and shows the plugin’s own README and skill descriptions', (await a.text('.plugin-page')).includes('Two skills for everyday documents') && (await a.text('.plugin-page')).includes('Reads PDF files'), await a.text('.plugin-page'));
+  await a.click('#pinstall-0-document-tools');
+  same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
+  check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  await a.click('#pcell-0-document-tools-codex-cli');
+  same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
+  await a.click('#pcell-0-document-tools-codex-cli');
+  await a.click('#plugins-apply');
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
   await a.shot('practice-plugins');
-  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool-row .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  await a.click('#plugin-back');
   await a.click('#forget-0');
-  check('Remove from list forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);

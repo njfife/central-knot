@@ -1,5 +1,6 @@
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginDetailView, PluginsView, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
+import { batches as pluginBatches, clear as clearPluginOp, describe as describePlugins, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -26,14 +27,15 @@ export const state = {
   pluginResult: undefined as (PluginActionResult & { problem?: string }) | undefined,
   /** The plugin whose details are open, as marketplace source and plugin name. */
   pluginOpen: undefined as string | undefined,
-  /** The installed cell waiting for its confirming click to uninstall, and what that click will do. */
-  pluginConfirm: undefined as string | undefined,
-  pluginConfirmText: undefined as string | undefined,
-  /** Armed "Uninstall from all": the tools a bulk install reached. */
-  pluginConfirmAll: undefined as HarnessId[] | undefined,
-  /** The plugin the last install or uninstall was for, so its report can offer the reverse. */
-  pluginLast: undefined as { source: string; market: string; plugin: string } | undefined,
-  /** The plugin and tools an install or uninstall is running for, so their boxes show it is working. */
+  /** Marketplace browsing: the one shown, its tab, an open plugin page, and the filter. */
+  market: { source: undefined as string | undefined, tab: 'plugins' as 'plugins' | 'about', plugin: undefined as string | undefined, find: '', category: undefined as string | undefined },
+  /** READMEs and plugin contents read so far, by marketplace source and plugin ('' for the marketplace's own README). */
+  marketDetail: new Map<string, { readme?: string } | PluginDetailView | null>(),
+  /** Plugin changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
+  pluginDraft: new Map() as PluginDraft,
+  /** What the last Apply all (or its Undo) did, tool by tool, so the band can say it and offer the way back. */
+  pluginDone: undefined as { done: PluginDone[]; undo: boolean } | undefined,
+  /** The plugin and tools a command is running for, so their boxes show it is working. */
   pluginWorking: undefined as { plugin: string; tools: HarnessId[] } | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
@@ -196,7 +198,7 @@ export function showPage(page: Page) {
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) { announce(''); state.pluginConfirm = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  if (page !== state.page) { announce(''); state.pluginDone = undefined; state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
@@ -239,12 +241,14 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
   const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
   const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
-  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', item: added?.name || undefined, text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
+  if (!result.problem && added) state.market = { ...state.market, source: added.source, plugin: undefined, tab: 'plugins', find: '', category: undefined };
+  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', item: added?.name || undefined, text: canInstall ? `${named} Nothing was installed: choose plugins and tools below, then Apply all.` : `${named} Nothing was installed.` }; }
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
 export const refreshMarketplace = (source: string) => busy('Refreshing the marketplace…', async () => {
   state.plugins = (await api().refreshMarketplace(source)) ?? state.plugins;
+  for (const key of [...state.marketDetail.keys()]) if (key.startsWith(`${source}\u0000`)) state.marketDetail.delete(key);
   state.pluginResult = undefined;
   const entry = state.plugins?.marketplaces.find(candidate => candidate.source === source);
   const text = entry ? `${entry.name || entry.source} read again: ${plural(entry.plugins.length, 'plugin')}. Nothing was installed.` : 'Marketplace read again. Nothing was installed.';
@@ -255,6 +259,7 @@ export const refreshMarketplace = (source: string) => busy('Refreshing the marke
 export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
   const before = state.plugins?.marketplaces.find(entry => entry.source === source)?.name;
   state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
+  if (state.market.source === source) state.market = { ...state.market, source: undefined, plugin: undefined };
   state.pluginResult = undefined;
   const name = before;
   state.outcome = { page: 'plugins', item: name || undefined, text: `${name ? `${name} removed` : 'Removed'} from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.`, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } };
@@ -263,48 +268,41 @@ export const forgetMarketplace = (source: string) => busy('Removing from the lis
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 
+/** Reads a marketplace's README or a plugin's contents once, in the background, then redraws. */
+export function loadMarketDetail(source: string, plugin = ''): void {
+  const key = `${source}\u0000${plugin}`;
+  if (state.marketDetail.has(key)) return;
+  state.marketDetail.set(key, null);
+  void api().pluginDetail(source, plugin || undefined).then(detail => { state.marketDetail.set(key, detail ?? { readme: undefined }); rerender(); }, () => { state.marketDetail.set(key, { readme: undefined }); rerender(); });
+}
+
+/** Opens an https link in the browser. */
+export const openLink = (url: string) => void api().openExternal(url);
+
 const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
-export const installPlugin = (source: string, plugin: string, tools: HarnessId[]) => busy(`Installing ${plugin}…`, async () => {
-  const market = state.plugins?.marketplaces.find(entry => entry.source === source)?.name ?? '';
-  state.pluginWorking = { plugin, tools };
-  render();
-  const result = await api().installPlugin(source, plugin, tools, state.home!.home).finally(() => { state.pluginWorking = undefined; });
-  if (result.view) state.plugins = result.view;
-  state.pluginResult = result;
-  state.pluginLast = { source, market, plugin };
-  announce(result.stopped ?? result.reports.map(report => `${names[report.tool]}: ${report.message}`).join(' '));
-});
-
-export const uninstallPlugin = (marketplace: string, plugin: string, tool: HarnessId) => busy(`Uninstalling ${plugin} from ${names[tool]}…`, async () => {
-  const source = state.plugins?.marketplaces.find(entry => entry.name === marketplace)?.source ?? '';
-  state.pluginWorking = { plugin, tools: [tool] };
-  render();
-  const result = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home).finally(() => { state.pluginWorking = undefined; });
-  if (result.view) state.plugins = result.view;
-  state.pluginResult = result;
-  state.pluginLast = { source, market: marketplace, plugin };
-  announce(result.stopped ?? result.reports.map(report => report.message).join(' '));
-});
-
-/** The way back from a bulk install: one confirm, then each tool's own uninstall in turn, reported together. */
-export const uninstallPluginAll = (marketplace: string, plugin: string, tools: HarnessId[]) => busy(`Uninstalling ${plugin} from ${tools.length} tools…`, async () => {
-  const source = state.plugins?.marketplaces.find(entry => entry.name === marketplace)?.source ?? '';
-  state.pluginWorking = { plugin, tools };
-  render();
-  const reports: PluginActionResult['reports'] = [];
-  let last: PluginActionResult | undefined;
-  try {
-    for (const tool of tools) {
-      last = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home);
-      reports.push(...last.reports);
-      if (last.stopped) break;
-    }
-  } finally { state.pluginWorking = undefined; }
-  if (last?.view) state.plugins = last.view;
-  state.pluginResult = last ? { ...last, reports } : last;
-  state.pluginLast = { source, market: marketplace, plugin };
-  announce(last?.stopped ?? reports.map(report => `${names[report.tool]}: ${report.message}`).join(' '));
+/** Runs plugin changes through each tool's own commands, in pluginplan's order, and keeps what each one did. */
+export const applyPluginOps = (ops: PluginOp[], undo = false) => busy(undo ? 'Undoing…' : 'Applying…', async () => {
+  const done: PluginDone[] = [];
+  let stopped: string | undefined;
+  let view: PluginsView | undefined;
+  for (const batch of pluginBatches(ops)) {
+    state.pluginWorking = { plugin: batch.plugin, tools: batch.tools };
+    render();
+    const result = batch.action === 'install'
+      ? await api().installPlugin(batch.source, batch.plugin, batch.tools, state.home!.home)
+      : await api().uninstallPlugin(batch.market, batch.plugin, batch.tools[0]!, state.home!.home);
+    if (result.view) view = result.view;
+    for (const report of result.reports) done.push({ source: batch.source, market: batch.market, plugin: batch.plugin, tool: report.tool, action: batch.action, report });
+    if (result.stopped) { stopped = result.stopped; break; }
+  }
+  state.pluginWorking = undefined;
+  if (view) state.plugins = view;
+  // What ran leaves the draft; anything not reached stays chosen, so Apply all can carry on.
+  for (const entry of done) clearPluginOp(state.pluginDraft, entry);
+  state.pluginDone = { done, undo };
+  state.pluginResult = stopped ? { reports: [], stopped } : undefined;
+  announce(stopped ?? describePlugins(done, names).map(line => `${line.plugin}: ${line.text}`).join('. '));
 });
 
 // ---------- History ----------

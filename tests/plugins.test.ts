@@ -181,3 +181,21 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the last fetched catalog stays browsable');
   } finally { server.kill(); await box.cleanup(); }
 });
+
+test('A CLI that is a script finds its interpreter beside it, even when the app was opened with a short PATH', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  const savedPath = process.env.PATH;
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    // A Node-style CLI: `#!/usr/bin/env fakenode` with fakenode in the same folder, as Homebrew installs Codex beside node.
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'fakenode'), '#!/bin/sh\necho "ran $2" >> "$HOME/calls.txt"\nexit 3\n', { mode: 0o755 });
+    await writeFile(join(bin, 'codex'), '#!/usr/bin/env fakenode\n', { mode: 0o755 });
+    process.env.PATH = '/usr/bin:/bin';
+    const report = await install({ ...box.context, binaries: { 'codex-cli': join(bin, 'codex') } }, await parseCatalog(root, root, 'folder'), 'marker', 'codex-cli');
+    assert.ok(report.runs.length > 0, JSON.stringify(report));
+    assert.doesNotMatch(report.runs[0]!.output, /No such file or directory/, report.runs[0]!.output);
+  } finally { process.env.PATH = savedPath; await box.cleanup(); }
+});

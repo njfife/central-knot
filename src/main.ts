@@ -13,6 +13,7 @@ import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } fro
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
+import { entryIn, marketplacePage, pluginDetail, readmeIn } from './catalogdetail.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot, ClaudeWrite } from './types.ts';
 
@@ -387,7 +388,7 @@ async function pluginsView(fresh?: string): Promise<PluginsView> {
   const marketplaces: MarketplaceView[] = [];
   for (const { source, origins } of known) {
     const { catalog, stale, problem } = await catalogFor(plugins, source, fresh !== undefined && sameSource(fresh, source));
-    const view: MarketplaceView = { source, origins, name: catalog?.name ?? '', kind: source.startsWith('/') ? 'folder' : 'git', fetchedAt: catalog?.fetchedAt, problem, stale, plugins: [], states: {} };
+    const view: MarketplaceView = { source, origins, name: catalog?.name ?? '', kind: source.startsWith('/') ? 'folder' : 'git', fetchedAt: catalog?.fetchedAt, problem, stale, plugins: [], states: {}, owner: catalog?.owner, description: catalog?.description, page: marketplacePage(source) };
     for (const plugin of catalog?.plugins ?? []) {
       view.plugins.push({ ...plugin, outcomes: plugin.components ? Object.fromEntries(tools.map(tool => [tool, outcomes(tool, plugin.components!)])) : {} });
       view.states[plugin.name] = Object.fromEntries(await Promise.all(tools.map(async tool => [tool, await installState(plugins, tool, catalog!.name, plugin.name)] as const)));
@@ -518,6 +519,18 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   handle('plugins:view', async () => (current ? pluginsView() : null));
+  // A marketplace's README, or one plugin's contents and README, read from the marketplace's files when its page opens.
+  handle('plugins:detail', async (source, plugin) => {
+    if (!current || typeof source !== 'string' || (plugin !== undefined && typeof plugin !== 'string')) return null;
+    const { catalog } = await catalogFor(await pluginContext(), source, false);
+    if (!catalog?.root) return null;
+    if (plugin === undefined) return { readme: await readmeIn(catalog.root) };
+    const entry = catalog.plugins.find(item => item.name === plugin);
+    if (!entry?.folder) return null;
+    return pluginDetail(entry.folder, await entryIn(catalog.root, plugin), catalog.root);
+  });
+  // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
+  handle('open:external', async url => { if (typeof url === 'string' && /^https:\/\/[^\s]+$/.test(url) && url.length < 2000) await shell.openExternal(url); });
   handle('plugins:add', async source => {
     if (typeof source !== 'string' || !source.trim() || source.length > 2000) throw new Error('Invalid marketplace.');
     const text = source.trim();

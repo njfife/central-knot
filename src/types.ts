@@ -85,6 +85,10 @@ export interface DesktopApi {
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
   showFile(path: string): Promise<void>;
+  /** A marketplace's README (no plugin), or one plugin's contents and README. */
+  pluginDetail(source: string, plugin?: string): Promise<{ readme?: string } | PluginDetailView | null>;
+  /** Opens an https link in the browser. */
+  openExternal(url: string): Promise<void>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;
@@ -223,9 +227,18 @@ export interface CatalogPlugin {
   components?: Components;
   /** Why Copilot CLI would refuse the whole marketplace because of this entry (MKT-06). */
   copilotRefuses?: string;
+  displayName?: string;
+  category?: string;
+  author?: string;
+  /** An https page for the plugin, as the marketplace gives it. */
+  homepage?: string;
+  license?: string;
+  keywords?: string[];
+  /** For a plugin outside the marketplace: where it comes from, in words, and a web link when there is one. */
+  from?: { label: string; url?: string };
 }
 
-export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string }
+export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string }
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string };
 
@@ -252,7 +265,14 @@ export interface MarketplaceView {
   stale?: boolean;
   plugins: PluginView[];
   states: Record<string, Partial<Record<HarnessId, InstallState>>>;
+  owner?: string;
+  description?: string;
+  /** Its web page, for GitHub sources. */
+  page?: string;
 }
+
+/** A plugin's contents and README, read when its page opens (catalogdetail.ts). */
+export interface PluginDetailView { readme?: string; skills: { name: string; description: string }[]; commands: { name: string; description: string }[]; agents: { name: string; description: string }[]; hooks: string[]; mcpServers: { name: string; runs: string }[]; lspServers: string[] }
 
 export interface PluginsView {
   home: string;

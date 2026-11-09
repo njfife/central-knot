@@ -3,8 +3,9 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { harnesses } from './harnesses.ts';
+import { listedPaths, sourceOf, type ListedPaths } from './catalogdetail.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun, Outcome } from './types.ts';
 export type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, InstallState, NativeRun, Outcome } from './types.ts';
 
@@ -134,14 +135,18 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   for (const entry of entries) {
     if (typeof entry !== 'object' || entry === null || typeof (entry as Record<string, unknown>).name !== 'string') continue;
     const item = entry as Record<string, unknown>;
-    const plugin: CatalogPlugin = { name: item.name as string, description: stringOr(item.description), version: typeof item.version === 'string' ? item.version : undefined };
+    const author = typeof item.author === 'string' ? item.author : stringOr((item.author as Record<string, unknown> | undefined)?.name);
+    const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
+    const plugin: CatalogPlugin = { name: item.name as string, description: stringOr(item.description), version: typeof item.version === 'string' ? item.version : undefined,
+      displayName: stringOr(item.displayName) || undefined, category: stringOr(item.category) || undefined, author: author || undefined, homepage: /^https:\/\//.test(stringOr(item.homepage)) ? stringOr(item.homepage) : undefined,
+      license: stringOr(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source) };
     const where = item.source;
     if (typeof where === 'string') {
       const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
       // A path outside the marketplace is not read.
       if (!relative(root, folder).startsWith('..') && !isAbsolute(relative(root, folder))) {
         plugin.folder = folder;
-        plugin.components = await componentsOf(folder);
+        plugin.components = await componentsOf(folder, listedPaths(item, folder));
       }
     } else if (typeof where === 'object' && where !== null) {
       const kindOf = stringOr((where as Record<string, unknown>).source);
@@ -151,7 +156,9 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
     }
     plugins.push(plugin);
   }
-  return { name, source, kind, fetchedAt, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
+  const owner = stringOr((manifest.owner as Record<string, unknown> | undefined)?.name);
+  const about = stringOr(manifest.description) || stringOr((manifest.metadata as Record<string, unknown> | undefined)?.description);
+  return { name, source, kind, fetchedAt, root, owner: owner || undefined, description: about || undefined, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
 }
 
 const count = async (folder: string, test: (name: string, isDirectory: boolean) => Promise<boolean> | boolean) => {
@@ -171,7 +178,7 @@ const skillFolders = async (folder: string) => {
 };
 
 /** What a plugin folder holds, read from its files. Nothing in it is run. */
-export async function componentsOf(folder: string): Promise<Components> {
+export async function componentsOf(folder: string, listed: ListedPaths = {}): Promise<Components> {
   let manifest: Record<string, unknown> = {};
   try { manifest = JSON.parse(await readFile(join(folder, '.claude-plugin/plugin.json'), 'utf8')); } catch { /* optional */ }
   let servers: Record<string, unknown> = {};
@@ -179,14 +186,15 @@ export async function componentsOf(folder: string): Promise<Components> {
   if (typeof manifest.mcpServers === 'object' && manifest.mcpServers !== null) servers = { ...servers, ...(manifest.mcpServers as Record<string, unknown>) };
   const serverText = JSON.stringify(servers);
   return {
-    skills: await count(join(folder, 'skills'), (name, isDirectory) => isDirectory && exists(join(folder, 'skills', name, 'SKILL.md'))),
+    // An entry that lists its skills ("strict": false) holds those, not every skill folder beside it.
+    skills: listed.skills ? (await Promise.all(listed.skills.map(path => exists(join(path, 'SKILL.md'))))).filter(Boolean).length : await count(join(folder, 'skills'), (name, isDirectory) => isDirectory && exists(join(folder, 'skills', name, 'SKILL.md'))),
     commands: await count(join(folder, 'commands'), name => name.endsWith('.md')),
     agents: await count(join(folder, 'agents'), name => name.endsWith('.md')),
     hooks: (await exists(join(folder, 'hooks/hooks.json'))) || manifest.hooks !== undefined,
     mcp: Object.keys(servers).length,
     mcpRootVariable: serverText.includes('${CLAUDE_PLUGIN_ROOT}'),
     bin: await exists(join(folder, 'bin')),
-    skillNames: await skillFolders(join(folder, 'skills')),
+    skillNames: listed.skills ? (await Promise.all(listed.skills.map(async path => (await exists(join(path, 'SKILL.md')) ? basename(path) : '')))).filter(Boolean).sort() : await skillFolders(join(folder, 'skills')),
   };
 }
 
@@ -309,7 +317,9 @@ async function native(context: PluginContext, tool: HarnessId, args: string[]): 
   if (!binary) return { tool, command, ok: false, output: `${harnesses[tool].name} CLI was not found, so its own plugin commands can’t run.`, changed: [] };
   const files = touched(context, tool);
   const before = await Promise.all(files.map(readOrNull));
-  const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home };
+  // An app opened from Finder or a launcher gets a short PATH. A CLI that is a script (Codex runs on Node) finds its
+  // interpreter beside itself, so the CLI's own folder goes first.
+  const env: NodeJS.ProcessEnv = { ...gitEnv(), HOME: context.home, USERPROFILE: context.home, PATH: [dirname(binary), process.env.PATH].filter(Boolean).join(delimiter) };
   const override = context.overrides?.[tool];
   if (override) env[harnesses[tool].configEnv] = override;
   else delete env[harnesses[tool].configEnv];
