@@ -1359,6 +1359,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .legend-cell.mini-cell .cell-disabled-mark svg { width: 8px; height: 8px; }
 .legend-cell .cell-disabled-mark { top: -5px; right: -5px; width: 12px; height: 12px; }
 .legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
+.legend-item > .legend-cell.cell-disabled { margin-right: 5px; }
 .cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
 /* Skills: every tool's row has the same three columns (tool, what happens there, its switch and Remove), so the switches line up. */
 .details-skills .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
