@@ -54,7 +54,9 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   const items = (disabled: boolean) => new Set(switched.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
   const off = items(true), on = items(false);
   const counts = [off && `${off === 1 ? '1 item' : `${off} items`} turned off`, on && `${on === 1 ? '1 item' : `${on} items`} turned back on`].filter(Boolean).join(', ') || 'no switch needed changing';
-  const where = switched.flips.length ? ` in ${list(switched.flips.map(flip => flip.tool))}` : '';
+  // The tools by name, as the result of the switch said them.
+  const tools = [...new Set(switched.flips.map(flip => who(flip.tool)))];
+  const where = tools.length ? ` in ${tools.length > 1 ? `${tools.slice(0, -1).join(', ')} and ${tools.at(-1)}` : tools[0]}` : '';
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? 'No profile';
   if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? 'No profile'}; back to ${to}: ${counts}${where}.`, action: 'Redo' };

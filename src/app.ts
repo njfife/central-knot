@@ -1,5 +1,5 @@
 import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -543,7 +543,18 @@ const stayedNote = (results: DestinationResult[]) => {
 };
 
 /** The profile open on the Profiles page: one of the home's profiles, or 'none' for No profile. */
-export const profileState = { open: undefined as string | undefined, confirmDelete: undefined as string | undefined, renaming: undefined as string | undefined };
+export const profileState = { open: undefined as string | undefined, confirmDelete: undefined as string | undefined, renaming: undefined as string | undefined, /** The name as typed while renaming. */ draft: undefined as string | undefined };
+
+/** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
+function switchOutcome(name: string, result: ProfileSwitchResult) {
+  const items = (disabled: boolean) => new Set(result.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
+  const off = items(true), on = items(false);
+  const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
+  const what = [off && `${plural(off, 'item')} turned off`, on && `${plural(on, 'item')} turned back on`].filter(Boolean).join(' and ');
+  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${stayedNote(result.results)}`,
+    act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
+  announce(state.outcome.text, true);
+}
 
 /** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
 export const switchToProfile = (id: string | null) => busy('Switching profile…', async () => {
@@ -552,14 +563,10 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
   const result = await api().switchProfile(id, home.home);
   if (result.view) state.home = result.view;
   if (result.stopped) { announce(result.stopped); return; }
-  const items = (disabled: boolean) => new Set(result.flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
-  const off = items(true), on = items(false);
-  const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
-  const what = [off && `${plural(off, 'item')} turned off`, on && `${plural(on, 'item')} turned back on`].filter(Boolean).join(' and ');
-  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${stayedNote(result.results)}`,
-    undo: result.event ? { id: result.event, label: 'Undo switch' } : undefined };
-  announce(state.outcome.text, true);
+  switchOutcome(name, result);
 });
+// A switch from the menu bar: its result and Undo are on the page the next time the window shows.
+api().onProfileSwitched((name, result) => { switchOutcome(name, result); rerender(); });
 
 /** Saves a profile's name and items. Quiet when it works: the page shows the change in place. */
 export const saveProfileDef = (profile: { id?: string; name: string; items: string[] }, said?: string) => busy('Saving profile…', async () => {

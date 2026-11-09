@@ -4,7 +4,7 @@
 import { deleteProfileDef, profileState, rerender, saveProfileDef, showPage, state, switchToProfile } from './app.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
-import { planSwitch, switchItems, type SwitchItem, type SwitchPlan } from './profileplan.ts';
+import { offByHand, planSwitch, switchItems, type SwitchItem, type SwitchPlan } from './profileplan.ts';
 import { toolName } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, Profile } from './types.ts';
@@ -48,7 +48,8 @@ const changeWords = ({ off, on }: { off: number; on: number }) => [off && `turns
 
 function listRow(id: string, name: string, count: string, active: boolean, selected: boolean) {
   return h(`button.list-row.profile-row${selected ? '.selected' : ''}`, { type: 'button', id: `profile-row-${id}`, 'aria-current': selected ? 'true' : undefined,
-    onclick: () => { profileState.open = id; profileState.confirmDelete = undefined; profileState.renaming = undefined; rerender(); } },
+    // Opening another profile starts it clean: the last switch's result belonged to the one before.
+    onclick: () => { if (profileState.open !== id && state.outcome?.page === 'profiles') state.outcome = undefined; profileState.open = id; profileState.confirmDelete = undefined; profileState.renaming = undefined; rerender(); } },
     icon(id === NONE ? 'circle-dashed' : 'sliders-horizontal', 14, 'tone-muted'),
     h('span.list-name.profile-row-name', { title: name }, name),
     count ? h('span.list-fraction', {}, count) : null,
@@ -75,8 +76,8 @@ function listColumn(open: string | undefined) {
 type Look = 'on' | 'held' | 'hand' | 'blocked' | 'none' | 'to-off' | 'to-on';
 const looks: Record<Look, { key: string; mark: () => Node }> = {
   'on': { key: 'On', mark: () => h('span.pf-dot', { 'aria-hidden': 'true' }) },
-  'held': { key: 'Off by a profile', mark: () => icon('circle-off', 14, 'tone-warning') },
-  'hand': { key: 'Off by hand (profiles leave it)', mark: () => icon('circle-off', 14, 'tone-muted') },
+  'held': { key: 'Off by a profile', mark: () => icon('circle-off', 14) },
+  'hand': { key: 'Off by hand (profiles leave it)', mark: () => icon('circle-slash-2', 14, 'tone-muted') },
   'blocked': { key: 'Can’t be switched (reason below)', mark: () => icon('circle-alert', 14, 'tone-warning') },
   'none': { key: 'No copy', mark: () => icon('minus', 14, 'tone-faint') },
   'to-off': { key: 'Turns off when you', mark: () => icon('circle-off', 14, 'tone-accent') },
@@ -155,8 +156,8 @@ function table(list: SwitchItem[], options: Pick<TableView, 'profile' | 'plan' |
   const legend = h('div.pf-legend', { 'aria-label': 'Key' }, (Object.keys(looks) as Look[]).filter(look => view.seen.has(look)).map(look =>
     h('span', {}, h(`span.pf-legend-mark${pending(look) ? '.pf-cell-pending' : ''}`, { 'aria-hidden': 'true' }, looks[look].mark()), pending(look) ? `${looks[look].key} ${view.action}` : looks[look].key)));
   // Each tool's reason once, in words (the cells carry it too), so it needs no hover.
-  const reasons = new Map(list.flatMap(item => Object.entries(item.blocked) as [HarnessId, string][]));
-  const why = reasons.size ? h('ul.pf-blocked', {}, [...reasons].map(([tool, reason]) => h('li', {}, icon('circle-alert', 14, 'tone-warning'), h('span', {}, h('strong', {}, `${named(tool)}: `), reason)))) : null;
+  const reasons = [...new Set(list.flatMap(item => (Object.entries(item.blocked) as [HarnessId, string][]).map(([tool, reason]) => JSON.stringify([tool, reason]))))].map(entry => JSON.parse(entry) as [HarnessId, string]);
+  const why = reasons.length ? h('ul.pf-blocked', {}, reasons.map(([tool, reason]) => h('li', {}, icon('circle-alert', 14, 'tone-warning'), h('span', {}, h('strong', {}, `${named(tool)}: `), reason)))) : null;
   return [grid, legend, why];
 }
 
@@ -174,13 +175,21 @@ const matches = (item: SwitchItem) => !find || `${item.name} ${item.description}
 
 /** The pane header: name (or its field while renaming), what a switch would do, and the actions. */
 function header(title: string, subtitle: string, actions: (Node | null)[], editable?: Profile) {
-  const back = button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Profiles', id: 'profile-back', onclick: () => { profileState.open = undefined; rerender(); } });
+  const back = button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Profiles', id: 'profile-back', onclick: () => { const was = profileState.open; profileState.open = undefined; rerender(); document.getElementById(`profile-row-${was}`)?.focus(); } });
   back.classList.add('profile-back');
   const renaming = editable && profileState.renaming === editable.id;
-  const save = (input: HTMLInputElement) => { profileState.renaming = undefined; if (input.value.trim() && input.value.trim() !== editable!.name) void saveProfileDef({ ...editable!, name: input.value }, `Renamed to ${input.value.trim()}.`); else rerender(); };
-  const name = renaming ? h('input.profile-name-input', { id: 'profile-name', type: 'text', value: editable!.name, maxlength: '40', 'aria-label': 'Profile name', spellcheck: 'false',
-    onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') save(event.target as HTMLInputElement); if (event.key === 'Escape') { profileState.renaming = undefined; rerender(); } },
-    onblur: (event: Event) => { if (profileState.renaming) save(event.target as HTMLInputElement); } }) : h('h2', { title }, title);
+  // When the field goes, keyboard focus goes on with the task: to the setup step of an empty profile, else to Rename.
+  const next = () => (document.getElementById('profile-from-now') ?? document.getElementById('profile-rename'))?.focus();
+  // Enter, Escape or leaving the field finishes it once (a field removed by the redraw may still report leaving).
+  let done = false;
+  const save = (input: HTMLInputElement, then = next) => { if (done) return; done = true; profileState.renaming = undefined; profileState.draft = undefined; if (input.value.trim() && input.value.trim() !== editable!.name) void saveProfileDef({ ...editable!, name: input.value }, `Renamed to ${input.value.trim()}.`).then(then); else { rerender(); then(); } };
+  const name = renaming ? h('input.profile-name-input', { id: 'profile-name', type: 'text', value: profileState.draft ?? editable!.name, maxlength: '40', 'aria-label': 'Profile name', spellcheck: 'false',
+    // Kept as typed, so a redraw while renaming (a background refresh) keeps the text.
+    oninput: (event: Event) => { profileState.draft = (event.target as HTMLInputElement).value; },
+    onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') save(event.target as HTMLInputElement); if (event.key === 'Escape') { done = true; profileState.renaming = undefined; profileState.draft = undefined; rerender(); next(); } },
+    // Leaving the field saves it, once whatever was clicked has had its click (a redraw on mouse-down would swallow it);
+    // focus stays where the person put it.
+    onblur: (event: Event) => { const input = event.target as HTMLInputElement; if (input.isConnected) setTimeout(() => save(input, () => undefined)); } }) : h('h2', { title }, title);
   return h('div.pane-header.profile-header', {}, back, icon('sliders-horizontal', 16, 'tone-muted'),
     h('div.pane-title', {}, name, h('p', { title: subtitle }, subtitle)), h('div.detail-actions.profile-actions', {}, ...actions));
 }
@@ -196,9 +205,13 @@ function profileDetail(profile: Profile) {
   const differ = plan.flips.length;
   // In use but not matching: the profile was edited since, an item turned up, or a switch was turned back by hand.
   // A tool whose settings file can't be used keeps its switch as it is: said here too, not only by the glyph in its cell.
-  const stuck = plan.blocked.length ? ` · ${plural(plan.blocked.length, 'switch', 'switches')} can’t be changed (⚠ in the table)` : '';
+  const blockedTools = [...new Set(all.flatMap(item => Object.keys(item.blocked) as HarnessId[]))];
+  const stuck = blockedTools.length ? ` · ${blockedTools.map(named).join(' and ')} can’t be switched right now (why is under the table)` : '';
+  // Items in the profile that a tool has off by hand: profiles leave those, so the profile is not fully on there.
+  const byHand = profile.items.filter(id => { const item = all.find(entry => entry.id === id); return item && offByHand(item, view.held).length; }).length;
+  const handNote = byHand ? ` · ${plural(byHand, 'item')} in it ${byHand === 1 ? 'is' : 'are'} off by hand in a tool (profiles leave ${byHand === 1 ? 'it' : 'them'})` : '';
   const subtitle = (active ? (differ ? `In use · Apply to tools ${changeWords(change)} to match it` : 'In use · new sessions in your tools use it')
-    : empty ? 'Nothing in it yet' : differ ? `Switching ${changeWords(change)}` : 'Switching changes nothing right now') + stuck;
+    : empty ? 'Nothing in it yet' : differ ? `Switching ${changeWords(change)} · new sessions use it` : 'Switching changes nothing right now') + handNote + stuck;
   const writeReason = !state.home!.manage.access.allowed ? state.home!.manage.access.reason : undefined;
   // While renaming, the name field has the header to itself.
   const renaming = profileState.renaming === profile.id;
@@ -209,7 +222,7 @@ function profileDetail(profile: Profile) {
   const cancel = button({ variant: 'ghost', size: 'small', label: active ? 'OK' : 'Cancel', id: 'profile-delete-cancel', onclick: () => { profileState.confirmDelete = undefined; rerender(); document.getElementById('profile-delete')?.focus(); } });
   const actions = confirming
     ? active ? [h('span.profile-confirm', { role: 'status' }, `${profile.name} is in use. Switch to No profile or another profile first, then delete it.`),
-        button({ variant: 'outline', size: 'small', label: 'Open No profile', id: 'profile-open-none', onclick: () => { profileState.confirmDelete = undefined; profileState.open = NONE; rerender(); document.getElementById('profile-switch')?.focus(); } }), cancel]
+        button({ variant: 'outline', size: 'small', label: 'Stop using profiles', id: 'profile-stop', attrs: { title: 'Turn back on what profiles turned off; then Delete works. One step in History, with Undo.' }, onclick: () => { profileState.confirmDelete = undefined; void switchToProfile(null); } }), cancel]
       : [h('span.profile-confirm', {}, `Delete ${profile.name}? Your tools stay as they are.`), danger(button({ variant: 'outline', size: 'small', label: 'Delete', id: 'profile-delete-confirm', onclick: () => void deleteProfileDef(profile.id) })), cancel]
     : renaming ? [h('span.profile-confirm.tone-muted', {}, 'Enter to save · Esc to cancel')] : [primary, button({ variant: 'ghost', size: 'small', label: 'Rename', id: 'profile-rename', disabled: !canWrite(), onclick: () => { profileState.renaming = profile.id; rerender(); focusName(); } }),
       danger(button({ variant: 'ghost', size: 'small', label: 'Delete', id: 'profile-delete', disabled: !canWrite(), onclick: () => { profileState.confirmDelete = profile.id; rerender(); document.getElementById(active ? 'profile-delete-cancel' : 'profile-delete-confirm')?.focus(); } }))];
@@ -218,7 +231,7 @@ function profileDetail(profile: Profile) {
     empty ? h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'), h('span.band-text', {}, `Nothing is in ${profile.name} yet. Tick what it should have on, or start from what is on now. Switching to it turns the rest off.`),
       button({ variant: 'primary', size: 'small', label: 'Start from what’s on now', id: 'profile-from-now', disabled: !canWrite(), attrs: { title: 'Tick every skill and MCP server that is on in at least one tool' },
         onclick: () => void saveProfileDef({ ...profile, items: all.filter(item => Object.values(item.tools).includes('on')).map(item => item.id) }, `${profile.name} now has what is on.`) })) : null,
-    findBar(shown.length, all.length, `Ticks save at once · tools change on ${active ? 'Apply to tools' : 'Switch'}`),
+    findBar(shown.length, all.length, primary ? `Ticks save at once · tools change on ${active ? 'Apply to tools' : 'Switch'}` : 'Ticks save at once'),
     h('div.scroll.pf-scroll', { id: 'profile-scroll' }, shown.length ? table(shown, { profile, plan, action: active ? 'apply' : 'switch' }) : h('p.pf-none', {}, find ? `Nothing matches “${find}”.` : 'This home has no skills or MCP servers yet.')));
 }
 
@@ -253,7 +266,7 @@ export function profilesPage(): HTMLElement {
     !home.manage.access.allowed ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${home.manage.access.reason} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
   if (!view.profiles.length) {
     return h('div.page.profiles-page', {}, bands.length ? h('div.bands', {}, bands) : null, emptyState('sliders-horizontal', 'Switch between sets of skills and MCP servers',
-      'Make a profile for each kind of work, such as Incident or Development, and tick what it needs. Switching to it, here or from the menu bar, turns everything else off in your tools. Nothing is deleted, and Undo switches back.',
+      'Make a profile for each kind of work, such as Incident or Development, and tick what it needs. Switching to it, here, from the status bar or from the menu bar icon, turns everything else off in your tools, for their next sessions. Nothing is deleted, and Undo switches back.',
       button({ variant: 'outline', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canWrite(), onclick: newProfile })));
   }
   const open = openId();
@@ -290,8 +303,10 @@ export function profileStatus(): HTMLElement | null {
   const choice = (id: string | null, name: string, empty = false) => h('button.pf-menu-item', { type: 'button', role: 'menuitemradio', 'aria-checked': String((id ?? undefined) === view.active), id: `status-profile-${id ?? NONE}`, disabled: !canWrite() || empty,
     title: empty ? `${name} has nothing in it yet. Tick what it should have on, on the Profiles page.` : undefined,
     // Focus goes back to the status item only for a keyboard choice; after a click it would sit there ringed.
-    onclick: (event: MouseEvent) => { menuOpen = false; if (event.detail === 0) document.getElementById('status-profile')?.focus(); else (document.activeElement as HTMLElement | null)?.blur(); if ((id ?? undefined) !== view.active) void switchToProfile(id); else rerender(); } },
-    h('span.pf-menu-tick', {}, (id ?? undefined) === view.active ? icon('check', 14) : null), h('span.pf-menu-name', {}, empty ? `${name} (empty)` : name));
+    // The profile in use, chosen again while its tools no longer match it, applies it (as the menu bar's radio item does).
+    onclick: (event: MouseEvent) => { menuOpen = false; if (event.detail === 0) document.getElementById('status-profile')?.focus(); else (document.activeElement as HTMLElement | null)?.blur(); if ((id ?? undefined) !== view.active || drift) void switchToProfile(id); else rerender(); } },
+    h('span.pf-menu-tick', {}, (id ?? undefined) === view.active ? icon('check', 14) : null), h('span.pf-menu-name', {}, empty ? `${name} (empty)` : name),
+    (id ?? undefined) === view.active && drift ? h('span.pf-menu-note', {}, `Apply to tools (${drift})`) : null);
   const menu = menuOpen ? h('div.pf-menu', { role: 'menu', 'aria-label': 'Switch profile', onkeydown: (event: KeyboardEvent) => menuKeys(event, close) },
     choice(null, 'No profile'), view.profiles.map(profile => choice(profile.id, profile.name, !profile.items.length && profile.id !== view.active)), h('div.pf-menu-sep', { role: 'separator' }),
     h('button.pf-menu-item', { type: 'button', role: 'menuitem', id: 'status-profile-edit', onclick: () => { menuOpen = false; profileState.open = active?.id ?? NONE; showPage('profiles'); } }, h('span.pf-menu-tick'), h('span.pf-menu-name', {}, 'Edit profiles…'))) : null;

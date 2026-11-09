@@ -114,6 +114,8 @@ export interface DesktopApi {
   deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
   /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
+  /** A switch made from the menu bar: what it did, so the page can show it with Undo. */
+  onProfileSwitched(callback: (name: string, result: ProfileSwitchResult) => void): void;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }

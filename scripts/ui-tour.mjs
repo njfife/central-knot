@@ -252,7 +252,7 @@ if (wanted('profiles')) {
   await a.click('#nav-skills'); await a.click('#open-notes'); await a.click('#enable-notes-claude-cli'); await a.click('#apply');
   await a.click('#nav-profiles');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
-  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand, which profiles leave alone; the status bar dot says Development no longer fully matches.');
+  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
   const copilotSettings = join(practice, '.copilot/settings.json');
   const copilotKept = existsSync(copilotSettings) ? readFileSync(copilotSettings, 'utf8') : undefined;
   writeFileSync(copilotSettings, '{ not json');
@@ -280,7 +280,10 @@ if (wanted('profiles')) {
   await a.theme('dark');
   if (await a.has('#profile-back')) await a.click('#profile-back');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
-  await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'At 860×560, opened Development (not in use) and clicked Rename.');
+  await a.click('#profile-rename');
+  await name('Development and code review for web apps');
+  await shot(a, 'size-860-long-name', 'At 860×560, renamed Development to a 40-character name: the header with Switch, Rename and Delete.');
+  await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'Clicked Rename again: the field has the header to itself, with Enter / Esc hints.');
   await a.press('Escape');
   await a.click('#profile-delete'); await shot(a, 'size-860-delete-confirm', 'At 860×560, clicked Delete on Development: the confirmation wraps under the title.');
   await a.click('#profile-delete-cancel');

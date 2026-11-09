@@ -349,7 +349,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'glyph-fill' : '') : null,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
-      disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null,
+      disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon(byProfile ? 'sliders-horizontal' : 'circle-off', 9)) : null,
       on && kind === 'agents' && skill.managed && oneWaySource(skill) === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
 }
 
@@ -726,7 +726,7 @@ function legend(list: SampleSkill[]) {
   const profileShown = list.some(skill => disabledIn(skill).some(tool => heldByProfile(skill.key, tool)));
   const profileSwatch = swatch('present', false);
   profileSwatch.classList.add('cell-disabled');
-  profileSwatch.append(h('span.cell-disabled-mark.cell-disabled-profile', {}, icon('circle-off', 8)));
+  profileSwatch.append(h('span.cell-disabled-mark.cell-disabled-profile', {}, icon('sliders-horizontal', 8)));
   const disabledSwatch = swatch('present', false);
   disabledSwatch.classList.add('cell-disabled');
   disabledSwatch.append(h('span.cell-disabled-mark', {}, icon('circle-off', 8)));
