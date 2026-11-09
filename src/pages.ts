@@ -1,4 +1,4 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
+import { announce, loadHome, rerender, selectItem, shownPath, showPage, startHome, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -23,13 +23,13 @@ const emptyBands = () => {
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
-    state.home?.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
+    state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
   if (state.busy) return reading();
-  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome(state.lastMode ?? 'fixture') })));
+  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void (state.lastMode ? loadHome(state.lastMode) : startHome()) })));
 }
 
 const remembered = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
