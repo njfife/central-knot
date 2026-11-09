@@ -128,13 +128,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return states;
   }
 
-  /** Each tool's installed copy of one plugin, read from the folder that tool keeps it in (its parts listed as the marketplace entry lists them). */
+  /**
+   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in. Its parts are found as its own
+   * plugin.json lists them, not as the marketplace's current entry does (that may name another release's paths); only an
+   * entry with "strict": false, whose parts the marketplace alone lists, is used. The detail request names just a source
+   * and a plugin, so the tools and their install states are read here again.
+   */
   async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
     const tools = (await host.tools()).filter(tool => engine.pluginTools.includes(tool));
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path);
+      const { skills, commands, agents } = await pluginContents(state.path, item.entry?.strict === false ? item.entry : {}, state.path);
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));

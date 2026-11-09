@@ -503,10 +503,17 @@ async function practiceFlow() {
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
-  await a.click('#pfile-0-skills-triage');
   check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Claude Code (1.9.0) differs from the marketplace’s copy'), await a.text('#pfile-0-skills-triage'));
+  await a.click('#pfile-0-skills-triage');
   same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent.trim().split("\\n").pop()]'),
     [['SKILL.md · Marketplace (2.0.0)', 'Follow the steps.'], ['SKILL.md · Claude Code (1.9.0)', 'The old steps.']]);
+  // Claude Code lets it go outside the app; coming back to Plugins reads the install states, and the copies, again.
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), '{"version":2,"plugins":{}}');
+  await a.click('#nav-skills');
+  await a.click('#nav-plugins');
+  if (!(await a.exists('#pfile-0-skills-triage'))) await a.click('#popen-0-issue-tracker');
+  for (let tries = 0; tries < 30 && /1\.9\.0/.test(await a.text('.plugin-page') ?? '1.9.0'); tries++) await wait(100);
+  check('a copy a tool no longer has is gone from the page', !/1\.9\.0/.test(await a.text('.plugin-page')) && /Not installed/.test(await a.text('.plugin-panel')), await a.text('.plugin-page'));
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);

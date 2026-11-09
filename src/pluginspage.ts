@@ -4,14 +4,14 @@
 import { rerender, showPage, state as app } from './app.ts';
 import { button, closeButton, emptyState, h, icon, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
-import { clockTime, plural } from './model.ts';
+import { clockTime, groupBy, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, otherVersions, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
+import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
@@ -51,35 +51,30 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
     h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), addBox(false));
 }
 
-/** Tools on another version, grouped by that version: Claude Code and Codex have 1.9.0. */
-function versionGroups(others: { tool: HarnessId; version: string }[]): { version: string; tools: HarnessId[] }[] {
-  const groups = new Map<string, HarnessId[]>();
-  for (const { tool, version } of others) groups.set(version, [...(groups.get(version) ?? []), tool]);
-  return [...groups].map(([version, tools]) => ({ version, tools }));
-}
-
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
 function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
   const read = market.details.get(pluginKey(entry.source, plugin.name));
-  const readContents = read?.reading ? 'Reading what it holds…' : read?.value && !read.value.problem ? summaryOf(componentsFrom(read.value)) : '';
+  const detail = read && !read.reading ? read.value : undefined;
+  const readContents = read?.reading ? 'Reading what it holds…' : detail && !detail.problem ? summaryOf(componentsFrom(detail)) : '';
+  const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   // A tool with another version than the marketplace offers is named on the row, so it shows without opening the plugin.
-  const others = otherVersions(view, entry, plugin.name, plugin.version);
+  const others = otherVersions(view, entry, plugin.name, offered);
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
       h('button.plugin-row-open', { type: 'button', id: `popen-${marketIndex}-${plugin.name}`, 'aria-label': `Open ${pluginTitle(plugin)}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
         // The category pill is left out while that category is the filter: every row would say the same.
-        h('span.plugin-row-title', { title: pluginTitle(plugin) }, pluginTitle(plugin)), plugin.version ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, plugin.version) : null,
+        h('span.plugin-row-title', { title: pluginTitle(plugin) }, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
       holds ? h('span.plugin-row-holds', {}, holds) : null,
       // On its own line under what it holds.
       others.length ? h('span.plugin-row-holds.plugin-version-differs', {}, icon('circle-alert', 12),
         // Wraps between words like any text; a version never parts from the word before it.
-        h('span', {}, versionGroups(others).map(({ version, tools }) => `${andList(tools.map(tool => names[tool]))} ${tools.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', '))) : null),
-    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex)),
+        h('span', {}, [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', '))) : null),
+    view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, offered)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
 

@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 
@@ -81,10 +81,16 @@ export const categoriesOf = (entry: MarketplaceView) => [...new Set(entry.plugin
 /** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
 export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));
 
-/** A version as compared: no leading "v", no build suffix after "+", no commit hash after "-" (Codex names a copy 0.1.13-77c10e110b37). */
-const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-[0-9a-f]{7,40}$/i, '');
+/**
+ * A version as compared: no leading "v", no build suffix after "+", no commit hash after "-" (Codex names a copy
+ * 0.1.13-77c10e110b37). A hash has a letter in it, so a dated pre-release such as 1.2.0-20250101 stays as it is.
+ */
+const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-(?=[0-9]*[a-f])[0-9a-f]{7,40}$/i, '');
 /** Whether two versions name the same release (see releaseOf). */
-export const sameVersion = (first: string, second: string) => releaseOf(first) === releaseOf(second);
+const sameVersion = (first: string, second: string) => releaseOf(first) === releaseOf(second);
+
+/** The version the marketplace offers: its catalog entry's, else what the plugin's own files say once read (a plugin kept in another repository). */
+export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => plugin.version ?? detail?.version;
 
 /** The version a tool has installed, when it is installed there and its version is known. */
 export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {

@@ -40,6 +40,13 @@ async function readInside(root: string, path: string, limit = READ_LIMIT): Promi
   } catch { return undefined; }
 }
 const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
+/** A skill, command or agent file is shown whole up to this size; past it, what is shown says so. */
+const PART_FILE_LIMIT = 4 * 1024 * 1024;
+/** A part's file as written, or with a last line saying it was cut when it is larger than PART_FILE_LIMIT. */
+async function partFile(root: string, path: string): Promise<string | undefined> {
+  const read = await readInside(root, path, PART_FILE_LIMIT);
+  return read && (read.whole ? read.text : `${read.text}\n\n[Central Knot shows the first ${PART_FILE_LIMIT / 1024 / 1024} MB of this file.]`);
+}
 /** A JSON object from text, or undefined when it isn't JSON or isn't an object. */
 export const parseObject = (raw: string) => { try { return record(JSON.parse(raw)); } catch { return undefined; } };
 /** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
@@ -62,32 +69,38 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
-/** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
-async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
+/**
+ * Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. Each part's `path`
+ * is its folder relative to the plugin's `folder`, the same in every copy of the plugin.
+ */
+async function skillsIn(root: string, folder: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
-    const body = await textInside(root, join(dir, 'SKILL.md'));
+    const body = await partFile(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
     const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body });
+    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body, path: relative(folder, dir) });
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down. */
-async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
+/**
+ * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down.
+ * Each part's `path` is its file relative to the plugin's `folder`.
+ */
+async function markdownIn(root: string, folder: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const filesIn = async (folder: string) => (await listInside(root, folder)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path]
       : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
-      const body = await textInside(root, file);
+      const body = await partFile(root, file);
       if (body === undefined) continue;
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body });
+      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body, path: relative(folder, file) });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));
@@ -130,9 +143,9 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, listed('skills') ?? [join(folder, 'skills')]),
-    commands: await markdownIn(root, listed('commands') ?? [join(folder, 'commands')]),
-    agents: await markdownIn(root, listed('agents') ?? [join(folder, 'agents')]),
+    skills: await skillsIn(root, folder, listed('skills') ?? [join(folder, 'skills')]),
+    commands: await markdownIn(root, folder, listed('commands') ?? [join(folder, 'commands')]),
+    agents: await markdownIn(root, folder, listed('agents') ?? [join(folder, 'agents')]),
     hooks: Object.keys(hooks).sort(),
     mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),

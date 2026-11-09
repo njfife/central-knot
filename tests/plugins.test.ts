@@ -199,6 +199,12 @@ test('Installed means files where the tool records them; a record with no files 
     assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'not-known');
     await put(join(box.home, '.codex/plugins/cache/m/p/1.0.0/skills/s/SKILL.md'), 'x');
     assert.deepEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/1.0.0'), version: '1.0.0' });
+    // With several copies kept, Codex loads the highest version (numbers compared as numbers), or "local" when there is one.
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.10.0/skills/s/SKILL.md'), 'x');
+    await put(join(box.home, '.codex/plugins/cache/m/p/1.9.0/skills/s/SKILL.md'), 'x');
+    assert.equal((await installState(box.context, 'codex-cli', 'm', 'p') as { version?: string }).version, '1.10.0');
+    await put(join(box.home, '.codex/plugins/cache/m/p/local/.codex-plugin/plugin.json'), JSON.stringify({ version: '2.0.0-dev' }));
+    assert.deepEqual(await installState(box.context, 'codex-cli', 'm', 'p'), { state: 'installed', path: join(box.home, '.codex/plugins/cache/m/p/local'), version: '2.0.0-dev' });
   } finally { await box.cleanup(); }
 });
 

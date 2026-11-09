@@ -132,11 +132,28 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     await box.markets.add(root);
     assert.match(await box.markets.readme(root) ?? '', /Our tools/);
     const detail = await box.markets.detail(root, 'pdf');
-    assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim()], [['pdf'], 'Reads PDFs.']);
+    assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim(), detail?.installed], [['pdf'], 'Reads PDFs.', {}]);
+    // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own parts.
+    const copy = join(box.home, '.claude/plugins/cache/team/pdf/0.9.0');
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./old'] }));
+    await put(join(copy, 'old/SKILL.md'), '---\nname: pdf\ndescription: older\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'pdf@team': [{ scope: 'user', installPath: copy, version: '0.9.0' }] } }));
+    const installed = (await box.markets.detail(root, 'pdf'))?.installed?.['claude-cli'];
+    assert.deepEqual([installed?.version, installed?.skills.map(skill => skill.description)], ['0.9.0', ['older']]);
     assert.equal(await box.markets.detail(root, 'missing'), null);
     const after = await box.markets.forget(root);
     assert.equal(after.marketplaces.length, 0);
     assert.ok(!box.calls.some(call => call.startsWith('uninstall')), 'nothing was uninstalled');
+    // A plugin the marketplace can't give files for (an npm package) is read from the tool that installed it.
+    const external = join(box.base, 'external');
+    await put(join(external, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ext', plugins: [{ name: 'tool', source: { source: 'npm', package: 'some-tool' } }] }));
+    const npmCopy = join(box.home, '.claude/plugins/cache/ext/tool/1.0.0');
+    await put(join(npmCopy, 'skills/s/SKILL.md'), '---\nname: s\ndescription: from npm\n---\n');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'tool@ext': [{ scope: 'user', installPath: npmCopy, version: '1.0.0' }] } }));
+    await box.markets.add(external);
+    const fromTool = await box.markets.detail(external, 'tool');
+    assert.deepEqual([fromTool?.skills, fromTool?.installed?.['claude-cli']?.skills.map(skill => skill.description)], [[], ['from npm']]);
+    assert.match(fromTool?.problem ?? '', /read from the tools that installed it/);
   } finally { await box.cleanup(); }
 });
 

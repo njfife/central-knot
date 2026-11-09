@@ -1,4 +1,5 @@
 import { icons, type IconName } from './icons.ts';
+import { groupBy } from './model.ts';
 
 type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
@@ -96,8 +97,7 @@ export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dism
  */
 export function fileText<Copy extends { text: string }>(id: string, label: string, copies: Copy[], name: (holders: Copy[], distinct: number) => string,
   { named = false, warn }: { named?: boolean; warn?: (holders: Copy[]) => boolean } = {}): HTMLElement[] {
-  const distinct = new Map<string, Copy[]>();
-  for (const copy of copies) distinct.set(copy.text, [...(distinct.get(copy.text) ?? []), copy]);
+  const distinct = groupBy(copies, copy => copy.text);
   return [...distinct].map(([text, holders], index) => {
     const who = name(holders, distinct.size);
     const odd = warn?.(holders) ?? false;

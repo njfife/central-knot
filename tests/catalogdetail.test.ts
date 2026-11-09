@@ -22,8 +22,9 @@ test('Paths an entry or plugin.json lists are read instead of the default folder
     await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
     const contents = await pluginContents(root, { source: './', strict: false, version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
     // Each part carries its whole file as written; the entry's version wins over plugin.json's, as the tools read it.
-    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n' }]);
-    assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n' }]);
+    // Each part also says where it sits in the plugin, which is the same in every copy of it.
+    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') }]);
+    assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: join('tools', 'notes.md') }]);
     assert.equal(contents.version, '1.0.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
@@ -40,12 +41,14 @@ test('Server and hook files are read in every shape plugins use: flat or wrapped
     await put(join(root, '.lsp.json'), JSON.stringify({ gopls: { command: 'gopls' } }));
     await put(join(root, 'hooks/hooks.json'), JSON.stringify({ PreToolUse: [] }));
     await put(join(root, 'commands/git/commit.md'), '---\ndescription: Commits\n---\n');
+    await put(join(root, 'commands/docs/commit.md'), '---\ndescription: Commits the docs\n---\n');
     const contents = await pluginContents(root, { mcpServers: ['./extra/one.json', './extra/two.json'], lspServers: { rust: { command: 'ra' } } }, root);
     assert.deepEqual(contents.mcpServers.map(server => server.name), ['github', 'one', 'two']);
     assert.equal(contents.mcpUsesPluginRoot, true);
     assert.deepEqual(contents.lspServers, ['gopls', 'rust']);
     assert.deepEqual(contents.hooks, ['PreToolUse']);
-    assert.deepEqual(contents.commands.map(command => command.name), ['commit']);
+    // Two commands may share a name in different folders; their places in the plugin tell them apart.
+    assert.deepEqual(contents.commands.map(command => [command.name, command.path]), [['commit', join('commands', 'docs', 'commit.md')], ['commit', join('commands', 'git', 'commit.md')]]);
   } finally { await cleanup(); }
 });
 

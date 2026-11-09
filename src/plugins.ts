@@ -12,7 +12,7 @@ import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
-import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, NativeRun } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -225,8 +225,10 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // A path outside the marketplace, through a link or not, is not read.
     if (await inside(root, folder)) {
       plugin.folder = folder;
-      plugin.version ??= text((await pluginManifest(folder, root))?.version) || undefined;
-      if (counts) plugin.components = await componentsOf(folder, item, root);
+      // The entry's version, else its plugin.json's: the counts' read gives it, or plugin.json alone is read.
+      const contents = counts ? await pluginContents(folder, item, root) : undefined;
+      if (contents) plugin.components = componentsFrom(contents);
+      plugin.version ??= contents ? contents.version : text((await pluginManifest(folder, root))?.version) || undefined;
     }
   }
   return plugin;
@@ -265,11 +267,6 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   const copilotRefuses = entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
     copilotRefuses, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
-}
-
-/** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
-async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
-  return componentsFrom(await pluginContents(folder, entry, root));
 }
 
 // ---------- What each tool has ----------
@@ -330,12 +327,23 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 }
 
 /**
- * The version of a tool's installed copy: what the tool recorded, else what the copy's plugin.json says. Claude Code
- * records "unknown" for a plugin that gives none.
+ * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says (Claude
+ * Code's, or Codex's .codex-plugin one). Claude Code records "unknown" for a plugin that gives none.
  */
 async function copyVersion(recorded: unknown, path: string): Promise<string | undefined> {
   const said = text(recorded);
-  return said && said !== 'unknown' ? said : text((await pluginManifest(path))?.version) || undefined;
+  if (said && said !== 'unknown') return said;
+  return text((await pluginManifest(path))?.version) || text((await readJson(join(path, '.codex-plugin/plugin.json')))?.version) || undefined;
+}
+
+/**
+ * The copy Codex loads from its cache folder for one plugin, as Codex chooses it: "local" (a local marketplace's copy)
+ * when there is one, else the highest version (numbers compared as numbers). Only folders with files count.
+ */
+async function codexCopy(cache: string): Promise<string | undefined> {
+  const folders: string[] = [];
+  for (const name of await readdir(cache).catch(() => [] as string[])) if (await hasFiles(join(cache, name))) folders.push(name);
+  return folders.includes('local') ? 'local' : folders.sort((first, second) => second.localeCompare(first, 'en', { numeric: true }))[0];
 }
 
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
@@ -370,11 +378,11 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     return { state: 'not-installed' };
   }
   if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
+  // Codex keeps each copy in a folder named for its version ("local" names no version).
   const cache = join(root, 'plugins/cache', marketplace, plugin);
-  const versions = await readdir(cache).catch(() => [] as string[]);
-  // Codex keeps each copy in a folder named for its version.
-  for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version), version };
-  return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
+  const copy = await codexCopy(cache);
+  if (!copy) return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
+  return { state: 'installed', path: join(cache, copy), version: await copyVersion(copy === 'local' ? undefined : copy, join(cache, copy)) };
 }
 
 // ---------- Install and uninstall ----------

@@ -15,9 +15,9 @@ export const pluginTitle = (plugin: PluginView) => plugin.displayName ?? plugin.
 /**
  * One tool's box for one plugin: installed (with its version), not installed, chosen for Apply all, or not available,
  * each saying why. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
- * `offered` is the version the marketplace offers, when known.
+ * `offered` is the version the marketplace offers, when known (see offeredVersion).
  */
-export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered = plugin.version) {
+export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pcell-${marketIndex}-${plugin.name}-${tool}`;
   const working = market.working;
   if (working?.source === entry.source && working.plugin === plugin.name && working.tools.includes(tool)) {

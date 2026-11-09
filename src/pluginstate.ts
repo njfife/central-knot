@@ -132,9 +132,11 @@ export function browse(patch: Partial<typeof market.nav>): void {
 export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);
   market.problem = undefined;
-  // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
-  if (fresh) { market.readmes.clear(); market.details.clear(); }
+  // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may
+  // have changed. A plugin's contents include each tool's installed copy, so they are read again with the install states.
+  if (fresh) market.readmes.clear();
   else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
+  market.details.clear();
   showView(view, { replace: true });
   announce('');
 });
@@ -205,6 +207,8 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.working = undefined;
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
+    // What each tool holds changed, and a plugin's contents include each tool's installed copy: read them again.
+    market.details.clear();
     showView(await api().plugins().catch(() => null));
   }
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);
