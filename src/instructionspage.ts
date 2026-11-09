@@ -1,6 +1,6 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { instructionReadState, loadInstructionVersion, readInstructionsQuietly, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
@@ -10,7 +10,8 @@ import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
-const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+/** A path's last part: the file's own name. */
+export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
 function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
@@ -119,7 +120,7 @@ function editor(file: InstructionFile) {
 const open = new Set<string>();
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
+const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && !!state.outcome.instruction?.saved && state.outcome.instruction.path === file.path;
 
 /** One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. */
 export function instructionCard(file: InstructionFile) {
@@ -157,13 +158,26 @@ export function instructionCard(file: InstructionFile) {
         button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== file.text), attrs: lockedWhy || editing ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 
-export function instructionsPage() {
-  const files = state.instructions;
-  if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading instruction files…' : 'Instruction files could not be read.')));
-  const done = state.outcome && /^Saved /.test(state.outcome.text) ? null : outcomeBand();
+/** Shown while the files are not here yet: reading, or a failed read with Try again. Starts the read if none is running. */
+export function instructionsNotRead(): HTMLElement {
+  readInstructionsQuietly();
+  return instructionReadState() === 'failed' || (!state.busy && !instructionReadState())
+    ? emptyState('circle-alert', 'Instruction files could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'ins-retry', onclick: () => readInstructionsQuietly(true) }))
+    : h('p.empty', {}, 'Reading instruction files…');
+}
+
+/** The bands above instruction cards: the last result (a save's own result sits on its card instead) and, where saving is off, why. */
+export function instructionBands(): HTMLElement | null {
+  const done = state.outcome?.instruction?.saved ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
-  return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
+  return done || preview ? h('div.bands', {}, done, preview) : null;
+}
+
+export function instructionsPage() {
+  const files = state.instructions;
+  if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
+  return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
       files.length ? files.map(instructionCard) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));

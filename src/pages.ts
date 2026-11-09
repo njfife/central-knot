@@ -118,7 +118,8 @@ export function agentsPage() {
 
 // ---------- Skills ----------
 
-const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd', {}, value)];
+/** One term and value in a facts list (dl.facts). */
+export const fact = (term: string, value: Node | string) => [h('dt', {}, term), h('dd', {}, value)];
 
 interface Found { tool: HarnessId; skill: Skill }
 

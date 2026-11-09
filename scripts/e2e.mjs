@@ -163,6 +163,9 @@ async function harnessFlow() {
   check('a harness opens on its skills, its own column first', (await a.exists('#harness-tab-skills[aria-selected="true"]')) && (await a.text('.ov-head .ov-tool-head') ?? '').includes('Copilot CLI'), await a.text('.ov-head'));
   const away = await a.run(`[...document.querySelectorAll('[role="rowgroup"]')].find(group => group.querySelector('.ov-section-label strong')?.textContent === 'Not in Copilot CLI')?.querySelector('[data-key="release-notes"]') ? true : false`);
   check('a skill only other tools have is under "Not in Copilot CLI"', away);
+  await a.click('#cell-release-notes-copilot-cli');
+  same('its box here adds it here only', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'release-notes', 'codex-cli')], ['will-sync', 'absent']);
+  await a.click('#discard');
   await a.click('#harness-add-from');
   check('Add from… opens its column menu, which brings things in', (await a.text('.tool-menu-label') ?? '').includes('Add to Copilot CLI from'), await a.text('.tool-menu'));
   await a.click('#menu-add-claude-cli-copilot-cli');
@@ -174,6 +177,7 @@ async function harnessFlow() {
   check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
   await a.click('#nav-skills');
   same('the Skills page shows the same change', await switchOn(a, 'release-notes'), true);
+  check('and is its usual self: Claude Code first, no "Not in" section', (await a.text('.ov-head .ov-tool-head') ?? '').includes('Claude Code') && !(await a.all('.ov-section-label strong')).some(label => label.startsWith('Not in')), await a.text('.ov-head'));
   await a.click('#nav-harnesses');
   await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
@@ -182,6 +186,12 @@ async function harnessFlow() {
   check('the switcher moves to another harness', (await a.text('.harness-head h2')) === 'Codex', await a.text('.harness-head'));
   await a.click('#harness-back');
   check('back returns to every harness', await a.exists('#harnesses-scroll'));
+  // Another home: the instruction file shown is that home's, not the practice copy's.
+  await a.click('#home-actual');
+  await a.click('#nav-harnesses');
+  await a.click('#harness-claude-cli');
+  await a.click('#harness-tab-instructions');
+  check('after a home switch, instructions are that home’s', (await a.text('#harness-body') ?? '').includes('~/.claude/CLAUDE.md'), await a.text('#harness-body'));
   same('no page errors, harnesses', a.pageErrors, []);
   await a.quit();
 }

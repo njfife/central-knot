@@ -2,11 +2,11 @@ import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { loadHome, readAgain, readInstructionsQuietly, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
-import { harnessesPage } from './harnesspage.ts';
+import { harnessesPage, refreshHarnessExtras } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
@@ -98,7 +98,12 @@ function renderHeader(rail: boolean) {
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
     h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
-      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
+      onclick: () => void readAgain().then(() => {
+        // Refresh also reads what the page shows besides the home: marketplaces, instruction files, installs.
+        if (state.page === 'plugins') void loadPlugins(true);
+        if (state.page === 'instructions') readInstructionsQuietly(true);
+        if (state.page === 'harnesses') refreshHarnessExtras();
+      }) })),
   );
 }
 

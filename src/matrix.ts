@@ -9,7 +9,7 @@ import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
-import { planAdd as planAddPure, withBoth } from './addplan.ts';
+import { planAdd as planAddPure, withBoth, withOnlyBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
 const ago = (iso: string) => {
@@ -32,7 +32,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
 });
 
 /** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
-type Kind = 'skills' | 'mcp' | 'agents';
+export type Kind = 'skills' | 'mcp' | 'agents';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
@@ -56,6 +56,15 @@ const toolList = (): Tool[] => {
 };
 /** Whether the focused harness has its own copy (as last read); with no focus, every item counts. */
 const inFocus = (skill: SampleSkill) => !focus || committedOf(skill.key)?.copies[focus] !== undefined;
+/** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
+const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, toolList()) === 'attention';
+
+/**
+ * How many items one tool has whose copies differ and need a choice: what the "Copies differ" chip counts on that tool's
+ * Harnesses page, read from the facts the same way the table reads them. `waiting`: MCP servers waiting for Claude Code.
+ */
+export const differingIn = (facts: SkillFacts[], tools: Tool[], tool: Tool, waiting: string[] = []) =>
+  facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && syncOf({ ...fromFacts(fact), waits: waiting.includes(fact.key) ? ['claude-cli'] : undefined }, tools) === 'attention').length;
 const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
 const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
@@ -136,7 +145,13 @@ function setManaged(keys: string[], managed: boolean) {
 }
 
 function setTool(keys: string[], tool: Tool, on: boolean) {
-  for (const key of keys) edit(key, (skill, draft) => { const managed = on ? true : skill.managed; return { managed, off: on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])], ...keepChoice(keepResolve(managed, draft?.resolve), draft) }; });
+  for (const key of keys) edit(key, (skill, draft) => {
+    const managed = on ? true : skill.managed;
+    // On a harness's page, ticking its own box for an unmanaged item syncs it between the tools that have it and this one only.
+    const pairOnly = on && tool === focus && !skill.managed;
+    const off = pairOnly ? toolList().filter(entry => entry !== tool && skill.copies[entry] === undefined) : on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])];
+    return { managed, off, ...keepChoice(keepResolve(managed, draft?.resolve), draft) };
+  });
   rerender();
 }
 
@@ -195,8 +210,8 @@ const smallAction = (label: string, id: string, onclick: () => void, extra = '')
 
 function filterBar() {
   const list = committedList();
-  const attention = list.filter(skill => syncOf(effective(skill), toolList()) === 'attention').length;
-  const hadAttention = list.some(skill => syncOf(skill, toolList()) === 'attention');
+  const attention = list.filter(skill => needsChoice(effective(skill))).length;
+  const hadAttention = list.some(needsChoice);
   const chip = (id: Filter, label: string, warn?: number) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn ? '.chip-warn' : ''}`, { type: 'button', 'aria-pressed': String(view.filter === id), onclick: () => { view.filter = id; rerender(); } },
     label, warn !== undefined ? h('span.chip-count', {}, String(warn)) : null);
   return h('div.chips', { role: 'group', 'aria-label': 'Show' },
@@ -532,7 +547,7 @@ function details(skill: SampleSkill, closable = true) {
     kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
       h('span.compare-foot-start', {},
         // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
-        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
+        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => { if (state.page !== 'skills') showPage('skills'); state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
       !designMode && kind === 'skills' && committedOf(skill.key).managed
         ? view.confirmDelete === skill.key
@@ -672,8 +687,9 @@ function legend(list: SampleSkill[]) {
 // ---------- What differs between the options ----------
 
 // On a harness's page, adding to that harness enrols only the source and that harness, as its menu says.
-const pairOnly = (to: Tool) => (to === focus ? toolList() : undefined);
-const planAdd = (from: Tool, to: Tool, list: SampleSkill[]) => planAddPure(list.map(effective), from, to, toolList(), !!pairOnly(to));
+const addsOnlyBoth = (to: Tool) => to === focus;
+const enrol = (skill: SampleSkill, from: Tool, to: Tool) => (addsOnlyBoth(to) ? withOnlyBoth(skill, from, to, toolList()) : withBoth(skill, from, to));
+const planAdd = (from: Tool, to: Tool, list: SampleSkill[]) => planAddPure(list.map(effective), from, to, toolList(), { onlyBoth: addsOnlyBoth(to) });
 
 /** Skills one tool can add to another without deciding between differing copies. */
 const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => { const plan = planAdd(from, to, list); return [...plan.fresh, ...plan.same, ...plan.resume]; };
@@ -684,9 +700,9 @@ const sendable = (from: Tool, to: Tool, list: SampleSkill[]) => { const plan = p
  */
 function send(from: Tool, to: Tool, list: SampleSkill[], conflicts = false) {
   const plan = planAdd(from, to, list);
-  for (const skill of [...plan.fresh, ...plan.same, ...plan.resume]) edit(skill.key, (now, draft) => ({ managed: true, off: withBoth(now, from, to, pairOnly(to)).off, ...keepChoice(keepResolve(true, draft?.resolve), draft) }));
+  for (const skill of [...plan.fresh, ...plan.same, ...plan.resume]) edit(skill.key, (now, draft) => ({ managed: true, off: enrol(now, from, to).off, ...keepChoice(keepResolve(true, draft?.resolve), draft) }));
   if (conflicts) for (const { skill } of plan.differ) edit(skill.key, (now, draft) => ({
-    managed: true, off: withBoth(now, from, to, pairOnly(to)).off, resolve: from,
+    managed: true, off: enrol(now, from, to).off, resolve: from,
     // As choosing a copy by hand: undoing the choice puts Managed back as it was.
     prior: draft?.resolve ? draft.prior ?? committedOf(skill.key).managed : now.managed,
     seen: committedOf(skill.key).hashes?.[from],
@@ -706,8 +722,10 @@ function addGroup(state: Cell, on: boolean, count: number, word: string, title: 
   return h(`span.add-group${extra}`, { title, 'data-group': word, 'data-count': String(count) }, mark, h('strong', {}, who.length && who.length <= 3 && who.length === count ? `${who.join(', ')}:` : String(count)), h('span', {}, who.length && who.length <= 3 && who.length === count ? word.replace(': ', ', ') : word));
 }
 
-/** One other tool in a tool's menu: what adding this tool's skills there would do, and Add. */
-/** `shown` is the tool the row is named for: the target in a tool's own menu, the source in a harness's "Add from" menu. */
+/**
+ * One other tool in a tool's menu: what adding `from`'s skills to `to` would do, and Add. `shown` is the tool the row is named
+ * for: the target in a tool's own menu, the source in a harness's "Add from" menu.
+ */
 function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
   const plan = planAdd(from, to, list);
   const key = `${from}>${to}`;
@@ -766,7 +784,16 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
 /** A harness's page: the same menu as its column header, from the toolbar, so bringing items in is never hidden. */
 function addFromButton(tool: Tool) {
   return button({ variant: 'outline', size: 'small', icon: 'plus', label: 'Add from…', name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from', attrs: { 'aria-expanded': String(view.toolMenu === tool), 'aria-haspopup': 'dialog' },
-    onclick: event => { event.stopPropagation(); view.toolMenu = view.toolMenu === tool ? undefined : tool; view.addConflicts.clear(); view.addReasons.clear(); rerender(); } });
+    onclick: event => toggleToolMenu(event, tool) });
+}
+
+/** Opens or closes a tool's menu; each opening starts with no differing copies included and no reasons shown. */
+function toggleToolMenu(event: Event, tool: Tool) {
+  event.stopPropagation();
+  view.toolMenu = view.toolMenu === tool ? undefined : tool;
+  view.addConflicts.clear();
+  view.addReasons.clear();
+  rerender();
 }
 
 /** Moving to another harness starts its tables closed: no row details or menu carried over from the last one. */
@@ -778,7 +805,7 @@ function toolHead(tool: Tool, list: SampleSkill[]) {
   if (variant === 'b') {
     const open = view.toolMenu === tool;
     return h(`div.ov-cell.ov-tool-head.tool-head-b${tool === focus ? '.tool-head-focus' : ''}`, { role: 'columnheader' },
-      h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: tool === focus ? `Options for ${names[tool]}: add other tools’ ${nouns[kind][1].toLowerCase()} here, or stop syncing here` : `Options for ${names[tool]}: copy its ${nouns[kind][1].toLowerCase()} to other tools, or stop syncing here`, onclick: (event: Event) => { event.stopPropagation(); view.toolMenu = open ? undefined : tool; view.addConflicts.clear(); view.addReasons.clear(); rerender(); } },
+      h('button.tool-head-button', { type: 'button', id: `tool-${tool}`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog', title: tool === focus ? `Options for ${names[tool]}: add other tools’ ${nouns[kind][1].toLowerCase()} here, or stop syncing here` : `Options for ${names[tool]}: copy its ${nouns[kind][1].toLowerCase()} to other tools, or stop syncing here`, onclick: (event: Event) => toggleToolMenu(event, tool) },
         brandMark(tool, 16), h('span.tool-head-name', {}, names[tool], icon('chevron-down', 12, 'tone-faint'))),
       open ? toolMenu(tool, list) : null);
   }
@@ -834,7 +861,8 @@ export { brandMark };
 export function outcomeBand(withAction = true): HTMLElement | null {
   const outcome = state.outcome;
   // A result stands until something new is queued, the page changes, or it is dismissed.
-  const matrixPage = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || state.page === 'harnesses';
+  // A table is on screen: its pending changes or open choice hide an older result. Harnesses shows one only on a kind's tab.
+  const matrixPage = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || (state.page === 'harnesses' && !!state.harness && ['skills', 'mcp', 'agents'].includes(state.harnessTab));
   if (!outcome || outcome.page !== state.page || (matrixPage && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && [outcome.item, ...(outcome.items ?? [])].some(name => name && (name === skill.name || name.toLowerCase() === skill.key)))))) || (state.skillsView === 'files' && state.item && ![outcome.item, ...(outcome.items ?? [])].some(name => name && name.toLowerCase() === state.item))) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
@@ -1161,10 +1189,13 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   forgetOtherHomes();
   const all = rows();
   const needle = view.find.trim().toLowerCase();
-  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill, toolList()) === 'attention'))
+  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : needsChoice(skill)))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
   const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
     oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
+  // Rows a harness's page is about (it has a copy) split into Managed and Unmanaged; the rest, only other tools have.
+  const here = shown.filter(inFocus), away = shown.filter(skill => !inFocus(skill));
+  managedDrawn = here.some(skill => committedOf(skill.key).managed);
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus) : null, changeBar())),
     notices(),
@@ -1176,15 +1207,10 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
           h('div.ov-fill')),
-        ...(() => {
-          const here = shown.filter(inFocus), away = shown.filter(skill => !inFocus(skill));
-          managedDrawn = here.some(skill => committedOf(skill.key).managed);
-          return [
-            section('Managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
-            section('Unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
-            // Items only other tools have: their box in this tool's column adds them here.
-            focus ? section(`Not in ${names[focus]}`, away, away.length) : null];
-        })(),
+        section('Managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
+        section('Unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
+        // Items only other tools have: their box in this tool's column adds them here (see setTool).
+        focus ? section(`Not in ${names[focus]}`, away, away.length) : null,
         ghostRows()), toolList().length),
       legend(all)));
 }

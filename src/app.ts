@@ -30,7 +30,7 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
+  outcome: undefined as { page: Page; text: string; note?: string; item?: string; /** An instruction save or its Undo: which file, and whether the result offers Undo save on that file's card. */ instruction?: { path: string; saved: boolean }; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
@@ -91,6 +91,9 @@ function accept(view: HomeView) {
   state.applied = undefined;
   state.item = undefined;
   state.instructionEdit = undefined;
+  // Another home has other instruction files: the pages that show them read again.
+  state.instructions = undefined;
+  instructionRead = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -277,8 +280,27 @@ export const loadInstructions = () => busy('Reading instruction files…', async
   announce('', true);
 });
 
+/** A quiet read of the instruction files, with no busy state, for pages that show them (Instructions after a home switch, Harnesses). */
+let instructionRead: { home: string; failed: boolean } | undefined;
+/** Whether the quiet read is under way or failed for this home; undefined once it is done (or never started). */
+export const instructionReadState = () => (instructionRead && instructionRead.home === state.home?.home ? (instructionRead.failed ? 'failed' : 'reading') : undefined);
+/** Reads the files unless they are here or being read; `again` reads them even so (Refresh, Try again). A slower older read is dropped. */
+export function readInstructionsQuietly(again = false) {
+  const home = state.home?.home;
+  if (!home || (!again && (state.instructions || instructionReadState() === 'reading'))) return;
+  const mine: { home: string; failed: boolean } = instructionRead = { home, failed: false };
+  void api().instructions().then(files => files ?? Promise.reject(), () => Promise.reject()).then(files => {
+    if (instructionRead !== mine) return;
+    instructionRead = undefined;
+    state.instructions = files;
+    rerender();
+  }, () => { if (instructionRead === mine) { mine.failed = true; rerender(); } });
+}
+
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
 export const saveInstructionText = (file: InstructionFile, text: string) => busy('Saving…', async () => {
+  // The result belongs to the page the save was started on, even if the person moves on while it runs.
+  const page = state.page;
   const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
   state.instructions = (await api().instructions()) ?? state.instructions;
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
@@ -293,25 +315,26 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: state.page, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page, item: name, instruction: { path: file.path, saved: !!result.saved && file.exists }, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
 
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
+  const page = state.page;
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
   state.instructions = (await api().instructions()) ?? state.instructions;
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
-  state.outcome = { page: state.page, item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
+  state.outcome = { page, item: name, instruction: { path: file.path, saved: false }, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
   announce(state.outcome.text, true);
 });
 
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
 export function startInstructionEdit(file: InstructionFile) {
   // A save on another card keeps its Undo there; any other result belongs to the last task.
-  if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
+  if (!(state.outcome?.instruction?.saved && state.outcome.instruction.path !== file.path)) state.outcome = undefined;
   state.instructionEdit = { tool: file.tool, text: file.text, hash: file.hash, stage: 'edit' };
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
