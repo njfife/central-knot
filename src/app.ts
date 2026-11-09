@@ -50,7 +50,7 @@ export const state = {
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
-  undoMoved: undefined as { page: Page; notices: string[] } | undefined,
+  undoMoved: undefined as { page: Page; notices: string[]; label: string } | undefined,
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
   seenNotices: new Set<string>(),
   /** The window chooses the sidebar shape until the person uses the toggle. */
@@ -512,7 +512,7 @@ api().onSyncChanged(async () => {
       // different events, one above the other, is the one thing here that would mislead.
       else if ([...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].length) {
         // Tied to the notices that pushed it aside: the line goes with them, and never outlives a later Apply.
-        state.undoMoved = { page: outcome.page, notices: [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].map(notice => notice.history || notice.item) };
+        state.undoMoved = { page: outcome.page, label: outcome.act.label, notices: [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].map(notice => notice.history || notice.item) };
         state.outcome = undefined;
       }
       rerender();

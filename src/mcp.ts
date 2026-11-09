@@ -287,7 +287,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const copies: Partial<Record<HarnessId, ToolCopy>> = {};
     for (const entry of entries) copies[entry.tool] = { hash: entry.hash, directory: entry.file, rootLabel: harnesses[entry.tool].name, lines: 0, modified: new Date().toISOString(), summary: summary(entry.server), writable: !entry.hostBound, folder: name };
     const cannot: Partial<Record<HarnessId, string>> = {};
-    const sample = entries[0].server;
+    // The definition shown is the synced one: a copy still waiting (Claude Code's older entry) is not what the server now is.
+    const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });

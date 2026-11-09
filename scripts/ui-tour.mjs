@@ -131,6 +131,7 @@ if (wanted('mcp')) {
   await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
   const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
+  if (await a.has('#open-files')) { if (first) await a.click(`#${first}`); await a.click('#open-files'); await shot(a, 'mcp-waiting-details', 'Opened the files server\'s details while it waits for Write to Claude Code.'); }
 }
 
 // ---------- Agents ----------
