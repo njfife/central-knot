@@ -1076,7 +1076,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 /* Round 11: file names keep their case; Files view top gap; agent detail rows share a text column; pending source dot neutral */
 .eyebrow-file { text-transform: none; letter-spacing: 0; }
 .detail-scroll > .details { padding-top: 4px; }
-.detail-scroll .details-where-row { margin-right: 18px; }
 .details-tool-head > strong { flex: none; min-width: 150px; }
 .see-change { color: var(--accent-ink); }
 
@@ -1193,7 +1192,8 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugin-outcome-row { align-items: center; }
 
 /* Files view: the detail pane keeps its width; its content stops at the page's content edge (list column is 300px). */
-.split .detail-column .pane-header, .split .detail-column .detail-scroll > *, .split .detail-column > .bands { max-width: 604px; }
+.split .detail-column .pane-header, .split .detail-column > .bands { max-width: 604px; }
+.split .detail-column .detail-scroll > * { max-width: 588px; }
 .sync-notice > .notice-change { flex: 1 1 100%; }
 
 .details-tool-head { grid-template-columns: 196px minmax(0, 1fr); }
@@ -1203,3 +1203,20 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 /* Round 14: the pending summary stands apart from the filter tabs */
 .toolbar-end { padding-left: 16px; border-left: 1px solid var(--line); margin-left: auto; }
 .toolbar-end:empty { border-left: 0; }
+
+/* Round 15: the chip states the queued decision in words; only its action is accent */
+.decided { color: var(--ink-soft); border-color: var(--line); }
+.decided-undo { color: var(--accent-ink); }
+.decided-uses { color: var(--ink-faint); }
+
+/* Round 15: the Find box keeps its width, so the filter tabs never move */
+.ov-page > .toolbar > .find { flex: none; width: 312px; }
+.ov-section-after { margin-left: 6px; }
+
+.legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed var(--accent); background: color-mix(in oklab, var(--accent) 25%, transparent); }
+.legend-switch > .switch-knob { position: absolute; top: 1px; right: 1px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); }
+
+/* Round 15: before and after line up; only what changed is marked */
+.sync-notice > .notice-change { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; align-items: baseline; }
+.change-removed { text-decoration: line-through; color: var(--danger, #f85149); }
+.change-added { background: color-mix(in oklab, var(--success, #3fb950) 28%, transparent); border-radius: 2px; }
