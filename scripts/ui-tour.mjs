@@ -1,7 +1,7 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -192,6 +192,66 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+}
+
+// ---------- Git repo ----------
+if (wanted('repo')) {
+  begin('repo');
+  const sizes = async (name, caption) => {
+    for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false });
+      await a.settle(); await shot(a, `${name}-${width}`, `${caption} At ${width}×${height}.`);
+    }
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  };
+  const run = (cwd, ...args) => execFileSync('git', ['-C', cwd, '-c', 'user.name=Sam', '-c', 'user.email=sam@example.com', ...args], { stdio: 'ignore' });
+  // A repo someone already keeps: a README, one skill, one MCP server and one agent of theirs.
+  const remote = join(scratch, 'remote', 'agent-config.git');
+  const author = join(scratch, 'author');
+  mkdirSync(remote, { recursive: true });
+  execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+  execFileSync('git', ['clone', '--quiet', remote, author], { stdio: 'ignore' });
+  const put = (path, text) => { mkdirSync(join(author, path, '..'), { recursive: true }); writeFileSync(join(author, path), text); };
+  put('README.md', '# Agent setup\n\nKept with Central Knot.\n');
+  put('skills/incident/SKILL.md', '---\nname: incident\ndescription: "Runs an incident: timeline, roles, comms."\n---\n\nOpen a timeline first.\n');
+  put('mcp/pagerduty.json', JSON.stringify({ type: 'http', url: 'https://mcp.pagerduty.example/mcp' }, null, 2) + '\n');
+  put('agents/reviewer.md', '---\nname: reviewer\ndescription: Reviews a change before it ships.\n---\n\nRead the diff twice.\n');
+  run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Incident kit'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
+
+  await a.click('#nav-skills');
+  if (await a.has('#manage-all')) { await a.click('#manage-all'); await a.click('#apply'); }
+  await a.click('#nav-repo');
+  await shot(a, 'repo-start-dark', 'Clicked "Git repo" in the sidebar: nothing connected yet. The page says what goes where and that nothing changes until Pull or Push.');
+  await a.theme('light'); await shot(a, 'repo-start-light', 'The same, light.'); await a.theme('dark');
+  await sizes('repo-start', 'The not-connected page.');
+  await a.run(`(() => { const input = document.querySelector('#repo-url'); input.value = ${JSON.stringify(remote)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'repo-address-typed', 'Typed the repo’s address (a local repo in this tour; an https or ssh address works the same).');
+  await a.click('#repo-connect');
+  await waitFor(a, `!!document.querySelector('#repo-state') && !/Checking/.test(document.querySelector('#repo-state').textContent)`, 20000); await a.settle();
+  await shot(a, 'repo-connected-dark', 'Clicked "Connect". The repo’s skill, MCP server and agent wait under "From the repo"; this computer’s Managed items wait under "From this computer". Nothing in the tools changed.');
+  await a.theme('light'); await shot(a, 'repo-connected-light', 'The same, light.'); await a.theme('dark');
+  await sizes('repo-connected', 'Connected, with changes both ways.');
+  await a.click('#repo-pull');
+  await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
+  await shot(a, 'repo-pulled', 'Clicked "Pull 3": the repo’s three items are now in the tools, Managed. Only this computer’s changes remain, ready to push.');
+  await a.click('#repo-push');
+  await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'repo-pushed-dark', 'Clicked "Push": committed and pushed. Up to date.');
+  await a.theme('light'); await shot(a, 'repo-pushed-light', 'The same, light.'); await a.theme('dark');
+  await sizes('repo-up-to-date', 'Up to date.');
+  // Someone changes the incident skill in the repo, and the notes skill is edited on this computer.
+  run(author, 'pull', '--quiet', 'origin', 'main');
+  put('skills/incident/SKILL.md', '---\nname: incident\ndescription: "Runs an incident: timeline, roles, comms."\n---\n\nOpen a timeline first.\nPage the on-call lead.\n');
+  run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Page the lead'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
+  edit(join(practice, '.claude/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nKeep notes short.\n'));
+  await wait(3500);
+  await a.click('#header-refresh');
+  await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '') && document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'repo-both-ways', 'The incident skill changed in the repo, notes was edited here, then clicked "Refresh". Push waits until the repo’s change is pulled.');
+  await a.click('#nav-history'); await shot(a, 'repo-history', 'Clicked "History": what Pull brought in, each with Undo.');
+  await a.click('#nav-repo'); await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
+  await a.click('#repo-disconnect'); await shot(a, 'repo-disconnect-confirm', 'Clicked "Disconnect…": it asks once, saying what stays.');
+  await a.click('#repo-disconnect-cancel');
 }
 
 a.quit();

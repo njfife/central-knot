@@ -17,6 +17,12 @@ const list = (tools: string[]) => {
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
+  // Pull from the git repo: said as a pull, whichever way sync carried it.
+  if (event.via === 'repo' && !event.undoneBy) {
+    if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
+    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}; it replaced ${list(event.losers.map(loser => loser.tool))}’s copy.`, action: 'Undo' };
+    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
+  }
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${list(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}’s.${order}`, action: 'Undo' };
@@ -58,7 +64,7 @@ const day = (iso: string) => {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
-const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'added' ? `Remove the copies Apply all added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
+const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
@@ -74,7 +80,7 @@ function actions(event: HistoryEvent, action?: string) {
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
   const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
-  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
+  const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
@@ -89,7 +95,7 @@ export function historyPage() {
   // The row's own button redoes; the band only confirms.
   // The new top row says what happened (and the announcement reads it out); a band repeating it would say it twice.
   const done = null;
-  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync, Apply all and Pull changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.

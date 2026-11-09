@@ -66,9 +66,9 @@ export function sameSource(first: string, second: string): boolean {
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
 const fetchUrl = (source: string) => { const repo = githubRepo(source); return repo ? `https://github.com/${repo}.git` : source.trim(); };
 
-const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
+export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
-function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number }): Promise<{ code: number | 'timeout' | 'missing'; output: string }> {
+export function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number }): Promise<{ code: number | 'timeout' | 'missing'; output: string }> {
   return new Promise(done => {
     execFile(file, args, { env: options.env, cwd: options.cwd, timeout: options.timeoutMs, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', windowsHide: true }, (error, stdout, stderr) => {
       const output = `${stdout ?? ''}${stderr ?? ''}`.replace(/\r/g, '').trim();
@@ -84,10 +84,10 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
 }
 
 /** Why a Git command failed, in words a person can act on (MKT-05). */
-export function whyGitFailed(code: number | 'timeout' | 'missing', output: string): string {
+export function whyGitFailed(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): string {
   const text = output.toLowerCase();
-  if (code === 'missing') return 'Git is not installed, so this marketplace cannot be read.';
-  if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return 'Can’t reach the marketplace. Check your connection; a company marketplace may need its network or VPN.';
+  if (code === 'missing') return `Git is not installed, so this ${place} cannot be read.`;
+  if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.`;
   if (/host key verification failed/.test(text)) return 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.';
   if (/passphrase/.test(text)) return 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.';
   if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';

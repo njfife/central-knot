@@ -1,7 +1,7 @@
 import { onlyAllowed } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -14,6 +14,7 @@ import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } fro
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
+import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView } from './gitrepo.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
@@ -563,6 +564,14 @@ app.whenReady().then(async () => {
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+  // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
+  // Connect, Pull, Push and Disconnect take their turn with every other change.
+  const otherHome = async () => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], view: await repoView(context()) });
+  handleRead('repo:view', async check => (current ? repoView(context(), { check: check === true }) : null));
+  handle('repo:connect', async (url, branch, home) => (home === current?.home && typeof url === 'string' && typeof branch === 'string' ? connectRepo(context(), url, branch) : otherHome()));
+  handle('repo:pull', async home => (home === current?.home ? pullRepo(context(), { syncOn }) : otherHome()));
+  handle('repo:push', async home => (home === current?.home ? pushRepo(context(), { from: current!.mode === 'actual' ? hostname() : current!.label }) : otherHome()));
+  handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context()) : otherHome()));
   await loading;
   if (smoke) {
     try {

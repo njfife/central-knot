@@ -9,12 +9,13 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
+import { loadRepo, repo, repoPage } from './repopage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', repo: 'Git repo', tools: 'Tools', settings: 'Settings' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */
@@ -61,6 +62,9 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: mode === 'custom' && current ? 'click to choose another' : 'a backup or another account' }[mode])));
 }
 
+/** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
+const repoWaiting = () => { const view = repo.view; if (!view?.connected) return undefined; const count = [...view.incoming, ...view.outgoing].filter(change => !change.held).length; return count || undefined; };
+
 function renderSidebar() {
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
@@ -71,6 +75,7 @@ function renderSidebar() {
     navRow('plugins', 'Plugins', 'puzzle'),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
+    navRow('repo', 'Git repo', 'git-branch', repoWaiting()),
     navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
   );
@@ -95,14 +100,14 @@ function renderHeader(rail: boolean) {
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
-    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
-      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
+    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : state.page === 'repo' ? 'Read this home again and check the repo for new commits' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); if (state.page === 'repo') void loadRepo(true); }) })),
   );
 }
 
 function renderPage() {
   document.body.classList.remove('has-item');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 
 function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {

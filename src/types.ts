@@ -109,6 +109,12 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** The git repo the Managed set lives in, if any. `check` asks the repo for its latest commit first. */
+  repo(check?: boolean): Promise<RepoView | null>;
+  connectRepo(url: string, branch: string, home: string): Promise<RepoResult>;
+  pullRepo(home: string): Promise<RepoResult>;
+  pushRepo(home: string): Promise<RepoResult>;
+  disconnectRepo(home: string): Promise<RepoResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -220,6 +226,8 @@ export interface HistoryEvent {
   orderProved: boolean;
   /** Set once undone or restored, naming the event that did it. */
   undoneBy?: string;
+  /** Made by Pull from the git repo. */
+  via?: 'repo';
 }
 
 // ---------- Marketplaces and plugins ----------
@@ -380,3 +388,48 @@ export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
 
+
+// ---------- Git repo ----------
+
+/** What one item of the Managed set is, in the repo's layout. */
+export type RepoKind = 'skill' | 'mcp' | 'agent' | 'base';
+
+/** One item that differs between the Managed set here and the repo. */
+export interface RepoChange {
+  key: string;
+  kind: RepoKind;
+  name: string;
+  /** What happened to it on the side it comes from. */
+  change: 'added' | 'changed' | 'removed';
+  /** Incoming: it changed here too since the last pull (or was removed here, or is no longer Managed). The repo's version wins on Pull; History keeps yours. */
+  alsoHere?: 'changed' | 'removed';
+  /** Outgoing: removed in the repo but changed here, so your change stays and goes back with the next Push. */
+  keptHere?: boolean;
+  /** Why it can't be brought across, if it can't. */
+  held?: string;
+}
+
+export interface RepoCommit { id: string; subject: string; at: string }
+
+export type RepoView =
+  | { connected: false; access: WriteAccess }
+  | {
+    connected: true;
+    access: WriteAccess;
+    url: string;
+    branch: string;
+    /** The commit last pulled or pushed here, and the repo's latest commit as last checked. */
+    base?: RepoCommit;
+    latest?: RepoCommit;
+    pulledAt?: string;
+    pushedAt?: string;
+    checkedAt?: string;
+    /** Why the last check could not reach the repo. */
+    problem?: string;
+    incoming: RepoChange[];
+    outgoing: RepoChange[];
+    /** Why Push can't run now. */
+    pushBlocked?: string;
+  };
+
+export interface RepoResult { view: RepoView; stopped?: string; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number }

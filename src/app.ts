@@ -1,4 +1,5 @@
 import { loadSettings } from './settingspage.ts';
+import { loadRepo } from './repopage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
@@ -7,7 +8,7 @@ import { loadPlugins, resetMarket } from './pluginstate.ts';
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'repo' | 'tools' | 'settings';
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -88,6 +89,8 @@ function accept(view: HomeView) {
   state.instructionEdit = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
+  // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
+  void loadRepo(state.page === 'repo');
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
@@ -182,6 +185,7 @@ export function showPage(page: Page) {
   if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   if (page === 'settings') void loadSettings();
+  if (page === 'repo') void loadRepo(true);
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') void loadInstructions();
   state.page = page;
