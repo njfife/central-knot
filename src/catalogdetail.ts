@@ -62,8 +62,10 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
+/** A skill as the tools read it, from its SKILL.md `body` in folder `dir`: its `name` (else the folder's) and description. */
+const skillPart = (body: string, dir: string): NamedPart => { const meta = nameAndDescription(body); return { name: meta.name || basename(dir), description: meta.description ?? '' }; };
 /** A skill's name as the tools read it: its SKILL.md's `name`, else its folder's. */
-export const skillName = (body: string, dir: string) => nameAndDescription(body).name || basename(dir);
+export const skillName = (body: string, dir: string) => skillPart(body, dir).name;
 
 /** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
 async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
@@ -71,7 +73,7 @@ async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const add = async (dir: string) => {
     const body = await textInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
-    found.push({ name: skillName(body, dir), description: nameAndDescription(body).description ?? '' });
+    found.push(skillPart(body, dir));
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
@@ -128,8 +130,11 @@ const listedIn = (folder: string, declared: Record<string, unknown>, key: string
  * marketplace `entry` or plugin.json lists, else its skills folder.
  */
 export async function skillNamesIn(folder: string, entry: Record<string, unknown> = {}): Promise<string[]> {
-  return (await skillsIn(folder, listedIn(folder, await declaredOf(folder, entry, folder), 'skills') ?? [join(folder, 'skills')])).map(part => part.name);
+  return (await declaredSkills(folder, await declaredOf(folder, entry, folder), folder)).map(part => part.name);
 }
+
+/** A plugin's skills: the paths it lists (`declared`), else its skills folder, each read inside `root`. */
+const declaredSkills = (folder: string, declared: Record<string, unknown>, root: string) => skillsIn(root, listedIn(folder, declared, 'skills') ?? [join(folder, 'skills')]);
 
 /**
  * What one plugin holds, by name. Its marketplace entry and plugin.json may list component paths ("strict": false entries
@@ -142,7 +147,7 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, listed('skills') ?? [join(folder, 'skills')]),
+    skills: await declaredSkills(folder, declared, root),
     commands: await markdownIn(root, listed('commands') ?? [join(folder, 'commands')]),
     agents: await markdownIn(root, listed('agents') ?? [join(folder, 'agents')]),
     hooks: Object.keys(hooks).sort(),

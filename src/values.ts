@@ -34,7 +34,7 @@ export const isFolder = (source: string) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(s
 /** A marketplace, plugin or skill name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
 export const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
 
-/** Orders two versions as Codex orders a plugin's: as semantic versions when both are (pre-releases by semver's rules), otherwise as text. */
+/** Orders two versions: as semantic versions when both are (pre-releases by semver's rules), otherwise as text (as Codex orders its cached plugin versions). */
 export function compareVersions(first: string, second: string): number {
   const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
   const [a, b] = [parse(first), parse(second)];

@@ -138,7 +138,8 @@ const OPPOSITE: Record<PluginAction, PluginAction> = { install: 'remove', remove
 
 /**
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
- * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone.
+ * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. Turning a
+ * skill back on is undone by turning it off, which, like any turn-off, is refused with the reason on an untested build.
  */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed)
@@ -238,7 +239,8 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
     try {
       result = step.action === 'install' ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
-        : await api.setSkill(step.source, step.marketName, step.plugin, step.skill!, step.tools[0]!, step.action === 'skill-on', home);
+        : step.skill ? await api.setSkill(step.source, step.marketName, step.plugin, step.skill, step.tools[0]!, step.action === 'skill-on', home)
+        : { reports: failedFor(step.tools, 'That choice named no skill, so nothing ran.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };
     for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.skill ? { skill: step.skill } : {}), report });

@@ -148,3 +148,16 @@ test('Finder-like PATH still yields bounded explicit candidates, never project p
   assert.ok(candidates.length <= 12);
   assert.ok(candidates.every(candidate => candidate.startsWith('/')));
 });
+
+test('A version probe finds a script CLI’s interpreter beside it, even when the app was opened with a short PATH', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ck-probe-'));
+  const path = process.env.PATH;
+  try {
+    // As npm installs Copilot CLI or Codex beside node: `#!/usr/bin/env node`, node in the same folder, not on PATH.
+    await writeFile(join(dir, 'fakenode'), '#!/bin/sh\necho "tool 1.2.3"\n', { mode: 0o755 });
+    await writeFile(join(dir, 'tool'), '#!/usr/bin/env fakenode\n', { mode: 0o755 });
+    process.env.PATH = '/usr/bin:/bin';
+    assert.equal((await probeVersion(join(dir, 'tool'))).version, '1.2.3');
+  } finally { process.env.PATH = path; await rm(dir, { recursive: true, force: true }); }
+});
+

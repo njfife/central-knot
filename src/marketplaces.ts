@@ -12,7 +12,7 @@ import { probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
-import { heldReason, untestedBuild } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, heldReason, untestedBuild } from './pluginstatus.ts';
 import { SAFE_NAME, isFolder, isHttps, onlyAllowed } from './values.ts';
 import { toolNames } from './words.ts';
 
@@ -70,13 +70,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
   const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
-  /** Each CLI's version by its path, read once (`--version`) for a plugin skill switch's tested range. */
+  /**
+   * Each CLI's version by its path (`--version`), for a plugin skill switch's tested range. A version read is kept until
+   * Refresh all (a CLI may be updated meanwhile); a read that failed (a slow first start) is tried again next time.
+   */
   const versionReads = new Map<string, Promise<string | undefined>>();
   const cliVersion = (binary: string | undefined) => {
     if (!binary) return Promise.resolve(undefined);
-    if (!versionReads.has(binary)) versionReads.set(binary, probeVersion(binary).then(probe => probe.version));
+    if (!versionReads.has(binary)) versionReads.set(binary, probeVersion(binary).then(probe => { if (!probe.version) versionReads.delete(binary); return probe.version; }));
     return versionReads.get(binary)!;
   };
+  /** A tool's build: its CLI's, else the one discovery read for this home (ChatGPT desktop's own Codex, which isn't a CLI here). */
+  const buildOf = async (ctx: engine.PluginContext, tool: HarnessId) => (await cliVersion(ctx.binaries[tool])) ?? host.home()?.snapshots.find(snapshot => snapshot.harness === tool)?.probe.version;
   /** A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them). */
   const context = async ({ clis = false } = {}): Promise<engine.PluginContext> => {
     const open = host.home();
@@ -167,7 +172,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh === true || (fresh !== undefined && engine.sameSource(fresh, source))))));
     const snapshots = host.home()?.snapshots ?? [];
     const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
-    const versions = Object.fromEntries((await Promise.all(tools.map(async tool => [tool, await cliVersion(ctx.binaries[tool])] as const))).filter(([, version]) => version));
+    if (fresh === true) versionReads.clear();
+    const versions = Object.fromEntries((await Promise.all(tools.filter(tool => SKILL_SWITCH_TESTED_FROM[tool]).map(async tool => [tool, await buildOf(ctx, tool)] as const))).filter(([, version]) => version));
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, versions };
   }
 
@@ -265,7 +271,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
-    const untested = on ? undefined : untestedBuild(tool, await cliVersion(ctx.binaries[tool]));
+    const untested = on ? undefined : untestedBuild(tool, await buildOf(ctx, tool), !!ctx.binaries[tool]);
     if (untested) return { reports: failedFor([tool], untested) };
     // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's.
     const { catalog } = await catalogFor(ctx, source, { counts: false });

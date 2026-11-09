@@ -310,9 +310,9 @@ export function tomlValue(value: TomlValue): string {
   return `{ ${Object.entries(value).map(([key, item]) => `${bareKey(key)} = ${tomlValue(item)}`).join(', ')} }`;
 }
 
-/** Adds a table at the end of a TOML document, one blank line after what is there. */
-function appendToml(text: string, body: string): string {
-  return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text.trim() ? '\n' : ''}${body.endsWith('\n') ? body : `${body}\n`}`;
+/** Adds a table at the end of a TOML document, one blank line after what is there, with the document's line ending `eol`. */
+function appendToml(text: string, body: string, eol = '\n'): string {
+  return `${text}${text && !text.endsWith('\n') ? eol : ''}${text.trim() ? eol : ''}${body.endsWith('\n') ? body : `${body}${eol}`}`;
 }
 
 /**
@@ -335,7 +335,7 @@ function ownEnd(text: string, table: TomlTable): number {
  * Takes `tables` (read from `text`) out, with `replacement` in place of the first when given. Everything else stays byte
  * for byte, apart from, with `endGap`, the one blank line appendToml puts before a table that ended the document.
  */
-function cutTables(text: string, tables: TomlTable[], replacement?: string, { endGap = false } = {}): string {
+function cutTables(text: string, tables: TomlTable[], replacement?: string, { endGap = false, eol = '\n' } = {}): string {
   let out = '';
   let cursor = 0;
   tables.forEach((table, index) => {
@@ -344,7 +344,7 @@ function cutTables(text: string, tables: TomlTable[], replacement?: string, { en
     cursor = ownEnd(text, table);
   });
   const rest = text.slice(cursor);
-  return endGap && replacement === undefined && rest === '' && out.endsWith('\n\n') ? out.slice(0, -1) : out + rest;
+  return endGap && replacement === undefined && rest === '' && out.endsWith(eol + eol) ? out.slice(0, -eol.length) : out + rest;
 }
 
 /**
@@ -369,9 +369,11 @@ export function setTomlTable(text: string, prefix: string[], name: string, body:
 export function editTomlArray(text: string, path: string[], drop: (table: TomlTable) => boolean, add?: Record<string, TomlValue>): string {
   const blocks = readTomlTables(text).filter(table => table.array && table.path.length === path.length && table.path.every((part, index) => part === path[index]));
   const dropped = blocks.filter(drop);
-  const kept = dropped.length ? cutTables(text, dropped, undefined, { endGap: true }) : text;
+  // A file written with Windows line endings keeps them.
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const kept = dropped.length ? cutTables(text, dropped, undefined, { endGap: true, eol }) : text;
   if (!add) return kept;
-  return appendToml(kept, `[[${path.map(bareKey).join('.')}]]\n${Object.entries(add).map(([key, value]) => `${bareKey(key)} = ${tomlValue(value)}\n`).join('')}`);
+  return appendToml(kept, `[[${path.map(bareKey).join('.')}]]${eol}${Object.entries(add).map(([key, value]) => `${bareKey(key)} = ${tomlValue(value)}${eol}`).join('')}`, eol);
 }
 
 /** The header for `[prefix.name]` and its subtables, quoting a name that needs it. */

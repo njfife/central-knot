@@ -277,7 +277,9 @@ export interface SkillOff { skill: string; held?: string }
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean;
   /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */
-  skills?: string[]; skillsOff?: SkillOff[] } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  skills?: string[]; skillsOff?: SkillOff[];
+  /** Why none of its skills can be switched here, whatever the skill: the tool's config is written in a form Central Knot doesn't edit. */
+  switchesHeld?: string } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 

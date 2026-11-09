@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
-import { isBundledCli } from './platform.ts';
+import { isBundledCli, pathBeside } from './platform.ts';
 import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 
 function errorCode(error: unknown): string {
@@ -20,7 +20,7 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
   }
   return new Promise(resolveResult => {
     execFile(binary, ['--version'], {
-      cwd: tmpdir(), timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
+      cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
       windowsHide: true, encoding: 'utf8',
     }, (error, stdout) => {
       if (error) {

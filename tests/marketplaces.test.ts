@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -27,12 +27,12 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
     openExternal: async () => {},
   };
   const use: MarketplaceEngine = {
-    findClis: async () => ({ 'claude-cli': '/bin/true' }),
+    findClis: async () => ({ 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}) }),
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
-    setSkill: async (_context, marketplace, plugin, skill, tool, on) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
+    setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
   return { base, home, calls, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
@@ -180,5 +180,24 @@ test('Refreshing a marketplace lets go of its plugins’ copies from other repos
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), true, 'a plain view keeps the copy');
     await box.markets.refresh(root);
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), false);
+  } finally { await box.cleanup(); }
+});
+
+test('Turning a plugin skill off waits for a tested build, read from the tool’s CLI; turning it back on never does', { skip: process.platform === 'win32' }, async () => {
+  const box = await setup({ codex: true });
+  try {
+    await mkdir(join(box.base, 'bin'), { recursive: true });
+    await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.100.0"\n', { mode: 0o755 });
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    const off = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home);
+    assert.match(off.reports[0]!.message, /Not verified on this build of Codex \(0\.100\.0\)/);
+    const on = await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', true, box.home);
+    assert.equal(on.reports[0]!.outcome, 'skill-on');
+    assert.deepEqual(box.calls.filter(call => call.startsWith('skill')), ['skill pdf:one@team codex-cli true entry=pdf'], 'only the turn-on reached the tool, with the plugin’s catalog entry');
+    // Codex updated while the app is open: Refresh all reads its build again, and turning off is offered.
+    await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.167.0"\n', { mode: 0o755 });
+    assert.equal((await box.markets.view(true)).versions?.['codex-cli'], '0.167.0');
+    assert.equal((await box.markets.setSkill(root, 'team', 'pdf', 'one', 'codex-cli', false, box.home)).reports[0]!.outcome, 'skill-off');
   } finally { await box.cleanup(); }
 });

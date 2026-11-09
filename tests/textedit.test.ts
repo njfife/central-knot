@@ -106,4 +106,7 @@ test('TOML: each [[array]] block is read as its own table, and blocks are droppe
   const dropped = editTomlArray(text, ['skills', 'config'], block => block.entries[0]!.value === 'a:one');
   assert.equal(dropped, `${codexToml}\n# about the next one\n[[ skills.config ]]\npath = "/p/SKILL.md"\nenabled = false\n`);
   assert.equal(editTomlArray(editTomlArray(codexToml, ['skills', 'config'], () => false, { name: 'b:two', enabled: false }), ['skills', 'config'], () => true), codexToml, 'an added block taken out again leaves the file as it was');
+  const windows = codexToml.replace(/\n/g, '\r\n');
+  const added = editTomlArray(windows, ['skills', 'config'], () => false, { name: 'b:two', enabled: false });
+  assert.ok(!/[^\r]\n/.test(added) && editTomlArray(added, ['skills', 'config'], () => true) === windows, 'a file with Windows line endings keeps them');
 });

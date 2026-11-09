@@ -56,6 +56,8 @@ export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
 export const offByBareName = (skill: string) => `Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
+/** Why Codex's skill switches aren't edited: its config.toml writes the list as a value, which a `[[skills.config]]` block can't extend. */
+export const INLINE_SKILLS_CONFIG = 'Codex’s config.toml writes skills.config as a value, a form Central Knot doesn’t edit, so its plugin skills can’t be switched here.';
 /** Why a skill the marketplace lists can't be switched where the installed copy (an older or newer version) lacks it. */
 export const notInCopy = (tool: HarnessId, skill: string) => `The copy ${names[tool]} has installed has no skill named “${skill}”.`;
 /** Why Copilot CLI's switch isn't offered for a skill whose name could not go safely on its command line. */
@@ -71,7 +73,7 @@ export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugi
   if (state.state !== 'installed') return NO_SKILL_SWITCH[tool] ?? `It isn’t installed in ${names[tool]}.`;
   const off = skillOff(entry, plugin, tool, skill);
   // Only turning one off waits for a tested build; turning one back on is always offered.
-  const blocked = skillSwitchBlock(tool, state.skills, skill) ?? off?.held ?? (off ? undefined : untestedBuild(tool, view.versions?.[tool]));
+  const blocked = noSwitchReason(tool, state.skills, skill) ?? state.switchesHeld ?? off?.held ?? (off ? undefined : untestedBuild(tool, view.versions?.[tool], !!view.clis[tool]));
   if (blocked) return blocked;
   if (!view.canWrite) return PREVIEW_ONLY;
   return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
@@ -82,11 +84,13 @@ export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'c
 
 /**
  * Why turning off one plugin skill isn't offered on this build of a tool (ENB-01: native Disable only where it was
- * verified): its version is older than the switch was tested on, or couldn't be read. Undefined when it may be offered.
+ * verified): its `version` is older than the switch was tested on, or isn't known: not read from its CLI, or no CLI
+ * found to ask (`hasCli` false; Codex's switch needs no command, only a known build). Undefined when it may be offered.
  */
-export function untestedBuild(tool: HarnessId, version: string | undefined): string | undefined {
+export function untestedBuild(tool: HarnessId, version: string | undefined, hasCli: boolean): string | undefined {
   const from = SKILL_SWITCH_TESTED_FROM[tool];
   if (!from) return undefined;
+  if (!version && !hasCli) return `${cliMissing(tool)}, so its build can’t be checked and turning off one of its plugin skills isn’t offered.`;
   if (!version) return `${names[tool]}’s version couldn’t be read, so turning off one of its plugin skills isn’t offered (verified from ${from}).`;
   return compareVersions(version, from) < 0 ? `Not verified on this build of ${names[tool]} (${version}): turning off one plugin skill is verified from ${from}.` : undefined;
 }
@@ -96,7 +100,7 @@ export function untestedBuild(tool: HarnessId, version: string | undefined): str
  * such switch, the copy lacks the skill, or the name can't go on Copilot CLI's command line. The page (cantSwitchSkill)
  * and the engine (plugins.setSkill) both ask this.
  */
-export function skillSwitchBlock(tool: HarnessId, skills: string[] | undefined, skill: string): string | undefined {
+export function noSwitchReason(tool: HarnessId, skills: string[] | undefined, skill: string): string | undefined {
   if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
   if (skills && !skills.includes(skill)) return notInCopy(tool, skill);
   return tool === 'copilot-cli' && !SAFE_NAME.test(skill) ? UNSAFE_SKILL_NAME : undefined;

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
+import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
 import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
@@ -315,47 +316,65 @@ async function files(folder: string): Promise<Record<string, string>> {
   return out;
 }
 
-test('Codex turns one skill of a plugin off by name in config.toml and back on to the same bytes, and the plugin’s files never change', async () => {
+/** A Codex home with ck-test-market's `full` installed (skills `one` and `second`, the latter in folder two). */
+async function codexHome() {
   const box = await sandbox();
+  const copy = join(box.home, '.codex/plugins/cache/ck-test-market/full/1.0.0');
+  await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
+  await put(join(copy, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
+  const original = '# mine\nmodel = "o3"\n\n[marketplaces.ck-test-market]\nsource = "/m"\n\n[plugins."full@ck-test-market"]\nenabled = true\n\n[[skills.config]]\npath = "/elsewhere/SKILL.md"\nenabled = false\n';
+  const config = join(box.home, '.codex/config.toml');
+  await put(config, original);
+  const switchTo = (skill: string, on: boolean) => setSkill(box.context, 'ck-test-market', 'full', skill, 'codex-cli', on, '/m');
+  return { box, copy, original, config, switchTo };
+}
+
+test('Codex turns one skill of a plugin off by name in config.toml and back on to the same bytes, and the plugin’s files never change', async () => {
+  const { box, copy, original, config, switchTo } = await codexHome();
   try {
-    const copy = join(box.home, '.codex/plugins/cache/ck-test-market/full/1.0.0');
-    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nB\n');
-    await put(join(copy, 'skills/two/SKILL.md'), '---\nname: second\ndescription: Named apart from its folder.\n---\nB\n');
-    const original = '# mine\nmodel = "o3"\n\n[marketplaces.ck-test-market]\nsource = "/m"\n\n[plugins."full@ck-test-market"]\nenabled = true\n\n[[skills.config]]\npath = "/elsewhere/SKILL.md"\nenabled = false\n';
-    const config = join(box.home, '.codex/config.toml');
-    await put(config, original);
     const plugin = await files(copy);
-    const off = await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m');
+    const off = await switchTo('one', false);
     assert.deepEqual([off.outcome, off.changed], ['skill-off', true], off.message);
     assert.equal(await readFile(config, 'utf8'), `${original}\n[[skills.config]]\nname = "full:one"\nenabled = false\n`);
     assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skills: ['one', 'second'], skillsOff: [{ skill: 'one' }] });
-    assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m')).changed, undefined, 'already off is not a change');
-    const on = await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', true, '/m');
+    assert.equal((await switchTo('one', false)).changed, undefined, 'already off is not a change');
+    const on = await switchTo('one', true);
     assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);
     assert.equal(await readFile(config, 'utf8'), original);
     // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes every block that picks the skill.
     await writeFile(config, `${original}\n[[skills.config]]\npath = ${tomlValue(join(copy, 'skills/two/SKILL.md'))}\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
-    assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'second', 'codex-cli', true, '/m')).outcome, 'skill-on');
+    assert.equal((await switchTo('second', true)).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
     // Blocks the person kept for the skills, and a file with no final newline, come back exactly when Undo turns them
     // back last first.
     const kept = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true`;
     await writeFile(config, kept);
-    for (const skill of ['one', 'second']) await setSkill(box.context, 'ck-test-market', 'full', skill, 'codex-cli', false, '/m');
-    for (const skill of ['second', 'one']) await setSkill(box.context, 'ck-test-market', 'full', skill, 'codex-cli', true, '/m');
+    for (const skill of ['one', 'second']) await switchTo(skill, false);
+    for (const skill of ['second', 'one']) await switchTo(skill, true);
     assert.equal(await readFile(config, 'utf8'), kept);
-    // Codex loads the highest cached version (or `local`), so that copy's skills are the ones it switches.
+    assert.deepEqual(await files(copy), plugin);
+  } finally { await box.cleanup(); }
+});
+
+test('Codex switches the skills of the cached version it loads: local, else the highest', async () => {
+  const { box, copy } = await codexHome();
+  try {
     assert.deepEqual(['1.0.0', '1.0.0-beta.10', '0.9.0', '1.0.0-beta.2'].sort(compareVersions), ['0.9.0', '1.0.0-beta.2', '1.0.0-beta.10', '1.0.0']);
     for (const older of ['0.9.0', '1.0.0-beta.10', '1.0.0-beta.2']) await put(join(box.home, `.codex/plugins/cache/ck-test-market/full/${older}/skills/old/SKILL.md`), '---\nname: old\n---\nB\n');
     assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { path?: string }).path, copy);
-    // The same list written as a value can't take a [[skills.config]] block (TOML forbids both): it is left alone.
-    for (const inline of [`${original}\n[skills]\nconfig = [{ name = "full:two", enabled = false }]\n`, `skills.config = []\n${original}`]) {
+  } finally { await box.cleanup(); }
+});
+
+test('A Codex config.toml that writes skills.config as a value is left alone: a [[skills.config]] block would make it invalid', async () => {
+  const { box, original, config, switchTo } = await codexHome();
+  try {
+    for (const inline of [`${original}\n[skills]\nconfig = [{ name = "full:two", enabled = false }]\n`, `skills.config = []\n${original}`, `skills = { config = [] }\n${original}`]) {
       await writeFile(config, inline);
-      assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m')).outcome, 'failed');
+      assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { switchesHeld?: string }).switchesHeld, INLINE_SKILLS_CONFIG, 'the page says so before anything is chosen');
+      assert.equal((await switchTo('one', false)).outcome, 'failed');
       assert.equal(await readFile(config, 'utf8'), inline);
     }
-    assert.deepEqual(await files(copy), plugin);
   } finally { await box.cleanup(); }
 });
 
