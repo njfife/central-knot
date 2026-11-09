@@ -1005,6 +1005,20 @@ test('R10: with Sync off, Apply all does not carry a pending deletion along', as
   } finally { await box.cleanup(); }
 });
 
+test('A tool whose skills folder was away during a deletion has its copy removed when the folder returns (DEL-02)', async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+    await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
+    await settleAndPass(box);
+    assert.equal(await exists(join(box.home, COPILOT, 'foo')), false);
+    await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+    await settleAndPass(box);
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
 test('R11: a linked skill folder is followed when its source is edited', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {

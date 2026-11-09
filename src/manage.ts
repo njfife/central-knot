@@ -562,7 +562,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           const id = event({ key, item: name, kind: 'deleted', winner: { tool: deletions[0].tool, hash: baseline }, losers: lost, orderProved: true, previous: baseline });
           notices.push({ key, item: name, kind: 'deleted', winner: deletions[0].tool, losers: removed, orderProved: true, history: id });
-          item.copies = leftover;
+          item.copies = [...leftover, ...item.copies.filter(copy => copy.status === 'written' && !entry.locations.some(location => location.copy.directory === copy.directory) && !deletions.some(gone => gone.directory === copy.directory)).map(copy => ({ ...copy, status: 'removing' as const }))];
           item.state = 'dont-share';
           item.deleted = { at: new Date(now).toISOString(), tool: deletions[0].tool, hash: baseline };
           deletedNow.add(key);
@@ -755,7 +755,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           if ((await readTree(copy.directory)).hash === copy.hash) { await removeChecked(context, copy.directory, copy.hash); writes++; results.push({ item: item.name, harness: copy.harness, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); }
           item.copies = item.copies.filter(entry => entry !== copy);
         } catch (error) {
-          if (errorCode(error) === 'ENOENT') item.copies = item.copies.filter(entry => entry !== copy);
+          if (errorCode(error) === 'ENOENT' && await folderExists(dirname(copy.directory))) item.copies = item.copies.filter(entry => entry !== copy);
         }
       }
       // A managed skill gone from every tool at once (an uninstaller, or while the app was closed) is a deletion once settled,
