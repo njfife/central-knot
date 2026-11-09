@@ -43,6 +43,9 @@ export interface SyncRecord { formatVersion: number; generation: string; owner: 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
+/** A text's or file's SHA-256, in hex. */
+export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
+
 export function itemKey(folder: string): string { return folder.normalize('NFC').toLowerCase(); }
 
 export const errorCode = (error: unknown) => (typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '');

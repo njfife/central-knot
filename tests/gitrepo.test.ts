@@ -205,6 +205,10 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
     assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the first computer/);
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['review:changed'], 'the undone pull is a change here, ready to push');
+    // With Sync off, two tools edited differently: which is the skill isn't settled, so it neither goes out nor counts as removed.
+    await writeFile(join(first.home, '.claude/skills/review/SKILL.md'), skillText('review', 'One way.'));
+    await writeFile(join(first.home, '.copilot/skills/review/SKILL.md'), skillText('review', 'Another way.'));
+    assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, row.held]), [['review', 'Its copies here differ and haven’t synced yet. Turn on Sync or use Sync once, then look again.']]);
   } finally { await box.cleanup(); }
 });
 
@@ -258,11 +262,14 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     const here = await box.home('here');
     await skill(here, '.claude/skills', 'mine');
     await writeFile(join(here.home, '.claude/skills/mine/debug.log'), 'part of the skill\n');
-    await applyChanges(here, [{ key: 'mine', managed: true, off: [] }]);
+    // A Managed skill of the same name as the repo's held one, with a file the repo's doesn't have: it never leaks into the repo's.
+    await skill(here, '.claude/skills', 'linked');
+    await writeFile(join(here.home, '.claude/skills/linked/extra.md'), 'only here\n');
+    await applyChanges(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
     assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true]]);
     await pullRepo(here);
-    assert.equal((await manageView(here)).skills.some(item => item.key === 'linked'), false, 'a link is never put in a tool');
+    assert.equal(await readFile(join(here.home, '.claude/skills/linked/alias.md'), 'utf8').then(() => true, () => false), false, 'a link is never put in a tool');
     view = live((await pushRepo(here)).view);
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'mcp/notes.json', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log']);
     assert.deepEqual(view.outgoing, []);

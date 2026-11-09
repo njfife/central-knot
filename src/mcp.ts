@@ -239,7 +239,7 @@ async function kept(context: ShareContext, name: string, hash: string): Promise<
 // ---------- Record ----------
 
 const recordPath = (home: string) => join(storeDirectory(home), 'mcp.json');
-async function readMcpRecord(home: string): Promise<McpRecord> {
+export async function readMcpRecord(home: string): Promise<McpRecord> {
   try { const parsed = JSON.parse(await readFile(recordPath(home), 'utf8')); if (parsed && typeof parsed.items === 'object') return parsed; } catch { /* first time */ }
   return { formatVersion: 1, items: {} };
 }
