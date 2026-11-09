@@ -41,7 +41,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
         const first = state.history?.find(other => other.undoneBy === undone.id);
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
-      if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Put back${where || ` in ${who(event.winner?.tool)}`} after its removal.` };
+      if (undone?.kind === 'removed') return { glyph: 'undo-2', text: `Restored${where}.` };
       if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after its deletion; back${where}.`, action: 'Delete again' };
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }

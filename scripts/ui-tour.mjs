@@ -110,7 +110,9 @@ if (wanted('disable')) {
   await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
   await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
   await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
-  await a.click('#open-release-notes'); await a.click('#delete-release-notes');
+  await a.click('#open-release-notes'); await a.click('#enable-release-notes-claude-cli'); await a.click('#apply');
+  await shot(a, 'unmanaged-disabled', 'Opened release-notes (unmanaged, only in Claude Code), switched Claude Code to Disabled and clicked "Apply all".');
+  await a.click('#delete-release-notes');
   await shot(a, 'delete-everywhere-confirm', 'Opened release-notes (unmanaged, only in Claude Code) and clicked "Delete everywhere…": it asks once more.');
   await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
   await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');

@@ -155,7 +155,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   // Copies written are counted; a run that only disabled, enabled or removed says so in the band's words.
   const copiesWritten = result.results.filter(entry => entry.outcome === 'written').length;
-  announce(result.stopped ?? [copiesWritten ? `${plural(copiesWritten, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : touched.length ? `${what.charAt(0).toUpperCase()}${what.slice(1)}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
+  announce(result.stopped ?? [copiesWritten ? `${plural(copiesWritten, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : touched.length ? `${what}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
 });
 
 /** After a read: what was found and where, so a home switch or Refresh says what it did. */

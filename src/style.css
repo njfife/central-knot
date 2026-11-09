@@ -1352,7 +1352,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */
 .cell-disabled.cell-on:not(.cell-pending-edit) { background: transparent; border-color: var(--control-line); }
 .cell-disabled.cell-synced:not(.cell-pending-edit) { color: var(--ink-soft); }
-.cell-disabled-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
+.cell-disabled-mark { position: absolute; top: -4px; right: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
 .cell-disabled-mark svg { width: 12px; height: 12px; stroke-width: 2.5; }
 .mini-cell.cell-disabled { position: relative; }
 .legend-cell.mini-cell .cell-disabled-mark { top: -5px; right: -5px; width: 11px; height: 11px; }
@@ -1375,6 +1375,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Queued, like the Managed switch: a dashed outline, never a ring that reads as focus. */
 .tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
 .tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
+/* A switch queued in a skill's details shows in its cell too: the queued dash around the cell, and the mark in accent. */
+.cell-switch-queued { outline: 1.5px dashed var(--accent); outline-offset: 1px; }
+.cell-switch-queued .cell-disabled-mark { color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
 .tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-faint); }
 /* What Disabled and Remove mean, right under the rows they belong to. */
 .details-switch-note { margin: 0; }
@@ -1387,5 +1390,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }
 /* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
 .ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
+/* On its own line the breakdown may still be long: it wraps within the bar rather than run past the edge. */
+.toolbar-end > .apply { min-width: 0; }
+.toolbar-end .apply-count { white-space: normal; min-width: 0; }
+.ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
 /* Keyboard focus on a queued switch shows as focus, not as the dashed queued mark. */
 .tool-switch-pending .switch:focus-visible, .managed-pending .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
