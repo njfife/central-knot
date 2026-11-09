@@ -1100,3 +1100,8 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-text { min-height: 0; }
 .ins-text-new { min-height: 0; }
 .ins-versions summary { color: var(--ink-soft); }
+
+/* The chosen-copy chip never runs into the Managed column */
+.ov-name { overflow: hidden; }
+.decided { min-width: 0; flex-shrink: 1; }
+.decided > span[aria-hidden] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
