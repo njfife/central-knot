@@ -210,13 +210,20 @@ async function readSide(dir: string, treeish: string | undefined, withBase: bool
 const preference: HarnessId[] = ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-cli'];
 const byPreference = (first: HarnessId, second: HarnessId) => preference.indexOf(first) - preference.indexOf(second);
 
+/** Said when copies here differ and sync hasn't settled which is the item yet (Sync off, say): it waits rather than guess. */
+const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Sync or use Sync once, then look again.';
+
 /**
- * Which tool's copy stands for a Managed item: one it syncs to, holding the synced content (not an edit still waiting to spread,
- * and, for an MCP server, not Claude Code's entry, which may still be waiting for Write now), by tool preference.
+ * Which tool's copy stands for a Managed item here, by tool preference among the tools it syncs to: an edit waiting to spread when
+ * there is exactly one (that is the newest content here), else the synced content (for an MCP server, not Claude Code's entry when
+ * another has it: Claude Code's may still be waiting for Write now). `UNSETTLED` when edits waiting to spread disagree.
  */
-function sourceTool(facts: SkillFacts, avoid: HarnessId[] = []): HarnessId | undefined {
+function sourceTool(facts: SkillFacts, avoid: HarnessId[] = []): HarnessId | typeof UNSETTLED | undefined {
   const tools = (Object.keys(facts.copies) as HarnessId[]).filter(tool => !facts.off.includes(tool)).sort(byPreference);
-  return tools.find(tool => !facts.edited?.includes(tool) && !avoid.includes(tool)) ?? tools.find(tool => !facts.edited?.includes(tool)) ?? tools[0];
+  const edited = tools.filter(tool => facts.edited?.includes(tool));
+  if (new Set(edited.map(tool => facts.copies[tool]!.hash)).size > 1) return UNSETTLED;
+  if (edited.length) return edited[0];
+  return tools.find(tool => !avoid.includes(tool)) ?? tools[0];
 }
 
 /** Managed items that can't go in the repo, with why: Push leaves the repo's copy of each as it is. */
@@ -228,6 +235,7 @@ async function writeSkills(context: ShareContext, dir: string, skills: SkillFact
   for (const entry of await readdir(join(dir, 'skills'), { withFileTypes: true }).catch(() => [])) if (entry.isDirectory()) await removeTree(join(dir, 'skills', entry.name));
   for (const facts of skills.filter(skill => skill.managed)) {
     const tool = sourceTool(facts);
+    if (tool === UNSETTLED) { unsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
     const copy = tool && facts.copies[tool];
     if (!copy) continue;
     if (facts.held) { unsendable(unsent, facts.key, 'skill', copy.folder, facts.held); continue; }
@@ -245,8 +253,8 @@ async function writeServers(context: ShareContext, dir: string, tools: HarnessId
   for (const tool of view.tools) for (const entry of (await readTool(context, tool)).entries) entries.set(`${entry.tool}\0${entry.name}`, entry.server);
   for (const facts of view.servers.filter(server => server.managed)) {
     const tool = sourceTool(facts, ['claude-cli']);
-    const server = tool && entries.get(`${tool}\0${facts.name}`);
-    if (facts.held || !server) { unsendable(unsent, serverKey(facts.name), 'mcp', facts.name, facts.held ?? 'No tool’s settings could be read for it just now.'); continue; }
+    const server = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.name}`) : undefined;
+    if (facts.held || !server) { unsendable(unsent, serverKey(facts.name), 'mcp', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s settings could be read for it just now.')); continue; }
     await writeDurably(join(dir, 'mcp', `${toFile(facts.name)}.json`), `${JSON.stringify(jsonEntry('claude-cli', server), null, 2)}\n`);
   }
 }
@@ -258,8 +266,8 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   for (const tool of view.tools) for (const entry of (await readAgents(context, tool)).entries) entries.set(`${entry.tool}\0${entry.key}`, entry);
   for (const facts of view.servers.filter(agent => agent.managed)) {
     const tool = sourceTool(facts);
-    const entry = tool && entries.get(`${tool}\0${facts.key}`);
-    if (facts.held || !entry) { unsendable(unsent, agentKey(facts.name), 'agent', facts.name, facts.held ?? 'No tool’s file could be read for it just now.'); continue; }
+    const entry = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.key}`) : undefined;
+    if (facts.held || !entry) { unsendable(unsent, agentKey(facts.name), 'agent', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s file could be read for it just now.')); continue; }
     // Claude Code's own file goes as written, with its own settings (tools, model). Another tool's is put in Claude Code's format
     // over the repo's file, so the settings only Claude Code has stay as the repo has them.
     const path = `agents/${toFile(entry.name)}.md`;
