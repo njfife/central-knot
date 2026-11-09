@@ -46,13 +46,13 @@ export async function loadRepo(check = false): Promise<void> {
 }
 
 /** After a write: the page and the home both read again, so every page shows what Pull or Push left on disk. */
-async function settle(result: RepoResult, done: string, history = false) {
+async function settle(result: RepoResult, done: string, note?: string) {
   repo.view = result.view;
   repo.problem = result.stopped;
   repo.confirmDisconnect = false;
   const home = await api().refresh();
   if (home) state.home = home;
-  if (!result.stopped) state.outcome = { page: 'repo', text: done, history };
+  if (!result.stopped) state.outcome = { page: 'repo', text: done, note };
 }
 
 const connect = () => busy('Connecting to the repo…', async () => {
@@ -66,7 +66,8 @@ const connect = () => busy('Connecting to the repo…', async () => {
 const pull = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
   const count = result.pulled ?? 0;
-  await settle(result, count ? `Pulled ${plural(count, 'change')} into your tools. ${count === 1 ? 'It is' : 'Each is'} in History, with Undo.` : 'Pulled. Nothing in your tools needed to change.', count > 0);
+  // Undo lives in History, linked from the note; a button beside it is only for something still to do.
+  await settle(result, count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.', count ? `${count === 1 ? 'It is' : 'Each is'} in History.` : undefined);
   // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
   // didn't take is said in the result, by tool.
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held') && !(entry.harness === 'claude-cli' && /Write now/.test(entry.message)))
@@ -74,7 +75,8 @@ const pull = () => busy('Pulling from the repo…', async () => {
   if (missed.length && state.outcome) state.outcome.text += ` ${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.`;
   const waiting = result.results.filter(entry => entry.harness === 'claude-cli' && /Write now/.test(entry.message)).map(entry => entry.item);
   if (waiting.length && state.outcome) {
-    state.outcome.text += ` ${andList([...new Set(waiting)])} reach${waiting.length === 1 ? 'es' : ''} Claude Code once you use Write to Claude Code, with Claude Code closed.`;
+    const names = [...new Set(waiting)];
+    state.outcome.text += ` ${andList(names)} ${names.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close it, then use Write to Claude Code on MCP servers.`;
     state.outcome.act = { label: 'MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
   }
 });
@@ -119,12 +121,13 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
     : side === 'out' && change.change === 'removed' ? 'Deleted here or no longer Managed. Push removes it from the repo.'
     : undefined;
   const tone = change.held || change.alsoHere ? 'tone-warning' : 'tone-muted';
+  const noteGlyph: IconName = change.held || change.alsoHere ? 'triangle-alert' : 'info';
   return h(`li.repo-row${change.held ? '.repo-row-held' : ''}`, { 'data-key': change.key },
     h('span.repo-row-icon', { title: kind.label }, icon(kind.glyph, 14, 'tone-muted')),
     h('span.repo-row-main', {},
       h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label),
-        h(`span.repo-row-change.repo-change-${change.change}`, {}, label)),
-      note ? h(`span.repo-row-note.${tone}`, {}, change.held ? icon('triangle-alert', 12) : null, note) : null));
+        h(`span.repo-row-change.repo-change-${change.held ? 'held' : change.change}`, {}, label)),
+      note ? h(`span.repo-row-note.${tone}`, {}, icon(noteGlyph, 12), note) : null));
 }
 
 /** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
@@ -155,6 +158,8 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
   return h('span.repo-state', { id: 'repo-state', role: 'status' }, parts);
 }
 
+const WAITING = 'Pull and Push wait until the repo can be reached. Try again above.';
+
 function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const { pull: pullable, push: pushable } = waiting(view);
   const locked = !!state.busy || !view.access.allowed;
@@ -164,14 +169,16 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const retryable = view.incoming.filter(change => change.retry).length;
   // A newer commit that changes nothing here still has to be pulled before a push: Pull then just moves to it.
   const pullButton = pullable || retryable || view.pushBlocked ? button({ variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull', id: 'repo-pull', disabled: moving || !view.latest,
-    attrs: { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
+    attrs: { title: view.problem ? WAITING : 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
   const pushButton = pushable ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: `Push ${pushable}`, id: 'repo-push', disabled: moving || !!view.pushBlocked,
     attrs: view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   // Each part stays whole when the row wraps, so a narrow window breaks at a dot, never inside a time.
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
-  const activity = [`Pulled ${when(view.pulledAt) ?? 'never'}`, `pushed ${when(view.pushedAt) ?? 'never'}`, checked].flatMap((text, index) => [index ? ' · ' : '', h('span.repo-activity-part', {}, text)]);
+  // Only what has happened: right after Connect that is just the check.
+  const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
+  const activity = parts.flatMap((text, index) => [index ? ' · ' : '', h('span.repo-activity-part', {}, index ? text : text.charAt(0).toUpperCase() + text.slice(1))]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
       summary(view),
@@ -197,7 +204,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
         : h('div.repo-sides', {},
           changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
-          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', pushable ? view.pushBlocked : undefined)),
+          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', !pushable ? undefined : view.problem ? WAITING : view.pushBlocked)),
       h('p.repo-aside', {}, `Pull and Push use this computer’s git and the sign-in it already has. Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 
@@ -224,12 +231,13 @@ function connectForm(allowed: boolean) {
   const ready = () => !state.busy && allowed && !!repo.draftUrl.trim();
   const go = () => { if (ready()) void connect(); };
   const refresh = () => { const control = document.getElementById('repo-connect') as HTMLButtonElement | null; if (control) control.disabled = !ready(); };
-  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string) => h('div.repo-field', {},
+  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: string) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
-    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed,
-      oninput: (event: Event) => { set((event.target as HTMLInputElement).value); refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }));
+    h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
+      oninput: (event: Event) => { set((event.target as HTMLInputElement).value); refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
+    below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
   return h('div.repo-connect', {},
-    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git or git@gitlab.com:you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }),
+    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, 'HTTPS or SSH, as you would give git clone: git@gitlab.com:you/agent-config.git works too.'),
     field('repo-branch', 'Branch', 'The repo’s default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional'),
     h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
       h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));

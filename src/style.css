@@ -1384,7 +1384,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row-name { min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
-.repo-row-note > svg { flex: none; align-self: center; }
+.repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
 .repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
 .repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--line); }
@@ -1396,6 +1396,9 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
 .repo-change-added { color: var(--success); }
 .repo-change-removed { color: var(--danger); }
+.repo-change-held { color: var(--ink-soft); }
+.repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.band-danger #repo-try-again { margin-left: auto; border-color: currentColor; color: inherit; flex: none; }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
 .repo-aside { display: flex; align-items: baseline; gap: 6px; max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
