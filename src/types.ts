@@ -323,7 +323,7 @@ export interface PluginContents {
   lspServers: string[];
   /** A top-level bin/ folder (account routes refuse it). */
   bin: boolean;
-  /** The version its marketplace entry or plugin.json gives (the entry wins, as the tools read it). */
+  /** Its version: its plugin.json's, else its marketplace entry's, as Claude Code reads them. */
   version?: string;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */

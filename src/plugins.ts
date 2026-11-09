@@ -225,10 +225,11 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // A path outside the marketplace, through a link or not, is not read.
     if (await inside(root, folder)) {
       plugin.folder = folder;
-      // Its plugin.json's version, else the entry's, as Claude Code reads them; the counts' read gives it, else plugin.json is read.
       const contents = counts ? await pluginContents(folder, item, root) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
-      plugin.version = (contents ? contents.version : text((await pluginManifest(folder, root))?.version) || undefined) ?? plugin.version;
+      // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
+      const fromFiles = contents ? contents.version : text((await pluginManifest(folder, root))?.version);
+      if (fromFiles) plugin.version = fromFiles;
     }
   }
   return plugin;
@@ -328,8 +329,8 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 
 /**
  * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says. Claude Code
- * records "unknown" for a plugin that gives none. Codex's "local" copy has no version in its folder name, so its
- * .codex-plugin/plugin.json is read first, as Codex reads it (`codex`).
+ * records "unknown" for a plugin that gives none. For a Codex copy (`codex`), whose folder name is the version only when
+ * there is one, its .codex-plugin/plugin.json is read first, as Codex reads it.
  */
 async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
   const said = text(recorded);
@@ -341,7 +342,9 @@ async function copyVersion(recorded: unknown, path: string, codex = false): Prom
 
 /**
  * A semantic version's parts ("1.2.0-rc.1" gives [1, 2, 0] and ["rc", "1"]), or undefined when it isn't strictly one, as
- * Codex parses it: no leading "v", no leading zeros. (Comparing for display is looser: see pluginstatus's releaseOf.)
+ * Codex parses it: no leading "v", no leading zeros. Not matched: Codex's stricter pre-release rules (no leading zeros,
+ * no empty parts) and its ordering by build metadata, which its cache names don't use. (Comparing for display is
+ * looser: see pluginstatus's releaseOf.)
  */
 function semver(version: string): { core: number[]; pre: string[] } | undefined {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
@@ -370,8 +373,9 @@ function compareVersions(first: string, second: string): number {
 }
 
 /**
- * The copy Codex loads from its cache folder for one plugin, as Codex chooses it: "local" (a local marketplace's copy)
- * when there is one, else the highest version (see compareVersions). Only folders with files count.
+ * The copy Codex loads from its cache folder for one plugin, as Codex chooses it: "local" (the name Codex gives a copy
+ * whose manifest has no version) when there is one, else the highest version (see compareVersions). Only folders with
+ * files count.
  */
 async function codexCopy(cache: string): Promise<string | undefined> {
   const folders: string[] = [];
@@ -411,11 +415,13 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     return { state: 'not-installed' };
   }
   if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
-  // Codex keeps each copy in a folder named for its version ("local" names no version).
+  // Codex names each copy's folder for its version; "local" (no version) and a bare commit prefix (its curated plugins)
+  // name none, so the copy's manifest gives it.
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const copy = await codexCopy(cache);
   if (!copy) return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
-  return { state: 'installed', path: join(cache, copy), version: await copyVersion(copy === 'local' ? undefined : copy, join(cache, copy), true) };
+  const named = copy === 'local' || /^[0-9a-f]{7,40}$/i.test(copy) ? undefined : copy;
+  return { state: 'installed', path: join(cache, copy), version: await copyVersion(named, join(cache, copy), true) };
 }
 
 // ---------- Install and uninstall ----------

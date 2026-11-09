@@ -15,3 +15,6 @@ export function readInto<T>(map: Map<string, Read<T>>, key: string, read: () => 
     onDone();
   });
 }
+
+/** What a read gave, or undefined while it is still being read or when there is none. */
+export const valueOf = <T>(read: Read<T> | undefined): T | undefined => (read && !read.reading ? read.value : undefined);

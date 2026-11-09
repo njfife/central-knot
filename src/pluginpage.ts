@@ -7,8 +7,9 @@ import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, installedVersion, limitNote, marketplaceHas, missingTools, offeredVersion, removableTools, sameText, unavailable } from './pluginstatus.ts';
+import { installed, installedVersion, limitNote, marketplaceVersionNote, missingTools, offeredVersion, removableTools, comparableText, unavailable } from './pluginstatus.ts';
 import { clearNotice, market, openLink, toggleOpened } from './pluginstate.ts';
+import { valueOf } from './reads.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -35,14 +36,15 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
 /** "Installed · 1.2.0". When the tool has another version than the marketplace offers, a second line says which. */
 function installedLine(version: string | undefined, offered: string | undefined) {
   const line = version ? `Installed · ${version}` : 'Installed';
-  const other = marketplaceHas(version, offered);
+  const other = marketplaceVersionNote(version, offered);
   return other ? [line, h('span.plugin-version-differs', {}, icon('circle-alert', 12), other)] : line;
 }
 
 /**
- * Where to install it: a box per tool with a second line that is always there (so the card never changes height), and
- * at the right of the heading row (always the same height) one button: choose it for every tool still without it, or,
- * once every tool has it, choose to uninstall it from all of them. An installed tool's line names its version.
+ * Where to install it: a box per tool with a status line that is always there (a tool on another version than the
+ * marketplace offers adds a second, "Marketplace has …"), and at the right of the heading row (always the same height)
+ * one button: choose it for every tool still without it, or, once every tool has it, choose to uninstall it from all of
+ * them. An installed tool's line names its version.
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, offered: string | undefined, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
@@ -128,13 +130,12 @@ const holdersLine = (holders: FileCopy[]) => andList(holders.map(holder => (hold
 
 /**
  * The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's
- * isn't known). Line endings alone are no difference (see sameText in pluginstatus.ts).
+ * isn't known). Line endings alone are no difference (see comparableText in pluginstatus.ts).
  */
 function differsIn(part: FilePart): FileCopy[] {
   const offered = part.copies.find(copy => copy.marketplace);
-  return offered ? part.copies.filter(copy => !copy.marketplace && sameText(copy.text) !== sameText(offered.text)) : [];
+  return offered ? part.copies.filter(copy => !copy.marketplace && comparableText(copy.text) !== comparableText(offered.text)) : [];
 }
-
 
 /**
  * The line above one text of a part's file: the file, then who holds that text ("SKILL.md · Claude Code (1.1.0)"). When
@@ -189,7 +190,7 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
       h('button.plugin-file-toggle', { type: 'button', id, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${label}`, onclick: () => toggleOpened(opened) },
         h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)),
         h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(part, differs, offeredRead))),
-      open ? h('div.plugin-file', {}, fileBlocks(`${id}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd, same: sameText })) : null);
+      open ? h('div.plugin-file', {}, fileBlocks(`${id}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd, same: comparableText })) : null);
   })));
 }
 
@@ -220,7 +221,7 @@ function contentsBlock(entry: MarketplaceView, marketIndex: number, plugin: Plug
 export function pluginPage(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   const read = market.details.get(pluginKey(entry.source, plugin.name));
   const reading = !read || read.reading;
-  const detail = read && !read.reading ? read.value : undefined;
+  const detail = valueOf(read);
   // A plugin kept elsewhere has no counts from the catalog; once its files are read, its contents give them.
   const components = plugin.components ?? (detail && !detail.problem ? componentsFrom(detail) : undefined);
   const title = pluginTitle(plugin);

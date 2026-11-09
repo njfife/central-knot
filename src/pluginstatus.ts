@@ -88,8 +88,11 @@ export const matches = (plugin: PluginView, find: string) => !find || [plugin.na
  */
 const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-(?=[0-9]*[a-f])[0-9a-f]{7,40}$/i, '');
 
-/** The version the marketplace offers: its catalog entry's, else what the plugin's own files say once read (a plugin kept in another repository). */
-export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => plugin.version ?? detail?.version;
+/**
+ * The version the marketplace offers, as Claude Code reads it: what the plugin's own files say once read (plugin.json's,
+ * else the entry's), else the catalog's (for a plugin kept in another repository, only the entry's until it is read).
+ */
+export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => detail?.version ?? plugin.version;
 
 /** The version a tool has installed, when it is installed there and its version is known. */
 export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
@@ -100,8 +103,8 @@ export function installedVersion(entry: MarketplaceView, plugin: string, tool: H
 /** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
 const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && releaseOf(installed) !== releaseOf(offered);
 
-/** "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
-export const marketplaceHas = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);
+/** The note "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
+export const marketplaceVersionNote = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);
 
 /** Tools whose installed copy is another version than `offered`, with that version. */
 export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined) =>
@@ -114,5 +117,5 @@ export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin:
 export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]) =>
   [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', ');
 
-/** Two copies of a file have the same text when they differ only in line endings (a Windows Git checkout writes CRLF). */
-export const sameText = (text: string) => text.replace(/\r\n/g, '\n');
+/** A file's text to compare copies by: line endings as LF, since a Windows Git checkout writes CRLF and that is no difference. */
+export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');

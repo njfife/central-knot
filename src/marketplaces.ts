@@ -129,20 +129,20 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in, as that tool reads it: Claude
-   * Code and Copilot CLI by the copy's own plugin.json with the marketplace entry's part lists added (paths a copy of
-   * another release doesn't have are simply not found); Codex by the one manifest it picks, its .codex-plugin one when the
-   * copy has it, without the entry. The detail request names just a source and a plugin, so the tools and their install
-   * states are read here again.
+   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in, as that tool reads it (see
+   * pluginContents): Claude Code and Copilot CLI by the copy's own plugin.json with the marketplace entry's part lists
+   * added (paths a copy of another release doesn't have are simply not found); Codex by the one manifest it picks, its
+   * .codex-plugin one when the copy has it, without the entry. A copy's commands and agents are listed as it holds them;
+   * "In each tool" says what each tool does with them. The detail request names just a source and a plugin, so the tools
+   * and their install states are read here again.
    */
   async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
     const tools = (await host.tools()).filter(tool => engine.pluginTools.includes(tool));
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const codex = tool === 'codex-cli';
-      const manifest = codex ? (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} : undefined;
-      const { skills, commands, agents } = await pluginContents(state.path, codex ? {} : item.entry ?? {}, state.path, manifest);
+      const codex = tool === 'codex-cli' ? { manifest: (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} } : undefined;
+      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path, codex);
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));

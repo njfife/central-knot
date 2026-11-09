@@ -77,10 +77,13 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
 async function skillsIn(root: string, folder: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
+    const path = relative(folder, dir);
+    // A folder listed twice (skills/ and skills/pdf) is one skill.
+    if (found.some(part => part.path === path)) return true;
     const body = await partFile(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
     const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body, path: relative(folder, dir) });
+    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body, path });
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
@@ -98,6 +101,7 @@ async function markdownIn(root: string, folder: string, paths: string[]): Promis
     const files = path.endsWith('.md') ? [path]
       : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
+      if (found.some(part => part.path === relative(folder, file))) continue;
       const body = await partFile(root, file);
       if (body === undefined) continue;
       const meta = nameAndDescription(body);
@@ -116,7 +120,10 @@ function serverRuns(server: unknown): string {
 
 /** A plugin's own .claude-plugin/plugin.json as an object, or undefined when it has none. */
 export const pluginManifest = (folder: string, root = folder) => jsonInside(root, join(folder, '.claude-plugin/plugin.json'));
-/** A plugin's .codex-plugin/plugin.json, which Codex reads before Claude Code's when a plugin has both. */
+/**
+ * A plugin's .codex-plugin/plugin.json, which Codex reads before Claude Code's when a plugin has both. (Codex also looks
+ * first for a root plugin.json naming the agent-plugins schema; that rare layout isn't read here.)
+ */
 export const codexManifest = (folder: string) => jsonInside(folder, join(folder, '.codex-plugin/plugin.json'));
 
 /**
@@ -134,27 +141,33 @@ async function section(root: string, folder: string, named: unknown, key: string
 }
 
 /**
- * What one plugin holds, by name. Its marketplace entry and plugin.json may list component paths ("strict": false entries
- * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
- * `manifest` is the plugin.json to read it by, when not Claude Code's own (Codex reads its .codex-plugin one instead).
+ * What one plugin holds, by name, read as Claude Code reads it (or, with `codex`, as Codex does). `root` bounds every
+ * read: the marketplace, or the plugin's own repository.
+ * - Claude Code: plugin.json is the manifest, and its marketplace `entry` adds to it: the entry's skills, commands and
+ *   agents are appended to plugin.json's lists (its default, "strict" mode); plugin.json's version wins. A skills list in
+ *   plugin.json adds to the default skills/ folder; commands and agents lists replace theirs. With no plugin.json the
+ *   entry is the manifest, and an entry's skills list replaces skills/ (a marketplace's root plugin lists its own).
+ * - Codex (`codex`): only the manifest Codex picks, without the entry; every list replaces its default folder.
+ * Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string,
-  manifest?: Record<string, unknown>): Promise<PluginContents> {
-  const own = manifest ?? (await pluginManifest(folder, root)) ?? {};
-  // As Claude Code reads them: the entry's fields fill in what plugin.json leaves out, but plugin.json's version wins, and
-  // the entry's skills, commands and agents are added to plugin.json's own lists (its default, "strict" mode).
-  const declared: Record<string, unknown> = { ...own, ...entry, version: own.version ?? entry.version };
-  const listed = (key: string) => {
-    const paths = [...(strings(own[key]) ?? []), ...(strings(entry[key]) ?? [])];
-    return own[key] === undefined && entry[key] === undefined ? undefined : paths.map(path => resolve(folder, path));
-  };
+  codex?: { manifest: Record<string, unknown> }): Promise<PluginContents> {
+  const pluginJson = codex ? undefined : await pluginManifest(folder, root);
+  const own = codex?.manifest ?? pluginJson ?? {};
+  const added = codex ? {} : entry;
+  const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
+  /** Each listed path once, resolved in the plugin's folder. */
+  const paths = (...lists: unknown[]) => [...new Set(lists.flatMap(list => strings(list) ?? []).map(path => resolve(folder, path)))];
+  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : paths(own[key], added[key]));
+  const skillsFolder = join(folder, 'skills');
+  const skillPaths = pluginJson && (own.skills !== undefined || added.skills !== undefined) ? paths(skillsFolder, own.skills, added.skills) : listedOr('skills', skillsFolder);
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, folder, listed('skills') ?? [join(folder, 'skills')]),
-    commands: await markdownIn(root, folder, listed('commands') ?? [join(folder, 'commands')]),
-    agents: await markdownIn(root, folder, listed('agents') ?? [join(folder, 'agents')]),
+    skills: await skillsIn(root, folder, skillPaths),
+    commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
+    agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
     hooks: Object.keys(hooks).sort(),
     mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),

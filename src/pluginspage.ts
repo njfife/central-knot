@@ -11,6 +11,7 @@ import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, t
 import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
+import { valueOf } from './reads.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolName, toolNames as names } from './words.ts';
 
@@ -55,7 +56,7 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
 function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
   const read = market.details.get(pluginKey(entry.source, plugin.name));
-  const detail = read && !read.reading ? read.value : undefined;
+  const detail = valueOf(read);
   const readContents = read?.reading ? 'Reading what it holds…' : detail && !detail.problem ? summaryOf(componentsFrom(detail)) : '';
   const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');

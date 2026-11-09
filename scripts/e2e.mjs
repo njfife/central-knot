@@ -485,7 +485,10 @@ async function practiceFlow() {
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
   // Claude Code has an older issue-tracker (1.9.0, its triage skill worded differently); the marketplace offers 2.0.0.
-  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n' });
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '1.9.0', {
+    'skills/triage/SKILL.md': '---\nname: triage\ndescription: Sorts new issues.\n---\n\nThe old steps.\n',
+    'skills/old-triage/SKILL.md': '---\nname: old-triage\ndescription: Dropped in 2.0.0.\n---\n',
+  });
   await a.click('#nav-plugins');
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -503,6 +506,7 @@ async function practiceFlow() {
   await a.click('#popen-0-issue-tracker');
   for (let tries = 0; tries < 30 && !(await a.exists('#pfile-0-skills-triage')); tries++) await wait(100);
   check('the plugin page says which version Claude Code has', /Installed · 1\.9\.0\s*Marketplace has 2\.0\.0/.test(await a.text('.plugin-panel')), await a.text('.plugin-panel'));
+  check('a skill only an installed copy has says where it is', (await a.text('#pfile-0-skills-old-triage')).includes('Only in Claude Code (1.9.0)'), await a.text('.plugin-page'));
   check('a closed skill row names the tool whose copy differs', (await a.text('#pfile-0-skills-triage')).includes('Claude Code (1.9.0) differs from the marketplace’s copy'), await a.text('#pfile-0-skills-triage'));
   await a.click('#pfile-0-skills-triage');
   same('a skill opens its SKILL.md as written, one block per version that differs', await a.all('.plugin-file .content-block', '[e.querySelector(".content-owner")?.textContent, e.querySelector("pre").textContent]'),

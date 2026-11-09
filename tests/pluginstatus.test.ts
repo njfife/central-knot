@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, limitNote, missingTools, otherVersions, otherVersionsLine, sameText, unavailable } from '../src/pluginstatus.ts';
+import { blocked, comparableText, limitNote, missingTools, offeredVersion, otherVersions, otherVersionsLine, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
-import type { MarketplaceView, PluginsView } from '../src/types.ts';
+import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
@@ -30,8 +30,11 @@ test('Only a known version that names another release is a difference', () => {
   assert.deepEqual(otherVersions(view, states('1.1.0'), 'p', undefined), []);
   // The list row names tools by version, each version kept with the word before it.
   assert.equal(otherVersionsLine(otherVersions(view, states('1.1.0', '1.1.0'), 'p', '1.2.0')), 'Claude Code and Codex have\u00a01.1.0');
+  // Once a plugin's own files are read, their version (plugin.json's) is the one offered, not the catalog entry's.
+  assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, { version: '1.1.0' } as PluginDetail), '1.1.0');
+  assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, undefined), '1.0.0');
   // A copy checked out with Windows line endings is the same text.
-  assert.equal(sameText('---\r\nname: s\r\n'), sameText('---\nname: s\n'));
+  assert.equal(comparableText('---\r\nname: s\r\n'), comparableText('---\nname: s\n'));
 });
 
 test('A tool’s limits are named in a few words', () => {

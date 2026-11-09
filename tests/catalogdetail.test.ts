@@ -12,19 +12,23 @@ async function box() {
   return { base, root: join(base, 'market'), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-test('Paths an entry or plugin.json lists are read instead of the default folders', async () => {
+test('Parts are found as Claude Code finds them: plugin.json and the entry list them, and only skills keep their default folder', async () => {
   const { root, cleanup } = await box();
   try {
     for (const name of ['hello', 'unlisted']) await put(join(root, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: Says ${name}\n---\n`);
+    await put(join(root, 'extra-skills/more/SKILL.md'), '---\nname: more\ndescription: More\n---\n');
     await put(join(root, 'tools/notes.md'), '---\ndescription: Takes notes\n---\n');
-    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.9.0', hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
+    await put(join(root, 'commands/ignored.md'), '---\ndescription: Not read\n---\n');
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ version: '0.9.0', skills: './extra-skills', hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
     await put(join(root, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
     await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
-    const contents = await pluginContents(root, { source: './', strict: false, version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
-    // Each part carries its whole file as written; plugin.json's version wins over the entry's, as Claude Code reads them.
-    // Each part also says where it sits in the plugin, which is the same in every copy of it.
-    assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') }]);
+    const contents = await pluginContents(root, { source: './', version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
+    // Skills: the default folder, plugin.json's list and the entry's, each skill once. Commands: the lists replace commands/.
+    assert.deepEqual(contents.skills.map(skill => skill.name), ['hello', 'more', 'unlisted']);
+    // Each part carries its whole file as written and its place in the plugin, the same in every copy of it.
+    assert.deepEqual(contents.skills[0], { name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') });
     assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: join('tools', 'notes.md') }]);
+    // plugin.json's version wins over the entry's.
     assert.equal(contents.version, '0.9.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
