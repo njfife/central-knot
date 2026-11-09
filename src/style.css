@@ -1398,7 +1398,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-change-removed { color: var(--danger); }
 .repo-change-held { color: var(--ink-soft); }
 .repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.band-danger #repo-try-again { margin-left: auto; border-color: currentColor; color: inherit; flex: none; }
+.band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; border-color: currentColor; color: inherit; flex: none; }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
 .repo-aside { display: flex; align-items: baseline; gap: 6px; max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
