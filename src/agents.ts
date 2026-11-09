@@ -6,14 +6,14 @@
 // Writing a destination changes only its name, description and prompt lines; every other byte of that file stays.
 // The safety rules are the skills engine's: unreadable is never absent, every write and removal checks the file first, every
 // replaced or removed file is kept whole for Restore, and deletions follow DEL-01 and DEL-02.
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { mkdir } from 'node:fs/promises';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, errorCode, readRecord, sha256, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 
@@ -35,7 +35,7 @@ export const fileFor = (context: ShareContext, tool: HarnessId, name: string) =>
 export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
 export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+const sha = sha256;
 
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */
 export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));

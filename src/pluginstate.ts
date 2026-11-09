@@ -174,8 +174,9 @@ function dropReads(source: string): void {
 export const refreshMarketplace = (source: string) => act('refreshing', async () => {
   const view = await api().refreshMarketplace(source);
   dropReads(source);
-  // A refresh can change what the last run's result describes (parts now out of date): it gives way to the refresh's own notice.
-  market.lastRun = undefined;
+  // A refresh can change what the last run's parts result describes (parts now out of date): that result gives way to the
+  // refresh's own notice. A plugin install's result and its Undo stay.
+  if (market.lastRun?.done.some(entry => entry.source === source && isParts(entry.action))) market.lastRun = undefined;
   showView(view);
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
   app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
@@ -216,8 +217,8 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     if (ops.some(op => isParts(op.action))) {
       const view = await api().refresh().catch(() => null);
       if (view) app.home = view;
-      // What each tool now holds changed, so each plugin's plan (which names clash) is read again.
-      for (const op of ops) market.partsPlans.delete(pluginKey(op.source, op.plugin));
+      // What each tool now holds changed, so every plugin's plan (which names clash) is read again when shown.
+      market.partsPlans.clear();
       readShown();
     }
   }

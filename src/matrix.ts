@@ -10,7 +10,7 @@ import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sa
 import type { Change, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
-import { versionWord } from './pluginstatus.ts';
+import { samePart, versionWord } from './pluginstatus.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
@@ -22,10 +22,10 @@ const names = toolNames as Record<Tool, string>;
  */
 function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: HarnessId[] }[] {
   const partKind = kind === 'skills' ? 'skill' : kind === 'mcp' ? 'mcp' : 'agent';
-  const named = [skill.key, skill.name].filter(Boolean).map(name => name!.toLowerCase());
+  const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
-    if (!install.items.some(item => !item.removed && item.kind === partKind && named.includes(item.name.toLowerCase()))) continue;
+    if (!install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
     const key = pluginKey(install.source, install.plugin);
     const entry = found.get(key) ?? { install, tools: [] };
     entry.tools.push(install.tool);

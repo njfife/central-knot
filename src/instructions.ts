@@ -1,14 +1,13 @@
 // Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02).
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here deletes or empties a file, and no project or workspace file is read or written.
-import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
+import { sha256, storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+const sha = sha256;
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
 const versionsFolder = (home: string, tool: HarnessId) => join(storeDirectory(home), 'instructions', tool);
 

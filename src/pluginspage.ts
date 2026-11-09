@@ -8,7 +8,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, partsOf, partsOffer, pluginTools, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, partsMark, partsOf, partsOffer, pluginTools, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -158,7 +158,8 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
  */
 function legend(view: PluginsView, entry: MarketplaceView) {
   const markOf = (plugin: PluginView, tool: Parameters<typeof unavailable>[3]) => {
-    if (partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin))) { const parts = partsOf(entry, plugin.name, tool); return parts?.changed ? 'parts-changed' : parts ? 'parts' : 'parts-offer'; }
+    const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
+    if (mark) return ({ changed: 'parts-changed', installed: 'parts', offer: 'parts-offer' } as const)[mark];
     return unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state;
   };
   const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(plugin, tool))));

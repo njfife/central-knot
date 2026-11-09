@@ -4,11 +4,11 @@
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
 import { withoutBom } from './values.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, errorCode, readRecord, sha256, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
@@ -54,7 +54,7 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
 }
 
 const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
-export const serverHash = (server: NeutralServer) => createHash('sha256').update(JSON.stringify(canonical(server))).digest('hex');
+export const serverHash = (server: NeutralServer) => sha256(JSON.stringify(canonical(server)));
 
 const strings = (value: unknown): Record<string, string> | undefined => (value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) : undefined);
 const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? value.map(String) : undefined);
@@ -213,7 +213,7 @@ export async function keep(context: ShareContext, name: string, server: NeutralS
   if (!entry) return undefined;
   const text = `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`;
   // The latest settings for this version, and an unchanging copy History can name, so a later version never overwrites an older one.
-  const ref = `${entry.tool}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
+  const ref = `${entry.tool}-${sha256(text).slice(0, 16)}`;
   const latest = join(keptBase(context, name), hash, `${entry.tool}.json`);
   if ((await readFile(latest, 'utf8').catch(() => undefined)) !== text) await writeDurably(latest, text);
   try { await stat(join(keptBase(context, name), hash, `${ref}.json`)); } catch { await writeDurably(join(keptBase(context, name), hash, `${ref}.json`), text); }

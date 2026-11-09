@@ -283,7 +283,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
-  /** It was about the plugin's parts (parts.ts), not the plugin itself. */ parts?: boolean; /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
+  /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
   /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
 
 // ---------- A plugin's parts in a tool without plugins (parts.ts) ----------

@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartKind, PartsState, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 
@@ -89,8 +89,29 @@ export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: Harnes
   return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
 }
 
+/**
+ * The same part, by each kind's own rule: skill folders ignore case (as macOS and Windows do), agents match as the Agents
+ * page keys them (NFC, ignoring case), MCP servers are keys in a settings file and match exactly.
+ */
+export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>): boolean {
+  if (first.kind !== second.kind) return false;
+  if (first.kind === 'mcp') return first.name === second.name;
+  return first.name.normalize('NFC').toLowerCase() === second.name.normalize('NFC').toLowerCase();
+}
+
 /** Each kind of part in words: [one, several]. */
 export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
+
+/**
+ * Where a tool stands with this plugin's parts, for the box, the key and the status line alike: they can go in
+ * (`offer`), they are there (`installed`), or they are there and the plugin has changed since (`changed`). Undefined
+ * when parts aren't a matter for this tool.
+ */
+export function partsMark(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): 'offer' | 'installed' | 'changed' | undefined {
+  if (!partsOffer(view, entry, plugin, tool, components)) return undefined;
+  const parts = partsOf(entry, plugin, tool);
+  return parts?.changed ? 'changed' : parts ? 'installed' : 'offer';
+}
 
 /** "2 skills · 1 MCP server", from parts as recorded. */
 export function partsSummary(items: PartsState['items'], separator = ' · '): string {

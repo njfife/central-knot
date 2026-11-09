@@ -6,7 +6,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { pluginKey, queued, toggle, type PluginAction } from './pluginplan.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, partsOf, partsOffer, partsSummary, stateOf, unavailable, versionWord } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, partsMark, partsOf, partsSummary, stateOf, unavailable, versionWord } from './pluginstatus.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
@@ -50,13 +50,14 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 
   const why = unavailable(view, entry, plugin.name, tool);
   // A tool that can't take the plugin may take its parts as separate items (parts.ts): its box chooses those instead.
-  if (partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin))) {
+  const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
+  if (mark) {
     const parts = partsOf(entry, plugin.name, tool);
     const preview = view.canWrite ? '' : ` ${PREVIEW_ONLY}`;
     if (pending === 'remove-parts') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove-parts', title: `${name}: its parts are removed on Apply all. Click to keep them.`, glyph: icon('x', 15), action: 'remove-parts' });
     if (pending === 'install-parts') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'parts-chosen', title: `${name}: its parts are ${parts ? 'updated' : 'installed as separate items'} on Apply all. Click to leave ${parts ? 'them as they are' : 'them out'}.`, glyph: icon('blocks', 15), action: 'install-parts' });
-    if (parts?.changed) return box({ look: 'cell-differs.cell-on', state: 'parts-changed', title: `${name}: ${changedWords(parts)}. ${preview.trim() || 'Click to update them on Apply all.'}`, glyph: icon('refresh-cw', 14), action: 'install-parts' });
-    if (parts) {
+    if (mark === 'changed' && parts) return box({ look: 'cell-differs.cell-on', state: 'parts-changed', title: `${name}: ${changedWords(parts)}. ${preview.trim() || 'Click to update them on Apply all.'}`, glyph: icon('refresh-cw', 14), action: 'install-parts' });
+    if (mark === 'installed' && parts) {
       const from = [partsSummary(parts.items), versionWord(parts.version) && `from ${versionWord(parts.version)}`].filter(Boolean).join(', ');
       return box({ look: 'cell-synced.cell-on.cell-parts', state: 'parts', title: `${name}: its parts are installed as separate items (${from}). ${preview.trim() || 'Click to remove them on Apply all.'}`, glyph: icon('blocks', 15), action: 'remove-parts' });
     }

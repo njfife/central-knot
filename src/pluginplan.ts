@@ -136,7 +136,8 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const { plugin, source } = mine[0]!;
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time.
     const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false, updated = false) => mine
-      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && !!entry.report.partsUpdated === updated)
+      // An unchanged result is one group whatever kind of run it was: only a change tells an update from an install.
+      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!changed || !!entry.report.partsUpdated === updated))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
       [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], ...(undo ? [[[...tools('installed', false, true), ...tools('uninstalled', false, true)], 'nothing left to undo in'] as [string[], string]]

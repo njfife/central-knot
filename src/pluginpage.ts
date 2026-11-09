@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { installed, partWords, partsEligible, partsFit, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
+import { installed, partWords, partsEligible, partsFit, partsMark, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
@@ -62,7 +62,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const parts = partsOf(entry, plugin.name, tool);
     if (chosen) return ({ install: 'Will install', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts', 'undo-parts': '' } as Record<PluginAction, string>)[chosen];
     if (installed(entry, plugin.name, tool)) return 'Installed';
-    if (partsOffer(view, entry, plugin.name, tool, components)) return parts?.changed ? 'Parts out of date' : parts ? 'Parts installed' : 'Can take its parts';
+    const mark = partsMark(view, entry, plugin.name, tool, components);
+    if (mark) return ({ changed: 'Parts out of date', installed: 'Parts installed', offer: 'Can take its parts' } as const)[mark];
     if (takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
@@ -92,7 +93,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
 }
 
 /** What stays with the plugin in any tool without it: the parts that are never installed on their own. */
-function staysBehind(detail: PluginDetail): string[] {
+function pluginOnlyParts(detail: PluginDetail): string[] {
   return [detail.commands.length ? plural(detail.commands.length, 'command') : '', detail.hooks.length ? 'hooks' : '',
     detail.lspServers.length ? plural(detail.lspServers.length, 'language server') : '', detail.bin ? 'the bin/ folder' : ''].filter(Boolean);
 }
@@ -158,7 +159,7 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const settled = tools.every(tool => !partsIn(tool) && !chosen(tool));
   const groups = new Map<string, HarnessId[]>();
   for (const tool of [...tools, ...empty].sort(byToolOrder)) { const key = settled ? JSON.stringify([partsWhy(view, entry, tool)[0], plans?.[tool] ?? null]) : tool; groups.set(key, [...(groups.get(key) ?? []), tool]); }
-  const behind = detail && !detail.problem ? staysBehind(detail) : [];
+  const behind = detail && !detail.problem ? pluginOnlyParts(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
     h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents can go in as separate items instead, and come out together.'),

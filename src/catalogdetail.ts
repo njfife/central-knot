@@ -144,10 +144,14 @@ async function section(root: string, folder: string, named: unknown, key: string
 
 /** A plugin's declared component paths: its marketplace entry wins over plugin.json, as the tools read it. */
 async function declaredOf(folder: string, entry: Record<string, unknown>, root: string) {
-  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
-  const declared = { ...pluginJson, ...entry };
+  const manifest = join(folder, '.claude-plugin/plugin.json');
+  const read = await readInside(root, manifest);
+  const parsed = read?.whole ? parseObject(read.text) : undefined;
+  // There but not readable: the paths it may declare are unknown, which is not the same as declaring none.
+  const manifestUnread = !parsed && (!!read || await present(manifest));
+  const declared = { ...(parsed ?? {}), ...entry };
   const listed = (key: string, fallback: string) => strings(declared[key])?.map(path => resolve(folder, path)) ?? [join(folder, fallback)];
-  return { declared, listed };
+  return { declared, listed, manifestUnread };
 }
 
 /**
@@ -179,9 +183,10 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
  */
 export interface PluginFiles { folder: string; skills: { name: string; dir: string }[]; agents: { name: string; text: string; whole: boolean }[]; servers: Record<string, unknown>; unread: { skills: string[]; agents: string[]; servers: boolean } }
 export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
-  const { declared, listed } = await declaredOf(folder, entry, root);
+  const { declared, listed, manifestUnread } = await declaredOf(folder, entry, root);
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
-  const unread = { skills: [] as string[], agents: [] as string[], servers: servers.unread };
+  // An unreadable plugin.json may declare other folders for any kind: every kind's contents count as unknown then.
+  const unread = { skills: manifestUnread ? ['*'] : [] as string[], agents: manifestUnread ? ['*'] : [] as string[], servers: servers.unread || manifestUnread };
   return {
     folder,
     skills: (await skillFolders(root, listed('skills', 'skills'), unread.skills)).map(found => ({ name: basename(found.dir), dir: found.dir })),

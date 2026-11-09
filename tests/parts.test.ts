@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
@@ -58,8 +58,14 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     assert.deepEqual(copilotMcp.mcpServers.figma, { type: 'local', command: 'npx', args: ['-y', 'figma-mcp'], env: { FIGMA_TOKEN: 'figd_abc123' }, tools: ['*'] });
     assert.match(await readFile(join(box.home, '.copilot/agents/designer.agent.md'), 'utf8'), /description: Turns designs into code/);
 
+    // Pi's skills folder is a link into the shared .agents folder: never written through, as on the Skills page.
+    await mkdir(join(box.home, '.agents/skills'), { recursive: true });
+    await rm(join(box.home, '.pi/agent/skills'), { recursive: true, force: true });
+    await symlink(join(box.home, '.agents/skills'), join(box.home, '.pi/agent/skills'));
     const pi = await installParts(box.context, { ...target, tool: 'pi-cli' }, await box.files());
     assert.equal(pi.outcome, 'installed', pi.message);
+    assert.match(pi.notes?.join(' ') ?? '', /skills folder is a link/);
+    await assert.rejects(readFile(join(box.home, '.agents/skills/figma-design/SKILL.md')));
     const piMcp = JSON.parse(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8'));
     assert.deepEqual(piMcp.mcpServers.figma, { type: 'stdio', command: 'npx', args: ['-y', 'figma-mcp'], env: { FIGMA_TOKEN: 'figd_abc123' } });
     assert.match(pi.message, /designer: Pi has no agents/);
@@ -83,7 +89,7 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
   } finally { await box.cleanup(); }
 });
 
-test('Parts never replace what was there, removing keeps an edited or managed part, and Undo of a removal puts the rest back', async () => {
+test('Parts never replace what was there, removing keeps an edited or managed part, and Undo of a removal puts back only what it took', async () => {
   const box = await sandbox();
   try {
     await mkdir(join(box.home, '.pi/agent/skills/figma-design'), { recursive: true });
@@ -103,9 +109,19 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
     assert.match(update.notes?.join(' ') ?? '', /Left out the agent “designer”: it was removed/);
     await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
     await assert.rejects(readFile(join(box.home, '.copilot/agents/designer.agent.md')));
+    // Every part removed by hand: an update finds none left, says so, and leaves nothing to undo that would bring them back.
+    await rm(join(box.home, '.copilot/skills/figma-design'), { recursive: true });
+    await rm(join(box.home, '.copilot/mcp-config.json'));
+    const none = await installParts(box.context, { ...target, version: '1.1.0', tool: 'copilot-cli' }, await box.files());
+    assert.match(none.message, /None of its parts are in Copilot CLI any more/);
+    assert.equal(none.partsRun, undefined);
 
+    // The managed "remote" was only for Pi's step; Codex gets every part.
+    await rm(join(box.home, '.central-knot/mcp.json'));
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     await writeFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), `${SKILL}Edited.\n`);
+    // Deleted by hand before the removal below: its Undo must not bring it back.
+    await rm(join(box.home, '.codex/agents/designer.toml'));
     // The MCP server was managed since: removing it would spread a deletion through sync, so it stays.
     await writeFile(join(box.home, '.central-knot/mcp.json'), JSON.stringify({ formatVersion: 1, items: { figma: { state: 'shared', off: [], hash: '', copies: [] } } }));
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
@@ -115,14 +131,17 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
     assert.match(await readFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), 'utf8'), /Edited/);
     await assert.rejects(readFile(join(box.home, '.codex/agents/designer.toml')));
 
+    assert.doesNotMatch(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /mcp-remote/);
+
+    // Undo puts back what the removal took out (the remote server), not what the person had deleted before it (the agent).
     const back = await undoParts(box.context, removed.partsRun ?? '');
     assert.equal(back?.outcome, 'installed', back?.message ?? '');
-    assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /You design/);
-    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/);
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /mcp-remote/);
+    await assert.rejects(readFile(join(box.home, '.codex/agents/designer.toml')));
   } finally { await box.cleanup(); }
 });
 
-test('A changed plugin shows as changed, and updating replaces unchanged parts and drops ones it no longer has', async () => {
+test('Updates: changed parts replaced, dropped ones removed, unreadable sources and edited settings left alone', async () => {
   const box = await sandbox();
   try {
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
@@ -161,6 +180,13 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
       await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
       assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/, unreadable);
     }
+    await writeFile(join(box.plugin, '.mcp.json'), JSON.stringify({ mcpServers: { figma: { command: 'npx', args: ['-y', 'figma-mcp'] } } }));
+    // A plugin.json that can't be read may declare other folders for any part: nothing installed is read as dropped.
+    await mkdir(join(box.plugin, '.claude-plugin'), { recursive: true });
+    await writeFile(join(box.plugin, '.claude-plugin', 'plugin.json'), '{ broken');
+    await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
+    assert.deepEqual((await readParts(box.home))[0]?.items.map(item => item.kind).sort(), ['mcp', 'skill']);
+    await rm(join(box.plugin, '.claude-plugin'), { recursive: true });
     const config = join(box.home, '.codex/config.toml');
     // A settings file that can't be read right now is a failure, not an edit: the parts stay on record to try again.
     const good = await readFile(config, 'utf8');

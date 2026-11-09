@@ -211,11 +211,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (entry) { if (!entry.origins.includes(origin)) entry.origins.push(origin); } else known.push({ source, origins: [origin] });
     };
     for (const source of await added()) note(source, 'central-knot');
-    // A marketplace whose plugins' parts are still in a tool stays listed, so its parts can still be updated or removed together.
-    const share = host.share?.();
-    for (const install of share ? await readParts(share.home) : []) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
     for (const tool of tools.filter(candidate => engine.pluginTools.includes(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
+    // A marketplace whose plugins' parts are still in a tool stays listed (after the tools', so "Added in Codex" still shows),
+    // so its parts can still be updated or removed together.
+    const share = host.share?.();
+    for (const install of share ? await readParts(share.home) : []) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh === true || (fresh !== undefined && engine.sameSource(fresh, source))))));
@@ -331,14 +332,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (mode === 'undo') {
       // A run with nothing kept for it was undone already: done, so "Undo the rest" isn't offered for it again.
       const undone = run ? await undoParts(share, run) : undefined;
-      return { reports: [undone ?? { tool, outcome: 'uninstalled', message: 'That change was undone already.', runs: [], parts: true, changed: false }] };
+      return { reports: [undone ?? { tool, outcome: 'uninstalled', message: 'That change was undone already.', runs: [], changed: false }] };
     }
     if (mode === 'remove') return { reports: [await removeParts(share, { source, plugin, tool })] };
     const ctx = await context();
     const { catalog } = await catalogFor(ctx, source, { counts: false });
-    if (!catalog || catalog.name !== marketName) return { reports: [{ ...failedFor([tool], 'Its marketplace changed. Refresh, then choose it again.')[0]!, parts: true }] };
+    if (!catalog || catalog.name !== marketName) return { reports: failedFor([tool], 'Its marketplace changed. Refresh, then choose it again.') };
     const read = await filesOf(ctx, catalog, plugin);
-    if (!read.files) return { reports: [{ ...failedFor([tool], read.problem ?? 'Its files can’t be read.')[0]!, parts: true }] };
+    if (!read.files) return { reports: failedFor([tool], read.problem ?? 'Its files can’t be read.') };
     const version = catalog.plugins.find(entry => entry.name === plugin)?.version;
     return { reports: [await installParts(share, { source, marketName, plugin, version, tool }, read.files)] };
   }
