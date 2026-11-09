@@ -55,10 +55,10 @@ test('R2 dotted env remains valid after an env edit elsewhere', () => box(async 
   validToml(await fs.readFile(codex, 'utf8'));
 }));
 
-test('R3 null mcpServers must not delete the other copies', () => box(async (context, copilot, codex) => {
+for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`R3 ${broken} must not delete the other copies`, () => box(async (context, copilot, codex) => {
   await fs.writeFile(copilot, json('BASE'));
   await applyMcp(context, tools, managed());
-  await fs.writeFile(copilot, '{"mcpServers":null}');
+  await fs.writeFile(copilot, broken);
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).entries[0]?.server.command, 'BASE');
