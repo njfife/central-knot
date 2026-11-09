@@ -746,7 +746,8 @@ function accountForReplacedCopy(history: HistoryEvent[], mine: HistoryEvent[], {
   const separate = mine.find(event => event !== replaced && event.kind === 'edit' && event.previous === before);
   if (replaced && separate) history.splice(history.indexOf(separate), 1);
   if (replaced && !settingsOnly) {
-    if (replaced.losers.some(loser => loser.hash === before)) return;
+    // Named per tool, even when its old copy matched another's: the row says every tool the pull changed.
+    if (replaced.losers.some(loser => loser.tool === tool)) return;
     if (pending) replaced.losers.unshift({ tool, hash: before }); else replaced.losers.push({ tool, hash: before });
   } else if (!replaced && !separate) {
     history.push({ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'edit', winner: { tool, hash: after }, losers: [], previous: before, orderProved: true, via: 'repo', settingsFile: settingsOnly });

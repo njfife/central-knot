@@ -101,7 +101,10 @@ const push = () => busy('Pushing to the repo…', async () => {
 });
 
 const disconnect = () => busy('Disconnecting…', async () => {
+  // The address stays in the form, so connecting again is one click.
+  const last = repo.view?.connected ? { url: repo.view.url, branch: repo.view.branch } : undefined;
   const result = await api().disconnectRepo(state.home!.home);
+  if (last && !result.stopped) { repo.draftUrl = last.url; repo.draftBranch = last.branch; }
   await settle(result, 'Disconnected. Your tools and the repo are as they were.');
 });
 
