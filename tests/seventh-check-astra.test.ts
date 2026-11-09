@@ -50,10 +50,10 @@ test('R2 dotted env fields are read, spread, and rewritten as valid TOML', () =>
   assert.equal(await fs.readFile(codex, 'utf8'), '[mcp_servers.docs]\ncommand = "BASE"\n\n[mcp_servers.docs.env]\nREGION = "east"\n');
 }));
 
-test('R3 null mcpServers must not delete the other copies', () => box(async (context, copilot, codex) => {
+for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`R3 ${broken} must not delete the other copies`, () => box(async (context, copilot, codex) => {
   await fs.writeFile(copilot, json('BASE'));
   await applyMcp(context, tools, managed());
-  await fs.writeFile(copilot, '{"mcpServers":null}');
+  await fs.writeFile(copilot, broken);
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).entries[0]?.server.command, 'BASE');
