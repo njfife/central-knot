@@ -71,6 +71,18 @@ test('N5 MCP old deletion Restore must not overwrite newly managed server',()=>b
   assert.equal(await command(b.context,'copilot-cli'),'UNRELATED');
 }));
 
+test('N8b MCP deletion made in Codex: Restore keeps Codex enabled=false (DEL-03)',()=>box(async b=>{
+  const codex=join(b.home,'.codex','config.toml');
+  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('BASE'));
+  await applyMcp(b.context,tools.slice(1),managed('docs'));
+  await fs.writeFile(codex,(await fs.readFile(codex,'utf8')).replace('command = "BASE"\n','command = "BASE"\nenabled = false\n'));
+  await applyMcp(b.context,tools.slice(1),[]);
+  await fs.writeFile(codex,'[mcp_servers.other]\ncommand = "true"\n');
+  await applyMcp(b.context,tools.slice(1),[],{settleMs:0});
+  await restoreMcp(b.context,tools.slice(1),(await readHistory(b.home)).find(e=>e.kind==='deleted')!.id);
+  assert.match(await fs.readFile(codex,'utf8'),/enabled\s*=\s*false/);
+}));
+
 test('N11 interrupted agents conflict must recover loser through History on restart',()=>box(async b=>{
   await fs.writeFile(b.paths[0],md('BASE'));await applyAgents(b.context,tools,managed('reviewer'));
   await fs.writeFile(b.paths[0],md('CLAUDE LOSER'));
