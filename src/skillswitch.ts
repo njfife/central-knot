@@ -46,12 +46,12 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
   const shown = path.startsWith(context.home + sep) ? `~${path.slice(context.home.length)}` : path;
   let text: string;
   try { text = await readFile(path, 'utf8'); } catch (error) {
-    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: `${shown} can’t be read, so Disable isn’t available here.` };
+    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: `${shown} can’t be read.` };
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
     const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}`;
-    return { tool, path, text, exists: true, problem: `${shown} ${why}, so Disable isn’t available here.` };
+    return { tool, path, text, exists: true, problem: `${shown} ${why}.` };
   }
 }
 

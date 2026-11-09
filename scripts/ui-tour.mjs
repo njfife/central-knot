@@ -115,13 +115,13 @@ if (wanted('disable')) {
   await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
   await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
   const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
-  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked "Restore in Copilot CLI" on the removal.'); }
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked Restore on the newest removal (release-notes, in Claude Code).'); }
   await a.click('#nav-skills');
   await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
   await a.click('#open-review');
   writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
   await a.click('#header-refresh'); await a.click('#open-notes');
-  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable (the reason is on hover).');
+  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable, with the reason as the row\'s text.');
   rmSync(join(practice, '.copilot/settings.json'));
   await a.click('#header-refresh');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {

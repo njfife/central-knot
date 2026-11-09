@@ -89,7 +89,7 @@ test('Codex: a name rule is overruled by a path rule, the person’s own rule ke
     await setDisabled(box.context, 'codex-cli', target, false);
     assert.equal(await readFile(file, 'utf8'), 'a = 1\n\n[mcp_servers.x]\ncommand = "x"\n');
     await writeFile(file, 'skills = { config = [] }\n');
-    assert.match((await readSwitchFile(box.context, 'codex-cli')).problem ?? '', /form Central Knot doesn’t edit, so Disable isn’t available here/);
+    assert.match((await readSwitchFile(box.context, 'codex-cli')).problem ?? '', /form Central Knot doesn’t edit\.$/);
     await assert.rejects(setDisabled(box.context, 'codex-cli', target, true));
     assert.equal(await readFile(file, 'utf8'), 'skills = { config = [] }\n');
   } finally { await box.cleanup(); }

@@ -1369,6 +1369,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
 .tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
 .tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-faint); }
+/* What Disabled and Remove mean, right under the rows they belong to. */
+.details-switch-note { margin: 0; }
 /* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
 .text-action.tool-remove { color: var(--ink-soft); }
 .text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
@@ -1376,8 +1378,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-remove-slot { display: inline-block; }
 /* Differing copies hide an empty foot, but not one holding Delete everywhere. */
 .details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action) { display: flex; }
-/* The change bar's breakdown gives way first on a narrow window (ellipsis, full text on hover), so Discard and Apply all always show. */
-.toolbar-end:has(> .apply) { flex: 0 1 auto; min-width: 0; }
-.toolbar-end > .apply { min-width: 0; }
-.toolbar-end > .apply > :not(.apply-count) { flex: none; }
-.toolbar-end .apply-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
+.ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
+/* Keyboard focus on a queued switch shows as focus, not as the dashed queued mark. */
+.tool-switch-pending .switch:focus-visible, .managed-pending .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

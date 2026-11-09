@@ -422,7 +422,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     }
     // A Disable that can't be carried out changes nothing either: otherwise the copy would arrive enabled.
     const cantDisable = change.disable?.find(tool => entry.facts.switchProblem?.[tool]);
-    if (cantDisable) { results.push({ item: entry.facts.name, harness: cantDisable, outcome: 'held', message: `${entry.facts.switchProblem![cantDisable]} Nothing was changed.` }); continue; }
+    if (cantDisable) { results.push({ item: entry.facts.name, harness: cantDisable, outcome: 'held', message: `Disable isn’t available in ${harnesses[cantDisable].name}: ${entry.facts.switchProblem![cantDisable]} Nothing was changed.` }); continue; }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     const wasOff = item.off ?? [];
