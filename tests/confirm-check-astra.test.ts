@@ -29,7 +29,8 @@ test('catch-up records overwritten content when Claude was the only destination'
     await applyMcp(context, tools, []);
     assert.equal((await readTool(context, 'claude-cli')).entries[0].server.command, 'B');
     const history = await readHistory(home);
-    assert.ok(history.some(event => event.previous === previous || event.losers.some(loser => loser.hash === previous)), JSON.stringify(history));
+    assert.ok(history.some(event => event.kind === 'edit' && event.previous === previous), JSON.stringify(history));
+    assert.ok(!history.some(event => event.winner?.tool === 'claude-cli' && event.losers.some(loser => loser.tool === 'claude-cli')), 'no made-up edit blames Claude Code');
   } finally { await fs.rm(base, { recursive: true, force: true }); }
 });
 
