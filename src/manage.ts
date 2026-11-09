@@ -350,7 +350,6 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   if (gate.state === 'needs-resume' && !resume) return { stopped: gate.reason, results: [], harnessWrites: 0 };
   let record = (await readRecord(context.home)).record;
   if (!record && !changes.length) return { results: [], harnessWrites: 0 };
-  if (options.observeOnly && !record) return { results: [], harnessWrites: 0 };
 
   const snapshots = await context.read();
   const tools = presentTools(snapshots);

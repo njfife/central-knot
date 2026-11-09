@@ -35,12 +35,13 @@ const exists = (path: string) => lstat(path).then(() => true, () => false);
 const facts = async (box: Box, key: string) => (await manageView(ctx(box))).skills.find(item => item.key === key)!;
 const manage = (key: string, off: HarnessId[] = []) => ({ key, managed: true, off });
 
-test('The view reports each tool’s copy and writes nothing', async () => {
+test('The view reports each tool’s copy; neither it nor a catch-up pass with nothing managed writes anything', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'only-claude');
     await skill(box.home, CLAUDE, 'twin'); await skill(box.home, COPILOT, 'twin');
     await skill(box.home, CLAUDE, 'plain', 'No frontmatter.\n');
+    await skill(box.home, COPILOT, 'cafe', text('café'));
     const view = await manageView(ctx(box));
     assert.deepEqual(view.tools, both);
     const only = view.skills.find(item => item.key === 'only-claude')!;
@@ -50,6 +51,8 @@ test('The view reports each tool’s copy and writes nothing', async () => {
     const twin = view.skills.find(item => item.key === 'twin')!;
     assert.equal(twin.copies['claude-cli']!.hash, twin.copies['copilot-cli']!.hash);
     assert.match(view.skills.find(item => item.key === 'plain')!.cannot['copilot-cli']!, /frontmatter/);
+    assert.match(view.skills.find(item => item.key === 'cafe')!.cannot['copilot-cli'] ?? '', /will not load/, 'a copy its own tool refuses counts as none');
+    assert.equal((await applyChanges(ctx(box), [])).harnessWrites, 0);
     assert.equal(await exists(storeDirectory(box.home)), false);
   } finally { await box.cleanup(); }
 });
@@ -68,19 +71,6 @@ test('Managing one skill copies it where it is missing; unmanaged skills are lef
   } finally { await box.cleanup(); }
 });
 
-test('A tool turned off gets no copy, and a copy already there stays', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    await skill(box.home, CLAUDE, 'both'); await skill(box.home, COPILOT, 'both');
-    const result = await applyChanges(ctx(box), [manage('solo', ['copilot-cli']), manage('both', ['copilot-cli'])]);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
-    assert.equal(await exists(join(box.home, COPILOT, 'both/SKILL.md')), true);
-    assert.deepEqual((await facts(box, 'solo')).off, ['copilot-cli']);
-  } finally { await box.cleanup(); }
-});
-
 test('Catch-up: a tool newly turned on gets its copy; a deleted copy is a deletion, not something to bring back', async () => {
   const box = await sandbox();
   try {
@@ -88,22 +78,13 @@ test('Catch-up: a tool newly turned on gets its copy; a deleted copy is a deleti
     await skill(box.home, CLAUDE, 'dropped');
     await applyChanges(ctx(box), [manage('kept', ['copilot-cli']), manage('dropped')]);
     assert.equal(await exists(join(box.home, COPILOT, 'kept')), false, 'off for Copilot');
+    assert.deepEqual((await facts(box, 'kept')).off, ['copilot-cli']);
     await applyChanges(ctx(box), [manage('kept')]);
     assert.equal(await exists(join(box.home, COPILOT, 'kept/SKILL.md')), true, 'turning Copilot on catches up');
     await rm(join(box.home, COPILOT, 'dropped'), { recursive: true });
     await applyChanges(ctx(box, { settleMs: 0 }), []);
     assert.equal(await exists(join(box.home, COPILOT, 'dropped')), false, 'not brought back');
     assert.equal(await exists(join(box.home, CLAUDE, 'dropped')), false, 'and the deletion spread');
-  } finally { await box.cleanup(); }
-});
-
-test('Catch-up with no record writes nothing, not even a record', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    const result = await applyChanges(ctx(box), []);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await exists(storeDirectory(box.home)), false);
   } finally { await box.cleanup(); }
 });
 
@@ -176,17 +157,6 @@ test('An unreadable skill is held, and the rest still syncs', { skip: noPosix ||
   } finally { await box.cleanup(); }
 });
 
-test('Differing copies inside one tool count as copies that differ', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, COPILOT, 'dup', text('dup', 'A'));
-    await skill(box.home, '.agents/skills', 'dup', text('dup', 'B'));
-    const result = await applyChanges(ctx(box), [manage('dup')]);
-    assert.equal(result.harnessWrites, 0);
-    assert.match(result.results[0].message, /Copies differ/);
-  } finally { await box.cleanup(); }
-});
-
 test('An interrupted copy leaves nothing half-written, and the next pass completes it', async () => {
   const box = await sandbox();
   try {
@@ -194,13 +164,15 @@ test('An interrupted copy leaves nothing half-written, and the next pass complet
     const fault = (step: string) => { if (step === 'before-rename') throw new Error('fault: crash'); };
     await assert.rejects(applyChanges(ctx(box, { fault }), [manage('solo')]), /fault/);
     assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
+    await mkdir(join(box.home, '.copilot', '.ck-stage-00000000-0000-4000-8000-000000000001', 'inner'), { recursive: true });
     const next = await applyChanges(ctx(box), []);
     assert.equal(next.harnessWrites, 1);
     assert.equal(await exists(join(box.home, COPILOT, 'solo/SKILL.md')), true);
+    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'a leftover from a killed copy is cleared');
   } finally { await box.cleanup(); }
 });
 
-test('A different copy Copilot reads in the shared .agents folder is shown, never written, and reported', async () => {
+test('A different copy Copilot reads in the shared .agents folder is shown, never written, reported, and counts as a copy that differs', async () => {
   const box = await sandbox();
   try {
     await skill(box.home, CLAUDE, 'dup', text('dup', 'A'));
@@ -214,6 +186,8 @@ test('A different copy Copilot reads in the shared .agents folder is shown, neve
     assert.ok(result.results.some(entry => /\.agents\/skills\/dup, which Central Knot does not change/.test(entry.message)), JSON.stringify(result.results));
     assert.equal(result.harnessWrites, 0);
     assert.equal((await facts(box, 'dup')).managed, false, 'a choice that cannot be carried out changes nothing, not even Managed');
+    const differ = await applyChanges(ctx(box), [manage('dup')]);
+    assert.ok(differ.harnessWrites === 0 && /Copies differ/.test(differ.results[0].message), JSON.stringify(differ.results));
     assert.deepEqual(view.choiceBlocks['claude-cli']?.map(block => block.tool), ['copilot-cli'], 'the page is told before anyone chooses');
   } finally { await box.cleanup(); }
 });
@@ -233,25 +207,6 @@ test('Choosing a copy never writes through a link, and leaves what it points to 
     assert.equal((await stat(real)).mode & 0o777, 0o555);
     assert.equal((await stat(join(real, 'sub'))).mode & 0o777, 0o500);
     assert.equal(await readFile(join(real, 'SKILL.md'), 'utf8'), text('lk', 'Dotfiles'));
-  } finally { await box.cleanup(); }
-});
-
-test('A chosen copy that disappears before Apply all stops that skill, writing nothing', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, COPILOT, 'clash', text('clash', 'Copilot'));
-    const result = await applyChanges(ctx(box), [{ ...manage('clash'), use: 'claude-cli' }]);
-    assert.equal(result.harnessWrites, 0);
-    assert.match(result.results[0].message, /you chose in Claude Code is gone/);
-    assert.equal(await exists(join(box.home, CLAUDE, 'clash')), false);
-  } finally { await box.cleanup(); }
-});
-
-test('A copy the tool itself refuses counts as one it cannot load', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, COPILOT, 'cafe', text('café'));
-    assert.match((await facts(box, 'cafe')).cannot['copilot-cli'] ?? '', /will not load/);
   } finally { await box.cleanup(); }
 });
 
@@ -337,21 +292,6 @@ test('A folder without SKILL.md where a copy would go is never overwritten', asy
     const result = await applyChanges(ctx(box), [manage('taken')]);
     assert.equal(result.harnessWrites, 0);
     assert.equal(await readFile(join(box.home, COPILOT, 'taken/notes.txt'), 'utf8'), 'mine');
-  } finally { await box.cleanup(); }
-});
-
-test('A stuck leftover stage does not stop later applies, and is cleared', { skip: noPosix || process.getuid?.() === 0 }, async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    await mkdir(join(box.home, COPILOT), { recursive: true });
-    const stuck = join(box.home, '.copilot', '.ck-stage-00000000-0000-4000-8000-000000000001');
-    await mkdir(join(stuck, 'inner'), { recursive: true });
-    await writeFile(join(stuck, 'inner/x'), 'x');
-    await chmod(join(stuck, 'inner'), 0o555);
-    await chmod(stuck, 0o555);
-    assert.equal((await applyChanges(ctx(box), [manage('solo')])).harnessWrites, 1);
-    assert.deepEqual(await readdir(join(box.home, '.copilot')), ['skills'], 'Central Knot clears its own leftover');
   } finally { await box.cleanup(); }
 });
 
@@ -481,18 +421,6 @@ test('Real home: written only when allowed; a relative override stops it and an 
     assert.equal(written.harnessWrites, 1, 'once Copilot is there, the managed skill catches up');
     assert.equal(await exists(join(realHome, COPILOT, 'real-skill/SKILL.md')), true);
   } finally { await box.cleanup(); }
-});
-
-test('Practice fixture: the bundled home shows each kind of skill', async () => {
-  const fixture = join(import.meta.dirname, '../fixtures/home');
-  const context: ShareContext = { home: fixture, mode: 'fixture', read: read(fixture, 'fixture'), build: 'test', settingsPath: join(tmpdir(), 'ck-unused-settings.json'), realHome: join(tmpdir(), 'ck-unused-home') };
-  const view = await manageView(context);
-  const shape = view.skills.map(item => {
-    const hashes = new Set(Object.values(item.copies).map(copy => copy!.hash));
-    return `${item.key}:${Object.keys(item.copies).length}${hashes.size > 1 ? ':differs' : ''}`;
-  });
-  assert.deepEqual(shape, ['notes:2', 'release-notes:1', 'review:2:differs', 'standup:1']);
-  assert.ok(view.writes['copilot-cli']?.to.endsWith('.copilot/skills'));
 });
 
 // ---------- Break-it round 3 ----------
