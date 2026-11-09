@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
@@ -276,5 +276,23 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Newer\./);
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion owed to a tool that was away finishes when it returns, though a stopped one-way copy stays elsewhere', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent(undefined, 'model: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(copilot, claudeAgent('Copilot only.\n'));
+    await applyAgents(box.context, tools, []);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent('Copilot only.\n'));
   } finally { await box.cleanup(); }
 });

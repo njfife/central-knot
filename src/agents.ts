@@ -483,7 +483,7 @@ async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
     const pending = item.copies.filter(copy => copy.status === 'removing');
     if ((pass.limitedToKeys && !pass.limitedToKeys.has(key)) || !pending.length) continue;
     const slot = pass.onDisk.byKey.get(key) ?? {};
-    const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !pending.some(copy => copy.tool === entry.tool));
+    const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !item.copies.some(copy => copy.tool === entry.tool));
     const done: AgentCopy[] = [];
     for (const copy of pending) {
       const here = slot[copy.tool];
