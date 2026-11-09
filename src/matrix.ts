@@ -10,7 +10,7 @@ import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sa
 import type { Change, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
-import { samePart, versionWord } from './pluginstatus.ts';
+import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
@@ -21,7 +21,7 @@ const names = toolNames as Record<Tool, string>;
  * because they can't take the plugin. Empty for an ordinary item.
  */
 function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; tools: HarnessId[] }[] {
-  const partKind = page === 'skills' ? 'skill' : page === 'mcp' ? 'mcp' : 'agent';
+  const partKind = partOfPage[page];
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
@@ -118,7 +118,7 @@ export const showFiltered = (which: Kind, filter: Filter) => { views[which].filt
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
 export function openItem(which: Kind, name: string) {
   const facts = which === 'skills' ? state.home?.manage.skills : which === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers;
-  const partKind = which === 'skills' ? 'skill' : which === 'mcp' ? 'mcp' : 'agent';
+  const partKind = partOfPage[which];
   const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
   views[which].filter = 'all';
   views[which].comparing = key;

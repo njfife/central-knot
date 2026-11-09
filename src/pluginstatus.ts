@@ -99,6 +99,10 @@ export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<Pa
   return first.name.normalize('NFC').toLowerCase() === second.name.normalize('NFC').toLowerCase();
 }
 
+/** Which page lists each kind of part, and the kind each page lists. */
+export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
+export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
+
 /** Each kind of part in words: [one, several]. */
 export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
 

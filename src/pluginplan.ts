@@ -137,13 +137,23 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const { plugin, source } = mine[0]!;
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time.
-    const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false, updated = false) => mine
+    const tools = ({ outcome, changed, parts = false, updated = false }: { outcome: ActionReport['outcome']; changed: boolean; parts?: boolean; updated?: boolean }) => mine
       // An unchanged result is one group whatever kind of run it was: only a change tells an update from an install.
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!changed || !!entry.report.partsUpdated === updated))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
-    const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
-      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], ...(undo ? [[[...tools('installed', false, true), ...tools('uninstalled', false, true)], 'nothing left to undo in'] as [string[], string]]
-        : [[tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']] as [string[], string][])];
+    const plugins: [string[], string][] = [
+      [tools({ outcome: 'installed', changed: true }), verbs.installed], [tools({ outcome: 'uninstalled', changed: true }), verbs.uninstalled],
+      [tools({ outcome: 'installed', changed: false }), 'already in'], [tools({ outcome: 'uninstalled', changed: false }), 'wasn’t installed in'],
+    ];
+    const partsChanged: [string[], string][] = [
+      [tools({ outcome: 'installed', changed: true, parts: true }), undo ? 'parts put back in' : 'parts installed in'],
+      [tools({ outcome: 'installed', changed: true, parts: true, updated: true }), 'parts updated in'],
+      [tools({ outcome: 'uninstalled', changed: true, parts: true }), 'parts removed from'],
+    ];
+    const partsUnchanged: [string[], string][] = undo
+      ? [[[...tools({ outcome: 'installed', changed: false, parts: true }), ...tools({ outcome: 'uninstalled', changed: false, parts: true })], 'nothing left to undo in']]
+      : [[tools({ outcome: 'installed', changed: false, parts: true }), 'parts already up to date in'], [tools({ outcome: 'uninstalled', changed: false, parts: true }), 'had no parts in']];
+    const groups = [...plugins, ...partsChanged, ...partsUnchanged];
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {

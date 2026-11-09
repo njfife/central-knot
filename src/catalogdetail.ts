@@ -175,13 +175,20 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   };
 }
 
-/**
- * The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts), from
- * `folder` (relative server paths are checked against it). `unread`: what is there but couldn't be read (skills and agents
- * by name, or '*' when a folder of them couldn't be listed; `servers` when a servers file isn't readable JSON): an update keeps those parts as
- * installed rather than reading their absence as the plugin dropping them.
- */
-export interface PluginFiles { folder: string; skills: { name: string; dir: string }[]; agents: { name: string; text: string; whole: boolean }[]; servers: Record<string, unknown>; unread: { skills: string[]; agents: string[]; servers: boolean } }
+/** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
+export interface PluginFiles {
+  /** The plugin's folder: a server's relative paths are checked against it. */
+  folder: string;
+  skills: { name: string; dir: string }[];
+  agents: { name: string; text: string; whole: boolean }[];
+  servers: Record<string, unknown>;
+  /**
+   * What is there but couldn't be read: skills and agents by name, or '*' when a folder of them (or plugin.json, which may
+   * name other folders) couldn't be read; `servers` when a servers file isn't readable JSON. An update keeps those parts
+   * as installed rather than reading their absence as the plugin dropping them.
+   */
+  unread: { skills: string[]; agents: string[]; servers: boolean };
+}
 export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
   const { declared, listed, manifestUnread } = await declaredOf(folder, entry, root);
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');

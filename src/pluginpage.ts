@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { installed, partWords, partsEligible, partsFit, partsMark, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
+import { installed, pageOfPart, partWords, partsEligible, partsFit, partsMark, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
@@ -103,9 +103,8 @@ function pluginOnlyParts(detail: PluginDetail): string[] {
  * installed, so each name opens its item on the Skills, MCP servers or Agents page.
  */
 function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (string | HTMLElement)[] {
-  const page = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
   const named = (kind: PartPlan['kind'], name: string) => (linked
-    ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${name} on the ${kind === 'skill' ? 'Skills' : kind === 'mcp' ? 'MCP servers' : 'Agents'} page`, onclick: () => openItem(page[kind], name) }, h('code.plugin-name', {}, name))
+    ? h('button.inline-link.plugin-part-link', { type: 'button', title: `Open ${name} on the ${kind === 'skill' ? 'Skills' : kind === 'mcp' ? 'MCP servers' : 'Agents'} page`, onclick: () => openItem(pageOfPart[kind], name) }, h('code.plugin-name', {}, name))
     : h('code.plugin-name', {}, name));
   return (['skill', 'mcp', 'agent'] as const).filter(kind => parts.some(part => part.kind === kind)).flatMap((kind, at) => {
     const names = parts.filter(part => part.kind === kind).map(part => part.name);
@@ -121,11 +120,13 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
 function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, pending: PluginAction | undefined, reading: boolean): (string | HTMLElement)[] {
   const going = (plan ?? []).filter(part => !part.why);
   if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
-  if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ', ...partNames(going.length ? going : parts?.items ?? []))];
+  if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ',
+    ...(going.length ? partNames(going) : ['nothing it can change: each part was changed, removed or managed since']))];
   const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
   const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
-  if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
-  if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true))];
+  // With parts there, what an update would leave out (removed by you, changed since, the folder) is said under them.
+  if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true)), ...limited, ...missing];
+  if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true)), ...limited, ...missing];
   if (!plan) return [h('span.plugin-outcome-item', {}, reading ? 'Reading its parts…' : 'Its files couldn’t be read.')];
   return [h('span.plugin-outcome-item', {}, ...(going.length ? ['Can go in: ', ...partNames(going)] : ['Nothing in it can go in here.'])), ...limited, ...missing];
 }

@@ -376,8 +376,11 @@ export function storeFolder(key: string): string {
   return `${readable || 'skill'}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
 }
 
+/** Where a skill revision is kept in Central Knot's store, by the skill's key and its content hash. */
+export const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
+
 export async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
-  const target = join(storeDirectory(context.home), 'items', storeFolder(key), tree.hash);
+  const target = storedRevision(context, key, tree.hash);
   try { if ((await readTree(target)).hash === tree.hash) return; await removeTree(target); }
   catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
   await mkdir(dirname(target), { recursive: true });

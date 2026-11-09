@@ -5,7 +5,7 @@ import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs
 import { dirname, join } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
-  FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
+  FORMAT_VERSION, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
@@ -216,7 +216,6 @@ async function saveHistory(home: string, events: HistoryEvent[], now = Date.now(
   await writeDurably(historyPath(home), `${JSON.stringify({ events: events.slice(-1000) }, null, 2)}\n`);
 }
 
-const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
 
 /**
  * Why a tool's own skills folder cannot be written, if it cannot. A folder that is a link, or that is the same folder as another

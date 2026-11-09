@@ -182,8 +182,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { parts: states, recordedName: installs[0]?.marketName };
   }
 
-  /** One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page. */
-  /** `records`: the parts record as read once for the whole view. */
+  /**
+   * One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page.
+   * `records`: the parts record as read once for the whole view.
+   */
   async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[]): Promise<MarketplaceView> {
     const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: sourceLabel(source) };
     try {
@@ -378,7 +380,8 @@ export function registerMarketplaces({ handle, handleRead }: { handle: Handle; h
     const ids = onlyAllowed([tool], partsTools);
     const okMode = mode === 'install' || mode === 'remove' || mode === 'undo';
     return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length && okMode && (run === undefined || run === null || isText(run, 64))
-      ? markets.parts(source, marketName, plugin, ids[0]!, mode, (run ?? undefined) as string | undefined, home) : refused(tool);
+      ? markets.parts(source, marketName, plugin, ids[0]!, mode, (run ?? undefined) as string | undefined, home)
+      : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
   });
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {
     const ids = toolIds([tool]);
