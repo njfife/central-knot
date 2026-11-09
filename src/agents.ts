@@ -280,8 +280,8 @@ interface Target { tool: HarnessId; entry?: AgentEntry; recorded?: CopyNow } typ
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
  */
-export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
-  const refused = await prepareSyncRecord(context, changes.length > 0);
+export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; resume?: boolean } = {}): Promise<McpResult> {
+  const refused = await prepareSyncRecord(context, changes.length > 0, options.resume);
   if (refused) return refused;
   const { present, onDisk } = await gatherAgentsAfterRecovery(context, tools);
   const record = await readAgentRecord(context.home);
@@ -296,11 +296,11 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   await saveRecordAndHistory(pass, log, displacedByEarlierPass);
   return { results: log.results, writes: log.writes, notices: log.notices, settling: outcomes.includes('settling') };
 }
-async function prepareSyncRecord(context: ShareContext, hasChanges: boolean): Promise<McpResult | undefined> {
+async function prepareSyncRecord(context: ShareContext, hasChanges: boolean, resume = false): Promise<McpResult | undefined> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !resume)) return { stopped: gate.reason, results: [], writes: 0 };
   let { record: syncRecord } = await readRecord(context.home);
   if (!syncRecord && !hasChanges) return { results: [], writes: 0 };
   if (!syncRecord) { syncRecord = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, syncRecord); }

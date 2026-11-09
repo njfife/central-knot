@@ -65,11 +65,11 @@ export interface DesktopApi {
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
   history(): Promise<HistoryEvent[]>;
-  applyMcp(changes: Change[], home: string): Promise<McpResult>;
+  applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
   unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
-  applyAgents(changes: Change[], home: string): Promise<McpResult>;
+  applyAgents(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;

@@ -427,7 +427,7 @@ api().onSyncChanged(async () => {
 // ---------- MCP servers ----------
 
 export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
-  const result = await api().applyMcp(changes, state.home!.home);
+  const result = await api().applyMcp(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
@@ -452,7 +452,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
 export const applyAgentsChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   // Read before applying: a copy that had stopped and is now replaced is said as resumed, not as newly managed.
   const before = state.home?.agents?.servers ?? [];
-  const result = await api().applyAgents(changes, state.home!.home);
+  const result = await api().applyAgents(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
   if (view) state.home = view;
   state.agentsResult = result;

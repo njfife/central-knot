@@ -539,11 +539,11 @@ app.whenReady().then(async () => {
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
-  handle('mcp:apply', async (list, home) => (home === current?.home
-    ? applyMcp(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
+  handle('mcp:apply', async (list, resume, home) => (home === current?.home
+    ? applyMcp(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
-  handle('agents:apply', async (list, home) => (home === current?.home
-    ? applyAgents(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
+  handle('agents:apply', async (list, resume, home) => (home === current?.home
+    ? applyAgents(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
