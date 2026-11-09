@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
@@ -24,7 +24,11 @@ async function sandbox() {
   await writeFile(join(plugin, '.mcp.json'), JSON.stringify({ mcpServers: {
     figma: { command: 'npx', args: ['-y', 'figma-mcp'], env: { FIGMA_TOKEN: 'figd_abc123' } },
     local: { command: '${CLAUDE_PLUGIN_ROOT}/bin/server' },
+    script: { command: 'node', args: ['scripts/server.js'] },
+    remote: { command: 'npx', args: ['-y', 'mcp-remote', 'https://mcp.example.com/sse'] },
   } }));
+  await mkdir(join(plugin, 'scripts'), { recursive: true });
+  await writeFile(join(plugin, 'scripts', 'server.js'), '');
   for (const folder of ['.codex', '.copilot', '.pi/agent']) await mkdir(join(home, folder), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
   const files = () => pluginFiles(plugin, {}, join(base, 'market'));
@@ -43,6 +47,9 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     assert.equal(toml.find(table => table.path.join('.') === 'mcp_servers.figma.env')?.entries[0]?.value, 'figd_abc123');
     assert.ok(!toml.some(table => table.path[1] === 'local'), 'a server needing the plugin folder stays behind');
     assert.match(codex.message, /local: It runs from the plugin’s own folder/);
+    // A script in the plugin's folder isn't copied, so that server stays behind; a URL argument is no such file.
+    assert.match(codex.message, /script: It runs files from the plugin’s own folder/);
+    assert.ok(toml.some(table => table.path.join('.') === 'mcp_servers.remote'));
     assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /developer_instructions/);
 
     const copilot = await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
@@ -58,7 +65,7 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     assert.match(pi.message, /designer: Pi has no agents/);
 
     const record = await readParts(box.home);
-    assert.deepEqual(record.find(entry => entry.tool === 'codex-cli')?.items.map(item => `${item.kind}:${item.name}`).sort(), ['agent:designer', 'mcp:figma', 'skill:figma-design']);
+    assert.deepEqual(record.find(entry => entry.tool === 'codex-cli')?.items.map(item => `${item.kind}:${item.name}`).sort(), ['agent:designer', 'mcp:figma', 'mcp:remote', 'skill:figma-design']);
     assert.equal(record[0]?.version, '1.0.0');
 
     const undone = await undoParts(box.context, codex.partsRun ?? '');
@@ -75,9 +82,12 @@ test('Parts never replace what was there, removing keeps an edited or managed pa
   try {
     await mkdir(join(box.home, '.pi/agent/skills/figma-design'), { recursive: true });
     await writeFile(join(box.home, '.pi/agent/skills/figma-design/SKILL.md'), '---\ndescription: mine\n---\nMine.\n');
+    // A server of this name is managed (it syncs from another tool): its own page decides where it goes.
+    await mkdir(join(box.home, '.central-knot'), { recursive: true });
+    await writeFile(join(box.home, '.central-knot/mcp.json'), JSON.stringify({ formatVersion: 1, items: { remote: { state: 'shared', off: ['pi-cli'], hash: '', copies: [] } } }));
     const pi = await installParts(box.context, { ...target, tool: 'pi-cli' }, await box.files());
     assert.equal(pi.outcome, 'installed');
-    assert.match(pi.notes?.join(' ') ?? '', /Pi already has one of that name/);
+    assert.match(pi.notes?.join(' ') ?? '', /Pi already has one of that name[\s\S]*“remote”: one of that name is managed/);
     assert.equal(await readFile(join(box.home, '.pi/agent/skills/figma-design/SKILL.md'), 'utf8'), '---\ndescription: mine\n---\nMine.\n');
 
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
@@ -103,10 +113,10 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
   try {
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     const installed = (await readParts(box.home))[0]!;
-    assert.equal(await partsDigest(await box.files()), installed.digest);
+    assert.equal(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
     await writeFile(join(box.plugin, 'skills', 'figma-design', 'SKILL.md'), SKILL.replace('Use the figma server.', 'Use the figma server, v2.'));
     await rm(join(box.plugin, 'agents'), { recursive: true });
-    assert.notEqual(await partsDigest(await box.files()), installed.digest);
+    assert.notEqual(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
 
     const updated = await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
     assert.equal(updated.outcome, 'installed', updated.message);
@@ -120,12 +130,26 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
     assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /You design/);
     assert.equal((await readParts(box.home))[0]?.version, '1.0.0');
 
-    // A servers file that can't be read now is no sign the plugin dropped its server: the installed one stays.
-    await writeFile(join(box.plugin, '.mcp.json'), '{ not json');
+    // A SKILL.md that can't be opened now is no sign the plugin dropped its skill: the installed copy stays.
+    const pluginSkill = join(box.plugin, 'skills', 'figma-design', 'SKILL.md');
+    await chmod(pluginSkill, 0o000);
     await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
-    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/);
-    // A setting of Codex's own added to the server is an edit: removing the parts leaves that server.
+    await chmod(pluginSkill, 0o644);
+    assert.ok((await readParts(box.home))[0]?.items.some(item => item.kind === 'skill'));
+    // A servers file that can't be read now is no sign the plugin dropped its server: the installed one stays.
+    for (const unreadable of ['{ not json', '{ "mcpServers": null }']) {
+      await writeFile(join(box.plugin, '.mcp.json'), unreadable);
+      await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
+      assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/, unreadable);
+    }
     const config = join(box.home, '.codex/config.toml');
+    // A settings file that can't be read right now is a failure, not an edit: the parts stay on record to try again.
+    const good = await readFile(config, 'utf8');
+    await writeFile(config, `${good}\n[broken`);
+    assert.equal((await removeParts(box.context, { ...target, tool: 'codex-cli' })).outcome, 'failed');
+    assert.ok((await readParts(box.home)).some(entry => entry.items.some(item => item.kind === 'mcp')));
+    await writeFile(config, good);
+    // A setting of Codex's own added to the server is an edit: removing the parts leaves that server.
     await writeFile(config, (await readFile(config, 'utf8')).replace('[mcp_servers.figma]\n', '[mcp_servers.figma]\nenabled = false\n'));
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     assert.match(removed.notes?.join(' ') ?? '', /MCP server “figma” as it is: it was changed/);

@@ -107,9 +107,8 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // Where a box offers a plugin's parts, the hint says so above the rows, where the choice is made.
-  const offersParts = shown.some(plugin => view.tools.some(tool => partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin)) && !partsOf(entry, plugin.name, tool)));
   const partsColumns = view.tools.filter(tool => shown.some(plugin => partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin)) && !partsOf(entry, plugin.name, tool)));
-  const partsHint = offersParts ? `A hatched box with a plus (${andList(partsColumns.map(tool => names[tool]))}) installs the plugin’s parts instead, as separate items.` : '';
+  const partsHint = partsColumns.length ? `A hatched box with a plus (${andList(partsColumns.map(tool => names[tool]))}) installs the plugin’s parts instead, as separate items.` : '';
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${[...reasons, partsHint].filter(Boolean).join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') })))
@@ -130,8 +129,10 @@ function aboutTab(entry: MarketplaceView) {
 function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const plugin = openPlugin(entry);
   if (plugin) return pluginPage(view, entry, marketIndex, plugin);
-  const remove = button({ variant: 'ghost', size: 'small', icon: 'circle-minus', label: 'Remove', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy, onclick: () => void forgetMarketplace(entry.source) });
-  remove.title = 'Removes it from this list only. Installed plugins stay installed.';
+  // Parts are removed together from their plugin's page, so a marketplace stays listed while any of its plugins' parts are in a tool.
+  const holdsParts = Object.keys(entry.parts ?? {}).length > 0;
+  const remove = button({ variant: 'ghost', size: 'small', icon: 'circle-minus', label: 'Remove', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || holdsParts, onclick: () => void forgetMarketplace(entry.source) });
+  remove.title = holdsParts ? 'Some of its plugins’ parts are in your tools. Remove those parts first; they are removed together from each plugin’s page.' : 'Removes it from this list only. Installed plugins stay installed.';
   // Where it was added is worth saying only when a tool added it; added here is the usual case, and installs register it too.
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(toolName);
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
@@ -236,7 +237,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
 
 /** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
 function problemBand(lines: ResultLine[]) {
-  const failures = lines.filter(line => !line.ok);
+  const failures = market.lastRun?.problemsClosed ? [] : lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),

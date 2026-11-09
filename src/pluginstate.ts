@@ -2,7 +2,7 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
@@ -219,12 +219,13 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
 });
 
 /**
- * Closes the problem band: the stop reason and the failure lines go, and what succeeded stays, so the toolbar keeps its
- * result line and Undo.
+ * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
+ * result line and Undo (including a failed parts run's, for what it did change).
  */
 export function dismissProblems(): void {
   market.problem = undefined;
-  if (market.lastRun) market.lastRun = { ...market.lastRun, done: market.lastRun.done.filter(entry => succeeded(entry.report)) };
+  // Closed, not dropped: a failed run that still changed something (part of a parts run) keeps its Undo.
+  if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
 }
 
 /** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */

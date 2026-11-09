@@ -10,7 +10,7 @@ import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from './parts.ts';
-import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PartPlan, PartsState, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PartPlan, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { heldReason, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed } from './values.ts';
@@ -132,7 +132,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return states;
   }
 
-  /** A plugin's skill folders, agent files and MCP servers: from the marketplace's files, or from its own repository. */
   /**
    * Where a plugin's files are: its folder in the marketplace, or a copy of the repository it lives in (read now if
    * needed), with the entry listing its components (for a plugin elsewhere, without the `source` naming that repository).
@@ -156,21 +155,22 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * This marketplace's plugins whose parts are in a tool, each saying whether the plugin has changed since: its parts'
-   * content, or its version. Each plugin's files are read once, however many tools hold its parts.
+   * This marketplace's plugins whose parts are in a tool, each saying whether the plugin has changed since: what that tool
+   * would get from it now, or its version. Each plugin's files are read once, however many tools hold its parts.
    */
   async function partsStates(ctx: engine.PluginContext, catalog: Catalog, source: string): Promise<MarketplaceView['parts']> {
     const share = host.share?.();
     if (!share) return undefined;
     const states: NonNullable<MarketplaceView['parts']> = {};
-    const digests = new Map<string, Promise<string | undefined>>();
-    const digestOf = (plugin: string) => {
-      if (!digests.has(plugin)) digests.set(plugin, filesOf(ctx, catalog, plugin).then(read => (read.files ? partsDigest(read.files) : undefined), () => undefined));
-      return digests.get(plugin)!;
+    const files = new Map<string, Promise<PluginFiles | undefined>>();
+    const filesOnce = (plugin: string) => {
+      if (!files.has(plugin)) files.set(plugin, filesOf(ctx, catalog, plugin).then(read => read.files, () => undefined));
+      return files.get(plugin)!;
     };
     for (const install of (await readParts(share.home)).filter(entry => entry.source === source && entry.marketName === catalog.name)) {
       const item = catalog.plugins.find(entry => entry.name === install.plugin);
-      const digest = item ? await digestOf(install.plugin) : undefined;
+      const read = item ? await filesOnce(install.plugin) : undefined;
+      const digest = read ? await partsDigest(share, read, install.tool).catch(() => undefined) : undefined;
       const state: PartsState = { version: install.version, at: install.at, items: install.items.map(({ kind, name }) => ({ kind, name })) };
       const newVersion = !!item?.version && !!install.version && item.version !== install.version;
       if ((digest && digest !== install.digest) || newVersion) { state.changed = true; if (newVersion) state.now = item!.version; }
@@ -186,8 +186,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const { catalog, stale, problem } = await catalogFor(ctx, source, { fresh });
       if (!catalog) return { ...base, problem };
       // The raw entry and remote address stay here; the page gets what it shows.
-      const shown = catalog.plugins.map(({ entry: _entry, remote: _remote, ...plugin }) => plugin);
-      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, plugins: shown, states: await statesFor(ctx, tools, catalog, source), parts: await partsStates(ctx, catalog, source) };
+      const shown: PluginView[] = catalog.plugins.map(({ entry: _entry, remote: _remote, ...plugin }) => plugin);
+      const parts = await partsStates(ctx, catalog, source);
+      // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
+      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: 'No longer in this marketplace. Its parts can still be removed together.', gone: true });
+      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, plugins: shown, states: await statesFor(ctx, tools, catalog, source), parts };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
@@ -203,6 +206,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       if (entry) { if (!entry.origins.includes(origin)) entry.origins.push(origin); } else known.push({ source, origins: [origin] });
     };
     for (const source of await added()) note(source, 'central-knot');
+    // A marketplace whose plugins' parts are still in a tool stays listed, so its parts can still be updated or removed together.
+    const share = host.share?.();
+    for (const install of share ? await readParts(share.home) : []) if (!known.some(item => engine.sameSource(item.source, install.source))) note(install.source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
     for (const tool of tools.filter(candidate => engine.pluginTools.includes(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
     const marketplaces: MarketplaceView[] = [];
@@ -306,7 +312,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog) return null;
     const { files } = await filesOf(ctx, catalog, plugin);
-    return files ? planParts(share, files, (await host.tools()).filter(tool => partsTools.includes(tool))) : null;
+    const installs = (await readParts(share.home)).filter(install => install.source === source && install.plugin === plugin);
+    // Every tool that takes parts, present or not: one that turns up later in the session finds its plan already there.
+    return files ? planParts(share, files, partsTools, installs) : null;
   }
 
   /** Installs, updates, removes or undoes one plugin's parts in one tool (parts.ts). `run`: the parts run an Undo reverses. */
@@ -316,8 +324,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const share = host.share?.();
     if (!share) return { reports: failedFor([tool], 'Parts can’t be installed here.') };
     if (mode === 'undo') {
+      // A run with nothing kept for it was undone already: done, so "Undo the rest" isn't offered for it again.
       const undone = run ? await undoParts(share, run) : undefined;
-      return { reports: [undone ?? { ...failedFor([tool], 'That change can’t be undone any more.')[0]!, parts: true }] };
+      return { reports: [undone ?? { tool, outcome: 'uninstalled', message: 'That change was undone already.', runs: [], parts: true, changed: false }] };
     }
     if (mode === 'remove') return { reports: [await removeParts(share, { source, plugin, tool })] };
     const ctx = await context();

@@ -37,6 +37,7 @@ export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessI
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.
  */
 export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   return state.state === 'installed' ? undefined : blocked(view, entry, tool);
@@ -66,7 +67,7 @@ export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: st
   if (!partsTools.includes(tool)) return false;
   // Parts there are always offered, so they can be updated or removed, even once the plugin could go there itself.
   if (partsOf(entry, plugin, tool)) return true;
-  if (installed(entry, plugin, tool)) return false;
+  if (installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
   if (!unavailable(view, entry, plugin, tool) || stateOf(entry, plugin, tool).state !== 'not-installed') return false;
   return !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
 }

@@ -249,6 +249,8 @@ export interface CatalogPlugin {
   remote?: { url: string; path: string; ref?: string; sha?: string };
   /** Its entry in marketplace.json as written, for the paths it lists (main process only; not sent to the page). */
   entry?: Record<string, unknown>;
+  /** No longer in the catalog, listed only because its parts are still in a tool, so they can be removed together. */
+  gone?: boolean;
 }
 
 /** A marketplace as read from its marketplace.json. */

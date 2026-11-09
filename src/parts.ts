@@ -6,8 +6,8 @@
 // (skills in the Skills store, MCP servers in the MCP store, agent files beside them).
 // Nothing is ever overwritten that these parts did not put there, and a part edited or managed since is left alone.
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { agentText, fileFor, fromMarkdown, keyOf, readAgentRecord, safeName } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
@@ -47,11 +47,13 @@ async function saveEntry(home: string, key: string, entry: PartsInstall | null) 
 }
 
 /** What one run changed, so its Undo can move back: the record entry before and after (null: none). */
-interface PartsRun { key: string; before: PartsInstall | null; after: PartsInstall | null; undone?: boolean }
+interface PartsRun { key: string; before: PartsInstall | null; after: PartsInstall | null }
 
 // ---------- What a plugin offers a tool ----------
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+/** The same part: same kind and name, ignoring case (as the tools' folders do on macOS and Windows). */
+const same = (first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>) => first.kind === second.kind && first.name.toLowerCase() === second.name.toLowerCase();
 
 /** One part that can go in: what it is, and how to save its content into Central Knot's store before it is written. */
 interface Ready extends PartItem { store: () => Promise<void> }
@@ -60,10 +62,18 @@ interface Ready extends PartItem { store: () => Promise<void> }
  * A server that can't run as a separate item: it needs the plugin's own folder or settings (only Claude Code fills those
  * in), or runs a program or folder named relative to the plugin, which isn't copied (CD §5, Unsupported).
  */
-function needsPlugin(raw: Record<string, unknown>): string | undefined {
+async function needsPlugin(raw: Record<string, unknown>, folder: string): Promise<string | undefined> {
   if (PLUGIN_ONLY.test(JSON.stringify(raw))) return 'It runs from the plugin’s own folder or settings, which only Claude Code fills in.';
-  const relative = (value: unknown) => typeof value === 'string' && /^\.\.?([\\/]|$)/.test(value);
-  if (relative(raw.cwd) || relative(raw.command) || (Array.isArray(raw.args) && raw.args.some(relative))) return 'It runs files from the plugin’s own folder, which aren’t copied.';
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  // Something in the plugin's folder: a path starting ./ or ../, or a relative name that is there. A program on PATH, a
+  // package name or a URL is not.
+  const inPlugin = async (value: string) => !isAbsolute(value) && (/^\.\.?([\\/]|$)/.test(value) || await exists(join(folder, value)));
+  const command = text(raw.command);
+  const cwd = text(raw.cwd);
+  const args = (Array.isArray(raw.args) ? raw.args.map(text) : []).filter((arg): arg is string => !!arg && !arg.startsWith('-') && !/^[a-z][\w+.-]*:/i.test(arg));
+  const relativeCommand = !!command && !isAbsolute(command) && (/[\\/]/.test(command) || await inPlugin(command));
+  const pluginArg = (await Promise.all(args.map(inPlugin))).some(Boolean);
+  if ((cwd !== undefined && !isAbsolute(cwd)) || relativeCommand || pluginArg) return 'It runs files from the plugin’s own folder, which aren’t copied.';
   return undefined;
 }
 
@@ -74,28 +84,33 @@ function needsPlugin(raw: Record<string, unknown>): string | undefined {
 async function partsFor(context: ShareContext, files: PluginFiles, tool: HarnessId): Promise<{ ready: Ready[]; plan: PartPlan[]; unread: Set<string> }> {
   const ready: Ready[] = [];
   const plan: PartPlan[] = [];
-  const unread = new Set<string>();
+  // Parts there in the plugin that can't be read now, as `kind\0name`.
+  const unread = new Set<string>([...files.unread.skills.map(skill => `skill\0${skill}`), ...files.unread.agents.map(agent => `agent\0${agent}`)]);
   const name = toolNames[tool];
   for (const skill of files.skills) {
     let tree;
-    try { tree = await readTree(skill.dir); } catch { unread.add(skill.name); plan.push({ kind: 'skill', name: skill.name, why: 'Its files couldn’t be read.' }); continue; }
+    try { tree = await readTree(skill.dir); } catch { unread.add(`skill\0${skill.name}`); plan.push({ kind: 'skill', name: skill.name, why: 'Its files couldn’t be read.' }); continue; }
     if (tree.held) { plan.push({ kind: 'skill', name: skill.name, why: tree.held }); continue; }
     const content = await readFile(join(skill.dir, 'SKILL.md'), 'utf8').catch(() => '');
     const facts = { ...parseSkill(content, skill.name), ...loadProblems(content, skill.name), folder: skill.name, path: join(skill.dir, 'SKILL.md'), directory: skill.dir, realDirectory: skill.dir, rootLabel: 'plugin', content, status: '' };
-    const refused = targetFor(tool, join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), skill.name), facts).skipped;
-    if (refused) { plan.push({ kind: 'skill', name: skill.name, why: refused }); continue; }
-    plan.push({ kind: 'skill', name: skill.name });
+    const fit = targetFor(tool, join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), skill.name), facts);
+    if (fit.skipped) { plan.push({ kind: 'skill', name: skill.name, why: fit.skipped }); continue; }
+    // What the tool does differently with it (Copilot ignores `paths`, say), in the Skills page's own words.
+    const losses = fit.limits.filter(Boolean);
+    plan.push({ kind: 'skill', name: skill.name, limit: losses.length ? losses.join(' ').replace(/\.$/, '') : undefined });
     const stored = tree;
     ready.push({ kind: 'skill', name: skill.name, hash: tree.hash, store: () => importRevision(context, itemKey(skill.name), skill.dir, stored) });
   }
   for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
-    const why = needsPlugin(raw as Record<string, unknown>);
+    const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
     if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
-    const neutral = fromJson(server, tool, '', raw as Record<string, unknown>).server;
+    const { server: neutral, extras } = fromJson(server, tool, '', raw as Record<string, unknown>);
     const cannot = cannotHold(tool, neutral);
     if (cannot) { plan.push({ kind: 'mcp', name: server, why: cannot }); continue; }
-    plan.push({ kind: 'mcp', name: server });
+    // Fields beyond the shared ones (a timeout, say) have no recorded form in another tool: said, as an agent's are.
+    const own = Object.keys(extras);
+    plan.push({ kind: 'mcp', name: server, limit: own.length ? `its ${own.join(', ')} setting${own.length > 1 ? 's stay' : ' stays'} with the plugin` : undefined });
     ready.push({ kind: 'mcp', name: server, hash: serverHash(neutral), store: async () => { await keepServer(context, server, neutral); } });
   }
   for (const agent of files.agents) {
@@ -115,27 +130,37 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
   return { ready, plan, unread };
 }
 
-/** The plan for each tool that can take parts, for the plugin's page: which parts would go in, and why each other one wouldn't. */
-export async function planParts(context: ShareContext, files: PluginFiles, tools: HarnessId[]): Promise<Partial<Record<HarnessId, PartPlan[]>>> {
+/**
+ * The plan for each tool that can take parts, for the plugin's page: which parts would go in, and why each other one
+ * wouldn't, including a name the tool already has from elsewhere (`installs`: this plugin's parts already there, which
+ * are its own and no clash).
+ */
+export async function planParts(context: ShareContext, files: PluginFiles, tools: HarnessId[], installs: PartsInstall[]): Promise<Partial<Record<HarnessId, PartPlan[]>>> {
   const plans: Partial<Record<HarnessId, PartPlan[]>> = {};
-  for (const tool of tools.filter(candidate => partsTools.includes(candidate))) plans[tool] = (await partsFor(context, files, tool)).plan;
+  for (const tool of tools.filter(candidate => partsTools.includes(candidate))) {
+    const ours = installs.find(install => install.tool === tool)?.items ?? [];
+    const holds = await toolHas(context, tool);
+    const plan = (await partsFor(context, files, tool)).plan;
+    for (const part of plan) {
+      if (part.why || ours.some(item => same(item, part))) continue;
+      if ((await onDisk(context, tool, part)).seen !== undefined || (part.kind === 'skill' && holds.skillNamed(part.name))) part.why = `${toolNames[tool]} already has one of that name.`;
+    }
+    plans[tool] = plan;
+  }
   return plans;
 }
 
 /**
- * What a plugin's parts are, as content, the same for every tool: compared with the digest recorded at install, it tells
- * that the plugin's parts have changed since. Undefined while some of them can't be read (nothing is claimed either way).
+ * What a plugin's parts are for one tool, as content: the parts that can go in there and their hashes. Compared with the
+ * digest recorded at install, it tells that something this tool would get has changed (a new agent doesn't make Pi's
+ * parts out of date). Undefined while some of them can't be read (nothing is claimed either way).
  */
-export async function partsDigest(files: PluginFiles): Promise<string | undefined> {
-  const digest = createHash('sha256');
-  for (const skill of files.skills) {
-    try { digest.update(`skill\0${skill.name}\0${(await readTree(skill.dir)).hash}\n`); } catch { return undefined; }
-  }
-  if (files.serversUnread) return undefined;
-  for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) digest.update(`mcp\0${server}\0${JSON.stringify(raw ?? null)}\n`);
-  for (const agent of files.agents) digest.update(`agent\0${agent.name}\0${sha(agent.text)}\n`);
-  return digest.digest('hex');
+export async function partsDigest(context: ShareContext, files: PluginFiles, tool: HarnessId): Promise<string | undefined> {
+  const { ready, unread } = await partsFor(context, files, tool);
+  return digestOf(ready, unread, files);
 }
+const digestOf = (ready: PartItem[], unread: Set<string>, files: PluginFiles) =>
+  (unread.size || files.unread.servers ? undefined : sha(JSON.stringify(ready.map(({ kind, name, hash }) => [kind, name, hash]))));
 
 // ---------- What a tool holds now ----------
 
@@ -144,9 +169,9 @@ const skillDir = (context: ShareContext, tool: HarnessId, name: string) => join(
 /**
  * A part as it is in the tool now, read fresh: `seen` is undefined when it isn't there and 'unreadable' when it can't be
  * read. For an MCP entry `seen` covers the tool's own settings on it too (a Codex `enabled = false`, a narrowed Copilot
- * `tools`), so an edit to those counts as an edit; `server` is its neutral hash, which an MCP write is checked against.
+ * `tools`), so an edit to those counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against.
  */
-async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartItem, 'kind' | 'name'>): Promise<{ seen?: string; server?: string }> {
+async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartItem, 'kind' | 'name'>): Promise<{ seen?: string; neutralHash?: string }> {
   if (item.kind === 'skill') {
     const dir = skillDir(context, tool, item.name);
     return (await exists(dir)) ? { seen: (await readTree(dir).catch(() => undefined))?.hash ?? 'unreadable' } : {};
@@ -155,14 +180,14 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
     const read = await readTool(context, tool);
     if (read.problem || read.invalid?.includes(item.name)) return { seen: 'unreadable' };
     const entry = read.entries.find(candidate => candidate.name === item.name);
-    return entry ? { seen: sha(JSON.stringify([entry.hash, entry.extras])), server: entry.hash } : {};
+    return entry ? { seen: sha(JSON.stringify([entry.hash, entry.extras])), neutralHash: entry.hash } : {};
   }
   const text = await readFile(fileFor(context, tool, item.name), 'utf8').catch(error => (errorCode(error) === 'ENOENT' ? undefined : null));
   return text === undefined ? {} : { seen: text === null ? 'unreadable' : sha(text) };
 }
 
 /** Whether the person manages an item now (sync then owns it), and whether the tool already reads a same-named skill anywhere. */
-async function toolHolds(context: ShareContext, tool: HarnessId) {
+async function toolHas(context: ShareContext, tool: HarnessId) {
   const roots = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).map(root => root.path);
   const skillNames = new Set<string>();
   for (const root of roots) for (const entry of await readdir(root).catch(() => [] as string[])) skillNames.add(entry.toLowerCase());
@@ -179,10 +204,17 @@ async function toolHolds(context: ShareContext, tool: HarnessId) {
   };
 }
 
+/**
+ * Whether a part on disk is still what these parts put there. A part recorded before it was written (a run that stopped
+ * halfway) has no `seen` yet: then its content hash decides, which for an MCP entry is the neutral hash.
+ */
+const stillOurs = (old: PartItem, now: { seen?: string; neutralHash?: string }) =>
+  (old.seen ? now.seen === old.seen : old.kind === 'mcp' ? now.neutralHash === old.hash : now.seen === old.hash);
+
 // ---------- Writing ----------
 
 /** Puts one part in from the content kept in the store, over what these parts left there (`replacing`) or where nothing is. */
-async function put(context: ShareContext, tool: HarnessId, item: PartItem, replacing: { seen: string; server?: string } | undefined) {
+async function put(context: ShareContext, tool: HarnessId, item: PartItem, replacing: { seen: string; neutralHash?: string } | undefined) {
   if (item.kind === 'skill') {
     const source = join(storeDirectory(context.home), 'items', storeFolder(itemKey(item.name)), item.hash);
     if (!(await exists(source))) throw new Error('its kept copy is no longer in Central Knot’s store');
@@ -196,7 +228,7 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
     const server = (await keptServer(context, item.name, item.hash))?.server as NeutralServer | undefined;
     if (!server) throw new Error('its kept copy is no longer in Central Knot’s store');
     // No extras given: an entry being replaced keeps the tool's own settings on it, and a new one gets the tool's defaults.
-    const problem = await editEntry(context, tool, item.name, replacing?.server, server);
+    const problem = await editEntry(context, tool, item.name, replacing?.neutralHash, server);
     if (problem) throw new Error(problem);
     return;
   }
@@ -208,9 +240,9 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
 }
 
 /** Takes one part out, only while it still is what these parts put there (`was`, as onDisk read it). */
-async function take(context: ShareContext, tool: HarnessId, item: PartItem, was: { seen: string; server?: string }) {
+async function take(context: ShareContext, tool: HarnessId, item: PartItem, was: { seen: string; neutralHash?: string }) {
   if (item.kind === 'skill') { await removeChecked(context, skillDir(context, tool, item.name), was.seen); return; }
-  if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.server, undefined); if (problem) throw new Error(problem); return; }
+  if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.neutralHash, undefined); if (problem) throw new Error(problem); return; }
   const file = fileFor(context, tool, item.name);
   const text = await readFile(file, 'utf8');
   if (sha(text) !== was.seen) throw Object.assign(new Error('It changed just now.'), { code: 'CK_CHANGED' });
@@ -226,28 +258,31 @@ const plainReason = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? 'it
  * afterwards, notes on what was left alone, how many writes were made, and how many failed (a failed part keeps its old state).
  */
 async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[]): Promise<{ held: PartItem[]; notes: string[]; wrote: number; failed: number }> {
-  const holds = await toolHolds(context, tool);
+  const holds = await toolHas(context, tool);
   const held: PartItem[] = [];
   const notes: string[] = [];
   let wrote = 0;
   let failed = 0;
-  const same = (first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>) => first.kind === second.kind && first.name.toLowerCase() === second.name.toLowerCase();
   for (const each of [...from, ...to.filter(item => !from.some(old => same(old, item)))]) {
     const old = from.find(item => same(item, each));
     const want = to.find(item => same(item, each));
     const label = `the ${partWords[each.kind][0]} “${each.name}”`;
     const now = await onDisk(context, tool, each);
+    // Can't be read right now (a settings file with a syntax error): nothing is changed, and a part keeps its place on record.
+    if (now.seen === 'unreadable') { failed++; notes.push(`Couldn’t change ${label}: it can’t be read in ${toolNames[tool]} right now.`); if (old) held.push(old); continue; }
     try {
       if (old) {
         if (now.seen === undefined) { if (want) notes.push(`Left out ${label}: it was removed from ${toolNames[tool]} after it was installed.`); continue; }
-        if (now.seen !== (old.seen ?? old.hash)) { notes.push(`Left ${label} as it is: it was changed after it was installed.`); continue; }
+        if (!stillOurs(old, now)) { notes.push(`Left ${label} as it is: it was changed after it was installed.`); continue; }
         if (holds.managed(each)) { notes.push(`Left ${label} as it is: it is managed now, so it belongs to its own page.`); continue; }
-        if (!want) { await take(context, tool, old, { seen: now.seen, server: now.server }); wrote++; continue; }
+        if (!want) { await take(context, tool, old, { seen: now.seen, neutralHash: now.neutralHash }); wrote++; continue; }
         if (want.hash === old.hash) { held.push(old); continue; }
-        await put(context, tool, want, { seen: now.seen, server: now.server });
+        await put(context, tool, want, { seen: now.seen, neutralHash: now.neutralHash });
       } else {
         if (!want) continue;
         if (now.seen !== undefined || (each.kind === 'skill' && holds.skillNamed(each.name))) { notes.push(`Left ${label}: ${toolNames[tool]} already has one of that name.`); continue; }
+        // A managed item of this name belongs to its own page, which decides where it goes: never claimed as a part.
+        if (holds.managed(each)) { notes.push(`Left ${label}: one of that name is managed, so its own page decides where it goes.`); continue; }
         await put(context, tool, want, undefined);
       }
       wrote++;
@@ -292,25 +327,26 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   if (!ready.length && !before) return report(tool, 'failed', `Nothing in it can go into ${toolNames[tool]}: ${plan.map(part => part.why).filter(Boolean)[0] ?? 'it has no skills, MCP servers or agents'}`);
   for (const part of ready) await part.store();
   // A part whose source can't be read now stays as it is, never read as dropped by the plugin.
-  const unreadable = (before?.items ?? []).filter(item => (item.kind === 'skill' && unread.has(item.name)) || (item.kind === 'mcp' && files.serversUnread));
+  const unreadable = (before?.items ?? []).filter(item => unread.has(`${item.kind}\0${item.name}`) || (item.kind === 'mcp' && files.unread.servers));
   const wanted: PartItem[] = [...ready.map(({ kind, name, hash }) => ({ kind, name, hash })), ...unreadable];
-  const digest = await partsDigest(files);
-  const entry = (items: PartItem[], current: boolean): PartsInstall | null => (items.length
-    ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version: current ? target.version : before?.version, tool, at: new Date().toISOString(), digest: (current ? digest : undefined) ?? before?.digest ?? '', items }
+  const digest = digestOf(ready, unread, files);
+  const record = (items: PartItem[], version: string | undefined, contentDigest: string): PartsInstall | null => (items.length
+    ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version, tool, at: new Date().toISOString(), digest: contentDigest, items }
     : null);
-  // On record first: everything this run may write, so a crash leaves nothing unclaimed.
-  await saveEntry(context.home, key, entry([...(before?.items ?? []), ...wanted.filter(item => !before?.items.some(old => old.kind === item.kind && old.name === item.name))], false));
+  const previous = { version: before?.version, digest: before?.digest ?? '' };
+  // Claimed first: every part this run may write is on record (as the plugin was), so a run that stops halfway still owns it.
+  const claimed = [...(before?.items ?? []), ...wanted.filter(item => !before?.items.some(old => same(old, item)))];
+  await saveEntry(context.home, key, record(claimed, previous.version, previous.digest));
   const moved = await move(context, tool, before?.items ?? [], wanted);
-  const after = entry(moved.held, !moved.failed);
+  // Settled: what is there now. With failures it keeps the plugin's old version and digest, so it still shows as changed.
+  const after = moved.failed ? record(moved.held, previous.version, previous.digest) : record(moved.held, target.version, digest ?? previous.digest);
   await saveEntry(context.home, key, after);
-  const run = await saveRun(context, { key, before, after });
+  const run = moved.wrote || before?.version !== after?.version ? await saveRun(context, { key, before, after }) : undefined;
   const skipped = plan.filter(part => part.why).map(part => `${part.name}: ${part.why}`);
   const left = skipped.length ? ` Not installed: ${skipped.join('; ')}` : '';
   const changed = moved.wrote > 0 || before?.version !== after?.version;
-  if (moved.failed || !moved.held.length) {
-    const what = before && !moved.held.length && !moved.failed ? 'Parts removed: the plugin no longer has any that can go here.' : 'Not every part could be changed.';
-    return report(tool, 'failed', `${what} ${moved.notes.join(' ')}${left}`.trim(), { run, changed });
-  }
+  if (moved.failed) return report(tool, 'failed', `Not every part could be changed. ${moved.notes.join(' ')}${left}`.trim(), { run, changed });
+  if (!moved.held.length) return report(tool, 'uninstalled', `Parts removed: the plugin no longer has any that can go into ${toolNames[tool]}.${left}`, { run, changed, notes: moved.notes });
   return report(tool, 'installed', `${before ? 'Parts brought up to date' : 'Parts installed'}: ${partsSummary(moved.held, ', ')}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}${left}`, { run, changed, notes: moved.notes, updated: !!before });
 }
 
@@ -325,7 +361,7 @@ export async function removeParts(context: ShareContext, target: Pick<PartsTarge
   const moved = await move(context, tool, before.items, []);
   const after = moved.held.length ? { ...before, items: moved.held } : null;
   await saveEntry(context.home, key, after);
-  const run = await saveRun(context, { key, before, after });
+  const run = moved.wrote ? await saveRun(context, { key, before, after }) : undefined;
   if (moved.failed) return report(tool, 'failed', [`Not every part could be removed from ${toolNames[tool]}.`, ...moved.notes].join(' '), { run, changed: moved.wrote > 0 });
   return report(tool, 'uninstalled', `Parts removed from ${toolNames[tool]}.`, { run, changed: moved.wrote > 0, notes: moved.notes });
 }
@@ -342,14 +378,14 @@ export async function undoParts(context: ShareContext, run: string): Promise<Act
   if (!tool) return undefined;
   const access = await writeAccess(context);
   if (!access.allowed) return report(tool, 'failed', access.reason);
-  if (past.undone) return report(tool, 'failed', 'That change was already undone.');
   const current = (await readParts(context.home)).find(install => keyOfInstall(install) === past.key) ?? null;
   const moved = await move(context, tool, current?.items ?? [], past.before?.items ?? []);
   const base = past.before ?? current;
   await saveEntry(context.home, past.key, base && moved.held.length ? { ...base, items: moved.held } : null);
   if (moved.failed) return report(tool, 'failed', [`Not everything was undone in ${toolNames[tool]}.`, ...moved.notes].join(' '));
-  await writeDurably(runPath(context.home, run), `${JSON.stringify({ ...past, undone: true }, null, 2)}\n`);
-  if (!moved.wrote) return report(tool, 'failed', ['Nothing was undone.', ...moved.notes].join(' '));
+  await rm(runPath(context.home, run), { force: true });
+  // Nothing left to undo (every part was edited or removed since): done, so it isn't offered again.
+  if (!moved.wrote) return report(tool, past.before ? 'installed' : 'uninstalled', past.before?.version !== past.after?.version ? `Its record is back to ${past.before?.version ? `version ${past.before.version}` : 'how it was'}; no file needed changing.` : 'Nothing was left to undo.', { notes: moved.notes });
   const done = past.before ? `Parts put back in ${toolNames[tool]}: ${partsSummary(moved.held, ', ')}.` : `Parts removed from ${toolNames[tool]}.`;
   return report(tool, past.before ? 'installed' : 'uninstalled', done, { changed: true, notes: moved.notes });
 }

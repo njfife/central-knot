@@ -2,10 +2,10 @@
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
 import { cantUninstall, installed, partsOf, partsOffer, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
-import { andList, toolNames as names, toolOrder } from './words.ts';
+import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
- * install, remove: the plugin itself, through the tool's own command. parts: its parts as separate items in a tool that
+ * install, remove: the plugin itself, through the tool's own command. install-parts: its parts as separate items in a tool that
  * can't take the plugin (installed, or brought up to date); remove-parts: those parts out again; undo-parts: an Undo of a
  * parts run (`run`), which only Undo makes.
  */
@@ -137,7 +137,7 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time.
     const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false, updated = false) => mine
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && !!entry.report.partsUpdated === updated)
-      .sort((first, second) => toolOrder.indexOf(first.tool) - toolOrder.indexOf(second.tool)).map(entry => names[entry.tool]);
+      .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
       [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('installed', true, true, true), 'parts updated in'], [tools('uninstalled', true, true), 'parts removed from'], [tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']];
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
@@ -176,7 +176,7 @@ export const resultSentence = (lines: ResultLine[], undo: boolean) => resultPart
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
 
 /** The last Apply all (or Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
-export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] }
+export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[]; /** Its problem lines were read and closed; what it did (and its Undo) stays. */ problemsClosed?: boolean }
 
 /** After a run: what ran leaves the draft (what wasn't reached stays chosen), and the run is recorded for the toolbar and its Undo. */
 export function recordRun(draft: PluginDraft, ops: PluginOp[], done: PluginDone[], undo: boolean, home: string): LastRun {

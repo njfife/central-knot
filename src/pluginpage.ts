@@ -86,7 +86,6 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)))))));
 }
 
-
 /** What stays with the plugin in any tool without it: the parts that are never installed on their own. */
 function staysBehind(detail: PluginDetail): string[] {
   return [detail.commands.length ? plural(detail.commands.length, 'command') : '', detail.hooks.length ? 'hooks' : '',
@@ -142,10 +141,10 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item.tone-accent', {}, 'Removed on Apply all: ', ...partNames(parts.items))];
     if (pending === 'install-parts') return [h('span.plugin-outcome-item.tone-accent', {}, `${parts ? 'Updated' : 'Installed'} on Apply all: `, ...partNames(going.length ? going : parts?.items ?? []))];
     const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
-    const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The agent ${part.name}: ${part.limit}`));
+    const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
     if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
     if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true))];
-    if (!plan) return [h('span.plugin-outcome-item', {}, read?.reading || !read ? 'Reading its parts…' : 'Its files couldn’t be read.')];
+    if (!plan) return [h('span.plugin-outcome-item', {}, read && !read.reading && !read.value ? 'Its files couldn’t be read.' : 'Reading its parts…')];
     return [h('span.plugin-outcome-item', {}, ...(going.length ? ['Can go in: ', ...partNames(going)] : ['Nothing in it can go in here.'])), ...limited, ...missing];
   };
   // Before anything is installed or chosen, tools alike share a row; after, each tool has its own, in column order.
