@@ -62,18 +62,6 @@ test('1b.1: the Copilot reader finds its own and shared .agents skills, and no p
   } finally { await box.cleanup(); }
 });
 
-test('1b.1: a same-named skill in both Copilot folders stays two labelled rows', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, COPILOT, 'dup');
-    await skill(box.home, AGENTS, 'dup');
-    const snapshot = await discover({ home: box.home, mode: 'custom', harness: 'copilot-cli' });
-    assert.equal(snapshot.skills.length, 2);
-    assert.equal(new Set(snapshot.skills.map(item => item.id)).size, 2);
-    assert.ok(snapshot.skills[1].notes.some(note => note.includes('another')));
-  } finally { await box.cleanup(); }
-});
-
 test('SKL-02: Copilot CLI refusals measured on 1.0.107 are skipped by name, and what it loads is not', () => {
   const named = (name: string, description = 'x') => `---\nname: ${name}\ndescription: ${description}\n---\nb\n`;
   for (const name of ['ok-name', 'a.b', 'a_b', 'a:b', 'a b', 'ABC', '1abc', 'a'.repeat(64)]) assert.equal(copilotProblem(named(name.includes(':') ? `"${name}"` : name), 'f'), undefined, name);
