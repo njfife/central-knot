@@ -198,7 +198,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   // Only what has happened: right after Connect that is just the check.
   const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
   // Each separator belongs to the part after it, so a wrapped line starts with "·", never ends with one.
-  const activity = parts.map((text, index) => h('span.repo-activity-part', {}, index ? `· ${text}` : text.charAt(0).toUpperCase() + text.slice(1)));
+  const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, index ? `· ${text}` : text.charAt(0).toUpperCase() + text.slice(1))]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
       summary(view),
@@ -210,7 +210,8 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
         button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: () => { repo.confirmDisconnect = false; rerender(); } })) : null,
-      problemBand(view.problem && !repo.problem && !repo.checking ? `${view.problem} To use another address, Disconnect and connect again.` : undefined),
+      // When the cause is the address itself, say how to change it (only by connecting again).
+      problemBand(view.problem && !repo.problem && !repo.checking ? `${view.problem}${/no repository there/i.test(view.problem) ? ' To use another address, Disconnect and connect again.' : ''}` : undefined),
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },
@@ -258,7 +259,7 @@ function connectForm(allowed: boolean) {
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
   return h('div.repo-connect', {},
-    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, 'HTTPS or SSH, as you would give git clone: git@gitlab.com:you/agent-config.git works too.'),
+    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, 'The address you’d give git clone. SSH works too: git@gitlab.com:you/agent-config.git'),
     field('repo-branch', 'Branch', 'The repo’s default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional'),
     h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
       h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));

@@ -1375,7 +1375,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-new { white-space: nowrap; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .repo-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 24px 32px; align-items: start; }
 .repo-side { display: flex; flex-direction: column; min-width: 0; }
-.repo-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
+.repo-side-head { display: flex; align-items: center; justify-content: flex-start; gap: 16px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
 .repo-list { list-style: none; margin: 0; padding: 0; }
 .repo-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
 .repo-row-icon { display: flex; padding-top: 3px; }
@@ -1406,7 +1406,10 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-aside { display: flex; align-items: baseline; gap: 6px; max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-aside > svg { flex: none; align-self: center; }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
-#repo-disconnect-confirm { margin-left: auto; border-color: currentColor; }
+#repo-disconnect-confirm { border-color: currentColor; }
+/* The question and its buttons sit together at the right, under Disconnect…. */
+.band.repo-confirm { justify-content: flex-end; }
+.band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
 /* The start page begins at the top, as the connected page does, not floating mid-window. */
 .repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
 .repo-page > .scroll { container-type: inline-size; }

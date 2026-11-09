@@ -31,7 +31,7 @@ function applyLayout() {
   return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
 }
 
-function navRow(page: Page, label: string, glyph: IconName, count?: number, countTitle?: string) {
+function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string) {
   const current = state.page === page;
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
@@ -67,7 +67,9 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 function repoRow() {
   const view = repo.view;
   const { pull, push } = view?.connected ? waiting(view) : { pull: 0, push: 0 };
-  return navRow('repo', 'Git repo', 'git-branch', pull + push || undefined, [pull ? `${pull} to pull` : '', push ? `${push} to push` : ''].filter(Boolean).join(' · '));
+  // Directions, not an item count: ↓ to pull, ↑ to push.
+  const shown = [pull ? `↓${pull}` : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
+  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, [pull ? `${pull} to pull` : '', push ? `${push} to push` : ''].filter(Boolean).join(' · '));
 }
 
 function renderSidebar() {
