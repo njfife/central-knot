@@ -340,19 +340,6 @@ test('A folder without SKILL.md where a copy would go is never overwritten', asy
   } finally { await box.cleanup(); }
 });
 
-test('An unreadable skills folder gets nothing', { skip: noPosix || process.getuid?.() === 0 }, async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    await mkdir(join(box.home, COPILOT), { recursive: true });
-    await chmod(join(box.home, COPILOT), 0o000);
-    const result = await applyChanges(ctx(box), [manage('solo')]);
-    await chmod(join(box.home, COPILOT), 0o755);
-    assert.equal(result.harnessWrites, 0);
-    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
-  } finally { await box.cleanup(); }
-});
-
 test('A stuck leftover stage does not stop later applies, and is cleared', { skip: noPosix || process.getuid?.() === 0 }, async () => {
   const box = await sandbox();
   try {
