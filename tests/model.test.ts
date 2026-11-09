@@ -4,7 +4,7 @@ import { plural, skillCount } from '../src/model.ts';
 import type { Skill, Snapshot } from '../src/types.ts';
 
 const skill = (folder: string): Skill => ({
-  id: folder, folder, name: folder, description: '', path: `/h/${folder}/SKILL.md`, directory: `/h/${folder}`, realDirectory: `/h/${folder}`,
+  folder, name: folder, description: '', path: `/h/${folder}/SKILL.md`, directory: `/h/${folder}`, realDirectory: `/h/${folder}`,
   rootLabel: 'root', hasFrontmatter: true, metadataKeys: [], content: '', notes: [], status: 'Not shared',
 });
 

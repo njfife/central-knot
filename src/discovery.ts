@@ -184,11 +184,10 @@ export async function discover(options: {
         const metadata = parseSkill(content, entry.name);
         if (entry.isSymbolicLink() || info.isSymbolicLink()) metadata.notes.push('Reached through a user link; read only.');
         if (metadata.name !== entry.name) metadata.notes.push(`Its metadata names it “${metadata.name}”.`);
-        const id = seen.has(entry.name) ? `${entry.name} (${skillRoot.label})` : entry.name;
         if (seen.has(entry.name)) metadata.notes.push(`Also found in another ${definition.name} folder; the harness shows one of them.`);
         seen.add(entry.name);
         snapshot.skills.push({
-          id, folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
+          folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
           rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name), codexProblem: codexProblem(content, entry.name), piProblem: piProblem(content),
         });
       } catch (error) {
