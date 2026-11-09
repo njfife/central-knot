@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -228,10 +228,9 @@ if (wanted('settings')) {
   await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
   await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
   // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
-  const DAY = 24 * 60 * 60 * 1000;
   // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time it records a change.
   await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says older History goes the next time this home records a change, not that it was removed.');
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History goes the next time this home records a change, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
   await keepFor(a, 30);
   // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
   await a.click('#nav-skills');
@@ -250,9 +249,16 @@ if (wanted('settings')) {
   await keepFor(a, 7);
   await shot(a, 'settings-history-confirm-dark', 'Chose 7 days: a shorter window removes History, so the row asks first, naming the local date and time it will cut from. The select still shows the saved 30 days.');
   await a.theme('light'); await shot(a, 'settings-history-confirm-light', 'The same, light.'); await a.theme('dark');
-  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question spans the row, its buttons right after its words.');
-  await size(2560, 1440); await shot(a, 'settings-history-confirm-2560', 'The same at 2560×1440: the buttons still follow the words, not the row’s far end.'); await size(860, 560);
-  await a.click('#history-shorten-cancel'); await shot(a, 'settings-history-cancelled', 'Clicked Cancel: the question goes, nothing is saved (still 30 days), and the focus is back on the select.');
+  // Keyboard focus on each of the question's buttons, both themes: the danger button's ring sits outside its red fill.
+  for (const [id, name] of [['history-shorten', 'shorten'], ['history-shorten-cancel', 'keep']]) {
+    await a.run(`document.querySelector('#${id}').focus()`);
+    await shot(a, `settings-history-focus-${name}-dark`, `Keyboard focus on "${name === 'shorten' ? 'Shorten to 7 days' : 'Keep 30 days'}", dark.`);
+    await a.theme('light'); await shot(a, `settings-history-focus-${name}-light`, 'The same, light, on the pale danger notice.'); await a.theme('dark');
+  }
+  await a.run(`document.activeElement?.blur()`);
+  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question is as wide as its words and buttons, not a band across the row.');
+  await size(2560, 1440); await shot(a, 'settings-history-confirm-2560', 'The same at 2560×1440: still only as wide as its content.'); await size(860, 560);
+  await a.click('#history-shorten-cancel'); await shot(a, 'settings-history-cancelled', 'Clicked "Keep 30 days" (Cancel): the question goes, nothing is saved (still 30 days), and the focus is back on the select.');
   await keepFor(a, 7);
   // Main carries out the change in its turn, after any sync pass: held here so the row's waiting state can be seen.
   const main = a.main && await a.main();
@@ -271,7 +277,7 @@ if (wanted('settings')) {
   const store = join(practice, '.central-knot');
   chmodSync(store, 0o555);
   await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-prune-failed', 'Shortened to 7 days with the home’s History folder read-only: the window is saved (the select shows 7), and the row says the older History couldn’t be removed yet and that the log says why.');
+  await shot(a, 'settings-history-prune-failed', 'Shortened to 7 days with the home’s History folder read-only: the window is saved (the select shows 7). The row says in red that the older History couldn’t be removed; what happens next and where to look follow in the hint colour.');
   await a.theme('light'); await shot(a, 'settings-history-prune-failed-light', 'The same, light.'); await a.theme('dark');
   chmodSync(store, 0o755);
   await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);

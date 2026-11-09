@@ -82,6 +82,9 @@ export const standIn = (main, platform) => main.run(`(() => {
 /** Blurs and focuses the window, as coming back to it from the system's settings does: the page and menus read again. */
 export const refocus = main => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
 
+/** One day in milliseconds, for History events made to look days old. */
+export const DAY = 24 * 60 * 60 * 1000;
+
 /** Chooses `days` in Settings' Keep history for select, as picking it from the system's own menu (which can't be driven) would. */
 export async function keepFor(page, days) {
   await page.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`);

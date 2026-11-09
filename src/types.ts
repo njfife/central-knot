@@ -1,6 +1,3 @@
-import type { HistoryDays } from './model.ts';
-export type { HistoryDays };
-
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
@@ -67,7 +64,7 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
-  history(): Promise<HistoryEvent[]>;
+  history(): Promise<HistoryList>;
   applyMcp(changes: Change[], home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
@@ -401,12 +398,17 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+/** How many days History keeps changes and deleted items (Settings); the choices are in model.ts. */
+export type HistoryDays = 7 | 30 | 90;
 /**
- * What a shorter History window did to the History already recorded: removed it from the open home at once (done), left it for
- * that home's next History write because this build doesn't sync it or may not write it, or no home is open (later), or tried
- * and couldn't (failed; the log says why). The window is saved in every case.
+ * What a shorter History window did to the History already recorded. The window is saved in every case. `done`: removed from
+ * the open home at once. `later`: this build doesn't sync the open home yet, and applies the window there with its next History
+ * write. `elsewhere`: the open home is preview-only here, or another Central Knot build syncs it; whichever copy next records a
+ * change there removes its older History, by its own window. `no-home`: no home is open. `failed`: tried and couldn't (the log says why).
  */
-export type HistoryPrune = 'done' | 'later' | 'failed';
+export type HistoryPrune = 'done' | 'later' | 'elsewhere' | 'no-home' | 'failed';
+/** History as main reads it: the events the window covers, and the window, read together so they always agree. */
+export interface HistoryList { events: HistoryEvent[]; days: HistoryDays }
 /** A saved History window: the settings as saved, and `pruned` when it was shorter; none when nothing was shorter or a newer request overtook it. */
 export interface HistoryWindowSaved { settings: AppPreferences; pruned?: HistoryPrune }
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */

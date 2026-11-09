@@ -17,7 +17,7 @@ import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -130,8 +130,29 @@ const appearances: Appearance[] = ['system', 'light', 'dark'];
 const appearance = (): Appearance => appSettings.appearance && appearances.includes(appSettings.appearance) ? appSettings.appearance : 'system';
 const isHistoryDays = (value: unknown): value is HistoryDays => historyDayChoices.includes(value as HistoryDays);
 const historyDays = (): HistoryDays => isHistoryDays(appSettings.historyDays) ? appSettings.historyDays : defaultHistoryDays;
-/** Counts History window changes asked for: a queued one whose number is no longer the latest was overtaken and does nothing. */
+/**
+ * Counts History window changes asked for: a queued one whose number is no longer the latest was overtaken and does nothing.
+ * The page can't overtake itself (its row takes no other change until main answers); this is the backstop for a second caller.
+ */
 let historyRequests = 0;
+/**
+ * Every window change takes its turn in the queue, in the order asked, so none runs beside a sync pass or another change.
+ * Whether it is shorter (and so prunes) is decided against the saved window when its turn comes, and one a newer request
+ * overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads the
+ * saved window either way, so a prune that fails is logged and reported, never undoes the saved window.
+ */
+async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSaved> {
+  const asked = ++historyRequests;
+  const pruned = await queued(async (): Promise<HistoryPrune | undefined> => {
+    if (asked !== historyRequests) return undefined;
+    const shorter = days < historyDays();
+    await saveAppSettings({ historyDays: days });
+    if (!shorter) return undefined;
+    if (!current) return 'no-home';
+    return pruneHistory(context()).catch(error => { logFailure('history prune', error); return 'failed' as const; });
+  });
+  return { settings: preferences(), pruned };
+}
 const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
@@ -569,22 +590,9 @@ app.whenReady().then(async () => {
     return preferences();
   });
   handleNow('settings:open-sign-in', openSignInSettings);
-  // Every window change takes its turn in the queue, in the order asked, so none runs beside a sync pass or another change.
-  // Whether it is shorter (and so prunes) is decided against the saved window when its turn comes, and one a newer request
-  // overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads the
-  // saved window either way, so a prune that fails is logged and reported, never undoes the saved window.
   handleNow('settings:history-days', async (days): Promise<HistoryWindowSaved> => {
     if (!isHistoryDays(days)) throw new Error('Invalid history days.');
-    const asked = ++historyRequests;
-    const pruned = await queued(async (): Promise<HistoryPrune | undefined> => {
-      if (asked !== historyRequests) return undefined;
-      const shorter = days < historyDays();
-      await saveAppSettings({ historyDays: days });
-      if (!shorter) return undefined;
-      if (!current) return 'later';
-      return pruneHistory(context()).catch(error => { logFailure('history prune', error); return 'failed' as const; });
-    });
-    return { settings: preferences(), pruned };
+    return changeHistoryWindow(days);
   });
   handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {
@@ -608,7 +616,8 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
   });
-  handle('history:list', async () => (current ? readHistory(context()) : []));
+  // The window is read in the same turn as the events, so History's caption always describes the events it shows.
+  handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });

@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
 import { readRecord, storeDirectory, type ShareContext } from '../src/share.ts';
-import type { HarnessId, Snapshot } from '../src/types.ts';
+import type { HarnessId, HistoryDays, Snapshot } from '../src/types.ts';
+import { DAY_MS } from '../src/model.ts';
 
 const both: HarnessId[] = ['claude-cli', 'copilot-cli'];
 const CLAUDE = '.claude/skills', COPILOT = '.copilot/skills';
@@ -993,10 +994,10 @@ test('R11: a linked skill folder is followed when its source is edited', { skip:
 test('R12: a History file of the wrong shape is moved aside; R13: History keeps the chosen days with no event cap, and any History write frees an expired deletion’s content, which still stops its stale replica', async () => {
   const box = await sandbox();
   try {
-    const DAY = 24 * 60 * 60 * 1000;
-    const start = Date.now(), later = start + 40 * DAY;
+    const start = Date.now(), later = start + 40 * DAY_MS;
     let now = start;
-    const timed = (historyDays?: number) => fast(box, { now: () => now, historyDays });
+    const timed = (historyDays?: HistoryDays) => fast(box, { now: () => now, historyDays });
+    assert.equal(await pruneHistory(timed(7)), 'later', 'a home this build doesn’t sync yet takes a shorter window at its first History write');
     await managedPair(box);
     await managedPair(box, 'gone');
     await writeFile(join(storeDirectory(box.home), 'history.json'), '{"events":{"not":"a list"}}');
@@ -1010,11 +1011,11 @@ test('R12: a History file of the wrong shape is moved aside; R13: History keeps 
     await deleteEverywhere(timed(), 'gone');
     // Forty days on: events 5, 20 and 60 days old, and more than the old cap of 1,000 from yesterday.
     now = later;
-    const aged = (days: number, key: string) => ({ id: key, at: new Date(later - days * DAY).toISOString(), key, item: key, kind: 'edit', losers: [], orderProved: true });
+    const aged = (days: number, key: string) => ({ id: key, at: new Date(later - days * DAY_MS).toISOString(), key, item: key, kind: 'edit', losers: [], orderProved: true });
     const file = join(storeDirectory(box.home), 'history.json');
     const seeded = [...JSON.parse(await readFile(file, 'utf8')).events, aged(60, 'sixty'), aged(20, 'twenty'), aged(5, 'five'), ...Array.from({ length: 1001 }, (_, index) => aged(1, `filler-${index}`))];
     await writeFile(file, JSON.stringify({ events: seeded }));
-    const kept = async (historyDays: number) => (await readHistory(timed(historyDays))).filter(entry => ['sixty', 'twenty', 'five'].includes(entry.key) || entry.kind === 'deleted').map(entry => entry.key);
+    const kept = async (historyDays: HistoryDays) => (await readHistory(timed(historyDays))).filter(entry => ['sixty', 'twenty', 'five'].includes(entry.key) || entry.kind === 'deleted').map(entry => entry.key);
     const storeOf = async (key: string) => readdir(join(storeDirectory(box.home), 'items', key)).catch(() => [] as string[]);
 
     await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Two.'));

@@ -23,7 +23,7 @@ export const state = {
   agentsResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
-  /** How long History keeps things, for History's intro; read with History when the page opens. */
+  /** How long History keeps things, for History's intro; read with History's events. */
   historyDays: undefined as HistoryDays | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
@@ -125,7 +125,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
   // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
-  const recent = result.stopped ? [] : (await api().history()).filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+  const recent = result.stopped ? [] : (await api().history()).events.filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
   const addedNow = replacedSome ? [] : recent.filter(event => event.kind === 'added');
   // A copy choice gets its own inline Undo: each replaced copy back in its own tool, new copies removed, the skill unmanaged.
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
@@ -210,15 +210,15 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
-/**
- * History, and how long it is kept (said in its intro; unsaid if the settings can't be read). The window is read after History:
- * a window change waits in main's queue just as the History read does, so read in this order the caption describes the events.
- */
+/** History's events and the window they cover, as main read them together. */
+async function readHistory() {
+  const { events, days } = await api().history();
+  state.history = events;
+  state.historyDays = days;
+}
+
 export const loadHistory = () => busy('Reading History…', async () => {
-  const history = await api().history();
-  const settings = await api().getSettings().catch(() => undefined);
-  state.history = history;
-  state.historyDays = settings?.historyDays;
+  await readHistory();
   announce('');
 });
 
@@ -230,7 +230,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   if (view) state.home = view;
-  state.history = await api().history();
+  await readHistory();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => toolName(entry.harness ?? '') ?? entry.harness ?? ''))].filter(Boolean);
@@ -371,7 +371,7 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   }
   const view = await api().refresh();
   if (view) state.home = view;
-  state.history = await api().history();
+  await readHistory();
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
   const items = [...new Set(results.map(entry => entry.item))];
@@ -451,7 +451,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
     const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
     // New entries are in History as 'added': one Undo removes them again (while unchanged) and unmanages those servers.
-    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const addedNow = (await api().history()).events.filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undoable = addedNow.length > 0 && !replacedAny;
     state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andList(copied)} copied to ${andList(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andList(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andList(to)}` : ''}.${undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'}` };
@@ -477,7 +477,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
-    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const addedNow = (await api().history()).events.filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undo = addedNow.length && !replacedAny;
     state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${source(server)}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
@@ -487,7 +487,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     for (const { change, was } of resumed) for (const tool of was!.stopped!) { try { localStorage.removeItem(`ck-kept-edit:${state.home?.home ?? ''}:${change.key}:${tool}`); } catch { /* nothing kept */ } }
     if (resumed.length && resumed.length === changes.length && result.writes) {
       // The edit the resume replaced is one click back: its 'chosen' event restores it, and the copy stops again.
-      const chosen = (await api().history()).filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+      const chosen = (await api().history()).events.filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
       const back = [...new Set(chosen.flatMap(event => event.losers.map(loser => toolName(loser.tool) ?? loser.tool)))];
       state.outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
         text: resumed.map(({ change, was }) => `${andList(was!.stopped!.map(tool => toolName(tool) ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolName(change.use!) ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.',

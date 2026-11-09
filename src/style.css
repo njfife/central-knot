@@ -97,7 +97,9 @@ ul { list-style: none; }
 
 :focus { outline: none; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.btn.primary:focus-visible, .btn.danger:focus-visible { outline-color: #ffffff; }
+.btn.primary:focus-visible { outline-color: #ffffff; }
+/* A white ring inside the red fill is faint where it sits on a pale danger notice: the app's focus ring goes outside it instead. */
+.btn.danger:focus-visible { outline-offset: 2px; }
 
 /* Frame */
 #frame { flex: 1; min-height: 0; display: flex; }
@@ -1357,15 +1359,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .setting-message .icon { flex: none; margin-top: 1px; }
 .setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }
+/* What follows a line's news (what happens next, where to look) reads as a hint, so the news itself stands out. */
+.setting-message-detail { color: var(--ink-soft); }
 /* A select as the reference draws it: 32 tall, control border, panel fill, small lift, 13/500, chevrons at the right. */
 .select { position: relative; display: inline-flex; align-items: center; }
 .select select { appearance: none; height: 32px; min-width: 72px; max-width: 256px; padding: 0 28px 0 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--lift); color: var(--ink); font: 500 13px/20px var(--sans); cursor: pointer; }
 .select select:hover:not(:disabled) { background: var(--hover); }
 .select select:disabled { opacity: 0.5; cursor: default; }
 .select .icon { position: absolute; right: 8px; color: var(--ink-soft); pointer-events: none; }
-/* A row's question (shortening History): a danger notice across the row, under its text and control. Its buttons follow the
-   words, never the row's far end; where they don't fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
-.setting-confirm { grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
+/* A row's question (shortening History): a danger notice under the row's text and control, as wide as its words and buttons
+   need (the whole row where the words must wrap), never a mostly empty band. Its buttons follow the words; where they don't
+   fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
+.setting-confirm { grid-column: 1 / -1; justify-self: start; width: fit-content; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
 .setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
 .setting-confirm-text { flex: 1 1 200px; min-width: 0; max-width: 72ch; }
 .setting-confirm-actions { display: flex; gap: 8px; }
@@ -1376,6 +1381,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
    still reads as an Off switch; the row says why in the hint's place. */
 .setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }
+/* On a dark page that much dimming still reads as an ordinary Off switch. */
+@media (prefers-color-scheme: dark) { .setting-control .switch:disabled { opacity: 0.35; } }
 /* The ring sits outside the track, as on the status bar's sync switch; inside, the knob would cover it. */
 .setting-control .switch:focus-visible { outline-offset: 2px; }
 /* The sidebar takes width, so the row's own width decides when the control moves under its text. */

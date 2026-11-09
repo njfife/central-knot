@@ -9,7 +9,7 @@ import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
 export const presentTools = (snapshots: Snapshot[]) => snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => snapshot.harness);
@@ -252,11 +252,14 @@ async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
 
 /**
  * Applies a shortened window to this home at once (Settings): History loses what is now older, and the store frees what only
- * that kept. Only a home this build syncs and may write ('done'); a preview-only home, or another build's, keeps it until its
- * next History write there ('later').
+ * that kept. Only in a home this build syncs and may write ('done'). Elsewhere the next History write there applies it: this
+ * build's once it syncs the home ('later'), or, in a preview-only home or one another build syncs, that copy's ('elsewhere').
  */
-export async function pruneHistory(context: ShareContext): Promise<Exclude<HistoryPrune, 'failed'>> {
-  if (!(await syncsHere(context))) return 'later';
+export async function pruneHistory(context: ShareContext): Promise<'done' | 'later' | 'elsewhere'> {
+  if (!(await syncsHere(context))) {
+    const { record } = await readRecord(context.home);
+    return (await writeAccess(context)).allowed && (!record || record.owner === context.build) ? 'later' : 'elsewhere';
+  }
   const events = await readHistory(context);
   await writeHistory(context.home, events);
   await pruneStore(context, events);

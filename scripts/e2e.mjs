@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -588,12 +588,11 @@ async function practiceFlow() {
   // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
   // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
   const historyFile = join(practice, '.central-knot/history.json');
-  const DAY = 24 * 60 * 60 * 1000;
   writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
     ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
   const agedIn = events => events.map(event => event.key).filter(key => key.startsWith('aged-'));
   const agedOnFile = () => agedIn(JSON.parse(readFileSync(historyFile, 'utf8')).events);
-  const agedShown = async () => agedIn(await a.run('window.centralKnot.history()'));
+  const agedShown = async () => agedIn((await a.run('window.centralKnot.history()')).events);
   same('History is kept for 30 days at first: it shows what that covers, and reading alone removes nothing',
     [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
   await keepFor(a, 90);
@@ -601,9 +600,9 @@ async function practiceFlow() {
     [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
   await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
-  same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed',
-    [/^History from before .+ will be removed and can’t be restored\. Your other homes remove it too, the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
-    [true, 'Shorten to 7 days', '90', 90]);
+  same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too, the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
   await a.shot('settings-history-confirm');
   await a.run(`document.querySelector('#history-days').focus()`);
   for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
@@ -634,23 +633,40 @@ async function practiceFlow() {
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
       [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating history…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days (Settings).']);
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
     main.close();
   }
+  // Shorten. Where main can be reached the change is held in its queue, and the window refocused meanwhile, so the page re-reads
+  // the settings (still 30 days) before main saves. The re-read main asks for once it has saved can land either side of the
+  // save's answer; it is muted here, so the save's answer must stand on its own: it is still the newer one, and the row reports it.
   await keepFor(a, 7);
+  const shortenMain = a.main && await a.main();
+  const shortenHeld = shortenMain && await holdQueue(shortenMain, a);
   await a.click('#history-shorten');
+  if (shortenHeld) {
+    await refocus(shortenMain); await a.settle();
+    await shortenMain.run(`(contents => { const send = contents.send; globalThis.ckUnmute = () => { contents.send = send; }; contents.send = (channel, ...rest) => channel === 'settings:changed' ? undefined : send.call(contents, channel, ...rest); })(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+    await shortenHeld.release();
+  }
   for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
   for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
   const removedNote = await a.text('#setting-history-message') ?? '';
+  if (shortenHeld) { await shortenMain.run('ckUnmute()'); shortenMain.close(); }
+  // Another row acting clears the note: the page says one finished thing at a time.
+  await a.click('#appearance-light');
+  const noteAfterOtherRow = await a.exists('#setting-history-message');
+  await a.click('#appearance-system');
   await a.click('#nav-history');
   const listed = await a.text('#history-scroll') ?? '';
-  same('Shorten saves, removes the older History from this home’s file, says from when, and History shows only what is left and how long it keeps it',
-    [savedSettings().historyDays, agedOnFile(), /^History before .+ was removed\.$/.test(removedNote), listed.includes('aged-5-days'), listed.includes('aged-20-days'), await a.text('.history-intro')],
-    [7, ['aged-5'], true, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days (Settings).']);
-  await a.click('#nav-settings');
+  const intro = await a.text('.history-intro');
+  await a.click('#history-intro-settings');
+  same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
+    [savedSettings().historyDays, agedOnFile(), /^History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
+    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
@@ -763,7 +779,7 @@ async function realHomeFlow() {
     // The History window chosen in the practice run survives the restart. Shortening it here, a preview-only home, writes nothing.
     mkdirSync(join(HOME, '.central-knot'));
     const previewHistory = join(HOME, '.central-knot/history.json');
-    writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
+    writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * DAY).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
     const before = readFileSync(previewHistory, 'utf8');
     const restarted = (await a.run('window.centralKnot.getSettings()')).historyDays;
     await a.run('window.centralKnot.setHistoryDays(30)');
@@ -771,11 +787,10 @@ async function realHomeFlow() {
     await keepFor(a, 7);
     await a.click('#history-shorten');
     for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
-    const previewNote = await a.text('#setting-history-message') ?? '';
-    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says the older History goes later rather than that it was removed',
-      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).length, (await a.run('window.centralKnot.getSettings()')).historyDays,
-        previewNote.replace(/before .+ is/, 'before … is')],
-      [7, true, 0, 7, 'Saved. History before … is removed from this home the next time it records a change.']);
+    const previewNote = (await a.text('#setting-history-message') ?? '').trim();
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says another copy removes the older History later rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote],
+      [7, true, 0, 7, 'Saved. This home’s older History is removed the next time Central Knot records a change there.']);
     await a.run('window.centralKnot.setHistoryDays(30)');
     rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();

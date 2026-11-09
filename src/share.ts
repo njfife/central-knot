@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
-import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
@@ -31,7 +31,7 @@ export interface ShareContext {
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
   /** How many days History keeps events, and deleted items' content (STO-04); 30 unless Settings says otherwise. */
-  historyDays?: number;
+  historyDays?: HistoryDays;
   /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
   settleMs?: number;
 }
