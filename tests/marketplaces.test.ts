@@ -87,7 +87,7 @@ test('One tool’s error fails that tool only: the others’ reports stay, and l
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], box.home);
+    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'], box.home);
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
     assert.match(result.reports[1]!.message, /disk full/);
   } finally { await box.cleanup(); }
@@ -146,7 +146,7 @@ test('A plugin gone from the marketplace fails for its tools; uninstall names th
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const gone = await box.markets.install(root, 'team', 'removed', ['claude-cli', 'codex-cli'] as HarnessId[], box.home);
+    const gone = await box.markets.install(root, 'team', 'removed', ['claude-cli', 'codex-cli'], box.home);
     assert.equal(gone.stopped, undefined);
     assert.deepEqual(gone.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
     await box.markets.uninstall(root, 'team', 'pdf', 'claude-cli', box.home);

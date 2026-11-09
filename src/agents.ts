@@ -17,7 +17,8 @@ import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 import { toolNames as shown } from './words.ts';
 
-export const agentTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+type AgentTool = Exclude<HarnessId, 'pi-cli'>;
+export const agentTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'] satisfies AgentTool[];
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
 export interface NeutralAgent { name: string; description: string; prompt: string; fields: Record<string, unknown> }
@@ -28,7 +29,8 @@ type ContentHash = string; type FileHash = string; type AgentSlot = Partial<Reco
 /** The origin's fields a destination would lose: all of them, in any tool but the origin's own (no recorded equivalent, CD §5). */
 export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: NeutralAgent }) => (tool === origin.tool ? [] : Object.keys(origin.agent.fields));
 
-const suffixOf = (tool: HarnessId) => (tool === 'codex-cli' ? '.toml' : tool === 'copilot-cli' ? '.agent.md' : '.md');
+const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml' };
+const suffixOf = (tool: HarnessId) => suffixes[tool as AgentTool];
 const folder = (context: ShareContext, tool: HarnessId) => join(context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig), 'agents');
 const fileFor = (context: ShareContext, tool: HarnessId, name: string) => join(folder(context, tool), `${name}${suffixOf(tool)}`);
 const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
