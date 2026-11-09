@@ -404,10 +404,17 @@ export interface BaseApply { text: string; expected: string; tools: HarnessId[];
   seen: Partial<Record<HarnessId, string>>;
   adopt?: HarnessId; overwrite?: HarnessId[] }
 /** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
-export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean; written: { tool: HarnessId; before: string | null; after: string }[]; left: { tool: HarnessId; why: 'edited' | 'failed' }[]; undo?: BaseUndo }
-/** Everything an apply changed, to put back: the base and its tools, and each file's text before (null: the apply created it). */
+export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
+  written: BaseWritten[];
+  /** Not written: its copy was edited there (or, for an undo, the file changed since), the write failed, or (undo) the tool now reads another file. */
+  left: { tool: HarnessId; why: 'edited' | 'failed' | 'moved' }[];
+  /** Something after the files were written could not be finished, said with the result. */ problem?: string;
+  undo?: BaseUndo }
+/** One file written: where, the text before (null: the write created it) and the hash after. */
+export interface BaseWritten { tool: HarnessId; path: string; before: string | null; after: string }
+/** Everything an apply changed, to put back: the base and its tools, and each file it wrote, by path. */
 export interface BaseUndo { text: string; tools: HarnessId[]; leftPlain: Partial<Record<HarnessId, string>>;
-  /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: { tool: HarnessId; before: string | null; after: string }[] }
+  /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: BaseWritten[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';

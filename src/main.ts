@@ -418,7 +418,7 @@ const isBaseApply = (value: unknown): value is BaseApply => {
 const isBaseUndo = (value: unknown): value is BaseUndo => {
   const undo = value as BaseUndo;
   return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && isTools(undo.tools) && isToolHashes(undo.leftPlain) && Array.isArray(undo.files)
-    && undo.files.every(file => isTool(file?.tool) && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
+    && undo.files.every(file => isTool(file?.tool) && typeof file.path === 'string' && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
 };
 
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {

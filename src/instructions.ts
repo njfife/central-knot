@@ -189,24 +189,28 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     files.push({ tool: snapshot.harness, path, current });
   }
   try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailed(error, baseChanged); }
-  const leftPlain: BaseList['leftPlain'] = Object.fromEntries(Object.entries(stored.list.leftPlain).filter(([tool]) => !tools.includes(tool as HarnessId)));
+  const leftPlain: BaseList['leftPlain'] = { ...stored.list.leftPlain };
   const result: BaseResult = { written: [], left: [], undo: { text: stored.text, tools: stored.list.tools, leftPlain: stored.list.leftPlain, baseHash: sha(request.text), files: [] } };
   for (const { tool, path, current } of files) {
     const text = current ?? '';
+    const chosen = tools.includes(tool);
     const action = request.adopt === tool ? 'adopt' : request.overwrite?.includes(tool) ? 'putBack' : 'save';
-    const write = baseWrite(text, request.text, { chosen: tools.includes(tool), held: baseState(text, tool, stored), action });
+    const write = baseWrite(text, request.text, { chosen, held: baseState(text, tool, stored), action });
     if (write.edited) { result.left.push({ tool, why: 'edited' }); continue; }
     const { next } = write;
     // Nothing to change, and a missing file is never created empty.
-    if (current === undefined ? !next : next === current) continue;
+    if (current === undefined ? !next : next === current) { if (chosen) delete leftPlain[tool]; continue; }
+    // A failed write keeps the tool's plain-text record, so a retry still moves that text back into the block.
     try { await keepAndWrite(context.home, tool, path, next, current); }
     catch { result.left.push({ tool, why: 'failed' }); continue; }
-    result.written.push({ tool, before: current ?? null, after: sha(next) });
+    result.written.push({ tool, path, before: current ?? null, after: sha(next) });
     // Taken off with nothing of its own: the base stays as plain text, remembered so adding the tool again doesn't repeat it.
-    if (!tools.includes(tool) && !splitBase(text).own.trim()) leftPlain[tool] = sha(next);
+    if (chosen) delete leftPlain[tool]; else if (!splitBase(text).own.trim()) leftPlain[tool] = sha(next);
   }
-  await writeBaseList(context.home, { tools, leftPlain });
   result.undo!.files = result.written;
+  // The files are written either way; a list that could not be saved is said, and Undo still puts the files back.
+  try { await writeBaseList(context.home, { tools, leftPlain }); }
+  catch (error) { result.problem = `The list of tools that get the base could not be saved: ${plainError(error)} The files above were written.`; }
   return result;
 }
 
@@ -220,12 +224,15 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const seenBase = await readText(basePath(context.home));
   if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
   try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailed(error, baseChanged); }
-  await writeBaseList(context.home, { tools: undo.tools, leftPlain: undo.leftPlain });
   const result: BaseResult = { written: [], left: [] };
+  try { await writeBaseList(context.home, { tools: undo.tools, leftPlain: undo.leftPlain }); }
+  catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   for (const file of undo.files) {
     const snapshot = snapshots.find(entry => entry.harness === file.tool);
     if (!snapshot) { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
     const { path } = await bind(file.tool, snapshot.root);
+    // The tool now reads another file (an override appeared): the file the save wrote is not the one bound now, so nothing is touched.
+    if (path !== file.path) { result.left.push({ tool: file.tool, why: 'moved' }); continue; }
     const current = await readText(path);
     if (current === undefined || sha(current) !== file.after) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
     try {
@@ -233,7 +240,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
       if (file.before === null) { await keep(context.home, file.tool, current); await removeFileChecked(path, current); }
       else await keepAndWrite(context.home, file.tool, path, file.before, current);
     } catch { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
-    result.written.push({ tool: file.tool, before: current, after: file.before === null ? '' : sha(file.before) });
+    result.written.push({ tool: file.tool, path, before: current, after: file.before === null ? '' : sha(file.before) });
   }
   return result;
 }

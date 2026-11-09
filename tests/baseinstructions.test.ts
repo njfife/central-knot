@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -110,7 +110,13 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     await set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await set('Shared.\n', ['claude-cli']);
     assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
+    // A failed write when adding it again keeps that record, so the retry still doesn't repeat the text.
+    await chmod(join(box.home, '.copilot'), 0o555);
+    const blocked = await set('Shared.\n', ['claude-cli', 'copilot-cli']);
+    await chmod(join(box.home, '.copilot'), 0o755);
+    assert.ok(blocked.left.some(entry => entry.tool === 'copilot-cli' && entry.why === 'failed'));
     await set('Shared.\n', ['claude-cli', 'copilot-cli']);
+    assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared.\n' });
     await set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
     assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared, now.\n' });
 
@@ -118,5 +124,17 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     await writeFile(claude, 'Be brief.\n');
     await set('Use tabs.\n', ['claude-cli', 'copilot-cli']);
     assert.ok((await readFile(claude, 'utf8')).startsWith('Be brief.\n\n<!--'));
+  } finally { await box.cleanup(); }
+});
+
+test('Undo touches only the file the save wrote: an override that appeared since is left alone', async () => {
+  const box = await sandbox();
+  const agents = join(box.home, '.codex/AGENTS.md'), override = join(box.home, '.codex/AGENTS.override.md');
+  try {
+    const saved = await applyBase(box.context, await box.snapshots(), { text: 'Shared.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools: ['codex-cli'] });
+    await writeFile(override, await readFile(agents, 'utf8'));
+    const undone = await undoBase(box.context, await box.snapshots(), saved.undo!);
+    assert.deepEqual(undone.left, [{ tool: 'codex-cli', why: 'moved' }]);
+    assert.ok((await stat(override)).isFile() && (await stat(agents)).isFile());
   } finally { await box.cleanup(); }
 });

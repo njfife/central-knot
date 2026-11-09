@@ -398,9 +398,12 @@ const toolNamesOf = (tools: HarnessId[]) => andList(tools.map(tool => namedTools
 function leftText(result: BaseResult, undoing = false) {
   const edited = result.left.filter(entry => entry.why === 'edited').map(entry => entry.tool);
   const failed = result.left.filter(entry => entry.why === 'failed').map(entry => entry.tool);
+  const moved = result.left.filter(entry => entry.why === 'moved').map(entry => entry.tool);
   const one = edited.length === 1;
   return [edited.length ? ` ${fileNames(edited)} ${one ? 'was' : 'were'} left as ${one ? 'it is' : 'they are'}: ${undoing ? 'changed there since the save' : `${one ? 'its' : 'their'} copy of the base was edited there`}.` : '',
-    failed.length ? ` ${fileNames(failed)} could not be written; nothing in ${failed.length === 1 ? 'it' : 'them'} changed.` : ''].join('');
+    failed.length ? ` ${fileNames(failed)} could not be written; nothing in ${failed.length === 1 ? 'it' : 'them'} changed.` : '',
+    moved.length ? ` ${andList(moved.map(tool => namedTools[tool]))} now ${moved.length === 1 ? 'reads' : 'read'} a different file, so the file the save wrote was left as it is.` : '',
+    result.problem ? ` ${result.problem}` : ''].join('');
 }
 
 /** Opens the base in its editor; a clean tool editor closes, since only one thing is edited at a time. */
