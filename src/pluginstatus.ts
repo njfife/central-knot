@@ -51,11 +51,11 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code has no switch for a single skill of a plugin.',
+  'claude-cli': 'Claude Code has no switch for a single skill of a plugin; to stop one there, uninstall the plugin from Claude Code.',
 };
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
-export const offByBareName = (skill: string) => `Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: copilot skill enable ${skill}`;
+export const offByBareName = (skill: string) => `Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
 /** Why a skill the marketplace lists can't be switched where the installed copy (an older or newer version) lacks it. */
 export const notInCopy = (tool: HarnessId, skill: string) => `The copy ${names[tool]} has installed has no skill named “${skill}”.`;
 /** Why Copilot CLI's switch isn't offered for a skill whose name could not go safely on its command line. */

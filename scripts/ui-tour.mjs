@@ -198,6 +198,12 @@ if (wanted('plugin-skills')) {
   writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy }] }));
   mkdirSync(join(HOME, '.local/bin'), { recursive: true });
   writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '{"disabledSkills":[]}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
+  const at860 = async (name, caption) => {
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+    await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
+    await shot(a, name, caption);
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  };
   await a.click('#nav-plugins');
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
   if (await a.has('#marketplace-source')) {
@@ -214,6 +220,7 @@ if (wanted('plugin-skills')) {
   await a.run(`document.querySelector('#pskill-0-document-tools-spreadsheet-codex-cli').focus({ focusVisible: true })`);
   await shot(a, 'skill-focus', 'Moved keyboard focus to spreadsheet’s Codex switch (as Tab would), beside pdf-reader’s chosen ones.');
   await a.run(`document.activeElement?.blur()`);
+  await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'skill-off', 'Clicked Apply all. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`.');
   await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
@@ -227,7 +234,8 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in both tools.');
   writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['spreadsheet'] }));
   await a.click('#plugin-back'); await a.click('#refresh-0'); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
-  await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there and can’t be turned on for this plugin alone (hover text says why).');
+  await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
+  await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
 }
 
 // ---------- Instructions ----------

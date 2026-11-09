@@ -141,7 +141,7 @@ test('A skill’s switch is its own choice: it runs between installs and removal
   const done = (tool: HarnessId, outcome: 'skill-off' | 'skill-on', changed?: boolean): PluginDone => ({ ...off(tool), action: outcome, report: { tool, outcome, message: '', runs: [], changed } });
   const run = [done('codex-cli', 'skill-off', true), done('copilot-cli', 'skill-off', true), done('claude-cli', 'skill-off')];
   assert.deepEqual(reverse(run).map(back => [back.tool, back.action, back.skill]), [['codex-cli', 'skill-on', 'pdf-reader'], ['copilot-cli', 'skill-on', 'pdf-reader']]);
-  assert.equal(resultLines(run)[0]!.text, 'pdf-reader turned off in Codex and Copilot CLI; pdf-reader already off in Claude Code');
+  assert.equal(resultLines(run)[0]!.text, 'pdf-reader turned off in Copilot CLI and Codex; pdf-reader already off in Claude Code');
   assert.equal(resultSentence(resultLines([done('codex-cli', 'skill-on', true)], true), true), 'Undone: docs: pdf-reader back on in Codex.');
 });
 

@@ -2,7 +2,7 @@
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
 import { cantSwitchSkill, cantUninstall, installed, skillOff, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, MarketplaceView, PluginActionResult, PluginsView } from './types.ts';
-import { andList, toolNames as names } from './words.ts';
+import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /** Install or uninstall a plugin, or turn one of its skills off or back on (ENB-06), in one tool. */
 export type PluginAction = 'install' | 'remove' | 'skill-off' | 'skill-on';
@@ -159,7 +159,7 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
   for (const key of new Set(done.map(lineKey))) {
     const mine = done.filter(entry => lineKey(entry) === key);
     const { plugin, source, skill } = mine[0]!;
-    const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
+    const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const groups: [string[], string][] = skill
       ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],
         [tools('skill-off', false), `${skill} already off in`], [tools('skill-on', false), `${skill} already on in`]]
@@ -177,15 +177,22 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
 }
 
 /**
- * The successful lines as one sentence, in pieces (`short`: tools counted, for the toolbar): "document-tools: installed in Codex." or, for an Undo, "Undone:
+ * The successful lines as one sentence, in pieces (`short`: tools counted, for the toolbar; `here`: the plugin whose page is
+ * open, named by its breadcrumb, so its lines leave its name out): "document-tools: installed in Codex." or, for an Undo, "Undone:
  * document-tools removed from Codex." Each plugin is its own piece so the page can link it. Empty when nothing succeeded.
  */
-export function resultParts(lines: ResultLine[], undo: boolean, { short = false } = {}): (string | { plugin: string; source: string })[] {
+export function resultParts(lines: ResultLine[], undo: boolean, { short = false, here }: { short?: boolean; here?: { plugin: string; source: string } } = {}): (string | { plugin: string; source: string })[] {
   const ok = lines.filter(line => line.ok);
   if (!ok.length) return [];
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
-  // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
-  ok.forEach((line, at) => parts.push(...(at ? ['; '] : []), { plugin: line.plugin, source: line.source }, `${undo && !line.skill ? ' ' : ': '}${short ? line.short : line.text}`));
+  ok.forEach((line, at) => {
+    const text = short ? line.short : line.text;
+    if (at) parts.push('; ');
+    // On the plugin's own page its name is already in the breadcrumb: "Installed in Codex." / "pdf-reader turned off in Codex."
+    if (here?.plugin === line.plugin && here.source === line.source) parts.push(at || undo || line.skill ? text : text[0]!.toUpperCase() + text.slice(1));
+    // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
+    else parts.push({ plugin: line.plugin, source: line.source }, `${undo && !line.skill ? ' ' : ': '}${text}`);
+  });
   return [...parts, '.'];
 }
 /** resultParts as plain text, for the screen reader and the tooltip. */
