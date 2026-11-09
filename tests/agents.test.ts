@@ -55,8 +55,8 @@ test('Claude-only fields make the others one-way With limits; an edit there stay
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
     const copilot = await read(box.home, '.copilot/agents/reviewer.agent.md');
     assert.ok(!copilot.includes('tools:') && !copilot.includes('model:'), 'no invented equivalent');
-    // Edit in Copilot (one-way): stays there, Claude untouched, Copilot no longer updated.
-    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), copilot.replace('Be brief.', 'Copilot only.'));
+    // Edit in Copilot (one-way), to a field only: stays there, Claude untouched, Copilot no longer updated.
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), copilot.replace('description: Reviews code\n', 'description: Reviews code\nmodel: my-local-model\n'));
     const held = await applyAgents(box.context, tools, []);
     assert.equal(held.writes, 0);
     assert.match(held.results[0].message, /stopped updating it there; nothing spread/);
@@ -67,7 +67,7 @@ test('Claude-only fields make the others one-way With limits; an edit there stay
     const onward = await applyAgents(box.context, tools, []);
     assert.equal(onward.writes, 1, JSON.stringify(onward.results));
     assert.match(await read(box.home, '.codex/agents/reviewer.toml'), /New prompt\./);
-    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Copilot only\./);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /model: my-local-model\n---\n\nYou review code\.\nBe brief\./);
     // Deleting the one-way Codex copy deletes nothing elsewhere.
     await rm(join(box.home, '.codex/agents/reviewer.toml'));
     await applyAgents(box.context, tools, [], { settleMs: 0 });
@@ -107,6 +107,9 @@ test('A different agent with the same name needs a choice; a chosen copy replace
     const chosen = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(chosen.writes, 2, JSON.stringify(chosen.results));
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Reviews code/);
+    const chosenEvent = (await readHistory(box.home)).find(entry => entry.kind === 'chosen' && entry.key === 'agent:reviewer')!;
+    assert.equal((await restoreAgent(box.context, tools, chosenEvent.id)).stopped, undefined);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Other prompt\./, 'the replaced copy comes back from History');
   } finally { await box.cleanup(); }
 });
 
