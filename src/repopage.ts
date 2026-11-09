@@ -275,5 +275,5 @@ export function repoPage(): HTMLElement {
       h('div.repo-start', {}, connectForm(view.access.allowed),
         h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(view.withBase),
           h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
-          h('p.empty-aside', {}, 'What goes is what’s Managed now: ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'see your Managed skills'), '.'))))));
+          h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.'))))));
 }
