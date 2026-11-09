@@ -1379,7 +1379,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* What Disabled and Remove mean, right under the rows they belong to. */
 .details-switch-note { margin: 0; }
 /* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
-.text-action.tool-remove { color: var(--ink-soft); }
+.text-action.tool-remove { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
 .tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
 .tool-remove-slot { display: inline-block; }
