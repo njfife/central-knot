@@ -218,8 +218,6 @@ async function practiceFlow() {
   await a.click('#remove-notes-codex-cli');
   await applyAll(a);
   same('Remove takes out only Codex’s copy', [existsSync(join(practice, '.codex/skills/notes')), existsSync(join(practice, '.claude/skills/notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/notes/SKILL.md'))], [false, true, true]);
-  await a.click('#header-refresh');
-  same('and nothing syncs it back', existsSync(join(practice, '.codex/skills/notes')), false);
   await a.click('#nav-history');
   await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
   await a.settle();

@@ -28,6 +28,15 @@ args = ["repl"]
 
 [profiles.work]
 model = "o3"
+
+# Codex's per-skill switches (Disable): arrays of tables, kept as they are
+[[skills.config]]
+path = "/x/skills/a/SKILL.md"
+enabled = false
+
+[[skills.config]]
+name = "b"
+enabled = false
 `;
 const massive = { type: 'stdio', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' } };
 const copilotOf = async (home: string) => JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
