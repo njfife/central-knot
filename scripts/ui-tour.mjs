@@ -287,6 +287,8 @@ if (wanted('profiles')) {
   await a.press('Escape');
   await a.click('#profile-delete'); await shot(a, 'size-860-delete-confirm', 'At 860×560, clicked Delete on Development: the confirmation wraps under the title.');
   await a.click('#profile-delete-cancel');
+  await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await shot(a, 'size-860-long-name-in-use', 'Still at 860×560, switched to the profile with the 40-character name: the status bar item shortens it with an ellipsis (the full name is on hover).');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
 }
 

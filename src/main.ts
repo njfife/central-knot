@@ -176,13 +176,13 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     lastDrift = await driftNow(context());
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
-  const drift = lastDrift ? ` (${lastDrift} to apply)` : '';
+  const drift = lastDrift ? ` (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'} to apply)` : '';
   return { label: `Profile: ${activeProfileName() ?? 'No profile'}${drift}`, submenu: [
     { label: 'No profile', type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
     // The profile in use no longer matches the tools: applying it again is one click here too, as in the status bar menu.
-    ...(lastDrift && lastProfiles.active ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName()} to tools (${lastDrift})`, enabled: usable, click: () => choose(lastProfiles.active!) }] : []),
+    ...(lastDrift && lastProfiles.active ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName()} to tools (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'})`, enabled: usable, click: () => choose(lastProfiles.active!) }] : []),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
   ] };

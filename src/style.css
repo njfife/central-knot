@@ -1384,7 +1384,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .profile-name-input:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 .pf-scroll { display: flex; flex-direction: column; container-type: inline-size; }
-.pf-table { --pf-col: clamp(96px, 9cqi, 220px); display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
+.pf-table { --pf-col: clamp(96px, 12cqi, 260px); display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
 .pf-row { display: grid; grid-template-columns: minmax(240px, 1fr) repeat(var(--pf-tools), var(--pf-col)); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--control-line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
@@ -1470,3 +1470,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A long name wraps instead of being cut: rows grow, keeping their minimum height */
 .pf-row:not(.pf-head) .pf-name { padding-block: 6px; }
 .profile-row { height: auto; min-height: 37px; padding-block: 8px; }
+.pf-sub-caveat { color: var(--warning); }
+.pf-sub-caveat .icon { display: inline-block; vertical-align: -2px; margin-right: 4px; }
+@media (max-width: 1100px) { .pf-sub-sessions { display: none; } }
+/* Skills and MCP pages: a copy a profile turned off reads as off, not only by its corner mark */
+.cell-button.cell-profile-off > .icon:first-child, .cell-button.cell-profile-off > .glyph-fill { opacity: 0.4; }
