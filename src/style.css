@@ -1405,7 +1405,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-aside > svg { flex: none; align-self: center; }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
 .repo-page > .scroll { container-type: inline-size; }
-.repo-start { width: min(560px, 100%); display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
+.repo-start { width: 100%; display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
 .repo-start-side { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; padding: 0 4px; }
 /* Wide windows: the form and what goes where sit side by side, so the start page uses the room instead of a narrow column. */
 @container (min-width: 960px) { .repo-start { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
