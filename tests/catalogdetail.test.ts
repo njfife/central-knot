@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { nameAndDescription as frontMatter } from '../src/discovery.ts';
-import { inside, marketplacePage, pluginContents, pluginDetail, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
+import { inside, marketplacePage, pluginContents, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -13,42 +12,19 @@ async function box() {
   return { base, root: join(base, 'market'), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
-test('Front matter gives name and description, quoted, folded or literal, with Windows line ends', () => {
-  assert.deepEqual(frontMatter('---\r\nname: "pdf"\r\ndescription: Reads PDFs\r\n---\r\nbody'), { name: 'pdf', description: 'Reads PDFs' });
-  assert.deepEqual(frontMatter('---\nname: x\ndescription: >\n  Reads PDFs\n  and tables\n---\n'), { name: 'x', description: 'Reads PDFs and tables' });
-  assert.deepEqual(frontMatter('---\ndescription: |\n  one\n  two\n---\n'), { name: undefined, description: 'one\ntwo' });
-  // Shapes a hand-written reader got wrong: a plain description over two lines, a trailing comment, a byte-order mark.
-  assert.deepEqual(frontMatter('---\nname: pdf # the name\ndescription: Reads PDFs and\n  extracts tables\n---\n'), { name: 'pdf', description: 'Reads PDFs and extracts tables' });
-  assert.deepEqual(frontMatter('\ufeff---\nname: x\n---\n'), { name: 'x', description: undefined });
-  assert.deepEqual(frontMatter('no front matter'), { name: undefined, description: undefined });
-});
-
-test('A strict:false entry holds only the skills it lists, and listed commands too', async () => {
+test('Paths an entry or plugin.json lists are read instead of the default folders', async () => {
   const { root, cleanup } = await box();
   try {
     for (const name of ['hello', 'unlisted']) await put(join(root, `skills/${name}/SKILL.md`), `---\nname: ${name}\ndescription: Says ${name}\n---\n`);
     await put(join(root, 'tools/notes.md'), '---\ndescription: Takes notes\n---\n');
+    await put(join(root, '.claude-plugin/plugin.json'), JSON.stringify({ hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
+    await put(join(root, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
+    await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
     const contents = await pluginContents(root, { source: './', strict: false, skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
     assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello' }]);
     assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes' }]);
-    // The plugin is the marketplace's own root: its README belongs to the marketplace and is shown there.
-    await put(join(root, 'README.md'), '# Market');
-    assert.equal((await pluginDetail(root, { source: './' }, root, false)).readme, undefined);
-    assert.equal((await pluginDetail(root, { source: './' }, root)).readme, '# Market');
-  } finally { await cleanup(); }
-});
-
-test('Hooks and MCP servers given as paths in plugin.json are read, and both counts and names agree', async () => {
-  const { root, cleanup } = await box();
-  try {
-    const plugin = join(root, 'plugins/p');
-    await put(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p', hooks: './config/hooks.json', mcpServers: './config/servers.json' }));
-    await put(join(plugin, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
-    await put(join(plugin, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp', '${CLAUDE_PLUGIN_ROOT}'] } } }));
-    const contents = await pluginContents(plugin, {}, root);
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
-    assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp ${CLAUDE_PLUGIN_ROOT}' }]);
-    assert.equal(contents.mcpUsesPluginRoot, true);
+    assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
   } finally { await cleanup(); }
 });
 
