@@ -64,12 +64,13 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
-    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'), allButton),
+    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
+    // The button for every tool at once sits right after the tools it chooses, not at the panel's far edge.
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
-    })));
+    }), allButton));
 }
 
 /**

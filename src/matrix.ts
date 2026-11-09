@@ -3,12 +3,13 @@
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
 import { andList, orList, toolNames } from './words.ts';
-import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, fitInView, h, icon, middle, withToolCount } from './dom.ts';
+import { convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { button, closeButton, emptyState, fitInView, h, icon, middle, pendingCount, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
+import { plural } from './model.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
@@ -219,9 +220,9 @@ function changeBar(bulk = true) {
     const fresh = next.reduce((total, skill) => total + toolList().filter(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined).length, 0);
     const replaced = next.reduce((total, skill) => total + toolList().filter(tool => replacedOnApply(skill, tool)).length, 0);
     const pending = `${count} ${count === 1 ? shortNoun[kind][0] : shortNoun[kind][1]} to change${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${replaced ? ` · ${replaced} ${replaced === 1 ? 'copy' : 'copies'} to replace` : ''}`;
-    // In narrow content the count hides (style.css) and Apply all's tooltip carries it.
+    // In a crowded toolbar the count shortens to "2 changes"; the full summary stays its tooltip and Apply all's.
     return h('div.apply', {}, manageAll,
-      h('span.apply-count.apply-quiet', { title: 'Nothing is written until Apply all' }, pending),
+      pendingCount(pending, plural(count, 'change')),
       button({ variant: 'ghost', size: 'small', icon: 'x', collapse: true, label: 'Discard', name: 'Discard these changes', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label, id: 'apply', disabled: !canWrite(), attrs: { title: `${pending}. Nothing is written until Apply all.` }, onclick: applyAll }));
   }
@@ -1196,7 +1197,7 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
   const draft = view.draft.get(skill.key);
   return h('div.page.split', {},
     h('div.list-column', {},
-      h('div.toolbar.list-toolbar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: () => { state.skillsView = 'table'; state.item = undefined; rerender(); } }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
+      h('div.toolbar.list-toolbar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
       h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
       h('div.scroll.list-scroll', { id: 'skills-list' }, list)),
     h('section.detail-column', { 'aria-label': 'Skill details' },

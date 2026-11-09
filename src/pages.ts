@@ -4,7 +4,7 @@ import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
 import { realHomeName, thisMachine } from './renderer.ts';
-import { isPresent } from './presence.ts';
+import { isPresent, missingTools } from './presence.ts';
 import { andList, orList } from './words.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 
@@ -26,12 +26,16 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-/** An empty page's way forward, naming only the tools this home has. */
-const addHint = () => {
-  const tools = homeToolNames();
-  return tools.length ? `Add one in ${orList(tools)}, then Refresh, or choose another home at the bottom left.` : 'No tools were found in this home. Choose another home at the bottom left.';
-};
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint()}`, id);
+/**
+ * An empty page's way forward. `able` is this home's tools that can hold this kind of item (the kind's own view lists only
+ * present tools), so the hint never names a tool that isn't here or couldn't take one; `noun` is the kind ("agents").
+ */
+function addHint(able: HarnessId[], noun: string) {
+  if (able.length) return `Add one in ${orList(able.map(toolName))}, then Refresh, or choose another home at the bottom left.`;
+  const here = homeToolNames();
+  return here.length ? `${andList(here)} can’t hold ${noun}. Choose another home at the bottom left.` : 'No tools were found in this home. Choose another home at the bottom left.';
+}
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint(state.home?.manage.tools ?? [], 'skills')}`, id);
 
 /** The Overview's first sentence: what Central Knot keeps the same, between this home's tools only. */
 function leadSentence(tools: string[]) {
@@ -118,7 +122,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', `None of your tools has an MCP server in this home. ${addHint()}`, 'mcp-empty');
+  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', `None of your tools has an MCP server in this home. ${addHint(state.home.mcp.tools, 'MCP servers')}`, 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -126,7 +130,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', `None of your tools has an agent in this home. ${addHint()}`, 'agents-empty');
+  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', `None of your tools has an agent in this home. ${addHint(state.home.agents.tools, 'agents')}`, 'agents-empty');
   return designOverview('agents');
 }
 
@@ -254,7 +258,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
 
 /** On This Mac's home, the tools that were looked for and not found: said once, as information, never as a card to act on. */
 function notFoundLine(home: HomeView) {
-  const missing = home.snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => toolName(snapshot.harness));
+  const missing = missingTools(home.snapshots).map(toolName);
   if (home.mode !== 'actual' || !missing.length) return null;
   return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'),
     `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`);

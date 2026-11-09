@@ -2,8 +2,8 @@ import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { loadHome, readAgain, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { button, fitToolbars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
@@ -21,8 +21,9 @@ const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', m
 const RAIL_BELOW = 968;
 
 /**
- * The window decides the frame: the sidebar or its rail. Everything inside the content area adapts to the content's own
- * width in style.css (toolbar buttons go icon-only, two-pane pages stack), so a resize redraws only when the rail changes.
+ * The window decides the frame: the sidebar or its rail. Inside the content area, style.css adapts to the content's own
+ * width (narrow tables, stacked two-pane pages) and fitToolbars shortens a toolbar only when it overflows, so a resize
+ * redraws only when the rail changes.
  */
 function applyLayout() {
   const rail = state.sidebar ? state.sidebar === 'rail' : window.innerWidth < RAIL_BELOW;
@@ -96,7 +97,7 @@ function renderHeader(rail: boolean) {
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
-    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', collapse: true, disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
   );
 }
@@ -141,6 +142,7 @@ function render() {
   renderHeader(rail);
   renderPage();
   renderStatus();
+  fitToolbars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   if (focused) document.getElementById(focused)?.focus();
   if (state.home) document.body.dataset.ready = 'true';
@@ -160,6 +162,7 @@ window.addEventListener('resize', () => {
   if ((window.innerWidth < RAIL_BELOW) !== narrowWindow) { narrowWindow = !narrowWindow; state.sidebar = undefined; }
   const wasRail = document.body.classList.contains('rail');
   if (applyLayout().rail !== wasRail) render();
+  else fitToolbars();
 });
 
 document.addEventListener('keydown', event => {
@@ -168,6 +171,8 @@ document.addEventListener('keydown', event => {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
+  // Escape leaves the Files and contents view for the table; in a find box it clears the box first (matrix.ts).
+  if (event.key === 'Escape' && !typing && state.page === 'skills' && state.skillsView === 'files') showSkillsTable();
 });
 
 void startHome();

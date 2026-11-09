@@ -152,6 +152,58 @@ const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
+// ---------- Fit: nothing is cut off ----------
+// In the page: each control (button, switch, input, filter chip, tool label) that the window or a clipping ancestor cuts,
+// each region that scrolls sideways, and an open menu that runs outside its scroll area. A control inside a region that
+// scrolls sideways on purpose (the plugin category chips) is reachable, so it is not counted. Empty when everything fits.
+const CUT_OFF = `(() => {
+  const out = [];
+  const label = node => node.id || node.getAttribute('aria-label') || (node.textContent || '').trim().slice(0, 40) || String(node.className);
+  const across = (box, edge) => box.left >= edge.left - 1 && box.right <= edge.right + 1;
+  for (const node of document.querySelectorAll('button, [role="switch"], input:not(.hidden-input), .chip, .ov-tool-head, .plugin-tool-name')) {
+    const box = node.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) continue;
+    if (!across(box, { left: 0, right: innerWidth })) { out.push('off the window: ' + label(node)); continue; }
+    for (let up = node.parentElement; up && up !== document.body; up = up.parentElement) {
+      const style = getComputedStyle(up);
+      if (style.overflowX === 'visible') continue;
+      const sideways = ['auto', 'scroll'].includes(style.overflowX) && up.scrollWidth > up.clientWidth + 1;
+      if (!sideways && !across(box, up.getBoundingClientRect())) { out.push('cut by ' + (up.id || up.className) + ': ' + label(node)); break; }
+    }
+  }
+  for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
+  for (const menu of document.querySelectorAll('.tool-menu')) {
+    const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
+    if (box.top < area.top - 1 || box.bottom > area.bottom + 1 || !across(box, area)) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
+  }
+  return out;
+})()`;
+
+/** Sizes the page as the window would be, and lets the app hear the resize. */
+async function sizeTo(a, width, height) {
+  await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+async function fullSize(a) {
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+
+/**
+ * At the smallest window, first with the sidebar folded to its rail and then open, nothing on this page is cut off.
+ * `again` puts back what the sidebar toggle's click closes, such as an open menu.
+ */
+async function fitsAtMinimum(a, where, again = async () => {}) {
+  await sizeTo(a, 860, 560); await again();
+  same(`nothing cut off at 860×560 with the rail: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle'); await again();
+  same(`nothing cut off at 860×560 with the sidebar open: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle');
+  await fullSize(a);
+}
+
 async function practiceFlow() {
   const a = await launch();
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
@@ -170,6 +222,15 @@ async function practiceFlow() {
   const reviewClaude = readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8');
   const reviewCopilot = readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8');
 
+  // An open column menu fits at the smallest window, and keeps fitting while the window shrinks and grows under it.
+  await fitsAtMinimum(a, 'Skills with Codex’s menu open', async () => { if (!(await a.exists('.tool-menu'))) await a.click('#tool-codex-cli'); });
+  await a.click('#tool-codex-cli');
+  for (const [width, height] of [[860, 560], [1728, 1117], [860, 560], [1280, 800]]) {
+    await sizeTo(a, width, height);
+    same(`the open menu still fits after resizing to ${width}×${height}`, [await a.exists('.tool-menu'), ...(await a.run(CUT_OFF))], [true]);
+  }
+  await a.press('Escape');
+  await fullSize(a);
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + (group.dataset.count ?? '1'))`);
@@ -448,6 +509,8 @@ async function practiceFlow() {
   let mcpSpread = false;
   for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readFileSync(join(practice, '.codex/config.toml'), 'utf8').includes('command = "npx-edited"'); }
   check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
+  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
+  await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
 
   // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
   await a.click('#nav-agents');
@@ -512,6 +575,12 @@ async function practiceFlow() {
   await a.click('#pinstall-0-document-tools');
   same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
   check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  await fitsAtMinimum(a, 'a plugin page with changes waiting for Apply all');
+  await a.click('#plugin-back');
+  await fitsAtMinimum(a, 'the plugin table with its tool labels and changes waiting');
+  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('3 installs'); })()`));
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   await a.click('#pcell-0-document-tools-codex-cli');
   same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
   await a.click('#pcell-0-document-tools-codex-cli');
@@ -593,12 +662,12 @@ async function realHomeFlow() {
   same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
   check('a skill with a link inside is held', await a.exists('.ov-row[data-key="has-link"] .held-pill'));
-  // At the smallest window, every control in the header and toolbar is on screen (narrow content shows icons only).
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
-  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  // Changes waiting for Apply all fill the toolbar most: still nothing is cut off at the smallest window.
   await a.click('#manage-all');
-  const offScreen = await a.run(`[...document.querySelectorAll('#header button, .toolbar button')].filter(node => { const box = node.getBoundingClientRect(); return box.width > 0 && (box.left < 0 || box.right > innerWidth || box.bottom > innerHeight); }).map(node => node.id || node.textContent)`);
-  same('nothing in the header or toolbar is cut off at 860×560', offScreen, []);
+  await fitsAtMinimum(a, 'Skills with changes waiting for Apply all');
+  await sizeTo(a, 860, 560);
+  check('the pending count stays, shortened, at the smallest window', await a.run(`(() => { const short = document.querySelector('.toolbar .count-short'); return !!short && short.getBoundingClientRect().width > 0 && short.parentElement.title.includes('to change'); })()`));
+  await fullSize(a);
   await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);

@@ -1,33 +1,28 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
-import { isEveryTool, restoreEvent, showPage, state } from './app.ts';
-import { andList, toolName } from './words.ts';
+import { restoreEvent, showPage, state, whichTools } from './app.ts';
+import { toolName } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
 const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
-/** The tools an event touched, named; every tool in this home, past two, is "all N tools". */
-const list = (tools: string[]) => {
-  const all = [...new Set(tools)];
-  return all.length > 2 && isEveryTool(all) ? `all ${all.length} tools` : andList(all.map(who));
-};
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   switch (event.kind) {
-    case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${list(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
-    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${list(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}’s.${order}`, action: 'Undo' };
+    case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${whichTools(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
+    case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${whichTools(event.losers.filter(loser => loser.hash !== event.previous).map(loser => loser.tool))}’s.${order}`, action: 'Undo' };
     case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
-    case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${list(event.losers.map(loser => loser.tool))}.${order}` };
-    case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${list(event.losers.map(loser => loser.tool))}’s.`, action: 'Undo' };
-    case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${list(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
+    case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit was kept over a deletion in ${whichTools(event.losers.map(loser => loser.tool))}.${order}` };
+    case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}’s copy; it replaced ${whichTools(event.losers.map(loser => loser.tool))}’s.`, action: 'Undo' };
+    case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${whichTools(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${whichTools(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
       const undone = state.history?.find(other => other.undoneBy === event.id);
       const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added' } as const)[past.kind];
-      const where = event.losers.length ? ` in ${list([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
+      const where = event.losers.length ? ` in ${whichTools([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
       // Undoing an undo is a redo: say what came back, and offer to take it away again.
       if (undone?.kind === 'restored') {
         const first = state.history?.find(other => other.undoneBy === undone.id);
@@ -72,7 +67,7 @@ function actions(event: HistoryEvent, action?: string) {
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
-  const scope = !touched.length || isEveryTool(touched) ? 'in all tools' : `in ${andList(touched.map(who))}`;
+  const scope = touched.length ? `in ${whichTools(touched)}` : 'in all tools';
   const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });

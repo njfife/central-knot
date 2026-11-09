@@ -13,9 +13,10 @@
  * A few breakpoints adapt the frame instead of clipping it:
  *   - window narrower than 968px: the sidebar folds to its icon rail (renderer.ts decides, so the toggle can override it);
  *   - window shorter than 640px: sidebar rows tighten so every page and home fits without scrolling;
- *   - content narrower than 1000px: toolbar buttons with an icon show only the icon, their label as a tooltip;
- *   - content narrower than 880px: two-pane pages stack, the list above its detail.
+ *   - content narrower than 880px: two-pane pages stack, the list above its detail;
+ *   - a table narrower than 780px: its Managed and tool columns tighten, so four tools fit beside an open sidebar.
  * "Content" is #main, the area beside the sidebar, so the rail's choice and the window's width are both accounted for.
+ * Toolbars have no breakpoint: dom.ts fitToolbars adapts one only when it overflows (.toolbar-short, .toolbar-icons, .toolbar-wrap).
  */
 :root {
   color-scheme: light dark;
@@ -228,10 +229,9 @@ ul { list-style: none; }
 .btn.ghost:hover:not(:disabled) { background: var(--press); color: var(--ink); }
 .btn.link { color: var(--accent-ink); }
 .btn.link:hover:not(:disabled) { text-decoration: underline; }
-@container content (width < 1000px) {
-  .btn.collapsible { padding: 0; aspect-ratio: 1; }
-  .btn.collapsible > .btn-label { display: none; }
-}
+/* A toolbar that can't fit its labels (fitToolbars): a collapsible button keeps only its icon, its label as the tooltip. */
+.toolbar-icons .btn.collapsible { padding: 0; aspect-ratio: 1; }
+.toolbar-icons .btn.collapsible > .btn-label { display: none; }
 
 .text-action { border: 0; background: none; padding: 2px 6px; border-radius: 5px; font: inherit; font-size: 12px; color: var(--accent-ink); cursor: pointer; }
 .text-action:hover { background: var(--hover); }
@@ -266,12 +266,15 @@ ul { list-style: none; }
 .apply-waiting { color: var(--warning); }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 button.apply-state.apply-waiting.text-action { color: var(--warning); text-decoration-color: color-mix(in oklab, var(--warning) 50%, transparent); }
-/* In narrow content the pending count leaves the toolbar; Apply all's tooltip says it. */
-@container content (width < 1000px) {
-  .apply-count { display: none; }
-  .toolbar-end { padding-left: 8px; }
-  .chip { padding: 0 8px; }
-}
+/* A crowded toolbar first shortens its pending count ("2 changes"; the full summary is the tooltip) and its spacing;
+   if it still can't fit after its buttons go icon-only, its actions take a second line, at the right. */
+.count-short { display: none; }
+.toolbar-short .count-full { display: none; }
+.toolbar-short .count-short { display: inline; }
+.toolbar-short .toolbar-end { padding-left: 8px; }
+.toolbar-short .chip { padding: 0 8px; }
+.toolbar-wrap { flex-wrap: wrap; row-gap: 2px; }
+.toolbar-wrap .toolbar-end { border-left: 0; }
 
 /* ---------- Bands and notices under the toolbar ---------- */
 .bands { display: flex; flex-direction: column; }
@@ -294,7 +297,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice > .notice-text { flex: 0 1 auto; min-width: 0; }
 .sync-notice .btn { flex: none; height: 26px; padding: 0 10px; font-size: 12px; }
 .sync-notice > .notice-dismiss { position: absolute; top: 2px; right: 0; }
-.notice-actions { display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap; }
+.notice-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }
 .notice-age { color: var(--ink-faint); white-space: nowrap; }
 .notice-name { all: unset; cursor: pointer; font-weight: 600; color: var(--ink); }
 .notice-name:hover { text-decoration: underline; }
@@ -314,6 +317,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .sync-notice > .notice-change { flex: 1 1 100%; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; align-items: baseline; padding-left: 22px; font-size: 12px; color: var(--ink-soft); overflow-wrap: anywhere; }
 .notice-change code { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
 .notice-change code.notice-change-new { color: var(--ink); }
+/* Narrow content: a notice's actions take their own line under its sentence, so no button is squeezed or cut. */
+@container content (width < 880px) {
+  .sync-notice > .notice-actions { flex-basis: 100%; padding-left: 22px; }
+}
 .notice-change-caption { grid-column: 1 / -1; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-faint); }
 .change-removed { padding: 0 2px; border-radius: 2px; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning) 70%, transparent); }
 .change-added { border-radius: 2px; background: color-mix(in oklab, var(--success) 28%, transparent); }
@@ -325,12 +332,18 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .see-change { color: var(--accent-ink); }
 
 /* ---------- The table: skills, MCP servers and agents ---------- */
-/* The name column takes the free width (and shows the description); Managed and each tool keep a steady width. */
-.matrix { container-type: inline-size; position: relative; }
-.ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
+/*
+ * The name column takes the free width (and shows the description). Managed keeps a steady width, and each tool's column
+ * grows a little with the table (up to 176px) so its boxes stay within reach of the names on a large display.
+ */
+.matrix { container: table / inline-size; position: relative; }
+.ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), clamp(108px, 9cqi, 176px)); }
+@container table (width < 780px) {
+  .ov { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
+}
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
 .ov-row:not(.ov-head) { cursor: pointer; }
-.ov-row:not(.ov-head):hover { background: var(--hover); }
+.ov-row:not(.ov-head):hover { background: color-mix(in oklab, var(--accent) 7%, var(--hover)); }
 .ov-row.open { background: var(--chrome); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: 60px; background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
@@ -417,8 +430,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-head-name { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
 .head-action { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; margin-top: 2px; border-radius: 999px; border: 1px solid var(--control-line); background: none; color: var(--accent-ink); font: inherit; font-size: 11px; cursor: pointer; }
 .head-action:disabled { color: var(--ink-faint); border-color: transparent; cursor: default; }
-/* dom.ts fitInView sets --fit-height and --fit-shift, so the menu stays inside the table's scrolling area. */
-.tool-menu { position: absolute; top: calc(100% - 4px); left: 50%; z-index: 10; width: min(400px, calc(100cqw - 16px)); max-height: min(620px, var(--fit-height, 72vh)); overflow-y: auto; transform: translateX(calc(-30% + var(--fit-shift, 0px))); padding: 12px; border: 1px solid var(--control-line); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 35%); text-align: left; font-size: 12.5px; color: var(--ink); }
+/* dom.ts fitInView sets --fit-height, --fit-shift and .popover-above, so the menu stays inside the table's scrolling area. */
+.tool-menu { --menu-width: min(400px, calc(100cqw - 16px)); position: absolute; top: calc(100% - 4px); left: calc(50% - 0.3 * var(--menu-width) + var(--fit-shift, 0px)); z-index: 10; width: var(--menu-width); max-height: min(620px, var(--fit-height, 60vh)); overflow-y: auto; padding: 12px; border: 1px solid var(--control-line); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 35%); text-align: left; font-size: 12.5px; color: var(--ink); }
+.tool-menu.popover-above { top: auto; bottom: calc(100% - 4px); }
 .tool-menu-head { display: flex; align-items: center; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .tool-menu-label { margin: 10px 0 6px; font-size: 11.5px; color: var(--ink-soft); }
 .tool-menu-row { display: grid; grid-template-columns: 18px 1fr auto auto; align-items: center; gap: 8px; padding: 6px 0; }
@@ -516,14 +530,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .compare-separate .text-action { padding: 0 2px; margin: 0 -2px; font-size: 12.5px; }
 
 /* ---------- Skills: Files and contents (a list beside one skill's detail) ---------- */
-.split { flex-direction: row; }
+.split { --list-row: 37px; flex-direction: row; }
 .list-column { width: 300px; min-width: 260px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .list-toolbar .find { flex: 1 1 auto; }
 .list-head { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 23px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--ink-soft); }
 .list-head > span:first-child { flex: 1; }
 .list-head-tool { width: 16px; display: grid; place-items: center; }
 .list-head-tool .mono-mark { background: transparent; color: var(--ink-soft); box-shadow: inset 0 0 0 1px var(--ink-faint); border-radius: 3px; }
-.list-row { all: unset; box-sizing: border-box; width: 100%; height: 37px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
+.list-row { all: unset; box-sizing: border-box; width: 100%; height: var(--list-row); display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); }
 .list-row:hover { background: var(--hover); }
 .list-row.selected, .list-row.selected:hover { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent); }
 .list-row.list-changed { box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 70%, transparent); }
@@ -545,9 +559,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .detail-scroll > .details { margin: 4px 0 0; padding: 4px 0 8px; box-shadow: none; background: none; }
 .detail-scroll .details-where-row { align-items: center; }
+/* Stacked, the list shows four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
-  .list-column { width: auto; max-height: 40%; border-right: 0; border-bottom: 1px solid var(--line); }
+  .list-column { width: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .list-scroll { flex: none; max-height: calc(var(--list-row) * 4); }
 }
 
 .section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -601,9 +617,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .overview-line > svg.icon:first-child, .tools-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
 .overview-line .btn, .tools-note .btn { height: auto; padding: 0 2px; margin: 0 -2px; text-indent: 0; }
 
-/* ---------- Tools and Instructions: one card per tool ---------- */
-.cards-scroll { display: flex; flex-direction: column; gap: 16px; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; }
-.cards-scroll > * { flex: none; }
+/* ---------- Tools and Instructions: one card per tool, side by side once there is room for two ---------- */
+.cards-scroll { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 720px), 1fr)); align-content: start; align-items: start; gap: 16px; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; }
+.cards-scroll > :not(.card) { grid-column: 1 / -1; }
 .tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .tool-head .middle { flex: 1; color: var(--ink-soft); }
@@ -763,9 +779,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-name { display: inline-block; max-width: 100%; vertical-align: bottom; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
-.plugin-panel-head .btn { margin-left: auto; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
+.plugin-tool-rows > .btn { margin-left: 8px; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }

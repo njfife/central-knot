@@ -1,7 +1,7 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
-import { andList, toolName, toolNames as namedTools } from './words.ts';
+import { andList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { presentTools } from './presence.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 
@@ -172,17 +172,14 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
   announce(readSummary(view));
 });
 
-/**
- * The tools in the open home (presence.ts), the one list every page offers and names. A tool that is not here never shows
- * as a column, box, menu entry or word; the Tools page alone says it was not found.
- */
+/** The open home's tools (presence.ts), for page wording: the Overview and empty pages name them, and "all tools" counts them. */
 export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.home.snapshots) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
 
-/** Whether `tools`, distinct tools of this home (by id or by name), are all of them, so a sentence can say "all tools". */
-export const isEveryTool = (tools: readonly string[]): boolean => tools.length > 0 && tools.length >= homeTools().length;
+/** The tools an action touched (ids), named for a sentence against the open home's tools: "all 3 tools" or their names. */
+export const whichTools = (touched: string[]): string => toolsPhrase(touched, homeTools());
 
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
@@ -196,6 +193,13 @@ export function showPage(page: Page) {
   if (page === 'instructions') void loadInstructions();
   state.page = page;
   state.find = '';
+  state.item = undefined;
+  rerender();
+}
+
+/** Leaves the Skills page's Files and contents view for the table (its Table button, or Escape). */
+export function showSkillsTable() {
+  state.skillsView = 'table';
   state.item = undefined;
   rerender();
 }
@@ -234,11 +238,11 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   state.history = await api().history();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
-  const where = [...new Set(restored.map(entry => toolName(entry.harness ?? '') ?? entry.harness ?? ''))].filter(Boolean);
+  const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
-  const everywhere = where.length > 2 && isEveryTool(where) ? `all ${where.length} tools` : andList(where);
+  const everywhere = whichTools(where);
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   if (past?.kind === 'added') {
@@ -250,7 +254,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit ${isEveryTool(where) ? 'in all tools' : `in ${andList(where)}`}`;
+  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
   if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
   if (!result.stopped && restored.length) flashRow(item);

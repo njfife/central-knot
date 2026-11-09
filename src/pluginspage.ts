@@ -2,7 +2,7 @@
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
 import { rerender, showPage, state as app } from './app.ts';
-import { button, closeButton, emptyState, h, icon, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, pendingCount, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
@@ -177,10 +177,11 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
   if (counts.plugins) {
+    const pending = [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
     return h('div.apply', {},
-      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ')),
-      button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
-      button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
+      pendingCount(pending, plural(counts.plugins, 'change')),
+      button({ variant: 'ghost', size: 'small', icon: 'x', collapse: true, label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
+      button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, attrs: { title: `${pending}. Nothing runs until Apply all.` }, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
   const last = market.lastRun;
   const parts = last ? resultParts(lines, last.undo, { short: true }) : [];

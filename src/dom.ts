@@ -34,7 +34,7 @@ interface ButtonOptions {
   name?: string;
   id?: string;
   disabled?: boolean;
-  /** A toolbar button with an icon and a label: in narrow content only the icon shows, and the label becomes its tooltip (style.css). */
+  /** A toolbar button with an icon and a label: when its toolbar can't fit (fitToolbars), only the icon shows, the label as its tooltip. */
   collapse?: boolean;
   onclick: (event: MouseEvent) => void;
   attrs?: Props;
@@ -84,18 +84,50 @@ export const eyebrow = (text: string, count?: number) => h('h3.eyebrow', {}, tex
 export const section = (title: string, ...body: (Child | Child[])[]) => h('section.section', {}, eyebrow(title), ...body);
 
 /**
- * Keeps a popover inside the scrolling area it opens in: once drawn, it gets the height left below its top and moves left
- * if it would run past the right edge (style.css reads --fit-height and --fit-shift). In a short or narrow window every
- * control in it stays reachable. Set through the style object: the page's security policy refuses inline style attributes.
+ * Keeps an open popover inside the scrolling area it opens in, now and whenever that area changes size (a window resize
+ * included). It opens below its anchor, or above when there is more room there (.popover-above), with the height that
+ * side really has (--fit-height), and moves sideways rather than run past an edge (--fit-shift). Values go through the
+ * style object: the page's security policy refuses inline style attributes.
  */
 export function fitInView(popover: HTMLElement): HTMLElement {
-  requestAnimationFrame(() => {
+  const fit = () => {
+    const frame = popover.closest('.scroll'), anchor = popover.parentElement;
+    if (!popover.isConnected || !frame || !anchor) { watcher.disconnect(); return; }
+    // The area's inside, without its scrollbar gutter: a popover over the gutter would make the area scroll sideways.
+    const outer = frame.getBoundingClientRect(), around = anchor.getBoundingClientRect();
+    const area = { left: outer.left + frame.clientLeft, right: outer.left + frame.clientLeft + frame.clientWidth, top: outer.top + frame.clientTop, bottom: outer.top + frame.clientTop + frame.clientHeight };
+    const below = area.bottom - around.bottom, above = around.top - area.top;
+    popover.classList.toggle('popover-above', above > below);
+    popover.style.setProperty('--fit-height', `${Math.max(0, Math.max(above, below) - 8)}px`);
+    popover.style.setProperty('--fit-shift', '0px');
     const box = popover.getBoundingClientRect();
-    const frame = popover.closest('.scroll')?.getBoundingClientRect() ?? new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-    popover.style.setProperty('--fit-height', `${Math.max(160, frame.bottom - box.top - 8)}px`);
-    popover.style.setProperty('--fit-shift', `${Math.min(0, frame.right - 8 - box.right)}px`);
-  });
+    popover.style.setProperty('--fit-shift', `${Math.min(0, area.right - 8 - box.right) + Math.max(0, area.left + 8 - box.left)}px`);
+  };
+  const watcher = new ResizeObserver(fit);
+  // Observed once drawn; the first observation fits it.
+  requestAnimationFrame(() => { const frame = popover.closest('.scroll'); if (frame) watcher.observe(frame); });
   return popover;
+}
+
+/** A pending-change count that shortens first in a crowded toolbar (fitToolbars): `short` replaces `full`, which stays its tooltip. */
+export const pendingCount = (full: string, short: string): HTMLElement =>
+  h('span.apply-count.apply-quiet', { title: full }, h('span.count-full', {}, full), h('span.count-short', {}, short));
+
+/** What a crowded toolbar gives up, in order, until it fits: long pending counts, then button labels, then its single line. */
+const TOOLBAR_STEPS = ['toolbar-short', 'toolbar-icons', 'toolbar-wrap'];
+
+/**
+ * Fits each toolbar to its width. A step applies only while the toolbar still overflows without it, so every label stays
+ * as long as there is room for it. The renderer calls this after each draw and on every resize.
+ */
+export function fitToolbars(): void {
+  for (const bar of document.querySelectorAll<HTMLElement>('.toolbar')) {
+    bar.classList.remove(...TOOLBAR_STEPS);
+    for (const step of TOOLBAR_STEPS) {
+      if (bar.scrollWidth <= bar.clientWidth) break;
+      bar.classList.add(step);
+    }
+  }
 }
 
 /** Sets a table's column count (--tool-count) through the style object: the page's security policy refuses inline style attributes. */
