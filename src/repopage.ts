@@ -81,18 +81,18 @@ const connect = () => busy('Connecting to the repo…', async () => {
 const pull = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
   const count = result.pulled ?? 0;
-  // Undo lives in History, linked from the note; a button beside it is only for something still to do.
-  await settle(result, count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.', count ? `${count === 1 ? 'It is' : 'Each is'} in History.` : undefined);
   // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
   // didn't take is said in the result, by tool.
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
-  if (missed.length && state.outcome) state.outcome.text += ` ${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.`;
-  const names = result.waitsForClaude ?? [];
-  if (names.length && state.outcome) {
-    state.outcome.text += ` ${andList(names)} ${names.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close Claude Code, then click Write to Claude Code on MCP servers.`;
-    state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
-  }
+  const waiting = result.waitsForClaude ?? [];
+  // Undo is the promise, said first: linked from the note when nothing else follows, in the sentence when a chore does.
+  const text = !count ? 'Pulled. Nothing in your tools needed to change.'
+    : waiting.length || missed.length ? `Pulled ${plural(count, 'change')} into your tools, ${count === 1 ? 'with' : 'each with'} Undo in History.` : `Pulled ${plural(count, 'change')} into your tools.`;
+  const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
+    waiting.length ? `${andList(waiting)} ${waiting.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
+  await settle(result, [text, ...rest].join(' '), count && !rest.length ? `${count === 1 ? 'It is' : 'Each is'} in History.` : undefined);
+  if (waiting.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
 const push = () => busy('Pushing to the repo…', async () => {
@@ -134,14 +134,15 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
     : side === 'in' && change.change === 'removed' ? 'Pull deletes it from your tools. History can restore it.'
     : side === 'out' && change.change === 'removed' ? 'Deleted here or no longer Managed. Push removes it from the repo.'
     : undefined;
-  const tone = change.held || change.alsoHere ? 'tone-warning' : 'tone-muted';
+  // Only what can't come in is said in full warning colour; a both-changed note is safe (History keeps yours), so its icon warns, not its words.
+  const tone = change.held ? 'tone-warning' : 'tone-muted';
   const noteGlyph: IconName = change.held || change.alsoHere ? 'triangle-alert' : 'info';
   return h(`li.repo-row${change.held ? '.repo-row-held' : ''}`, { 'data-key': change.key },
     h('span.repo-row-icon', { title: kind.label }, icon(kind.glyph, 14, 'tone-muted')),
     h('span.repo-row-main', {},
       h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label),
         h(`span.repo-row-change.repo-change-${change.held ? 'held' : change.change}`, {}, label)),
-      note ? h(`span.repo-row-note.${tone}`, {}, icon(noteGlyph, 12), note) : null));
+      note ? h(`span.repo-row-note.${tone}`, {}, icon(noteGlyph, 12, change.alsoHere && !change.held ? 'tone-warning' : ''), note) : null));
 }
 
 /** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
@@ -171,7 +172,8 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
   return h('span.repo-state', { id: 'repo-state', role: 'status' }, parts);
 }
 
-const WAITING = 'Pull and Push wait until the repo can be reached. Try again above.';
+/** While the repo can't be reached: said once, above both lists, and named by both buttons. */
+const WAITING_ID = 'repo-waiting';
 
 function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const { pull: pullable, push: pushable } = waiting(view);
@@ -182,17 +184,18 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   const retryable = view.incoming.filter(change => change.retry).length;
   // A newer commit that changes nothing here still has to be pulled before a push: Pull then just moves to it.
   const pullButton = pullable || retryable || view.pushBlocked ? button({ variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull', id: 'repo-pull', disabled: moving || !view.latest,
-    attrs: view.problem ? { 'aria-describedby': 'repo-incoming-blocked' } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
+    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
   // The branch gone from the repo: Push puts it back even with nothing else to send.
   const pushButton = pushable || view.branchGone ? button({ variant: view.pushBlocked || view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: pushable ? `Push ${pushable}` : 'Push', id: 'repo-push', disabled: moving || !!view.pushBlocked,
-    attrs: view.pushBlocked || view.problem ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
+    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   // Each part stays whole when the row wraps, so a narrow window breaks at a dot, never inside a time.
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
   // Only what has happened: right after Connect that is just the check.
   const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
-  const activity = parts.flatMap((text, index) => [index ? ' · ' : '', h('span.repo-activity-part', {}, index ? text : text.charAt(0).toUpperCase() + text.slice(1))]);
+  // Each separator belongs to the part after it, so a wrapped line starts with "·", never ends with one.
+  const activity = parts.map((text, index) => h('span.repo-activity-part', {}, index ? `· ${text}` : text.charAt(0).toUpperCase() + text.slice(1)));
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
       summary(view),
@@ -213,13 +216,13 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
-      view.problem ? h('p.repo-stale', {}, `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}.`) : null,
+      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}. Pull and Push wait until it can be reached again: Try again above.`) : null,
       inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushButton)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
         : h('div.repo-sides', {},
-          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullButton && view.problem ? WAITING : undefined),
-          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', !pushable ? undefined : view.problem ? WAITING : view.pushBlocked)),
+          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
+          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', pushable && !view.problem ? view.pushBlocked : undefined)),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 

@@ -266,11 +266,13 @@ if (wanted('repo')) {
   await a.click('#header-refresh');
   await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '') && document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'repo-held-and-both', 'A skill no tool can read arrived in the repo, and incident was edited on both sides, then "Refresh": the unreadable one says why it can’t come in, and incident says the repo’s version wins with yours kept in History.');
+  await a.theme('light'); await shot(a, 'repo-held-and-both-light', 'The same, light.'); await a.theme('dark');
   // The repo can't be reached (its folder moved away, as a server that is down or a VPN that is off would look).
   renameSync(remote, `${remote}.away`);
   await a.click('#header-refresh');
   await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '') && document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'repo-unreachable', 'The repo couldn’t be reached when Refresh checked it.');
+  await a.theme('light'); await shot(a, 'repo-unreachable-light', 'The same, light.'); await a.theme('dark');
   await a.run(`document.querySelector('#repo-try-again')?.focus()`); await tab(0);
   await shot(a, 'repo-keyboard-try-again', 'Keyboard focus on Try again in the band.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
