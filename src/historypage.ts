@@ -1,18 +1,17 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
-import { restoreEvent, showPage, state, presentCount } from './app.ts';
-import { toolNames } from './words.ts';
+import { isEveryTool, restoreEvent, showPage, state } from './app.ts';
+import { andList, toolName } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
-const names = toolNames as Record<string, string>;
-const who = (tool?: string) => (tool ? names[tool] ?? tool : 'Central Knot');
+const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
+/** The tools an event touched, named; every tool in this home, past two, is "all N tools". */
 const list = (tools: string[]) => {
-  const all = [...new Set(tools)].map(who);
-  if (all.length > 2 && all.length >= presentCount()) return `all ${all.length} tools`;
-  return all.length > 2 ? `${all.slice(0, -1).join(', ')} and ${all.at(-1)}` : all.join(' and ');
+  const all = [...new Set(tools)];
+  return all.length > 2 && isEveryTool(all) ? `all ${all.length} tools` : andList(all.map(who));
 };
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
@@ -73,7 +72,7 @@ function actions(event: HistoryEvent, action?: string) {
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' ? [...new Set(event.losers.map(loser => loser.tool))] : [];
-  const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
+  const scope = !touched.length || isEveryTool(touched) ? 'in all tools' : `in ${andList(touched.map(who))}`;
   const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });

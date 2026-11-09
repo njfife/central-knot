@@ -2,6 +2,7 @@ import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
+import { presentTools } from './presence.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -171,8 +172,17 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
   announce(readSummary(view));
 });
 
-/** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
-export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
+/**
+ * The tools in the open home (presence.ts), the one list every page offers and names. A tool that is not here never shows
+ * as a column, box, menu entry or word; the Tools page alone says it was not found.
+ */
+export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.home.snapshots) : []);
+
+/** The open home's tools by name, for sentences: "Claude Code and Codex". */
+export const homeToolNames = (): string[] => homeTools().map(toolName);
+
+/** Whether `tools` is every tool in this home, so a sentence can say "all tools" rather than list them. */
+export const isEveryTool = (tools: readonly string[]): boolean => tools.length > 0 && tools.length >= homeTools().length;
 
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
@@ -228,7 +238,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
-  const everywhere = where.length >= presentCount() ? `all ${where.length} tools` : andList(where);
+  const everywhere = where.length > 2 && isEveryTool(where) ? `all ${where.length} tools` : andList(where);
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   if (past?.kind === 'added') {
@@ -240,7 +250,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit ${where.length >= presentCount() ? 'in all tools' : `in ${andList(where)}`}`;
+  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit ${isEveryTool(where) ? 'in all tools' : `in ${andList(where)}`}`;
   if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
   if (!result.stopped && restored.length) flashRow(item);
@@ -258,7 +268,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const applied = await api().apply([{ key: made.skill, managed: true, off: others }], home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
   if (view) state.home = view;
-  const from = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' }[made.origin ?? 'claude-cli'];
+  const from = toolName(made.origin ?? 'claude-cli');
   state.outcome = { page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be managed: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent. It syncs to Pi only; turn on other tools for it on the Skills page.` };
   announce(state.outcome.text, true);
 });
@@ -286,7 +296,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });

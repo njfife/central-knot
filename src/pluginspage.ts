@@ -12,7 +12,7 @@ import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, stateOf, summ
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
-import { andList, toolName, toolNames as names } from './words.ts';
+import { andList, orList, toolName, toolNames as names } from './words.ts';
 
 /** "9:20 AM" today, else "Nov 8". */
 const when = (iso: string) => (new Date(iso).toDateString() === new Date().toDateString() ? clockTime(iso) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }));
@@ -250,7 +250,7 @@ export function pluginsPage() {
     h('div.market-empty-add', {},
       addBox(true),
       h('div.market-examples', {}, h('span', {}, 'Or try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
-      h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.')));
+      view.tools.length ? h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.map(tool => names[tool]))} show up here by themselves.`) : null));
   return h('div.page.plugins-page', {},
     toolbar(shown?.entry, lines),
     h('div.bands', {},

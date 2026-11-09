@@ -1,9 +1,11 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
+import { announce, homeToolNames, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { realHomeName } from './renderer.ts';
+import { realHomeName, thisMachine } from './renderer.ts';
+import { isPresent } from './presence.ts';
+import { andList, orList } from './words.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 
 // ---------- Overview ----------
@@ -24,7 +26,19 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
+/** An empty page's way forward, naming only the tools this home has. */
+const addHint = () => {
+  const tools = homeToolNames();
+  return tools.length ? `Add one in ${orList(tools)}, then Refresh, or choose another home at the bottom left.` : 'No tools were found in this home. Choose another home at the bottom left.';
+};
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. ${addHint()}`, id);
+
+/** The Overview's first sentence: what Central Knot keeps the same, between this home's tools only. */
+function leadSentence(tools: string[]) {
+  if (tools.length > 1) return `Central Knot keeps the skills, MCP servers and agents you choose the same in ${andList(tools)}.`;
+  const why = tools.length ? `Only ${tools[0]} is in this home, so there is nothing to keep in step yet.` : 'No tools were found in this home.';
+  return `Central Knot keeps the skills, MCP servers and agents you choose the same between your tools. ${why}`;
+}
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
@@ -81,7 +95,7 @@ export function overviewPage() {
     done ? h('div.bands', {}, done) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      h('p.overview-lead', {}, 'Central Knot keeps the skills, MCP servers and agents you choose the same in Claude Code, Copilot CLI and Codex.',
+      h('p.overview-lead', {}, leadSentence(homeToolNames()),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         !home.manage.skills.length && !home.mcp.servers.length && !(home.agents?.servers.length) ? ' Nothing found in this home yet.' : nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : ''),
       h('div.kind-cards', {},
@@ -104,7 +118,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
+  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', `None of your tools has an MCP server in this home. ${addHint()}`, 'mcp-empty');
   return designOverview('mcp');
 }
 
@@ -112,7 +126,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', 'None of your tools has an agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'agents-empty');
+  if (!state.home.agents?.servers.length) return nothingHere('bot', 'No agents here yet', `None of your tools has an agent in this home. ${addHint()}`, 'agents-empty');
   return designOverview('agents');
 }
 
@@ -238,6 +252,14 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
         issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));
 }
 
+/** On This Mac's home, the tools that were looked for and not found: said once, as information, never as a card to act on. */
+function notFoundLine(home: HomeView) {
+  const missing = home.snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => toolName(snapshot.harness));
+  if (home.mode !== 'actual' || !missing.length) return null;
+  return h('p.tools-note', { id: 'tools-not-found' }, icon('circle-dashed', 14, 'tone-muted'),
+    `Not found on ${thisMachine}: ${andList(missing)}. Central Knot looks for ${missing.length === 1 ? 'it' : 'them'} again each time it reads this home.`);
+}
+
 export function toolsPage() {
   const { home } = state;
   if (!home) return h('div.page');
@@ -245,6 +267,6 @@ export function toolsPage() {
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    // A sample folder lists only the tools it has; this computer's home also lists tools that were not found, with how to fix that.
-    home.snapshots.filter(snapshot => home.mode === 'actual' || snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => toolCard(snapshot, home))));
+    home.snapshots.filter(isPresent).map(snapshot => toolCard(snapshot, home)),
+    notFoundLine(home)));
 }

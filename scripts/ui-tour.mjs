@@ -1,8 +1,11 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
+// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (every page at 860×560, 1280×800, 1728×1117 and
+// 2560×1440 in dark, and at 860×560 in light) and missing
+// (a home with only Claude Code and Codex, so Copilot CLI and Pi must appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -34,11 +37,19 @@ async function launch() {
   const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
   const run = async expression => { const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text); return reply.result.result.value; };
   const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
-  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  const viewport = { width: 1280, height: 800 };
+  /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
+  const size = async (width, height) => {
+    Object.assign(viewport, { width, height });
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+    await run(`window.dispatchEvent(new Event('resize'))`);
+    await settle();
+  };
+  await size(1280, 800);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
   await settle();
   return {
-    run, send, settle,
+    run, send, settle, size, viewport,
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
@@ -53,7 +64,7 @@ const wanted = name => !only || only.includes(name);
 async function shot(a, name, caption) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 798 });
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: a.viewport.height - 2 });
   await wait(120);
   const reply = await a.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
@@ -192,6 +203,65 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+}
+
+// ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
+/** Adds the fixture marketplace once, so the Plugins pages have something to show. */
+async function ensureMarket() {
+  await a.click('#nav-plugins');
+  await waitFor(a, `!!document.querySelector('.market-list, #marketplace-source')`);
+  if (await a.has('.market-list')) return;
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await waitFor(a, `!!document.querySelector('.market-list')`, 30000);
+}
+
+/** One shot of each page at the current size; `tag` names the size in the file names. */
+async function everyPage(tag) {
+  const at = `at ${a.viewport.width}×${a.viewport.height}`;
+  await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
+  await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
+  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (first) { await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at}.`); await a.click(`#${first}`); }
+  const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the first tool column's menu ${at}.`); await a.click(`#${head}`); }
+  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}.`);
+  await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
+  const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (agent) { await a.click(`#${agent}`); await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at}.`); await a.click(`#${agent}`); }
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `Instructions ${at}.`);
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `Plugins, the marketplace's list ${at}.`);
+  if (await a.has('[id^="popen-0-"]')) {
+    await a.click('[id^="popen-0-"]'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted')`);
+    await shot(a, `${tag}-plugin-page`, `A plugin's page ${at}.`); await a.click('#plugin-back');
+  }
+  await a.click('#nav-history'); await shot(a, `${tag}-history`, `History ${at}.`);
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
+}
+
+if (wanted('sizes')) {
+  begin('sizes');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}`); }
+  await a.theme('light'); await a.size(860, 560); await everyPage('860-light');
+  await a.theme('dark'); await a.size(1280, 800);
+}
+
+// ---------- A home with only some tools ----------
+// The tour's HOME gets the practice copy's Claude Code and Codex folders only. The tour's PATH has no Copilot CLI or Pi,
+// so neither is detected: they must not appear as a column, box, menu entry, filter or choice anywhere.
+if (wanted('missing')) {
+  begin('missing');
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
+  await a.click('#home-actual');
+  await shot(a, 'opened', 'Put only Claude Code and Codex folders in the tour\'s home, then clicked "This Mac\'s home".');
+  await everyPage('1280');
+  await a.size(860, 560);
+  await a.click('#nav-tools'); await shot(a, '860-tools', 'Tools at 860×560 in the same home.');
+  await a.click('#nav-skills'); await shot(a, '860-skills', 'Skills at 860×560 in the same home.');
+  await a.size(1280, 800);
 }
 
 a.quit();

@@ -2,7 +2,7 @@ import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
+import { loadHome, readAgain, startHome, rerender, setRenderer, setSync, showPage, state, type Page } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
@@ -14,19 +14,20 @@ import type { HomeMode, ManageView } from './types.ts';
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
+/** The machine, inside a sentence: "not found on this Mac". */
+export const thisMachine = navigator.userAgent.includes('Mac') ? 'this Mac' : 'this computer';
 const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
-const MATRIX_MINIMUM = 760;
+/** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
+const RAIL_BELOW = 968;
 
-/** Window width decides the frame: rail or sidebar, one pane or two. */
+/**
+ * The window decides the frame: the sidebar or its rail. Everything inside the content area adapts to the content's own
+ * width in style.css (toolbar buttons go icon-only, two-pane pages stack), so a resize redraws only when the rail changes.
+ */
 function applyLayout() {
-  const width = window.innerWidth;
-  const rail = state.sidebar ? state.sidebar === 'rail' : width < MATRIX_MINIMUM + 208;
-  const contentWidth = width - (rail ? 56 : 208);
-  const classes = document.body.classList;
-  classes.toggle('rail', rail);
-  classes.toggle('one-pane', contentWidth < 960);
-  classes.toggle('page-skills', state.page === 'skills');
-  return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
+  const rail = state.sidebar ? state.sidebar === 'rail' : window.innerWidth < RAIL_BELOW;
+  document.body.classList.toggle('rail', rail);
+  return { rail };
 }
 
 function navRow(page: Page, label: string, glyph: IconName, count?: number) {
@@ -94,13 +95,12 @@ function renderHeader(rail: boolean) {
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
     // Settings are the app's own: there is nothing in the home to read again there.
-    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', collapse: true, disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
   );
 }
 
 function renderPage() {
-  document.body.classList.remove('has-item');
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 
@@ -139,7 +139,6 @@ function render() {
   renderSidebar();
   renderHeader(rail);
   renderPage();
-  applyLayout();
   renderStatus();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   if (focused) document.getElementById(focused)?.focus();
@@ -154,11 +153,9 @@ document.body.append(probe);
 if (probe.offsetWidth === probe.clientWidth) document.documentElement.style.setProperty('--overlay-gutter', '16px');
 probe.remove();
 
-let lastShape = '';
 window.addEventListener('resize', () => {
-  const { shape } = applyLayout();
-  if (shape !== lastShape) render();
-  lastShape = shape;
+  const wasRail = document.body.classList.contains('rail');
+  if (applyLayout().rail !== wasRail) render();
 });
 
 document.addEventListener('keydown', event => {
@@ -166,10 +163,6 @@ document.addEventListener('keydown', event => {
   if (event.key === '/' && !typing && !event.metaKey && !event.ctrlKey) {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
-  }
-  if (event.key === 'Escape') {
-    if (typing) return; // Escape in a find box clears it; see the Overview.
-    if (state.page === 'skills' && document.body.classList.contains('one-pane') && state.item) selectItem(undefined);
   }
 });
 
