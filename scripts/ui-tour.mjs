@@ -141,7 +141,8 @@ if (wanted('mcp')) {
   edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`);
   await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
-  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
   if (await a.has('#open-files')) { if (first) await a.click(`#${first}`); await a.click('#open-files'); await shot(a, 'mcp-waiting-details', 'Opened the files server\'s details while it waits for Write to Claude Code.'); }
 }
@@ -224,16 +225,27 @@ async function everyPage(tag) {
   const at = `at ${a.viewport.width}×${a.viewport.height}`;
   await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
   await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
-  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) {
-    await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at}.`);
+    await a.click(`#${first}`); await shot(a, `${tag}-skills-details`, `Opened the first skill's details ${at} (beside the table from 1600px of content).`);
     const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
-    if (files) { await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`); await a.click('#skills-table'); }
+    if (files) {
+      await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`);
+      const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
+      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-pending`, `Turned Managed for it in the Files view: the change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+      await a.click('#skills-table');
+    }
     if (await a.has('.ov-row.open')) await a.click(`#${first}`);
   }
   // The last column's menu: the one most likely to run past the window's edge.
   const head = await a.run(`[...document.querySelectorAll('.tool-head-button')].at(-1)?.id ?? ''`);
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the last tool column's menu ${at}.`); await a.click(`#${head}`); }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#use-draft-copilot-cli')) { await a.click('#use-draft-copilot-cli'); await shot(a, `${tag}-skills-choice`, `Chose Copilot CLI's copy of draft, whose copies differ: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
   const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
   if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
   await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
@@ -262,6 +274,11 @@ if (wanted('sizes')) {
   begin('sizes');
   // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
   cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
+  // A skill whose copies differ, so a copy choice can be shown waiting for Apply all.
+  for (const [tool, body] of [['.claude', 'Claude Code’s draft.'], ['.copilot', 'Copilot CLI’s draft.']]) {
+    mkdirSync(join(practice, tool, 'skills/draft'), { recursive: true });
+    writeFileSync(join(practice, tool, 'skills/draft/SKILL.md'), `---\nname: draft\ndescription: Turn notes into a first draft.\n---\n\n${body}\n`);
+  }
   await a.click('#nav-skills'); await a.click('#header-refresh');
   await editMcpOutside();
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
@@ -309,6 +326,16 @@ if (wanted('missing')) {
   await a.size(860, 560);
   await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
   await a.size(1280, 800);
+  // A folder whose only tool is Pi, which takes no plugins: the Plugins page says so instead of drawing an empty table.
+  const piOnly = join(scratch, 'pi-only');
+  cpSync(join(root, 'fixtures/home/.claude/skills/notes'), join(piOnly, '.pi/agent/skills/notes'), { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
+  a = await launch();
+  await a.click('#nav-plugins'); await waitFor(a, `!!document.querySelector('.empty')`);
+  await shot(a, 'pi-only-plugins', 'A folder whose only tool is Pi: Plugins says no tool here can install plugins.');
+  await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
 }
 
 a.quit();

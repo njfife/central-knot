@@ -628,8 +628,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- Overview ---------- */
 .overview-scroll { display: flex; flex-direction: column; gap: 16px; padding: 20px var(--pad-end) 32px 16px; }
 .overview-scroll > * { flex: none; }
-.intro { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.5; }
-.intro-text { flex: 0 1 var(--measure); }
+.intro { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; line-height: 1.5; }
+.intro-text { flex: 1 1 22em; max-width: var(--measure); }
 .intro #intro-dismiss { margin-left: auto; }
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 .kind-cards { display: flex; flex-wrap: wrap; gap: 12px; }
