@@ -15,10 +15,9 @@ import { appendHistory, readConverted, readHistory, recordConverted, replaceHist
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
+import { toolNames as shown } from './words.ts';
 
 export const agentTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
-/** The names the page uses for each tool. */
-const shown: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
 export interface NeutralAgent { name: string; description: string; prompt: string; fields: Record<string, unknown> }
