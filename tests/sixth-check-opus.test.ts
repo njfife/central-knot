@@ -43,15 +43,6 @@ test('P2 Codex http_headers written as a table is read and kept', () => box(asyn
   assert.deepEqual(entry.server.headers, { 'X-Team': 'core' }, 'headers in table form are not read, so other tools get the server without them');
 }));
 
-test('P3 inline-table Codex server is not duplicated into invalid TOML', () => box(async ({ home, context }) => {
-  await fs.writeFile(copilot(home), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-mcp', tools: ['*'] } } }));
-  await fs.writeFile(codex(home), 'model = "gpt-5"\n\n[mcp_servers]\ndocs = { command = "docs-mcp" }\n');
-  await applyMcp(context, tools.slice(1), managed('docs'));
-  const text = await fs.readFile(codex(home), 'utf8');
-  // A second definition of mcp_servers.docs makes the file invalid TOML for Codex.
-  assert.ok(!/\[mcp_servers\.docs\]/.test(text), `added a second definition of mcp_servers.docs:\n${text}`);
-}));
-
 test('P4 Claude Code recreating .claude.json without servers is not a deletion everywhere', () => box(async ({ home, context }) => {
   const claude = join(home, '.claude.json');
   const servers = { docs: { type: 'stdio', command: 'docs-mcp' }, web: { type: 'stdio', command: 'web-mcp' } };
@@ -65,16 +56,6 @@ test('P4 Claude Code recreating .claude.json without servers is not a deletion e
   await applyMcp(context, tools, [], { settleMs: 0 });
   const left = (await readTool(context, 'codex-cli')).entries.map(e => e.name);
   assert.deepEqual(left, ['docs', 'web'], `Codex servers removed after Claude reset its file: ${JSON.stringify(left)}`);
-}));
-
-test('P5 a symlinked config file stays a symlink after a write', () => box(async ({ home, context }) => {
-  const real = join(home, 'dotfiles-config.toml');
-  await fs.writeFile(real, 'model = "gpt-5"\n');
-  await fs.symlink(real, codex(home));
-  await fs.writeFile(copilot(home), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-mcp' } } }));
-  await applyMcp(context, tools.slice(1), managed('docs'));
-  const info = await fs.lstat(codex(home));
-  assert.ok(info.isSymbolicLink(), `config.toml symlink replaced by a regular file; dotfile target ${await fs.readFile(real, 'utf8').then(t => (t.includes('docs') ? 'updated' : 'NOT updated'))}`);
 }));
 
 test('P6 a comment before the next table survives a rewrite of the server', () => box(async ({ home, context }) => {

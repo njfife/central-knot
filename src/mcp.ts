@@ -142,8 +142,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
 
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */
 export function cannotHold(tool: HarnessId, server: NeutralServer): string | undefined {
-  if (tool === 'codex-cli' && server.transport === 'sse') return 'Codex has no documented SSE transport.';
-  if (tool === 'pi-cli' && server.transport === 'sse') return 'Pi has no SSE transport.';
+  if ((tool === 'codex-cli' || tool === 'pi-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
   if (server.transport === 'stdio' && !server.command) return 'It has no command to run.';
   if (server.transport !== 'stdio' && !server.url) return 'It has no URL.';
   return undefined;

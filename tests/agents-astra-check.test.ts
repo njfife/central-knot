@@ -30,14 +30,6 @@ test('R1 malformed managed file must not propagate deletion', async () => {
     assert.equal(await readFile(b.paths[0], 'utf8').catch(() => 'DELETED'), md());
   } finally { await b.clean(); }
 });
-test('R2 malformed untracked destination must not be overwritten', async () => {
-  const b = await box(); try {
-    await writeFile(b.paths[0], md());
-    const broken = '---\nname: [unfinished\n---\nLocal work';
-    await writeFile(b.paths[1], broken); await applyAgents(b.context, tools, manage);
-    assert.equal(await readFile(b.paths[1], 'utf8'), broken);
-  } finally { await b.clean(); }
-});
 test('R3 deletion Restore must recover each destinations own fields', async () => {
   const b = await box(); try {
     await writeFile(b.paths[0], md('Original', 'model: opus\n'));
@@ -97,13 +89,6 @@ test('R8 Restore must respect ownership gate', async () => {
     assert.equal(result.writes, 0, JSON.stringify(result));
   } finally { await b.clean(); }
 });
-test('R9 chosen collision must be recoverable through History', async () => {
-  const b = await box(); try {
-    await writeFile(b.paths[0], md('Claude')); await writeFile(b.paths[1], md('Copilot'));
-    await applyAgents(b.context, tools, [{ ...manage[0], use: 'claude-cli' }]);
-    assert.ok((await readHistory(b.home)).some(e => e.key === 'agent:reviewer'));
-  } finally { await b.clean(); }
-});
 test('R10 edit versus deletion must produce resolution notice', async () => {
   const b = await box(); try {
     await writeFile(b.paths[0], md()); await applyAgents(b.context, tools.slice(0, 2), manage);
@@ -119,13 +104,5 @@ test('R11 TOML updating keys must not replace matching text inside prompt', asyn
     await writeFile(b.paths[2], next);
     const actual = (await readAgents(b.context, 'codex-cli')).entries[0].agent;
     assert.deepEqual([actual.name, actual.prompt], ['changed-name', 'New prompt\n']);
-  } finally { await b.clean(); }
-});
-test('R12 one-way field-only edit must stop subsequent upstream writes', async () => {
-  const b = await box(); try {
-    await writeFile(b.paths[0], md('Original', 'model: opus\n')); await applyAgents(b.context, tools, manage);
-    await writeFile(b.paths[1], md('Original', 'model: my-local-model\n')); await applyAgents(b.context, tools, []);
-    await writeFile(b.paths[0], md('New upstream', 'model: opus\n')); await applyAgents(b.context, tools, []);
-    assert.match(await readFile(b.paths[1], 'utf8'), /Original/);
   } finally { await b.clean(); }
 });

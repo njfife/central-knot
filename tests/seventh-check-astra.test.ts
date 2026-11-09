@@ -41,24 +41,19 @@ for (const [name, initial] of [
   }));
 }
 
-test('R2 dotted env fields are preserved across tools', () => box(async (context, copilot, codex) => {
+test('R2 dotted env fields are read, spread, and rewritten as valid TOML', () => box(async (context, copilot, codex) => {
   await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="BASE"\nenv.REGION="west"\n');
   await applyMcp(context, tools, managed());
   assert.deepEqual((await readTool(context, 'copilot-cli')).entries[0]?.server.env, { REGION: 'west' });
-}));
-
-test('R2 dotted env remains valid after an env edit elsewhere', () => box(async (context, copilot, codex) => {
-  await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="BASE"\nenv.REGION="west"\n');
-  await applyMcp(context, tools, managed());
   await fs.writeFile(copilot, JSON.stringify({ mcpServers: { docs: { command: 'BASE', env: { REGION: 'east' } } } }));
   await applyMcp(context, tools, []);
-  validToml(await fs.readFile(codex, 'utf8'));
+  assert.equal(await fs.readFile(codex, 'utf8'), '[mcp_servers.docs]\ncommand = "BASE"\n\n[mcp_servers.docs.env]\nREGION = "east"\n');
 }));
 
-test('R3 null mcpServers must not delete the other copies', () => box(async (context, copilot, codex) => {
+for (const broken of ['{"mcpServers":null}', '{"mcpServers":{"docs":null}}']) test(`R3 ${broken} must not delete the other copies`, () => box(async (context, copilot, codex) => {
   await fs.writeFile(copilot, json('BASE'));
   await applyMcp(context, tools, managed());
-  await fs.writeFile(copilot, '{"mcpServers":null}');
+  await fs.writeFile(copilot, broken);
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).entries[0]?.server.command, 'BASE');
@@ -80,6 +75,7 @@ test('R4 symlink target recovers after death in the checked write', () => box(as
   await applyMcp(context, tools, [], { now: 1000 });
   await applyMcp(context, tools, [], { now: 4000 });
   assert.equal((await readTool(context, 'codex-cli')).exists, true, `Broken link persists; dotfiles contains ${await fs.readdir(join(context.home, 'dotfiles'))}`);
+  assert.ok((await fs.lstat(codex)).isSymbolicLink(), 'config.toml link replaced by a regular file');
 }));
 
 test('R5 historical native MCP fields are immutable per event', () => box(async (context, copilot, codex) => {

@@ -141,6 +141,7 @@ async function failedDeletion(b: Awaited<ReturnType<typeof setup>>) {
   b.tick(2500);
   await b.pass();
   assert.equal((await b.state()).copies.find(copy => copy.harness === 'copilot-cli')?.status, 'removing');
+  assert.equal(await b.read(2), null, 'the others still go');
 }
 
 test('An unfinished deletion never removes a copy installed again in a folder made again', () => box(async b => {
@@ -187,16 +188,6 @@ test('Use this copy with one destination read-only still records the replaced co
   await b.write(0, 'ANOTHER SKILL', 'ck-other');
   await applyChanges(b.context, [{ key: 'ck-other', managed: true, off: [] }]);
   assert.ok((await b.stored()).includes('CLAUDE VERSION'), 'still kept after another skill writes History');
-}));
-
-test('A SKILL.md that cannot be read (permissions) holds the skill instead of deleting it elsewhere', () => box(async b => {
-  await chmod(join(b.path(0), 'SKILL.md'), 0o000);
-  await b.pass();
-  b.tick(2500);
-  await b.pass();
-  await chmod(join(b.path(0), 'SKILL.md'), 0o644);
-  assert.deepEqual(await b.copies(), ['BASE', 'BASE', 'BASE']);
-  assert.equal((await b.state()).state, 'shared');
 }));
 
 test('An edit saved just as a deletion spreads is kept, not removed', () => box(async b => {

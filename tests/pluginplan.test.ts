@@ -35,47 +35,32 @@ test('Apply all runs each plugin’s installs as one command, then its removals 
   ]);
 });
 
-test('Undo reverses only what really changed, and the report names each plugin once', () => {
+test('Undo reverses only what really changed, and the report names each plugin once per marketplace', () => {
   const done: PluginDone[] = [
     { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Installed.', runs: [], changed: true } },
     { ...op('pdf', 'codex-cli'), report: { tool: 'codex-cli', outcome: 'failed', message: 'It stopped with exit code 1.', runs: [] } },
     { ...op('docx', 'copilot-cli', 'remove'), report: { tool: 'copilot-cli', outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true } },
     // Already installed before this run (the view was stale): Undo must not remove what the person already had.
-    { ...op('xlsx', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
+    { ...op('pdf', 'claude-cli'), source: 'other/market', report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
   ];
   assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['pdf', 'claude-cli', 'remove'], ['docx', 'copilot-cli', 'install']]);
   assert.deepEqual(resultLines(done), [
     { source: 'anthropics/skills', plugin: 'pdf', ok: true, text: 'installed in Claude Code', short: 'installed in Claude Code' },
     { source: 'anthropics/skills', plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.', short: 'Codex: It stopped with exit code 1.' },
     { source: 'anthropics/skills', plugin: 'docx', ok: true, text: 'uninstalled from Copilot CLI', short: 'uninstalled from Copilot CLI' },
-    { source: 'anthropics/skills', plugin: 'xlsx', ok: true, text: 'already in Claude Code', short: 'already in Claude Code' },
+    { source: 'other/market', plugin: 'pdf', ok: true, text: 'already in Claude Code', short: 'already in Claude Code' },
   ]);
 });
 
-test('Two marketplaces may offer the same plugin name: their reports stay apart', () => {
-  const done: PluginDone[] = [
-    { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } },
-    { ...op('pdf', 'codex-cli'), source: 'other/market', report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true } },
-  ];
-  assert.equal(resultLines(done).length, 2);
-});
-
-test('Choices for a plugin or marketplace no longer listed are dropped', () => {
-  const draft: PluginDraft = new Map();
-  toggle(draft, op('pdf', 'claude-cli'));
-  toggle(draft, op('gone', 'claude-cli'));
-  toggle(draft, { ...op('pdf', 'codex-cli'), source: 'removed/market' });
-  prune(draft, { home: '/h', tools: ['claude-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins: [{ name: 'pdf', description: '' }], states: {} }] });
-  assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['pdf']);
-});
-
-test('Choices that no longer mean anything are dropped: already installed, not installed, held, or no CLI', () => {
+test('Choices that no longer mean anything are dropped: no longer listed, already installed, not installed, held, or no CLI', () => {
   const draft: PluginDraft = new Map();
   toggle(draft, op('done', 'claude-cli'));
   toggle(draft, op('gone', 'claude-cli', 'remove'));
   toggle(draft, op('held', 'claude-cli'));
   toggle(draft, op('nocli', 'codex-cli'));
   toggle(draft, op('keep', 'claude-cli'));
+  toggle(draft, op('unlisted', 'claude-cli'));
+  toggle(draft, { ...op('keep', 'claude-cli'), source: 'removed/market' });
   const plugins = ['done', 'gone', 'held', 'nocli', 'keep'].map(name => ({ name, description: '' }));
   prune(draft, { home: '/h', tools: ['claude-cli', 'codex-cli'], clis: { 'claude-cli': true }, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', sourceLabel: 'GitHub: anthropics/skills', plugins,
     states: { done: { 'claude-cli': { state: 'installed', path: '/p' } }, held: { 'claude-cli': { state: 'held', reason: 'other' } } } }] });

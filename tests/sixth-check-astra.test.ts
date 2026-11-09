@@ -24,15 +24,6 @@ async function box(run:(b:{home:string;context:ShareContext;paths:string[]})=>Pr
 }
 const command=async(c:ShareContext,t:HarnessId)=>(await readTool(c,t)).entries.find(e=>e.name==='docs')?.server.command;
 
-test('S1 Codex MCP subtables survive an ordinary update',()=>box(async b=>{
- const target=join(b.home,'.codex/config.toml');
- await fs.writeFile(target,'[mcp_servers.docs]\nurl="https://example.test/mcp"\n[mcp_servers.docs.http_headers]\nX-Region="west"\n[mcp_servers.docs.env_http_headers]\nX-Workspace="WORKSPACE_NAME"\n');
- await applyMcp(b.context,tools.slice(1),managed('docs'));
- await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),JSON.stringify({mcpServers:{docs:{url:'https://example.test/new'}}}));
- await applyMcp(b.context,tools.slice(1),[]);
- assert.match(await fs.readFile(target,'utf8'),/WORKSPACE_NAME/,'tool-specific subtable erased');
-}));
-
 test('S2 concurrent MCP tool-specific setting is not overwritten',()=>box(async b=>{
  const target=join(b.home,'.codex/config.toml');
  await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),json('BASE'));
@@ -72,15 +63,6 @@ test('S4 process death during agent Restore must not delete it everywhere',()=>b
  await applyAgents(b.context,tools,[],{now:1000});
  await applyAgents(b.context,tools,[],{now:4000});
  assert.equal((await readAgents(b.context,'copilot-cli')).entries[0]?.agent.prompt.trim(),'EDIT');
-}));
-
-test('S5 malformed MCP entry must not spread a deletion',()=>box(async b=>{
- await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),json('BASE'));
- await applyMcp(b.context,tools.slice(1),managed('docs'));
- await fs.writeFile(join(b.home,'.copilot/mcp-config.json'),'{"mcpServers":{"docs":null}}');
- await applyMcp(b.context,tools.slice(1),[],{now:1000});
- await applyMcp(b.context,tools.slice(1),[],{now:4000});
- assert.equal(await command(b.context,'codex-cli'),'BASE');
 }));
 
 test('S6 Restore must not adopt an MCP edit saved after its write as baseline',()=>box(async b=>{

@@ -68,15 +68,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
   const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
-  /**
-   * A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them).
-   * `shareReads`: read each record once for the whole request; only a read-only view may, because an install reads the
-   * tool's records again after its command and must see the change.
-   */
-  const context = async ({ clis = false, shareReads = false } = {}): Promise<engine.PluginContext> => {
+  /** A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them). */
+  const context = async ({ clis = false } = {}): Promise<engine.PluginContext> => {
     const open = host.home();
     if (!open) throw new Error('No home is open.');
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: clis ? await use.findClis() : {}, overrides: open.overrides, reads: shareReads ? new Map() : undefined };
+    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: clis ? await use.findClis() : {}, overrides: open.overrides };
   };
 
   /**
@@ -146,7 +142,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** Every marketplace: added here, or already added in a tool. `fresh`: one source, or every Git source, fetched again. */
   async function view(fresh?: string | true): Promise<PluginsView> {
-    const ctx = await context({ clis: true, shareReads: true });
+    const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
     const tools = (await host.tools()).filter(tool => engine.pluginTools.includes(tool));
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];

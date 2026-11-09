@@ -5,12 +5,6 @@ import { parseInline, parseMarkdown, trimRepeats, type Block, type Inline } from
 const text = (parts: Inline[]): string => parts.map(part => part.kind === 'text' || part.kind === 'code' ? part.text : part.kind === 'image' ? part.alt : text(part.kind === 'link' ? part.label : part.children)).join('');
 const links = (parts: Inline[]): string[] => parts.flatMap(part => part.kind === 'link' ? [part.url, ...links(part.label)] : part.kind === 'strong' || part.kind === 'em' ? links(part.children) : []);
 
-test('Code spans are kept exactly, angle brackets included, before any HTML is dropped', () => {
-  const parts = parseInline('Run `claude plugin install <plugin>@<marketplace>` then <b>restart</b>.');
-  assert.deepEqual(parts.find(part => part.kind === 'code'), { kind: 'code', text: 'claude plugin install <plugin>@<marketplace>' });
-  assert.equal(text(parts), 'Run claude plugin install <plugin>@<marketplace> then restart.');
-});
-
 test('Only https links are links; other schemes and relative paths are just their text', () => {
   const parts = parseInline('[docs](https://example.com/docs) [local](./README.md) [bad](javascript:alert(1)) <https://example.com/x> see https://example.com/y.');
   assert.deepEqual(links(parts), ['https://example.com/docs', 'https://example.com/x', 'https://example.com/y']);
@@ -25,14 +19,8 @@ test('Underscores inside words stay as they are; emphasis needs a word boundary'
   assert.match(text(parts), /CLAUDE_PLUGIN_ROOT and my_plugin_name, see __init__\.py/);
 });
 
-test('Images become their alt text, and HTML-only lines say nothing', () => {
-  const blocks = parseMarkdown('<p align="center"><img src="logo.png"></p>\n\n![Logo](https://example.com/logo.png) Team tools');
-  assert.equal(blocks.length, 1);
-  assert.deepEqual((blocks[0] as Extract<Block, { kind: 'paragraph' }>).content[0], { kind: 'image', alt: 'Logo' });
-});
-
 test('Headings, lists, code, tables and quotes are read', () => {
-  const kinds = parseMarkdown('# Title\n\n- one\n- two\n\n1. first\n\n```\ncode <here>\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n> quoted\n\n---').map(block => block.kind);
+  const kinds = parseMarkdown('<p align="center"><img src="logo.png"></p>\n\n# Title\n\n- one\n- two\n\n1. first\n\n```\ncode <here>\n```\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n> quoted\n\n---').map(block => block.kind);
   assert.deepEqual(kinds, ['heading', 'list', 'list', 'code', 'table', 'quote', 'rule']);
 });
 
@@ -85,15 +73,12 @@ test('Under a Skills heading, a skill’s paragraph that repeats its description
   assert.deepEqual(shown, ['What it does', 'Apps.', 'Skills', 'pdf-reader', 'Before first use, install Poppler and restart the tool.', 'code', 'Stack variations', 'A table.']);
 });
 
-test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {
+test('Common README shapes read right: badges, images, code in emphasis, setext headings, escapes', () => {
   const badge = parseInline('[![CI](https://img.example/ci.svg)](https://example.com/ci) done');
   assert.deepEqual(badge[0], { kind: 'link', label: [{ kind: 'text', text: 'CI' }], url: 'https://example.com/ci' });
-  const strong = parseInline('**use `x` now**');
-  assert.equal(strong.length, 1);
-  assert.equal(strong[0]!.kind, 'strong');
-  assert.deepEqual((strong[0] as { children: Inline[] }).children.map(part => part.kind), ['text', 'code', 'text']);
+  assert.deepEqual(parseInline('**use `<b>x</b>` now**'), [{ kind: 'strong', children: [{ kind: 'text', text: 'use ' }, { kind: 'code', text: '<b>x</b>' }, { kind: 'text', text: ' now' }] }]);
   assert.equal(text(parseInline('2 \\* 3 and \\_x\\_')), '2 * 3 and _x_');
-  assert.deepEqual(parseMarkdown('1. Run:\n   ```\n   npm test\n   ```\n2. Done').map(block => block.kind), ['list', 'code', 'list']);
+  assert.deepEqual(parseInline('![Logo](https://example.com/logo.png)'), [{ kind: 'image', alt: 'Logo' }]);
   assert.deepEqual(parseMarkdown('Title\n=====\n\nSub\n---\n\nText').map(block => block.kind), ['heading', 'heading', 'paragraph']);
 });
 

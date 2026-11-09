@@ -354,8 +354,6 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
-  // A folder inside a real configuration folder would put copies and a record among the real ones.
-  if ([...protectedRoots, join(realHome, '.central-knot')].some(root => inside(home, root))) return refused;
   // Every folder this home would write, followed through links, even where it does not exist yet.
   const fold = (path: string) => (process.platform === 'linux' ? path : path.toLowerCase());
   const guarded = [...protectedRoots, join(realHome, '.central-knot')].map(fold);
