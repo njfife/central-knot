@@ -98,12 +98,10 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // One hint line per tool that can't take this marketplace, in the words its boxes use (pluginstatus.blocked).
   const reasons = view.tools.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
   const someCan = view.canWrite && reasons.length < view.tools.length;
-  // The hint heads the name column; in narrow content it takes its own line above the table instead (style.css).
-  const hint = someCan ? 'Click a box; nothing runs until Apply all.' : '';
-  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, hint ? [h('span.hint-wide', {}, hint), h('span.hint-narrow', {}, 'Plugin')] : 'Plugin'),
+  // The hint heads the name column, wrapping within it when the column is narrow.
+  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? 'Click a box; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
-    hint ? h('p.plugin-hint', { 'aria-hidden': 'true' }, hint) : null,
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') }))) : null,
     shown.length
@@ -120,6 +118,8 @@ function aboutTab(entry: MarketplaceView, marketIndex: number) {
   if (remove) remove.title = 'Removes it from this list only. Installed plugins stay installed.';
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   return [
+    // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
+    entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
     h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted([...marketFacts(entry), source])), remove),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
       : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),

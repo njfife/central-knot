@@ -887,9 +887,8 @@ span.ins-confirm { margin-top: 0; }
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .cell-button.cell-pending-remove, .legend-cell.cell-pending-remove { border-style: dashed; border-color: var(--danger); color: var(--danger); background: color-mix(in oklab, var(--danger) 8%, transparent); }
 .plugin-legend { padding: 10px 16px 0; }
-/* "Click a box…": in the plugin table's header, or, in narrow content, on its own line above the table. */
-.plugin-hint { display: none; margin: 0 0 4px; font-size: 12px; color: var(--ink-soft); }
-.hint-narrow { display: none; }
+/* The description repeated under About is for narrow content only, where the Plugins tab leaves it out. */
+.about-only-narrow { display: none; margin: 0 0 10px; }
 .plugin-legend .legend-cell.cell-absent { border-style: solid; }
 /* A plugin's own page */
 .plugin-head h2 { display: inline; margin: 0 8px 0 0; font-size: 18px; font-weight: 650; }
@@ -953,12 +952,13 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-holds { order: 1; flex: none; }
   .plugin-row-about ~ .plugin-row-holds::after { content: "·"; margin: 0 6px; }
   .plugin-row-about { order: 2; flex: 1 1 0; min-width: 0; }
-  .plugin-hint { display: block; }
   /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
   .market-title-line, .toolbar-title-only { display: none; }
-  .market-page > .market-page-about { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hint-wide { display: none; }
-  .hint-narrow { display: inline; }
+  /* The plugins get the height: the hint wraps within the header's name column, the description moves under About. */
+  .plugin-table .ov-head .plugin-hint { white-space: normal; line-height: 15px; padding-right: 12px; }
+  .market-page > .market-page-about { display: none; }
+  .about-only-narrow { display: block; }
+  .market-item-meta { white-space: nowrap; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
