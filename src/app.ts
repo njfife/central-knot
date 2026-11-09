@@ -39,6 +39,8 @@ export const state = {
   marketDraft: '',
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
+  /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
+  seenNotices: new Set<string>(),
   /** The window chooses the sidebar shape until the person uses the toggle. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -91,6 +93,10 @@ function accept(view: HomeView) {
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
+/** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
+export const flashRequests = new Set<string>();
+const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
+
 /** After the first Apply all on a page, its tip has done its job. */
 const retireTip = (kind: 'skills' | 'mcp' | 'agents') => { try { localStorage.setItem(`ck-help-dismissed-${kind}`, '1'); } catch { /* shows again */ } };
 
@@ -111,8 +117,11 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const added = writtenTo(false), replacedIn = writtenTo(true);
   const single = managed === 1 ? changes.find(change => change.managed)?.key : undefined;
   const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
-  const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', added.length ? `copied to ${andText(added)}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To stop future syncing, turn Managed off, then Apply all; copies already written stay.'), item: singleName };
+  // The result matches the bar before it: how many new copies, and of which skills.
+  const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
+  const newItems = [...new Set(newCopies.map(entry => entry.item))];
+  const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andText(added)}`}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' New copies aren’t in History: to remove one, delete it in that tool. To stop future syncing, turn Managed off, then Apply all.'), item: singleName };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -132,7 +141,8 @@ export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
 export const startHome = () => busy('Reading user-wide skills…', async () => {
   const view = await api().startHome();
-  if (view) { accept(view); announce(readSummary(view)); } else announce('');
+  // The first read is said the same way as a home switch: a band, not a passing status line.
+  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
 export const readAgain = () => busy('Reading user-wide skills…', async () => {
@@ -184,7 +194,7 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
   const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
   const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
-  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed. Installing needs each tool’s command-line tool; see below.` }; }
+  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
@@ -254,7 +264,9 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
       : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
   const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : `Redo edit ${where.length >= (state.home?.snapshots.length ?? 3) ? 'in all tools' : `in ${andText(where)}`}`;
   if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
-  announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
+  // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
+  if (!result.stopped && restored.length) flashRow(item);
+  announce(result.stopped ?? (restored.length ? text : `Restored in ${plural(restored.length, 'tool')}.`), !result.stopped && !!restored.length);
 });
 
 /** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
@@ -304,7 +316,8 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const managed = changes.filter(change => change.managed).length;
     // The write band right below says what waits for Claude Code; the result names what was written, and where.
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
-    state.outcome = { page: state.page, item: copied.length === 1 ? copied[0] : undefined, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}. To stop future syncing, turn Managed off, then Apply all; copies already written stay.` };
+    const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
+    state.outcome = { page: state.page, item: copied.length === 1 ? copied[0] : undefined, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}. New copies aren’t in History: to remove one, delete it in that tool.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -337,5 +350,5 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   if (view) state.home = view;
   state.mcpResult = result;
   if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To stop syncing ${names.length === 1 ? 'it' : 'them'} to Claude Code, turn off ${names.length === 1 ? 'its' : 'their'} Claude Code box, then Apply all.` };
-  announce(result.stopped ?? `${plural(result.writes, 'entry', 'entries')} written to Claude Code.`);
+  announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });

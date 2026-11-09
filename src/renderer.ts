@@ -9,6 +9,8 @@ import { historyPage } from './historypage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
+/** The real home is named for the machine it is on. */
+export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
 const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', plugins: 'Plugins', history: 'History', tools: 'Tools' };
 const MATRIX_MINIMUM = 760;
 
@@ -29,13 +31,20 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h('span.nav-count', { 'aria-hidden': 'true' }, String(count)));
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h('span.nav-count', { 'aria-hidden': 'true' }, String(count)),
+    // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
+    !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
+
+const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents?.servers ?? [])].some(fact => fact.managed);
+const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents?.notices ?? [] : [];
+const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
+const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.slice(0, 3).map(notice => notice.item).join(', ')}`; };
 
 const homeHelp: Record<HomeMode, string> = {
   fixture: 'Practice copy: sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools.',
   custom: 'Another folder: a home folder that contains .claude, .copilot or .codex, such as a backup or another account. Central Knot writes only inside it.',
-  actual: 'This Mac’s home: your real tools. Changes you apply here write to their folders.',
+  actual: `${realHomeName}: your real tools. Changes you apply here write to their folders.`,
 };
 
 function homeRow(mode: HomeMode, label: string, glyph: IconName) {
@@ -45,7 +54,7 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   return h('button.home-row', {
     type: 'button', id: `home-${mode}`, 'data-home': mode, 'aria-current': current ? 'true' : undefined, 'aria-label': shown, title: mode === 'custom' && current ? `${state.home!.home}\nClick to choose another folder.` : homeHelp[mode],
     disabled: !!state.busy, onclick: () => void loadHome(mode),
-  }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: 'a backup or another account' }[mode])));
+  }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: mode === 'custom' && current ? 'click to choose another' : 'a backup or another account' }[mode])));
 }
 
 function renderSidebar() {
@@ -62,7 +71,7 @@ function renderSidebar() {
     h('p.homes-title', {}, 'Home'),
     homeRow('fixture', 'Practice copy', 'flask-conical'),
     homeRow('custom', 'Another folder…', 'folder-open'),
-    homeRow('actual', 'This Mac’s home', 'laptop'),
+    homeRow('actual', realHomeName, 'laptop'),
   );
 }
 
@@ -101,8 +110,8 @@ function renderStatus() {
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync:'), h('span.sync-state', {}, 'paused'))
     : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
-      title: state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off')) : '',
+      title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now. Click to turn it on.',
+      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
   // The result band already says what just happened; the status bar does not say it twice.

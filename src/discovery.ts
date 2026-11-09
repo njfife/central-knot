@@ -105,7 +105,7 @@ export async function discover(options: {
   const root = configRoot(definition, home, options.configOverride);
   const snapshot: Snapshot = {
     harness: definition.id, harnessName: definition.name, surface: definition.surface,
-    mode: options.mode, label: options.mode === 'actual' ? 'This Mac’s home' : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
+    mode: options.mode, label: options.mode === 'actual' ? (process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home') : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
     root, detection: 'Not found', probe: { state: 'not-run', detail: 'System probes run only when you select this Mac’s home.' },
     discovery: 'missing', skills: [], issues: [],
   };

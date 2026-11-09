@@ -424,7 +424,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', (await a.text('.details') ?? '').includes('Copilot CLI and Codex have no “tools” or “model” setting'), await a.text('.details'));
+  check('the details name the limits', (await a.text('.details') ?? '').includes('Its “tools” and “model” settings stay in Claude Code'), await a.text('.details'));
   await a.shot('practice-agents');
   await a.click('#nav-skills');
 

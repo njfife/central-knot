@@ -389,12 +389,13 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   if (mode === 'custom') {
     let folder = remembered;
     if (!folder) {
-      const selection = await dialog.showOpenDialog(window, { title: 'Choose a simulated home folder', properties: ['openDirectory'] });
+      const selection = await dialog.showOpenDialog(window, { title: 'Choose a home folder (one containing .claude, .copilot or .codex)', properties: ['openDirectory'] });
       if (selection.canceled) return null;
       folder = selection.filePaths[0];
     }
-    next = { mode, home: folder, label: 'Selected folder' };
-  } else if (mode === 'actual') next = { mode, home: homedir(), label: 'This Mac’s home' };
+    // A chosen folder is called by its own name everywhere: status bar, results and sidebar.
+    next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
+  } else if (mode === 'actual') next = { mode, home: homedir(), label: process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home' };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;

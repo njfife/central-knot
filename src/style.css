@@ -888,3 +888,26 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugin-table-noactions .ov-row { grid-template-columns: minmax(200px, 360px) repeat(var(--tool-count, 2), 120px) 0; }
 .plugin-outcome-card .details-tool-head { flex-wrap: wrap; row-gap: 2px; }
 .plugin-card-state { margin-left: 0; flex-basis: 100%; padding-left: 22px; white-space: nowrap; }
+/* UI round 6 */
+@keyframes row-flash { from { background: var(--selected-row); } to { background: transparent; } }
+.ov-page .toolbar > .find { flex: 0 1 200px; min-width: 140px; }
+.sync-notice .btn { flex: none; }
+.nav-unseen { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 6px; flex: none; }
+.sync-track.on.idle { background: var(--ink-faint); }
+/* UI round 6 → 7 */
+.ov { --ov-columns: minmax(170px, 320px) 76px repeat(var(--tool-count, 3), minmax(108px, 150px)) minmax(0, 1fr); }
+.ov-page > .toolbar { flex-wrap: nowrap; }
+.ov-page .toolbar > .find { flex: 0 1 200px; min-width: 110px; }
+.managed-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
+.row-tag { margin-left: 8px; font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.cell-synced .cell-oneway-mark { color: var(--ink-soft); }
+.history-day { padding-left: 16px; padding-right: 16px; margin-left: 0; }
+.history-list { padding: 0 16px; }
+.history-list .history-day { padding-left: 0; }
+.outcome-quiet-danger, #outcome-undo.text-danger { color: var(--ink-soft); }
+#outcome-undo.text-danger:hover, #outcome-undo.text-danger:focus-visible { color: var(--danger, #dc2626); }
+.notice-still-off { font-size: inherit; padding: 0; color: var(--ink-soft); text-decoration: underline dotted; }
+.plugin-when { margin: 6px 0 0; font-size: 11.5px; color: var(--ink-faint); }
+.plugin-card-state { flex-basis: auto; padding-left: 0; margin-left: 4px; }
+.cannot-dash { color: var(--ink-faint); font-weight: 700; }
+.sync-notice .btn { height: 26px; padding: 0 10px; font-size: 12px; }

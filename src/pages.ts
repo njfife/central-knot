@@ -3,6 +3,7 @@ import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
+import { realHomeName } from './renderer.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 
 // ---------- Overview ----------
@@ -41,7 +42,9 @@ function practiceBanner() {
     h('div.intro-text', {},
       h('strong', {}, 'This is a practice copy.'),
       h('span', {}, ' Sample skills, MCP servers and agents in a throwaway folder. Nothing here touches your real tools, so try anything.')),
-    (() => { const real = button({ variant: 'outline', size: 'small', label: 'Use This Mac’s home', id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you click Apply all.'; return real; })(),
+    // The first step stays inside the sandbox; the real home is the quieter second choice.
+    button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }),
+    (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you click Apply all.'; return real; })(),
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { remember('ck-practice-banner-dismissed'); rerender(); } }));
 }
 
@@ -79,7 +82,8 @@ export function overviewPage() {
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       h('p.overview-lead', {}, 'Central Knot keeps the skills, MCP servers and agents you choose the same in Claude Code, Copilot CLI and Codex.',
-        nothingManaged ? ' Open one below, turn on Managed for what you want kept the same, then click Apply all.' : ''),
+        // The next step only where it can be taken: something to manage, and a home that can be written.
+        !home.manage.skills.length && !home.mcp.servers.length && !(home.agents?.servers.length) ? ' Nothing found in this home yet.' : nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want kept the same, then click Apply all.' : ''),
       h('div.kind-cards', {},
         kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills)),
         kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.claudePending.length),
@@ -89,7 +93,7 @@ export function overviewPage() {
         : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
           ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the ${navigator.userAgent.includes('Mac') ? 'menu bar icon and the Central Knot menu' : 'tray icon'}.`),
+        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('panel-left', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
 
@@ -200,7 +204,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
       brandMark(snapshot.harness, 18),
       h('h2.tool-title', {}, toolName(snapshot.harness) ?? fullToolName(snapshot)),
       pathText(shownPath(snapshot.root), snapshot.root),
-      copyButton(snapshot.root, `folder for ${fullToolName(snapshot)}`, `copy-root-${snapshot.harness}`, 'Copy path')),
+      copyButton(snapshot.root, `folder for ${fullToolName(snapshot)}`, `copy-root-${snapshot.harness}`, 'Copy folder path')),
     h('div.tool-body', {},
       h('div.tool-column', {},
         // Outside This Mac's home no app is checked (the note above says so), so the card shows only folders.
@@ -214,6 +218,9 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
           // One label for every tool; a second folder (shared .agents) keeps its own name.
           ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
           ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span', {}, path(disclosed.to), h('span.tone-faint', {}, ' (empty; new skills go here)'))) : []),
+          // Where its MCP servers and agents live, read from what was found there.
+          ...fact('MCP servers file', (() => { const file = home.mcp.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(file) : h('span.tone-faint', {}, '—'); })()),
+          ...fact('Agents folder', (() => { const file = home.agents?.servers.map(server => server.copies[snapshot.harness]?.directory).find(Boolean); return file ? path(dirname(file)) : h('span.tone-faint', {}, '—'); })()),
           ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',
@@ -221,9 +228,9 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
             snapshot.skills.length ? button({ variant: 'link', size: 'micro', label: plural(skillCount(snapshot), 'skill'), id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('skills') })
               : snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? h('span.link-quiet', { title: discoveryLine(snapshot) }, '0 skills') : h('span', {}, discoveryLine(snapshot)),
             h('span.tone-faint', {}, ' · '),
-            button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }),
+            count(home.mcp.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }) : h('span.link-quiet', {}, '0 MCP servers'),
             h('span.tone-faint', {}, ' · '),
-            button({ variant: 'link', size: 'micro', label: plural(count(home.agents?.servers, snapshot.harness), 'agent'), id: `tool-agents-${snapshot.harness}`, onclick: () => showPage('agents') }))),
+            count(home.agents?.servers, snapshot.harness) ? button({ variant: 'link', size: 'micro', label: plural(count(home.agents?.servers, snapshot.harness), 'agent'), id: `tool-agents-${snapshot.harness}`, onclick: () => showPage('agents') }) : h('span.link-quiet', {}, '0 agents'))),
         disclosed && disclosed.alsoReadBy.length > 0 && section('Others that read its skills folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
         issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));
 }
@@ -233,6 +240,6 @@ export function toolsPage() {
   if (!home) return h('div.page');
   const done = outcomeBand();
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
-    home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so no app is checked here. Choose This Mac’s home to see your installed tools and versions.' : 'This is a folder, not this Mac: no app is checked here. Choose This Mac’s home to see your installed tools and versions.') : null,
+    home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so no app is checked here. Choose your real home to see your installed tools and versions.' : 'This is a folder, not this computer: no app is checked here. Choose your real home to see your installed tools and versions.') : null,
     home.snapshots.map(snapshot => toolCard(snapshot, home))));
 }

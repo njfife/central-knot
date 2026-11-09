@@ -44,7 +44,7 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
   'codex-cli': {
     id: 'codex-cli', name: 'Codex', surface: 'CLI', binary: 'codex',
     configEnv: 'CODEX_HOME', defaultConfig: '.codex', reservedSkills: ['.system'], loadsDotFolders: false,
-    otherReaders: ['ChatGPT desktop (Codex), which reads this same folder'],
+    otherReaders: ['ChatGPT desktop (Codex)'],
     nextStep: 'Written. Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
     skillRoots: (config, home) => [
       { path: join(config, 'skills'), label: 'Codex skills' },
