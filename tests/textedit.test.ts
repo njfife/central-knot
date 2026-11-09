@@ -16,20 +16,15 @@ const claudeJson = `{
 }
 `;
 
-test('JSON: adding a server changes only that member', () => {
-  const out = setJsonMember(claudeJson, ['mcpServers', 'docs'], { type: 'http', url: 'https://example.com/mcp' });
-  assert.deepEqual(JSON.parse(out).mcpServers.docs, { type: 'http', url: 'https://example.com/mcp' });
-  assert.deepEqual(JSON.parse(out).mcpServers.massive, JSON.parse(claudeJson).mcpServers.massive);
-  assert.ok(out.startsWith(claudeJson.slice(0, claudeJson.indexOf('    }\n  },') + 5)), 'everything before the insertion is byte-identical');
-  assert.ok(out.endsWith(`  },\n  "projects": { "/x": { "allowedTools": [] } }\n}\n`), 'everything after it too');
-});
-
-test('JSON: replacing and removing a member keep the rest byte for byte', () => {
+test('JSON: adding, replacing and removing a member keep the rest byte for byte', () => {
   const replaced = setJsonMember(claudeJson, ['mcpServers', 'massive'], { type: 'stdio', command: 'node', args: [] });
   assert.equal(JSON.parse(replaced).mcpServers.massive.command, 'node');
   assert.equal(replaced.slice(0, replaced.indexOf('"massive"')), claudeJson.slice(0, claudeJson.indexOf('"massive"')));
   assert.equal(replaced.slice(replaced.indexOf('  },\n  "projects"')), claudeJson.slice(claudeJson.indexOf('  },\n  "projects"')));
-  const two = setJsonMember(claudeJson, ['mcpServers', 'docs'], { url: 'u' });
+  const two = setJsonMember(claudeJson, ['mcpServers', 'docs'], { type: 'http', url: 'https://example.com/mcp' });
+  assert.deepEqual(JSON.parse(two).mcpServers.docs, { type: 'http', url: 'https://example.com/mcp' });
+  assert.ok(two.startsWith(claudeJson.slice(0, claudeJson.indexOf('    }\n  },') + 5)), 'everything before the insertion is byte-identical');
+  assert.ok(two.endsWith(`  },\n  "projects": { "/x": { "allowedTools": [] } }\n}\n`), 'everything after it too');
   for (const name of ['massive', 'docs']) {
     const removed = setJsonMember(two, ['mcpServers', name], undefined);
     const parsed = JSON.parse(removed);
