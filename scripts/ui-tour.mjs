@@ -210,6 +210,7 @@ if (wanted('instructions')) {
 async function ensureMarket() {
   await a.click('#nav-plugins');
   await waitFor(a, `!!document.querySelector('.market-list, #marketplace-source')`);
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
   if (await a.has('.market-list')) return;
   const market = join(scratch, 'market');
   if (!existsSync(market)) writeMarket(market);
@@ -256,7 +257,7 @@ if (wanted('missing')) {
   begin('missing');
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
   await a.click('#home-actual');
-  await shot(a, 'opened', 'Put only Claude Code and Codex folders in the tour\'s home, then clicked "This Mac\'s home".');
+  await shot(a, 'opened', 'Put only Claude Code and Codex folders in the tour\'s home, then clicked "This Mac\'s home". A tool whose CLI is installed in a standard place (such as /opt/homebrew/bin) is still detected, so it stays.');
   await everyPage('1280');
   await a.size(860, 560);
   await a.click('#nav-tools'); await shot(a, '860-tools', 'Tools at 860×560 in the same home.');

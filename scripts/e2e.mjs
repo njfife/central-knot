@@ -232,6 +232,11 @@ async function practiceFlow() {
   await a.settle();
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
 
+  // The practice copy has no Pi folder: Pi is no column, box or menu, and Tools shows no card for it.
+  await a.click('#nav-skills');
+  check('a tool not in this home has no column or box', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
+  await a.click('#nav-tools');
+  check('nor a card on Tools', !(await a.exists('.tool-card[aria-label^="Pi"]')) && await a.exists('.tool-card[aria-label^="Codex"]'));
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
   await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
@@ -588,6 +593,13 @@ async function realHomeFlow() {
   same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
   check('a skill with a link inside is held', await a.exists('.ov-row[data-key="has-link"] .held-pill'));
+  // At the smallest window, every control in the header and toolbar is on screen (narrow content shows icons only).
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.click('#manage-all');
+  const offScreen = await a.run(`[...document.querySelectorAll('#header button, .toolbar button')].filter(node => { const box = node.getBoundingClientRect(); return box.width > 0 && (box.left < 0 || box.right > innerWidth || box.bottom > innerHeight); }).map(node => node.id || node.textContent)`);
+  same('nothing in the header or toolbar is cut off at 860×560', offScreen, []);
+  await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
   const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);

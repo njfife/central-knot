@@ -344,6 +344,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name-text { flex: 0 1 auto; min-width: 3em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unmanaged .ov-name-text { font-weight: 400; }
 .ov-name-about { flex: 1 1 0; min-width: 0; color: var(--ink-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover { background: var(--press); }
 .row-open-spacer { display: inline-block; width: 18px; margin-left: -6px; flex: none; }

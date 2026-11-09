@@ -40,7 +40,7 @@ export const state = {
   undoMoved: undefined as { page: Page; notices: string[]; label: string; items: string[] } | undefined,
   /** Sync notices already shown on their page, so the sidebar dot clears once seen. */
   seenNotices: new Set<string>(),
-  /** The window chooses the sidebar shape until the person uses the toggle. */
+  /** The window chooses the sidebar shape until the person uses the toggle, which holds until the window crosses the rail breakpoint. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
 
@@ -181,7 +181,7 @@ export const homeTools = (): HarnessId[] => (state.home ? presentTools(state.hom
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
 
-/** Whether `tools` is every tool in this home, so a sentence can say "all tools" rather than list them. */
+/** Whether `tools`, distinct tools of this home (by id or by name), are all of them, so a sentence can say "all tools". */
 export const isEveryTool = (tools: readonly string[]): boolean => tools.length > 0 && tools.length >= homeTools().length;
 
 export function showPage(page: Page) {

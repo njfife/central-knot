@@ -153,7 +153,10 @@ document.body.append(probe);
 if (probe.offsetWidth === probe.clientWidth) document.documentElement.style.setProperty('--overlay-gutter', '16px');
 probe.remove();
 
+let narrowWindow = window.innerWidth < RAIL_BELOW;
 window.addEventListener('resize', () => {
+  // A toggled shape holds at the size it was chosen; crossing the breakpoint hands the choice back to the window.
+  if ((window.innerWidth < RAIL_BELOW) !== narrowWindow) { narrowWindow = !narrowWindow; state.sidebar = undefined; }
   const wasRail = document.body.classList.contains('rail');
   if (applyLayout().rail !== wasRail) render();
 });
