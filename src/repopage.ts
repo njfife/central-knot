@@ -119,9 +119,10 @@ const kinds: Record<RepoChange['kind'], { glyph: IconName; label: string }> = {
 const when = (iso?: string) => (iso ? dayAndTime(iso) : undefined);
 
 /** A commit as people read it in a git client: short id, subject, when. */
+/** A commit as people read it in a git client: short id, subject, when (real spaces between, so it reads and copies as one line). */
 const commitText = (commit: RepoCommit) => h('span.repo-commit', { title: `${commit.id}\n${commit.subject}` },
-  h('span.mono.repo-sha', {}, commit.id.slice(0, 7)), commit.subject ? h('span.repo-subject', {}, commit.subject) : null,
-  commit.at ? h('span.tone-muted.repo-when', {}, when(commit.at)) : null);
+  h('span.mono.repo-sha', {}, commit.id.slice(0, 7)), commit.subject ? [' ', h('span.repo-subject', {}, commit.subject)] : null,
+  commit.at ? [' ', h('span.tone-muted.repo-when', {}, when(commit.at))] : null);
 
 /** What happened to one item on the side it comes from, and what Pull or Push will do about it. */
 function changeRow(change: RepoChange, side: 'in' | 'out') {
@@ -199,8 +200,8 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
   // Only what has happened: right after Connect that is just the check.
   const parts = [view.pulledAt ? `pulled ${when(view.pulledAt)}` : '', view.pushedAt ? `pushed ${when(view.pushedAt)}` : '', checked].filter(Boolean);
   // Each separator belongs to the part after it, so a wrapped line starts with "·", never ends with one.
-  // Parts sit apart by space, not dots, so a wrapped line neither starts nor ends on a separator.
-  const activity = parts.map((text, index) => h('span.repo-activity-part', {}, index ? text : text.charAt(0).toUpperCase() + text.slice(1)));
+  // One sentence: each part keeps its comma, so a wrapped line ends on a comma, never starts with a separator.
+  const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, `${index ? text : text.charAt(0).toUpperCase() + text.slice(1)}${index < parts.length - 1 ? ',' : ''}`)]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
       summary(view),
@@ -262,8 +263,10 @@ function connectForm(allowed: boolean) {
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
   const sshHint = h('span', {}, 'The address you’d give git clone. SSH works too: ', h('span.mono', {}, 'git@gitlab.com:you/agent-config.git'));
   return h('div.repo-connect', {},
-    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, sshHint),
-    field('repo-branch', 'Branch', 'The repo’s default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional'),
+    // The address takes the width; the branch, one word, sits beside it when there is room.
+    h('div.repo-fields', {},
+      field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, sshHint),
+      field('repo-branch', 'Branch', 'Default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional')),
     h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
       h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));
 }
