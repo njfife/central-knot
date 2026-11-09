@@ -548,26 +548,29 @@ async function practiceFlow() {
   await a.click('#base-review');
   check('the base review says what happens to each chosen file', (await a.text('.base-plan')).includes('CLAUDE.md') && (await a.text('.base-plan')).includes('AGENTS.md') && !(await a.text('.base-plan')).includes('copilot-instructions'), await a.text('#base-card'));
   await a.click('#base-save');
-  await wait(400);
   const baseClaude1 = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8'), baseCodex1 = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
   check('Save adds the base after each chosen tool’s own text, which is unchanged', baseClaude1.startsWith(baseClaude0) && baseClaude1.includes('- Shared by every tool.') && baseCodex1.startsWith(baseCodex0) && baseCodex1.includes('- Shared by every tool.'), baseClaude1);
   check('an unchosen tool is not written', !existsSync(join(practice, '.copilot/copilot-instructions.md')));
-  check('the result says so, with Undo', await a.exists('#outcome-undo-base'), await a.text('.bands'));
+  // A tool's own instructions edited afterwards: its base block and the other files stay as they are.
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Own line after the base.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli'); await a.click('#ins-save-claude-cli');
+  const ownEdited = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8');
+  check('editing a tool’s own text keeps its base block after it, unchanged', ownEdited === baseClaude1.replace('\n\n<!-- Central Knot', '\n- Own line after the base.\n\n<!-- Central Knot') && readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8') === baseCodex1, ownEdited);
+  await a.click('#outcome-undo-instruction');
   writeFileSync(join(practice, '.codex/AGENTS.md'), baseCodex1.replace('- Shared by every tool.', '- Shared, edited in Codex.'));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
   check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-adopt-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
   await a.click('#base-adopt-codex-cli');
   await a.click('#base-save');
-  await wait(400);
   check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
   await a.click('#outcome-undo-base');
-  await wait(400);
   check('Undo puts Claude Code back', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude1);
   await a.click('#base-edit');
   await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
-  await a.click('#base-review'); await a.click('#base-save'); await wait(400);
-  check('Taking every tool off leaves each file’s own text as it was', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude0 && !readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8').includes('Central Knot base instructions'));
+  await a.click('#base-review'); await a.click('#base-save');
+  check('Taking every tool off leaves each file’s own text as it was', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude0 && readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8') === baseCodex0);
   // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);
