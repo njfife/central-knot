@@ -170,7 +170,7 @@ const saveAgentRecord = (home: string, record: AgentRecord) => writeDurably(reco
  * each tool's own file with its own fields (CON-02). Kept versions are never pruned.
  */
 const keptFolder = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', 'agents', encodeURIComponent(key), hash);
-async function keep(context: ShareContext, entry: AgentEntry) {
+export async function keepAgentVersion(context: ShareContext, entry: AgentEntry) {
   const base = keptFolder(context, entry.key, entry.hash);
   await writeDurably(join(base, `${entry.tool}.txt`), entry.text);
   try { await stat(join(base, 'agent.json')); } catch { await writeDurably(join(base, 'agent.json'), `${JSON.stringify({ tool: entry.tool, name: entry.name, agent: entry.agent }, null, 2)}\n`); }
@@ -371,7 +371,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
           // Away now: it goes when its folder is back, if it still holds what it held (DEL-02).
           if (away(copy.tool) || copy.status === 'removing') { leftover.push({ ...copy, status: 'removing' }); continue; }
           if (!here) continue;
-          try { await keep(context, here); await removeChecked(here.file, here.text); }
+          try { await keepAgentVersion(context, here); await removeChecked(here.file, here.text); }
           catch (error) {
             if (errorCode(error) === 'CK_CHANGED') { results.push({ item: name, harness: copy.tool, outcome: 'held', message: `${harnesses[copy.tool].name}'s copy was changed just as the deletion spread, so it was kept as it is.` }); continue; }
             leftover.push({ ...copy, status: 'removing' });
@@ -413,7 +413,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     const competing = changed.length > 1 && new Set(changed.map(entry => entry.hash)).size > 1;
     const replaced: { tool: HarnessId; hash: string }[] = [];
     const addedHere: { tool: HarnessId; hash: string }[] = [];
-    await keep(context, source);
+    await keepAgentVersion(context, source);
     const copies: AgentCopy[] = item.copies.filter(copy => copy.stopped || copy.status === 'removing' || away(copy.tool));
     for (const tool of syncing) {
       if (!live(tool)) continue;
@@ -428,7 +428,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
       try { text = agentText(tool, source.agent, here?.text); } catch { results.push({ item: name, harness: tool, outcome: 'held', message: 'This file could not be updated without changing other parts of it.' }); continue; }
       try {
         if (here) {
-          await keep(context, here);
+          await keepAgentVersion(context, here);
           // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (a write that
           // failed, caught up now) holds an older version that History already has.
           if (changed.length || chosenNow.has(key) || raced) {
@@ -480,7 +480,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
       // A file elsewhere now (a moved agents folder) is not the one the deletion was owed for.
       if (readded || (here && (here.bytes !== copy.bytes || here.file !== copy.file)) || (!here && folders.has(copy.tool))) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (!here) continue;
-      try { await keep(context, here); await removeChecked(here.file, here.text); writes++; results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); item.copies = item.copies.filter(other => other !== copy); }
+      try { await keepAgentVersion(context, here); await removeChecked(here.file, here.text); writes++; results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); item.copies = item.copies.filter(other => other !== copy); }
       catch (error) { if (errorCode(error) === 'CK_CHANGED') item.copies = item.copies.filter(other => other !== copy); }
     }
   }
@@ -525,7 +525,7 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
     const here = slot[loser.tool];
     if (!here) { results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s copy is already gone.` }); continue; }
     if (here.bytes !== loser.hash) { stayed.push(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s copy was edited since, so it stays.` }); continue; }
-    try { await keep(context, here); await removeChecked(here.file, here.text); }
+    try { await keepAgentVersion(context, here); await removeChecked(here.file, here.text); }
     catch (error) {
       stayed.push(loser.tool);
       results.push({ item: item.name, harness: loser.tool, outcome: errorCode(error) === 'CK_CHANGED' ? 'held' : 'failed', message: errorCode(error) === 'CK_CHANGED' ? `${harnesses[loser.tool].name}'s copy changed just now, so it stays.` : `Could not remove ${harnesses[loser.tool].name}'s copy.` });
@@ -626,7 +626,7 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
     if (here?.text === text) { copies.push({ tool, file: here.file, hash: here.hash, bytes: here.bytes, oneWay: oneWay || undefined }); continue; }
     const path = here?.file ?? fileFor(context, tool, version.name);
     try {
-      if (here) await keep(context, here);
+      if (here) await keepAgentVersion(context, here);
       await writeChecked(path, text, here?.text);
     } catch (error) { results.push({ item: item.name, harness: tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
     writes++;
@@ -671,7 +671,7 @@ async function restoreReplacedOneWay(context: ShareContext, tools: HarnessId[], 
     // Only over the copy the choice wrote: a later change in that tool is never overwritten.
     if (here.bytes !== copy.bytes) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `Changed in ${harnesses[loser.tool].name} since, so nothing was put back.` }); continue; }
     try {
-      await keep(context, here);
+      await keepAgentVersion(context, here);
       await writeChecked(here.file, text, here.text);
     } catch (error) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
     writes++;

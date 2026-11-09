@@ -110,6 +110,14 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await connectRepo(second, box.remote, '');
     await pullRepo(second);
 
+    // A setting only Claude Code has (the agent's model) travels too.
+    const firstPlanner = join(first.home, '.claude/agents/planner.md');
+    await writeFile(firstPlanner, (await readFile(firstPlanner, 'utf8')).replace('model: opus', 'model: sonnet'));
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['planner:changed']);
+    await pushRepo(first);
+    await pullRepo(second);
+    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
     await rm(join(first.home, '.claude/agents/planner.md'));
     await applyMcp({ ...first, settleMs: 0 }, tools, []);
@@ -121,6 +129,33 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
     assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);
     assert.equal((await agentsView(second, tools)).servers.length, 0);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back', async () => {
+  const box = await world();
+  try {
+    const first = await box.home('first');
+    await skill(first, '.claude/skills', 'solo', skillText('solo', 'Before.'));
+    await applyChanges(first, [{ key: 'solo', managed: true, off: ['copilot-cli'] }]);
+    await connectRepo(first, box.remote, '');
+    await pushRepo(first);
+    const author = join(box.base, 'author');
+    execFileSync('git', ['clone', '--quiet', box.remote, author]);
+    await writeFile(join(author, 'skills/solo/SKILL.md'), skillText('solo', 'After.'));
+    git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-am', 'edit'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+    await pullRepo(first);
+    assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /After/);
+    const pulled = (await readHistory(first.home)).find(event => event.key === 'solo' && event.via === 'repo')!;
+    assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
+    assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /Before/);
+    // A commit that touches nothing in the layout still has to be pulled before a push; Pull then just moves to it.
+    await writeFile(join(author, 'README.md'), 'Notes.\n');
+    git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'readme'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+    let view = live(await repoView(first, { check: true }));
+    assert.ok(view.pushBlocked);
+    view = live((await pullRepo(first)).view);
+    assert.equal(view.pushBlocked, undefined);
   } finally { await box.cleanup(); }
 });
 

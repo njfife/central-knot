@@ -1388,7 +1388,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--line); }
 .repo-side-note > svg { flex: none; align-self: center; }
 .repo-activity { color: var(--ink); }
-.repo-in-sync { margin: 0; color: var(--ink-soft); }
+.repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
 .repo-change-added { color: var(--success); }
 .repo-change-removed { color: var(--danger); }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }

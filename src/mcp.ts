@@ -211,7 +211,7 @@ async function recoverSettings(context: ShareContext, tool: HarnessId) {
  * settings (a Codex `enabled = false`, a timeout), so Restore puts each tool's entry back as it was. Never pruned.
  */
 const keptBase = (context: ShareContext, name: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name));
-async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
+export async function keepServerVersion(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
   const hash = serverHash(server);
   const path = join(keptBase(context, name), `${hash}.json`);
   try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
@@ -388,7 +388,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const recorded = new Map(recordedCopies.map(copy => [copy.tool, copy.hash]));
     // Each synced copy's own settings are kept as they are now (written only when they changed), so if that copy is deleted
     // there, Restore puts it back with its settings: a server that was off comes back off (DEL-03).
-    for (const entry of entries) if (recorded.get(entry.tool) === entry.hash) await keep(context, name, entry.server, entry);
+    for (const entry of entries) if (recorded.get(entry.tool) === entry.hash) await keepServerVersion(context, name, entry.server, entry);
     const edited = entries.filter(entry => recorded.has(entry.tool) && recorded.get(entry.tool) !== entry.hash);
     // Deletion: a recorded entry gone from a file that is there and can be read (DEL-01, settled), spread to the others (DEL-02).
     const missing = recordedCopies.filter(copy => live.includes(copy.tool) && !slot[copy.tool]);
@@ -410,7 +410,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
           const entry = slot[copy.tool];
           if (away(copy.tool) || !live.includes(copy.tool)) { if (!item.off.includes(copy.tool)) leftover.push({ ...copy, status: 'removing' }); continue; }
           if (!entry) continue;
-          const ref = await keep(context, name, entry.server, entry);
+          const ref = await keepServerVersion(context, name, entry.server, entry);
           gone.push({ tool: copy.tool, hash: entry.hash, kept: ref });
           if (copy.tool === 'claude-cli' && !claudeNow(name)) {
             leftover.push({ ...copy, status: 'removing' });
@@ -452,7 +452,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();
     const addedHere: { tool: HarnessId; hash: string }[] = [];
-    await keep(context, name, source.server, source);
+    await keepServerVersion(context, name, source.server, source);
     const claudeBefore = slot['claude-cli']?.hash ?? null;
     for (const tool of live) {
       const here = slot[tool];
@@ -460,7 +460,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const reason = cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
-      const ref = here ? await keep(context, name, here.server, here) : undefined;
+      const ref = here ? await keepServerVersion(context, name, here.server, here) : undefined;
       // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (Claude Code
       // catching up through Write now) holds an older version that History already has.
       const named = edited.length > 0 || chosenNow.has(name) || !!raced;
@@ -516,7 +516,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (missingFiles.has(copy.tool)) continue;
       if (!entry || entry.hash !== copy.hash) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (copy.tool === 'claude-cli' && !claudeNow(name)) continue;
-      await keep(context, name, entry.server, entry);
+      await keepServerVersion(context, name, entry.server, entry);
       const problem = await editEntry(context, copy.tool, name, entry.hash, undefined);
       if (problem) { results.push({ item: name, harness: copy.tool, outcome: 'held', message: problem }); continue; }
       writes++;
@@ -609,7 +609,7 @@ async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past
     const entry = (await readTool(context, loser.tool)).entries.find(candidate => candidate.name === name);
     if (!entry) { results.push({ item: name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s entry is already gone.` }); continue; }
     if (entry.hash !== loser.hash) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s entry was edited since, so it stays.` }); continue; }
-    await keep(context, name, entry.server, entry);
+    await keepServerVersion(context, name, entry.server, entry);
     const problem = await editEntry(context, loser.tool, name, entry.hash, undefined);
     if (problem) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: problem }); continue; }
     item.copies = item.copies.filter(copy => copy.tool !== loser.tool);
@@ -667,7 +667,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
     const reason = cannotHold(tool, version.server);
     if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
     if (tool === 'claude-cli') { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now to restore it there.' }); continue; }
-    if (here) await keep(context, name, here.server, here);
+    if (here) await keepServerVersion(context, name, here.server, here);
     const problem = await editEntry(context, tool, name, here?.hash, version.server, extras);
     if (problem) { results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
     writes++;
