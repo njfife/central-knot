@@ -1,11 +1,12 @@
 // Crash recovery of moved-aside settings files: none is ever lost, even several for the same path.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import fs, { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { recoverParked } from '../src/share.ts';
+import { recoverParked, writeFileChecked } from '../src/share.ts';
 
 test('A moved-aside original goes back to an empty place; ones whose place is taken become separate backups', async () => {
   const folder = await mkdtemp(join(tmpdir(), 'ck-recover-'));
@@ -22,3 +23,36 @@ test('A moved-aside original goes back to an empty place; ones whose place is ta
     assert.equal(names.length, 5, names.join(', '));
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
+
+for (const race of ['changed before the move', 'no hard links']) {
+  test(`A moved-aside original that cannot go back is kept as a backup (${race})`, async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'ck-putback-'));
+    const path = join(folder, 'settings.json');
+    const original = race === 'no hard links' ? 'expected\n' : 'edited\n';
+    const originalLink = fs.link;
+    const originalRename = fs.rename;
+    try {
+      await writeFile(path, original);
+      fs.rename = async (source, destination) => {
+        await originalRename(source, destination);
+        if (race === 'changed before the move' && String(destination).endsWith('.old')) await writeFile(path, 'later\n');
+      };
+      fs.link = async (source, destination) => {
+        if (race === 'no hard links' && String(source).endsWith('.tmp')) throw Object.assign(new Error('no hard links'), { code: 'EPERM' });
+        if (race === 'no hard links' && String(destination) === path) await writeFile(path, 'later\n');
+        return originalLink(source, destination);
+      };
+      syncBuiltinESMExports();
+      await assert.rejects(writeFileChecked(path, 'replacement\n', 'expected\n'), { code: 'CK_CHANGED' });
+      assert.equal(await readFile(path, 'utf8'), 'later\n');
+      const names = await readdir(folder);
+      const contents = await Promise.all(names.map(name => readFile(join(folder, name), 'utf8')));
+      assert.ok(contents.includes(original), `Original lost; remaining files: ${names.join(', ')}`);
+    } finally {
+      fs.link = originalLink;
+      fs.rename = originalRename;
+      syncBuiltinESMExports();
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
+}

@@ -968,11 +968,27 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
     assert.equal((await readHistory(box.home)).length, count, 'a failed copy adds no History when retried');
     await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
     const caught = await applyChanges(three(box), []);
-    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced]), [['codex-cli', true]]);
+    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced, entry.caughtUp]), [['codex-cli', undefined, true]]);
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit one.'), 'caught up');
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex edit.'));
     await applyChanges(three(box), []);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex edit.'), 'and it spreads again');
+  } finally { await box.cleanup(); }
+});
+
+test('Apply all that manages a new skill while another catches up marks the catch-up apart from new and replaced copies', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await chmod(join(box.home, CODEX), 0o555); await chmod(join(box.home, CODEX, 'foo'), 0o555);
+    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edit one.'));
+    await applyChanges(three(box), []);
+    await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
+    await skill(box.home, CLAUDE, 'fresh');
+    const result = await applyChanges(three(box), [manage('fresh')]);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced, entry.caughtUp]).sort(),
+      [['foo', 'codex-cli', undefined, true], ['fresh', 'codex-cli', undefined, undefined], ['fresh', 'copilot-cli', undefined, undefined]]);
+    assert.ok((await readHistory(box.home)).some(entry => entry.kind === 'added' && entry.key === 'fresh'));
   } finally { await box.cleanup(); }
 });
 
@@ -1004,6 +1020,66 @@ test('R10: with Sync off, Apply all does not carry a pending deletion along', as
     assert.equal(await exists(join(box.home, COPILOT, 'foo/SKILL.md')), true);
   } finally { await box.cleanup(); }
 });
+
+test('A tool whose skills folder was away during a deletion has its copy removed when the folder returns (DEL-02)', async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+    await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
+    await settleAndPass(box);
+    assert.equal(await exists(join(box.home, COPILOT, 'foo')), false);
+    await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+    await settleAndPass(box);
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy kept in a tool switched off does not end a removal another tool still owes', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await applyChanges(three(box), [manage('foo', ['copilot-cli'])]);
+    await chmod(join(box.home, CODEX), 0o555);
+    await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
+    const failed = await applyChanges(three(box), []);
+    assert.deepEqual(failed.results.map(result => [result.harness, result.outcome]), [['codex-cli', 'failed']]);
+    await chmod(join(box.home, CODEX), 0o755);
+    await applyChanges(three(box), []);
+    assert.equal(await exists(join(box.home, COPILOT, 'foo/SKILL.md')), true, 'the switched-off copy stays');
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
+test('Delete everywhere removes the copy of a tool whose skills folder was away when that folder returns (DEL-02)', async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+    await deleteEverywhere(three(box), 'foo');
+    await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+    await settleAndPass(box);
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
+for (const how of ['spread', 'Delete everywhere'] as const) {
+  test(`An owed removal (${how}) leaves a folder Codex no longer uses alone`, async () => {
+    const box = await sandbox();
+    try {
+      await managedThree(box);
+      await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+      if (how === 'spread') { await rm(join(box.home, CLAUDE, 'foo'), { recursive: true }); await settleAndPass(box); }
+      else await deleteEverywhere(three(box), 'foo');
+      const moved = join(box.base, 'other-codex');
+      await mkdir(join(moved, 'skills'), { recursive: true });
+      await settleAndPass(box, { overrides: { 'codex-cli': moved } });
+      await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+      await settleAndPass(box, { overrides: { 'codex-cli': moved } });
+      assert.equal(await exists(join(box.home, CODEX, 'foo/SKILL.md')), true);
+    } finally { await box.cleanup(); }
+  });
+}
 
 test('R11: a linked skill folder is followed when its source is edited', { skip: noPosix }, async () => {
   const box = await sandbox();
