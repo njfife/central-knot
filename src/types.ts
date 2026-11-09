@@ -79,6 +79,10 @@ export interface DesktopApi {
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
+  /** Main saved a change to the settings, whoever made it (this page, a menu, a dialog). */
+  onSettingsChanged(callback: () => void): void;
+  /** Shows Central Knot's own log in the file manager (its folder if nothing is logged yet); `failed` says why it couldn't. */
+  showLog(): Promise<{ failed?: string }>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */

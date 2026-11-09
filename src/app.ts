@@ -400,6 +400,11 @@ let refreshing = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
+// Settings changed by a menu, a dialog or the system: an open Settings page reads them again, and again whenever the window
+// comes back, so it never shows (or writes back) a value that is no longer the saved one.
+const rereadSettings = () => { if (state.page === 'settings') void loadSettings(); };
+api().onSettingsChanged(rereadSettings);
+window.addEventListener('focus', rereadSettings);
 
 api().onSyncChanged(async () => {
   if (state.busy || refreshing || !state.home) return;

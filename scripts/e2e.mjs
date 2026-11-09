@@ -95,10 +95,15 @@ function seedHome() {
 }
 
 // ---------- App ----------
+// The file manager the app opens on Linux is this stand-in: it notes what it was asked to open.
+const opened = join(scratch, 'opened.txt');
+mkdirSync(join(scratch, 'bin'));
+writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${opened}'\n`);
+chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 let app;
 async function launch(userData = join(scratch, 'data')) {
   const port = 9400 + randomInt(500);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
@@ -554,6 +559,34 @@ async function practiceFlow() {
   await a.shot('settings-light');
   await a.click('#appearance-system');
   check('System can be chosen again', await a.exists('#appearance-system[aria-checked="true"]'));
+  same('Settings rows use the page width, each control at the row end', await a.run(`(() => {
+    const page = document.querySelector('.settings-scroll'), style = getComputedStyle(page), row = document.querySelector('#setting-log').getBoundingClientRect();
+    return [Math.round(page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - row.width), Math.round(row.right - document.querySelector('#show-log').getBoundingClientRect().right)];
+  })()`), [0, 0]);
+  await a.run(`document.querySelector('#appearance-dark').focus()`);
+  await a.press(' ', 'Space');
+  await wait(200);
+  check('Space on a focused card chooses it', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]'));
+  const appSettings = join(scratch, 'data/app-settings.json');
+  const savedSettings = () => JSON.parse(readFileSync(appSettings, 'utf8'));
+  // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
+  await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
+  check('settings saved at once land in order beside the other settings', savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
+  // A change saved elsewhere (a menu, another writer) shows on the open page without a click.
+  await a.run(`window.centralKnot.setAppearance('dark')`);
+  let followed = false;
+  for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-dark[aria-checked="true"]'); }
+  check('the open Settings page follows a change saved elsewhere', followed);
+  chmodSync(appSettings, 0o444);
+  await a.click('#appearance-light');
+  check('a save that fails says why in its row, and the saved choice stays', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]') && /Couldn’t save this change/.test(await a.text('#setting-appearance .setting-failure') ?? ''), await a.text('#setting-appearance'));
+  chmodSync(appSettings, 0o644);
+  await a.click('#appearance-system');
+  check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
+  // Show log file opens the folder the log is in (Linux has no file selection to check).
+  await a.click('#show-log');
+  for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
+  same('Show log file opens the log’s folder', existsSync(opened) && readFileSync(opened, 'utf8').trim(), join(scratch, 'data'));
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close

@@ -18,9 +18,10 @@ import { trayIconPng } from './trayicon.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
+const logPath = () => join(app.getPath('userData'), 'central-knot.log');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
 function log(line: string) {
-  try { appendFileSync(join(app.getPath('userData'), 'central-knot.log'), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
+  try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 const BUILD = 'com.centralknot.firstlook';
@@ -92,15 +93,47 @@ async function saveSyncSetting(on: boolean) {
 interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
-async function loadAppSettings() { try { appSettings = JSON.parse(await readFile(appSettingsPath(), 'utf8')) ?? {}; } catch { appSettings = {}; } }
-async function saveAppSettings(change: Partial<AppSettings>) {
-  appSettings = { ...appSettings, ...change };
-  if (smoke) return;
-  await mkdir(app.getPath('userData'), { recursive: true });
-  await writeFile(appSettingsPath(), `${JSON.stringify(appSettings, null, 2)}\n`);
+/** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
+async function loadAppSettings() {
+  try {
+    const saved: unknown = JSON.parse(await readFile(appSettingsPath(), 'utf8'));
+    appSettings = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch { appSettings = {}; }
+}
+/**
+ * Every writer (the Settings page, the menu bar menu, the app menu, the first-close dialog, a home switch) saves through this
+ * one chain, so writes never interleave. Each merges only its own fields into the settings as last saved, and keeps fields
+ * this version doesn't know. It is not the sync queue: a settings change never waits behind sync. The memory copy changes
+ * only once the file is written, so a failed save leaves the last saved value in force; the page hears of every saved change.
+ */
+let settingsWrites: Promise<unknown> = Promise.resolve();
+function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
+  const write = settingsWrites.then(async () => {
+    const next = { ...appSettings, ...change };
+    if (!smoke) {
+      await mkdir(app.getPath('userData'), { recursive: true });
+      await writeFile(appSettingsPath(), `${JSON.stringify(next, null, 2)}\n`);
+    }
+    appSettings = next;
+    if (window && !window.isDestroyed()) window.webContents.send('settings:changed');
+  });
+  settingsWrites = write.catch(() => undefined);
+  return write;
 }
 const appearances: Appearance[] = ['system', 'light', 'dark'];
-const preferences = (): AppPreferences => ({ appearance: appSettings.appearance ?? 'system' });
+/** The settings as the page shows them; a stored value this version doesn't offer counts as the default. */
+const preferences = (): AppPreferences => ({ appearance: appearances.includes(appSettings.appearance!) ? appSettings.appearance! : 'system' });
+/**
+ * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux opens
+ * that folder: where no file manager answers Electron over D-Bus, its fallback opens the folder above instead. Selecting a file
+ * reports nothing back, so that case can only be taken as done; opening the folder says why it couldn't, where the system tells.
+ */
+async function showLog(): Promise<{ failed?: string }> {
+  const logged = await access(logPath()).then(() => true, () => false);
+  if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return {}; }
+  const failed = await shell.openPath(app.getPath('userData'));
+  return failed ? { failed } : {};
+}
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
  * light and dark styles follow it; the window's own background (seen while it draws) follows too.
@@ -415,8 +448,8 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
 }
 
 /**
- * A request that only reads Central Knot's own copies and writes nothing a tool reads (a README, a plugin's contents):
- * answered at once, outside the queue, so background reads never hold up a change the person asked for.
+ * A request that writes nothing a tool reads (a README, a plugin's contents, Central Knot's own settings): answered at once,
+ * outside the queue, so it never waits behind sync and background reads never hold up a change the person asked for.
  */
 function handleRead(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
@@ -487,13 +520,15 @@ app.whenReady().then(async () => {
   await firstSignIn();
   makeTray();
   createWindow(!smoke && !startedHidden());
-  handle('settings:get', async () => preferences());
-  handle('settings:appearance', async appearance => {
+  // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
+  handleRead('settings:get', async () => settingsWrites.then(preferences));
+  handleRead('settings:appearance', async appearance => {
     if (!appearances.includes(appearance as Appearance)) throw new Error('Invalid appearance.');
     await saveAppSettings({ appearance: appearance as Appearance });
     applyAppearance();
     return preferences();
   });
+  handleRead('settings:show-log', showLog);
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');

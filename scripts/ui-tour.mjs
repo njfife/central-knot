@@ -2,7 +2,7 @@
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -192,6 +192,32 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+}
+
+// ---------- Settings ----------
+if (wanted('settings')) {
+  begin('settings');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await a.click('#nav-settings');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
+  }
+  await size(860, 560); await a.theme('dark');
+  // Keyboard: Tab reaches the cards and Enter chooses one, with the focus ring showing.
+  await a.run(`document.querySelector('#appearance-dark').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: type === 'keyDown' ? '\r' : undefined });
+  await a.settle(); await shot(a, 'settings-keyboard', 'Focused the Dark card from the keyboard and pressed Enter: Dark is chosen and the focus ring shows.');
+  // A save that fails: the settings file is made read-only, then Light is clicked.
+  const file = join(scratch, 'data/app-settings.json');
+  chmodSync(file, 0o444);
+  await a.click('#appearance-light'); await shot(a, 'settings-save-failed-dark', 'With the settings file made read-only, clicked Light: the row says why, and Dark stays chosen.');
+  await a.theme('light'); await shot(a, 'settings-save-failed-light', 'The same, light (the system appearance is light; the app is still set to Dark).');
+  chmodSync(file, 0o644);
+  await a.click('#appearance-system');
+  await a.theme('dark'); await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await size(1280, 800);
 }
 
 a.quit();
