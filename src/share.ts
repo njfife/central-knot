@@ -226,8 +226,12 @@ export async function writeFileChecked(path: string, text: string, expected: str
     }
     try { await link(temporary, path); }
     catch (error) {
-      // Something was saved there after the old file was moved aside: that save stays; the old file (as read) is not needed.
-      if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
+      // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
+      // it under a plain backup name, never deleted, since only this entry was kept in the store.
+      if (errorCode(error) === 'EEXIST') {
+        if (parkedThere) { await rename(parked, `${path}.central-knot-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`).then(() => { parkedThere = false; }, () => undefined); }
+        throw expected === undefined ? occupiedError() : changedWhileSyncing();
+      }
       // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
       if (parkedThere && await putBack(parked, path)) parkedThere = false;
       if (errorCode(error) === 'EPERM' || errorCode(error) === 'ENOTSUP' || errorCode(error) === 'EXDEV') {

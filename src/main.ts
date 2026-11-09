@@ -311,7 +311,9 @@ async function startWatching() {
 /** Whether a Claude Code process is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
 function claudeRunning(): Promise<boolean> {
   if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
-  return new Promise(done => execFile('pgrep', ['-x', 'claude'], error => done(!error)));
+  // The native `claude` binary, or Claude Code run through node (an npm install shows as node with its package in the command).
+  const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
+  return found(['-x', 'claude']).then(native => native || found(['-f', '@anthropic-ai/claude-code']));
 }
 
 /** A tool's own CLI, never an app's bundled copy (CD §3), searched as version probes are. */

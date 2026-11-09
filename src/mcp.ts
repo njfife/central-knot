@@ -211,7 +211,8 @@ async function keep(context: ShareContext, name: string, server: NeutralServer, 
   const text = `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`;
   // The latest settings for this version, and an unchanging copy History can name, so a later version never overwrites an older one.
   const ref = `${entry.tool}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
-  await writeDurably(join(keptBase(context, name), hash, `${entry.tool}.json`), text);
+  const latest = join(keptBase(context, name), hash, `${entry.tool}.json`);
+  if ((await readFile(latest, 'utf8').catch(() => undefined)) !== text) await writeDurably(latest, text);
   try { await stat(join(keptBase(context, name), hash, `${ref}.json`)); } catch { await writeDurably(join(keptBase(context, name), hash, `${ref}.json`), text); }
   return ref;
 }
@@ -372,6 +373,9 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (entries.some(entry => entry.hostBound)) { results.push({ item: name, outcome: 'held', message: entries.find(entry => entry.hostBound)!.hostBound! }); continue; }
     const recordedCopies = item.copies.filter(copy => !copy.status);
     const recorded = new Map(recordedCopies.map(copy => [copy.tool, copy.hash]));
+    // Each synced copy's own settings are kept as they are now (written only when they changed), so if that copy is deleted
+    // there, Restore puts it back with its settings: a server that was off comes back off (DEL-03).
+    for (const entry of entries) if (recorded.get(entry.tool) === entry.hash) await keep(context, name, entry.server, entry);
     const edited = entries.filter(entry => recorded.has(entry.tool) && recorded.get(entry.tool) !== entry.hash);
     // Deletion: a recorded entry gone from a file that is there and can be read (DEL-01, settled), spread to the others (DEL-02).
     const missing = recordedCopies.filter(copy => live.includes(copy.tool) && !slot[copy.tool]);
@@ -442,7 +446,10 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
       const ref = here ? await keep(context, name, here.server, here) : undefined;
-      if (here) await displace(item, tool, here.hash);
+      // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (Claude Code
+      // catching up through Write now) holds an older version that History already has.
+      const named = edited.length > 0 || chosenNow.has(name) || !!raced;
+      if (here && named) await displace(item, tool, here.hash);
       // The destination's own settings come from the file as reread just before writing, never from an older read.
       const problem = await editEntry(context, tool, name, here?.hash, source.server);
       if (problem) { if (here) undisplace(item, tool, here.hash); results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }

@@ -569,3 +569,23 @@ The Mac real home was not used, because a Central Knot app was running there (a 
 The new log showed two windows created at launch, 93 ms apart. macOS sends `activate` during startup, before startup has made its window. The reopen handler saw no window and made one, then startup made another. Only the second window's requests are accepted, so the first failed to read and showed "Could not read this home". Closing the working window uncovered it. This is the "Could not read this home" every computer-use session saw since e805d21.
 - **Fixed:** `activate` never makes a window before startup has made the first. `createWindow` only ever makes one at a time; a live window is shown instead.
 - The e2e checks there is one page at launch, which matters on macOS.
+
+## Final check, Opus (on 1999d87), with the real Mac home, November 9, 2026
+
+"Not yet", with one blocking item. The real-home run otherwise passed:
+- the skill, MCP server and agent (`ck-test-*`) were managed, edited, deleted after the settle and restored;
+- each pass changed exactly one line in `config.toml` and `.claude.json`;
+- idle passes left the files byte-identical;
+- after cleanup, `~/.claude.json` and `~/.codex/config.toml` were byte-identical to the backup.
+
+All sixth-check findings stayed fixed.
+
+- **Blocking, fixed: Restore of a deletion now brings back the deleting tool's own settings.** Each synced copy's own settings are kept each pass (written only when they change), so a server deleted in Codex comes back with `enabled = false`, its timeout and its tool approvals. It never comes back enabled (DEL-03). Kept in `tests/final-check-opus.test.ts`.
+- **Fixed: no made-up History entry after Write now.** Catching up a Claude Code copy that was behind no longer puts its old entry on record as displaced, so the next pass makes no "edit, winner claude, losers claude" entry. New test in `tests/mcp.test.ts`.
+- **Fixed: a save landing while a settings file is moved aside.** The original is kept beside the file as `<file>.central-knot-<time>.bak` instead of being deleted.
+- **Fixed: the Write now guard also finds Claude Code run through node** (`@anthropic-ai/claude-code`).
+- **Left as is (cosmetic):**
+  - indentation when adding the first server to an empty `"mcpServers": {}`;
+  - practice-home write guards for `~/.codex` and `~/.claude.json` (a practice home never writes there).
+
+**Validation.** 226 unit tests. Linux e2e 123/123.
