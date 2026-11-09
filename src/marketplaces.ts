@@ -31,6 +31,7 @@ export interface MarketplaceHost {
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
   findClis(): Promise<Partial<Record<HarnessId, string>>>;
+  checkAccess: typeof engine.checkAccess;
   readCatalog: typeof engine.readCatalog;
   readRemotePlugin: typeof engine.readRemotePlugin;
   install: typeof engine.install;
@@ -52,7 +53,7 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   }
   return found;
 }
-const realEngine: MarketplaceEngine = { findClis, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall };
+const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall };
 
 const toolIds = (value: unknown): engine.PluginTool[] => onlyAllowed(value, engine.pluginTools);
 /** Reports go to the page without each run's file bytes (kept only for the record here); the page never reads them. */
@@ -191,7 +192,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const text = source.trim();
     if (text.startsWith('-')) return { problem: 'That isn’t a marketplace: owner/repo, a Git URL or a folder.' };
     if (/^(\.\.?|~)([\\/]|$)/.test(text)) return { problem: 'Use the folder’s full path, or choose it with Folder…' };
-    const catalog = await use.readCatalog(await context(), text);
+    const ctx = await context();
+    // A Git source is asked for access before it is fetched: one that can't be read adds nothing and copies nothing (MKT-05).
+    const access = isFolder(text) ? undefined : await use.checkAccess(ctx, text);
+    if (access && access.state !== 'ok') return { problem: access.message };
+    const catalog = await use.readCatalog(ctx, text);
     if (catalog.problem) return { problem: catalog.problem };
     const list = await added();
     const listedAs = list.find(item => engine.sameSource(item, text));
@@ -230,7 +235,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function install(source: string, marketName: string, plugin: string, tools: engine.PluginTool[], home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
-    const ctx = await context({ clis: true });
+    const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };

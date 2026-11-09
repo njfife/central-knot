@@ -26,6 +26,8 @@ export interface PluginContext {
   timeoutMs?: number;
   /** Reads shared within one read-only view (each tool's records and a live folder's catalog read once). Never set for an install or uninstall, which read again after their command. */
   reads?: Map<string, Promise<unknown>>;
+  /** Access checks made in one request, by URL, so tools installing from one Git marketplace check it once (MKT-05). */
+  checked?: Map<string, Promise<AccessResult>>;
 }
 
 /** A read done once per context when the context carries a cache. */
@@ -84,16 +86,41 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
   });
 }
 
-/** Why a Git command failed, in words a person can act on (MKT-05). */
-export function whyGitFailed(code: number | 'timeout' | 'missing', output: string): string {
+/** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
+const git = (args: string[], timeoutMs: number) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
+
+/** What a Git source said when asked for access: ok, or one MKT-05 class with words a person can act on. */
+export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
+
+/** Why a Git command failed, in classes a person can act on (MKT-05). Where the server's answer fits more than one cause, the message names each. */
+export function gitFailure(code: number | 'timeout' | 'missing', output: string): Exclude<AccessResult, { state: 'ok' }> {
   const text = output.toLowerCase();
-  if (code === 'missing') return 'Git is not installed, so this marketplace cannot be read.';
-  if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return 'Can’t reach the marketplace. Check your connection; a company marketplace may need its network or VPN.';
-  if (/host key verification failed/.test(text)) return 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.';
-  if (/passphrase/.test(text)) return 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.';
-  if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';
-  if (/repository not found|not found|404|does not appear to be a git repository|access denied/.test(text)) return 'No access, or no repository there. Check the address and that your account can read it.';
-  return output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.';
+  if (code === 'missing') return { state: 'git-missing', message: 'Git is not installed, so this marketplace cannot be read. Install Git, then try again.' };
+  if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: 'Can’t reach the marketplace. Check your connection; a company marketplace may need its network or VPN.' };
+  if (/host key verification failed/.test(text)) return { state: 'unknown-host', message: 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.' };
+  if (/passphrase/.test(text)) return { state: 'passphrase', message: 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.' };
+  if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
+  if (/repository not found|not found|404|does not appear to be a git repository|access denied/.test(text)) return { state: 'no-access', message: 'No access, or no repository there: the server doesn’t say which. Check the address and that your account can read it.' };
+  return { state: 'unclassified', message: output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.' };
+}
+
+/** Why a Git command failed, in words a person can act on (MKT-05). */
+export const whyGitFailed = (code: number | 'timeout' | 'missing', output: string): string => gitFailure(code, output).message;
+
+/**
+ * Whether this computer can read a Git source, asked with `git ls-remote` before Add reads it and before a tool is told
+ * to fetch it, because a tool's own fetch fails silently (MKT-05). Ok proves access from Central Knot only; a tool's own
+ * result still decides an install. Checks made with one context's `checked` are made once per source.
+ */
+export function checkAccess(context: PluginContext, source: string): Promise<AccessResult> {
+  const url = fetchUrl(source);
+  const ask = async (): Promise<AccessResult> => {
+    const listed = await git(['ls-remote', '--quiet', '--', url, 'HEAD'], context.timeoutMs ?? 20_000);
+    return listed.code === 0 ? { state: 'ok' } : gitFailure(listed.code, listed.output);
+  };
+  if (!context.checked) return ask();
+  if (!context.checked.has(url)) context.checked.set(url, ask());
+  return context.checked.get(url)!;
 }
 
 // ---------- Catalog ----------
@@ -132,16 +159,16 @@ async function cloneInto(context: PluginContext, url: string, target: string, { 
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   await dropStages(target);
-  const git = (args: string[]) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
-  const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage]);
+  const timeoutMs = context.timeoutMs ?? 60_000;
+  const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage], timeoutMs);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
     return whyGitFailed(cloned.code, cloned.output);
   }
   // A pinned commit is checked out in the stage too: the copy takes its place only when it is exactly what was asked for.
   if (sha) {
-    const fetched = await git(['-C', stage, 'fetch', '--depth', '1', '--quiet', 'origin', sha]);
-    const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']) : fetched;
+    const fetched = await git(['-C', stage, 'fetch', '--depth', '1', '--quiet', 'origin', sha], timeoutMs);
+    const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'], timeoutMs) : fetched;
     if (checked.code !== 0) { await rm(stage, { recursive: true, force: true }); return `The commit it names (${sha.slice(0, 12)}) could not be read.`; }
   }
   const refused = check ? await check(stage) : undefined;
@@ -436,6 +463,9 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
   const registered = await registeredSource(context, tool, catalog.name);
   if (!registered) {
+    // The tool's own add fetches a Git marketplace and fails silently, so this computer's access is checked first.
+    const access = catalog.kind === 'git' && context.binaries[tool] ? await checkAccess(context, catalog.source) : undefined;
+    if (access && access.state !== 'ok') return { tool, outcome: 'failed', message: `${access.message} Nothing was added to ${name}.`, runs };
     const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
     runs.push(add);
     if (!add.ok) return { tool, outcome: 'failed', message: `Could not add the marketplace. ${lastLines(add.output)}`.trim(), runs };
