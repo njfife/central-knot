@@ -191,10 +191,16 @@ export function repeats(first: string, second: string): boolean {
   return small.size >= 4 && [...small].filter(word => large.has(word)).length / small.size >= 0.6;
 }
 
-/** Whether `text` starts with `name` as a whole word, after any bullet marks or quotes ("`pdf-reader`: …" yes, "Run pdf-reader" no). */
-const leadsWith = (text: string, name: string) => {
-  const rest = text.replace(/^[^\w]+/, '');
-  return rest.toLowerCase().startsWith(name.toLowerCase()) && !/[\w-]/.test(rest[name.length] ?? '');
+/**
+ * Whether a list item only names a part the page lists: it starts with the part's name ("`pdf-reader`: …", not "Run
+ * pdf-reader"), and what follows is nothing or mostly that part's description. An item that says more (an option, a
+ * step) is the README's own.
+ */
+const onlyNames = (item: string, part: { name: string; description: string }) => {
+  const rest = item.replace(/^[^\w]+/, '');
+  if (!rest.toLowerCase().startsWith(part.name.toLowerCase()) || /[\w-]/.test(rest[part.name.length] ?? '')) return false;
+  const after = rest.slice(part.name.length).replace(/^[^\w]+/, '');
+  return !after || repeats(after, part.description);
 };
 
 const isHeadingAtMost = (block: Block, level: number) => block.kind === 'heading' && block.level <= level;
@@ -204,8 +210,8 @@ const PARTS_HEADING = /^(?:included |available |the )?(?:skills?|commands?|agent
 
 /**
  * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and what only says
- * again what the page lists about the parts in `skipParts`. That is a list of two or more items that each start with a
- * part's name ("pdf-reader: reads PDFs"), and, under a heading such as "Skills", a paragraph in a part's own sub-section
+ * again what the page lists about the parts in `skipParts`. That is a list of two or more items that each only name a
+ * part (see onlyNames: "pdf-reader: reads PDFs"), and, under a heading such as "Skills", a paragraph in a part's own sub-section
  * (its heading is the part's name) that mostly repeats that part's description. Anything else in that sub-section (setup
  * steps, examples, tables) stays. A heading left with nothing under it goes too.
  */
@@ -231,7 +237,7 @@ export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Blo
       }
     }
     if (inPart && block.kind === 'paragraph' && repeats(plainText(block.content), inPart.description)) continue;
-    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => parts.some(part => leadsWith(plainText(item), part.name)))) continue;
+    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => parts.some(part => onlyNames(plainText(item), part)))) continue;
     kept.push(block);
   }
   // From the end, so a heading emptied by one below it goes as well.

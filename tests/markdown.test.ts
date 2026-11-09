@@ -60,10 +60,14 @@ test('A heading line of thousands of spaces is read at once, and closing #s are 
 });
 
 test('A list that only names parts already on the page is left out, with a heading it alone filled', () => {
+  const parts = [{ name: 'pdf-reader', description: 'Reads PDFs' }, { name: 'sheet-tidy', description: 'Tidies sheets' }];
   const source = '## Skills\n\n- `pdf-reader`: reads PDFs\n- **sheet-tidy** — tidies sheets\n\n## Setup\n\n- Run pdf-reader on a file\n- Then sheet-tidy it\n\n## More\n\nIncludes:\n\n- pdf-reader\n- sheet-tidy\n';
-  const blocks = trimRepeats(parseMarkdown(source), { skipParts: [{ name: 'pdf-reader', description: 'Reads PDFs' }, { name: 'sheet-tidy', description: 'Tidies sheets' }] });
+  const blocks = trimRepeats(parseMarkdown(source), { skipParts: parts });
   assert.deepEqual(blocks.map(block => block.kind), ['heading', 'list', 'heading', 'paragraph']);
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Setup');
+  // Items that start with a part's name but say something of their own (a usage, an option) are the README's.
+  const usage = trimRepeats(parseMarkdown('## Usage\n\n- `pdf-reader`: run it with --layout table\n- `sheet-tidy`: add --keep-formulas\n'), { skipParts: parts });
+  assert.deepEqual(usage.map(block => block.kind), ['heading', 'list']);
 });
 
 test('Under a Skills heading, a skill’s paragraph that repeats its description goes; setup steps and examples stay', () => {

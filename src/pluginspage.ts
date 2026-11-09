@@ -23,8 +23,9 @@ function addBox(first: boolean) {
     return h('div.market-add', {}, button({ variant: 'ghost', size: 'small', icon: 'plus', label: 'Add marketplace', id: 'open-add-marketplace', disabled: !!app.busy,
       onclick: () => { market.addOpen = true; rerender(); requestAnimationFrame(() => document.getElementById('marketplace-source')?.focus()); } }));
   }
-  const add = () => { if (market.draftSource.trim()) void addMarketplace(market.draftSource.trim()); };
-  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
+  // One add at a time: Enter while one is being read does nothing (the box is disabled then too).
+  const add = () => { if (!app.busy && market.draftSource.trim()) void addMarketplace(market.draftSource.trim()); };
+  const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', disabled: !!app.busy, placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
     oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = !!app.busy || !market.draftSource.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); if (event.key === 'Escape' && !first) { market.addOpen = false; rerender(); } } });
   const close = first ? null : closeButton(() => { market.addOpen = false; market.draftSource = ''; rerender(); }, { id: 'close-add-marketplace', label: 'Close' });
