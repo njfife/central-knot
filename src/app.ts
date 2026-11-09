@@ -29,6 +29,8 @@ export const state = {
   /** The installed cell waiting for its confirming click to uninstall, and what that click will do. */
   pluginConfirm: undefined as string | undefined,
   pluginConfirmText: undefined as string | undefined,
+  /** Armed "Uninstall from all": the tools a bulk install reached. */
+  pluginConfirmAll: undefined as HarnessId[] | undefined,
   /** The plugin the last install or uninstall was for, so its report can offer the reverse. */
   pluginLast: undefined as { source: string; market: string; plugin: string } | undefined,
   /** The plugin and tools an install or uninstall is running for, so their boxes show it is working. */
@@ -273,6 +275,26 @@ export const uninstallPlugin = (marketplace: string, plugin: string, tool: Harne
   state.pluginResult = result;
   state.pluginLast = { source, market: marketplace, plugin };
   announce(result.stopped ?? result.reports.map(report => report.message).join(' '));
+});
+
+/** The way back from a bulk install: one confirm, then each tool's own uninstall in turn, reported together. */
+export const uninstallPluginAll = (marketplace: string, plugin: string, tools: HarnessId[]) => busy(`Uninstalling ${plugin} from ${tools.length} tools…`, async () => {
+  const source = state.plugins?.marketplaces.find(entry => entry.name === marketplace)?.source ?? '';
+  state.pluginWorking = { plugin, tools };
+  render();
+  const reports: PluginActionResult['reports'] = [];
+  let last: PluginActionResult | undefined;
+  try {
+    for (const tool of tools) {
+      last = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home);
+      reports.push(...last.reports);
+      if (last.stopped) break;
+    }
+  } finally { state.pluginWorking = undefined; }
+  if (last?.view) state.plugins = last.view;
+  state.pluginResult = last ? { ...last, reports } : last;
+  state.pluginLast = { source, market: marketplace, plugin };
+  announce(last?.stopped ?? reports.map(report => `${names[report.tool]}: ${report.message}`).join(' '));
 });
 
 // ---------- History ----------

@@ -1,6 +1,6 @@
 // Plugins: marketplaces, what each tool has installed from them, and Install or Uninstall through each tool's own commands.
 // Every change is a real install or removal in that tool, run at once and confirmed by reading the tool's record.
-import { addMarketplace, forgetMarketplace, installPlugin, pickMarketplaceFolder, refreshMarketplace, rerender, shownPath, showPage, state, uninstallPlugin } from './app.ts';
+import { addMarketplace, forgetMarketplace, installPlugin, pickMarketplaceFolder, refreshMarketplace, rerender, shownPath, showPage, state, uninstallPlugin, uninstallPluginAll } from './app.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { ActionReport, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
@@ -184,11 +184,18 @@ function reports() {
   if (result.problem || result.stopped) return h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, result.problem ?? result.stopped));
   if (!result.reports.length) return null;
   const changed = result.reports.flatMap(report => report.runs.flatMap(run => run.changed.map(entry => entry.path)));
+  const installedHere = result.reports.filter(report => report.outcome === 'installed').map(report => report.tool);
   return h('div.band.plugin-report', { role: 'status' },
     h('div.plugin-report-lines', {}, result.reports.map(report => h('p', {},
       icon(report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'check' : report.outcome === 'not-known' ? 'circle-question-mark' : 'triangle-alert', 14, report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'tone-success' : 'tone-warning'),
       state.pluginLast ? h('strong.item-name', {}, `${state.pluginLast.plugin} · `) : null, h('strong', {}, `${names[report.tool]}: `), report.message, reverse(report)))),
-    changed.length ? h('p.plugin-report-files', {}, `Changed by the tools’ own commands: ${[...new Set(changed)].map(path => shownPath(path)).join(', ')}. To reverse, use the link on each line above.`) : null,
+    changed.length || installedHere.length > 1 ? h('p.plugin-report-files', {}, changed.length ? `Changed by the tools’ own commands: ${[...new Set(changed)].map(path => shownPath(path)).join(', ')}. ` : '',
+      // One click installed it in several tools: one way back, through the same confirm.
+      installedHere.length > 1 && state.pluginLast ? button({ variant: 'outline', size: 'small', label: `Uninstall from all ${installedHere.length}`, id: 'report-uninstall-all', disabled: !!state.busy, onclick: () => {
+        state.pluginConfirm = 'all'; state.pluginConfirmAll = installedHere;
+        state.pluginConfirmText = `Uninstall ${state.pluginLast!.plugin} from ${installedHere.map(tool => names[tool]).join(', ')}? You can reinstall it right after. Esc cancels.`;
+        rerender();
+      } }) : changed.length ? 'To reverse, use the link on each line above.' : '') : null,
     h('button.band-dismiss', { type: 'button', id: 'report-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.pluginResult = undefined; rerender(); } }, icon('x', 12)));
 }
 
@@ -207,8 +214,11 @@ export function pluginsPage() {
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       state.pluginConfirm ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, state.pluginConfirmText ?? ''),
-        h('button.text-action.text-danger', { type: 'button', id: 'plugin-confirm-go', onclick: () => (document.getElementById(state.pluginConfirm!) as HTMLButtonElement | null)?.click() }, 'Uninstall'),
-        h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; rerender(); } }, 'Cancel')) : null,
+        h('button.text-action.text-danger', { type: 'button', id: 'plugin-confirm-go', onclick: () => {
+          if (state.pluginConfirm === 'all' && state.pluginLast && state.pluginConfirmAll) { const tools = state.pluginConfirmAll; state.pluginConfirm = undefined; state.pluginConfirmAll = undefined; void uninstallPluginAll(state.pluginLast.market, state.pluginLast.plugin, tools); return; }
+          (document.getElementById(state.pluginConfirm!) as HTMLButtonElement | null)?.click();
+        } }, state.pluginConfirm === 'all' ? `Uninstall from all ${state.pluginConfirmAll?.length ?? ''}` : 'Uninstall'),
+        h('button.text-action', { type: 'button', id: 'plugin-confirm-cancel', onclick: () => { state.pluginConfirm = undefined; state.pluginConfirmAll = undefined; rerender(); } }, 'Cancel')) : null,
       state.busy && /^(Installing|Uninstalling|Reading the marketplace|Refreshing|Removing)/.test(state.busy) ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, /^(Installing|Uninstalling)/.test(state.busy) ? `${state.busy} This runs the tool’s own command and can take a few seconds.` : `${state.busy} Nothing is installed by this.`)) : null,
       outcomeBand(),
       reports()),
