@@ -619,11 +619,12 @@ function details(skill: SampleSkill, closable = true) {
     : differs ? 'Not managed yet. Its copies differ.' : kind === 'skills' ? 'Unmanaged · edits don’t sync between tools' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
 
   // What each tool row's two actions mean, said once under the rows, before the first click.
-  // Managed skills sync, so a third term (a tool's box in the table) is told apart; unmanaged ones have only the two.
+  // Managed skills sync (as they will be after Apply all), so a third term (a tool's box in the table) is told apart; unmanaged
+  // ones have only the two.
   const switchNote = kind === 'skills' && !designMode ? h('p.details-limits.details-note.details-switch-note', {}, icon('info', 12, 'tone-muted'), h('span', {},
-    h('strong', {}, 'Disabled'), committedOf(skill.key).managed ? ': the copy stays and keeps syncing, but that tool doesn’t load it from its next session. ' : ': the copy stays, but that tool doesn’t load it from its next session. ',
-    h('strong', {}, 'Remove'), committedOf(skill.key).managed ? ': the copy is taken out and syncing there stops; History keeps it. ' : ': the copy is taken out; History keeps it.',
-    committedOf(skill.key).managed ? [h('strong', {}, 'Unticking a tool’s box'), ' in the table: syncing there stops; the copy stays.'] : null)) : null;
+    h('strong', {}, 'Disabled'), skill.managed ? ': the copy stays and keeps syncing, but that tool doesn’t load it from its next session. ' : ': the copy stays, but that tool doesn’t load it from its next session. ',
+    h('strong', {}, 'Remove'), skill.managed ? ': the copy is taken out and syncing there stops; History keeps it. ' : ': the copy is taken out; History keeps it.',
+    skill.managed ? [h('strong', {}, 'Unticking a tool’s box'), ' in the table: syncing there stops; the copy stays.'] : null)) : null;
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   // MCP keeps one layout in every state (a row per tool with its status and settings file), so it never takes the one-line form.
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
