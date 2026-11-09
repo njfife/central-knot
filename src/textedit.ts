@@ -352,7 +352,8 @@ function cutTables(text: string, tables: TomlTable[], replacement?: string, { en
  * undefined). Everything else, including comments and other tables, stays byte for byte. A new table goes at the end.
  */
 export function setTomlTable(text: string, prefix: string[], name: string, body: string | undefined): string {
-  const owns = (table: TomlTable) => table.path.length > prefix.length && prefix.every((part, index) => table.path[index] === part) && table.path[prefix.length] === name;
+  // `[[…]]` blocks are never a table's own (the MCP reader leaves them out too), so rewriting a server keeps them.
+  const owns = (table: TomlTable) => !table.array && table.path.length > prefix.length && prefix.every((part, index) => table.path[index] === part) && table.path[prefix.length] === name;
   const mine = readTomlTables(text).filter(owns);
   if (!mine.length) return body === undefined ? text : appendToml(text, body);
   // Rebuilt in place of the first of its tables; its other tables are dropped wherever they are.

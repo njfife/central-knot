@@ -4,7 +4,8 @@ import type { HarnessId } from './types.ts';
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
 /** Sorts tool ids into the order the app lists tools everywhere (columns, notes, results). */
-export const byToolOrder = (first: HarnessId, second: HarnessId) => Object.keys(toolNames).indexOf(first) - Object.keys(toolNames).indexOf(second);
+const TOOL_ORDER = Object.keys(toolNames);
+export const byToolOrder = (first: HarnessId, second: HarnessId) => TOOL_ORDER.indexOf(first) - TOOL_ORDER.indexOf(second);
 
 /** A tool's display name from an id that may come from a file or a report (an unknown id is shown as it is). */
 export const toolName = (tool: string) => (toolNames as Record<string, string>)[tool] ?? tool;

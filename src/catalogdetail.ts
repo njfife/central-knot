@@ -116,10 +116,19 @@ async function section(root: string, folder: string, named: unknown, key: string
   return Object.assign({}, ...parts);
 }
 
-/** The skills an installed copy of a plugin holds, by name: those its plugin.json lists, else its skills folder. */
-export async function skillNamesIn(folder: string): Promise<string[]> {
-  const listed = strings((await jsonInside(folder, join(folder, '.claude-plugin/plugin.json')))?.skills)?.map(path => resolve(folder, path));
-  return (await skillsIn(folder, listed ?? [join(folder, 'skills')])).map(part => part.name);
+/** What a plugin says about its parts: its plugin.json, with its marketplace entry winning, as the tools read it. */
+async function declaredOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Record<string, unknown>> {
+  return { ...((await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {}), ...entry };
+}
+/** The paths a plugin lists for one kind of part (`skills`, `commands`, …), from its folder; undefined when it lists none. */
+const listedIn = (folder: string, declared: Record<string, unknown>, key: string) => strings(declared[key])?.map(path => resolve(folder, path));
+
+/**
+ * The skills an installed copy of a plugin holds, by name, read as its page reads the marketplace's copy: those its
+ * marketplace `entry` or plugin.json lists, else its skills folder.
+ */
+export async function skillNamesIn(folder: string, entry: Record<string, unknown> = {}): Promise<string[]> {
+  return (await skillsIn(folder, listedIn(folder, await declaredOf(folder, entry, folder), 'skills') ?? [join(folder, 'skills')])).map(part => part.name);
 }
 
 /**
@@ -127,10 +136,8 @@ export async function skillNamesIn(folder: string): Promise<string[]> {
  * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginContents> {
-  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
-  // The marketplace entry wins over plugin.json, as the tools read it.
-  const declared = { ...pluginJson, ...entry };
-  const listed = (key: string) => strings(declared[key])?.map(path => resolve(folder, path));
+  const declared = await declaredOf(folder, entry, root);
+  const listed = (key: string) => listedIn(folder, declared, key);
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');

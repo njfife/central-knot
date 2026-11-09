@@ -88,14 +88,11 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
 
 /**
  * Whether a skill switch choice means nothing now: the tool can't switch that skill here (pluginstatus.cantSwitchSkill:
- * not installed, no switch, not in the installed copy…), it is already as chosen, or, to turn it on, it is held off by a
- * switch that isn't the plugin's own.
+ * not installed, no switch, not in the installed copy, held off…) or it already is as chosen.
  */
 function skillChoiceStale(view: PluginsView, entry: MarketplaceView, op: PluginOp): boolean {
   if (!op.skill || cantSwitchSkill(view, entry, op.plugin, op.tool, op.skill)) return true;
-  const off = skillOff(entry, op.plugin, op.tool, op.skill);
-  if (op.action === 'skill-off') return !!off;
-  return !off || !!off.held;
+  return !!skillOff(entry, op.plugin, op.tool, op.skill) === (op.action === 'skill-off');
 }
 
 /** The skill switches chosen for one plugin, optionally only in one tool or for one skill. */
@@ -139,10 +136,14 @@ export function batches(ops: PluginOp[]): Step[] {
 
 const OPPOSITE: Record<PluginAction, PluginAction> = { install: 'remove', remove: 'install', 'skill-off': 'skill-on', 'skill-on': 'skill-off' };
 
-/** The way back: only what this run really changed, reversed. "Already installed", failures and unknowns are left alone. */
+/**
+ * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
+ * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone.
+ */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed)
-  .map(({ report: _report, ...op }) => ({ ...op, action: OPPOSITE[op.action] }));
+  .map(({ report: _report, ...op }) => ({ ...op, action: OPPOSITE[op.action] }))
+  .reverse();
 
 /** A tool did what was asked (installed, uninstalled, turned a skill off or on), whether this run changed it or it already was. */
 export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'uninstalled' || report.outcome === 'skill-off' || report.outcome === 'skill-on';
@@ -189,12 +190,16 @@ export function resultParts(lines: ResultLine[], undo: boolean, { short = false,
     const text = short ? line.short : line.text;
     if (at) parts.push('; ');
     // On the plugin's own page its name is already in the breadcrumb: "Installed in Codex." / "pdf-reader turned off in Codex."
-    if (here?.plugin === line.plugin && here.source === line.source) parts.push(at || undo || line.skill ? text : text[0]!.toUpperCase() + text.slice(1));
+    // Only a line that starts the sentence takes a capital, and never a skill's name.
+    const opens = !at && !undo && !line.skill;
+    if (here?.plugin === line.plugin && here.source === line.source) parts.push(opens ? capitalized(text) : text);
     // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
     else parts.push({ plugin: line.plugin, source: line.source }, `${undo && !line.skill ? ' ' : ': '}${text}`);
   });
   return [...parts, '.'];
 }
+const capitalized = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 /** resultParts as plain text, for the screen reader and the tooltip. */
 export const resultSentence = (lines: ResultLine[], undo: boolean) => resultParts(lines, undo).map(part => (typeof part === 'string' ? part : part.plugin)).join('');
 

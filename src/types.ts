@@ -344,6 +344,8 @@ export interface PluginsView {
   marketplaces: MarketplaceView[];
   /** Tools present only as a desktop app's bundled copy, with no CLI to run plugin commands. */
   desktopOnly?: HarnessId[];
+  /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
+  versions?: Partial<Record<HarnessId, string>>;
 }
 
 // ---------- MCP servers ----------

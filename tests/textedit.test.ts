@@ -102,6 +102,7 @@ test('TOML: each [[array]] block is read as its own table, and blocks are droppe
   const blocks = readTomlTables(text).filter(table => table.array);
   assert.deepEqual(blocks.map(table => [table.path.join('.'), table.entries[0]!.value]), [['skills.config', 'a:one'], ['skills.config', '/p/SKILL.md']]);
   assert.equal(setTomlTable(text, ['mcp_servers'], 'massive', undefined).includes('[[skills.config]]\nname = "a:one"'), true, 'a server edit leaves the blocks alone');
+  assert.ok(setTomlTable(`${codexToml}[[mcp_servers.massive.extra]]\nx = 1\n`, ['mcp_servers'], 'massive', undefined).includes('[[mcp_servers.massive.extra]]'), 'even one under the server: the MCP reader never carried it');
   const dropped = editTomlArray(text, ['skills', 'config'], block => block.entries[0]!.value === 'a:one');
   assert.equal(dropped, `${codexToml}\n# about the next one\n[[ skills.config ]]\npath = "/p/SKILL.md"\nenabled = false\n`);
   assert.equal(editTomlArray(editTomlArray(codexToml, ['skills', 'config'], () => false, { name: 'b:two', enabled: false }), ['skills', 'config'], () => true), codexToml, 'an added block taken out again leaves the file as it was');

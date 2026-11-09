@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
+import { compareVersions } from '../src/values.ts';
 import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
@@ -337,13 +338,15 @@ test('Codex turns one skill of a plugin off by name in config.toml and back on t
     assert.deepEqual((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { skillsOff?: unknown }).skillsOff, [{ skill: 'second' }]);
     assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'second', 'codex-cli', true, '/m')).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
-    // A block the person kept for the skill, and a file with no final newline, come back exactly on the way back (Undo).
-    const kept = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true`;
+    // Blocks the person kept for the skills, and a file with no final newline, come back exactly when Undo turns them
+    // back last first.
+    const kept = `${original}\n[[skills.config]]\nname = "full:one" # keep on\nenabled = true\n\n[[skills.config]]\nname = "full:second"\nenabled = true`;
     await writeFile(config, kept);
-    await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', false, '/m');
-    await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', true, '/m');
+    for (const skill of ['one', 'second']) await setSkill(box.context, 'ck-test-market', 'full', skill, 'codex-cli', false, '/m');
+    for (const skill of ['second', 'one']) await setSkill(box.context, 'ck-test-market', 'full', skill, 'codex-cli', true, '/m');
     assert.equal(await readFile(config, 'utf8'), kept);
     // Codex loads the highest cached version (or `local`), so that copy's skills are the ones it switches.
+    assert.deepEqual(['1.0.0', '1.0.0-beta.10', '0.9.0', '1.0.0-beta.2'].sort(compareVersions), ['0.9.0', '1.0.0-beta.2', '1.0.0-beta.10', '1.0.0']);
     for (const older of ['0.9.0', '1.0.0-beta.10', '1.0.0-beta.2']) await put(join(box.home, `.codex/plugins/cache/ck-test-market/full/${older}/skills/old/SKILL.md`), '---\nname: old\n---\nB\n');
     assert.equal((await installState(box.context, 'codex-cli', 'ck-test-market', 'full') as { path?: string }).path, copy);
     // The same list written as a value can't take a [[skills.config]] block (TOML forbids both): it is left alone.
@@ -381,6 +384,9 @@ exit 0
     assert.equal((await setSkill(context, 'ck-test-market', 'full', 'one', 'copilot-cli', true, '/m')).outcome, 'skill-on');
     assert.equal((await setSkill(context, 'ck-test-market', 'full', 'quiet', 'copilot-cli', false, '/m')).outcome, 'failed', 'exit 0 with nothing recorded is not a change');
     assert.equal((await setSkill(context, 'ck-test-market', 'full', 'gone', 'copilot-cli', false, '/m')).message, 'The copy Copilot CLI has installed has no skill named “gone”.');
+    // Skills its marketplace entry lists (outside skills/) are the copy's skills too, as the page reads them.
+    await put(join(copy, 'custom/extra/SKILL.md'), '---\nname: extra\n---\nB\n');
+    assert.deepEqual((await installState(context, 'copilot-cli', 'ck-test-market', 'full', { skills: ['./custom/extra'] }) as { skills?: string[] }).skills, ['extra']);
     // A bare name turns off every skill so named: one this plugin has is held; one it doesn't have isn't its at all.
     await writeFile(settings, JSON.stringify({ disabledSkills: ['one', 'my-notes'] }));
     assert.deepEqual((await installState(context, 'copilot-cli', 'ck-test-market', 'full') as { skillsOff?: { skill: string }[] }).skillsOff?.map(off => off.skill), ['one']);

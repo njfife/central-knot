@@ -2,7 +2,7 @@
 // it, whether it is installed there, and a short summary of what it holds.
 import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
-import { SAFE_NAME } from './values.ts';
+import { SAFE_NAME, compareVersions } from './values.ts';
 import { toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
@@ -62,18 +62,44 @@ export const notInCopy = (tool: HarnessId, skill: string) => `The copy ${names[t
 export const UNSAFE_SKILL_NAME = 'Its name has characters Central Knot doesn’t pass to Copilot CLI’s command.';
 
 /**
- * Why one skill of this plugin can't be turned off or on in this tool here, if it can't: the tool has no such switch, the
- * plugin isn't installed there or its installed copy lacks the skill, its name can't go on Copilot CLI's command line,
- * Copilot CLI's command is missing, or writing isn't allowed in this home.
+ * Why one skill of this plugin can't be switched in this tool here, if it can't: the tool has no such switch, the plugin
+ * isn't installed there or its installed copy lacks the skill, its name can't go on Copilot CLI's command line, it is held
+ * off by a switch that isn't the plugin's own, Copilot CLI's command is missing, or writing isn't allowed in this home.
  */
 export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string): string | undefined {
-  if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
   const state = stateOf(entry, plugin, tool);
-  if (state.state !== 'installed') return `It isn’t installed in ${names[tool]}.`;
-  if (state.skills && !state.skills.includes(skill)) return notInCopy(tool, skill);
-  if (tool === 'copilot-cli' && !SAFE_NAME.test(skill)) return UNSAFE_SKILL_NAME;
+  if (state.state !== 'installed') return NO_SKILL_SWITCH[tool] ?? `It isn’t installed in ${names[tool]}.`;
+  const off = skillOff(entry, plugin, tool, skill);
+  // Only turning one off waits for a tested build; turning one back on is always offered.
+  const blocked = skillSwitchBlock(tool, state.skills, skill) ?? off?.held ?? (off ? undefined : untestedBuild(tool, view.versions?.[tool]));
+  if (blocked) return blocked;
   if (!view.canWrite) return PREVIEW_ONLY;
   return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
+}
+
+/** The oldest build of each tool its switch for one plugin skill was exercised on (capability data, Appendix B). */
+export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'codex-cli': '0.142.3', 'copilot-cli': '1.0.107' };
+
+/**
+ * Why turning off one plugin skill isn't offered on this build of a tool (ENB-01: native Disable only where it was
+ * verified): its version is older than the switch was tested on, or couldn't be read. Undefined when it may be offered.
+ */
+export function untestedBuild(tool: HarnessId, version: string | undefined): string | undefined {
+  const from = SKILL_SWITCH_TESTED_FROM[tool];
+  if (!from) return undefined;
+  if (!version) return `${names[tool]}’s version couldn’t be read, so turning off one of its plugin skills isn’t offered (verified from ${from}).`;
+  return compareVersions(version, from) < 0 ? `Not verified on this build of ${names[tool]} (${version}): turning off one plugin skill is verified from ${from}.` : undefined;
+}
+
+/**
+ * Why a tool can't switch this skill of its installed copy (whose skills are `skills`, when read), in any home: it has no
+ * such switch, the copy lacks the skill, or the name can't go on Copilot CLI's command line. The page (cantSwitchSkill)
+ * and the engine (plugins.setSkill) both ask this.
+ */
+export function skillSwitchBlock(tool: HarnessId, skills: string[] | undefined, skill: string): string | undefined {
+  if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
+  if (skills && !skills.includes(skill)) return notInCopy(tool, skill);
+  return tool === 'copilot-cli' && !SAFE_NAME.test(skill) ? UNSAFE_SKILL_NAME : undefined;
 }
 
 /** Whether a tool has this skill of an installed plugin turned off, and the switch's own record of it. */

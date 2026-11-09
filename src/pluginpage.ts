@@ -92,20 +92,21 @@ const partList = (owner: string, parts: { name: string; text: string; mono?: boo
   return h(`li${open ? '.clamped' : ''}${part.end ? '.with-end' : ''}`, {},
     h('code.plugin-name', {}, part.name),
     part.text || part.note ? h('span.plugin-part-body', {}, part.text ? h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text) : null, part.text ? more : null,
-      part.note ? h('span.plugin-part-note', {}, ...inlineMarkdown(part.note, openLink)) : null) : h('span'),
+      // A row with switches keeps its middle column even with nothing in it, so the switches stay in the third.
+      part.note ? h('span.plugin-part-note', {}, ...inlineMarkdown(part.note, openLink)) : null) : part.end ? h('span') : null,
     part.end ?? null);
 }));
 
 /**
  * One skill's switch in one tool where the plugin is installed (ENB-06): on or off there, or, chosen for Apply all, in the
- * position it will take, marked as waiting. One that can't change here (held off by a switch that isn't the plugin's own,
- * or `cantSwitchSkill`) shows where it stands with a lock, can't be clicked, and its row or column says why.
+ * position it will take, marked as waiting. One that can't change here (`cantSwitchSkill`, such as held off by a switch
+ * that isn't the plugin's own) shows where it stands with a lock, can't be clicked, and its row or column says why.
  */
 function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, skill: string, marketIndex: number) {
   const off = skillOff(entry, plugin.name, tool, skill);
   const chosen = queued(market.draft, entry.source, plugin.name, tool, skill);
   const on = chosen ? chosen === 'skill-on' : !off;
-  const why = chosen ? undefined : stuckReason(view, entry, plugin.name, tool, skill);
+  const why = chosen ? undefined : cantSwitchSkill(view, entry, plugin.name, tool, skill);
   const where = `${skill} in ${names[tool]}`;
   const label = chosen ? `${where}: turned ${on ? 'on' : 'off'} on Apply all. Click to leave it ${on ? 'off' : 'on'}.`
     : `${where}: ${on ? 'on' : 'off'}. ${why ?? `Click to turn it ${on ? 'off' : 'on'} on Apply all.`}`;
@@ -118,10 +119,6 @@ function skillSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
     control, why ? icon('lock', 11, 'skill-switch-lock') : null);
 }
 
-/** Why a skill's switch in a tool can't change here, if it can't: held off by a switch that isn't the plugin's own, or `cantSwitchSkill`. */
-const stuckReason = (view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string) =>
-  skillOff(entry, plugin, tool, skill)?.held ?? cantSwitchSkill(view, entry, plugin, tool, skill);
-
 /**
  * The plugin's skills. Where it is installed, each skill has a switch per tool that can turn one skill off (ENB-06), under
  * that tool's name. Every reason a switch can't change is on the page, not only in hover text: once above the list when it
@@ -133,11 +130,17 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const tools = view.tools.filter(tool => installed(entry, plugin.name, tool));
   const switchable = tools.filter(tool => !NO_SKILL_SWITCH[tool]);
   const switches = (skill: string) => h('span.skill-switches', {}, switchable.map(tool => skillSwitch(view, entry, plugin, tool, skill, marketIndex)));
-  const reasons = (tool: HarnessId) => skills.map(part => stuckReason(view, entry, plugin.name, tool, part.name));
-  const columnWide = new Set(switchable.map(tool => reasons(tool)).filter(list => list[0] && list.every(why => why === list[0])).map(list => list[0]!));
+  const why = (tool: HarnessId, skill: string) => cantSwitchSkill(view, entry, plugin.name, tool, skill);
+  // A reason every skill in a column shares (a missing CLI, a preview-only home) is said once above the list. A held
+  // skill's reason is its own, so held skills don't count against the rest of their column.
+  const sharedReason = (tool: HarnessId) => {
+    const reasons = skills.filter(part => !skillOff(entry, plugin.name, tool, part.name)?.held).map(part => why(tool, part.name));
+    return reasons[0] && reasons.every(reason => reason === reasons[0]) ? reasons[0] : undefined;
+  };
+  const columnWide = new Set(switchable.map(sharedReason).filter((reason): reason is string => !!reason));
   const rowNote = (skill: string) => {
     const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, skill) === action).map(tool => names[tool]);
-    const stuck = new Set(switchable.map(tool => stuckReason(view, entry, plugin.name, tool, skill)).filter((why): why is string => !!why && !columnWide.has(why)));
+    const stuck = new Set(switchable.map(tool => why(tool, skill)).filter((reason): reason is string => !!reason && !columnWide.has(reason)));
     const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...stuck];
     return notes.filter(Boolean).join(' ') || undefined;
   };

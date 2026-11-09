@@ -8,10 +8,11 @@ import { marketplacePage, pluginDetail, readmeIn, sourceLabel } from './catalogd
 import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
+import { probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
-import { heldReason } from './pluginstatus.ts';
+import { heldReason, untestedBuild } from './pluginstatus.ts';
 import { SAFE_NAME, isFolder, isHttps, onlyAllowed } from './values.ts';
 import { toolNames } from './words.ts';
 
@@ -69,6 +70,13 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
   const saveAdded = (list: string[]) => writeDurably(listPath, `${JSON.stringify(list, null, 2)}\n`);
+  /** Each CLI's version by its path, read once (`--version`) for a plugin skill switch's tested range. */
+  const versionReads = new Map<string, Promise<string | undefined>>();
+  const cliVersion = (binary: string | undefined) => {
+    if (!binary) return Promise.resolve(undefined);
+    if (!versionReads.has(binary)) versionReads.set(binary, probeVersion(binary).then(probe => probe.version));
+    return versionReads.get(binary)!;
+  };
   /** A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them). */
   const context = async ({ clis = false } = {}): Promise<engine.PluginContext> => {
     const open = host.home();
@@ -123,7 +131,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     const states: MarketplaceView['states'] = {};
     for (const plugin of catalog.plugins) {
-      const pairs = await Promise.all(tools.map(async tool => [tool, held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name)] as const));
+      const pairs = await Promise.all(tools.map(async tool => [tool, held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry)] as const));
       states[plugin.name] = Object.fromEntries(pairs);
     }
     return states;
@@ -159,7 +167,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh === true || (fresh !== undefined && engine.sameSource(fresh, source))))));
     const snapshots = host.home()?.snapshots ?? [];
     const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
-    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly };
+    const versions = Object.fromEntries((await Promise.all(tools.map(async tool => [tool, await cliVersion(ctx.binaries[tool])] as const))).filter(([, version]) => version));
+    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, versions };
   }
 
   /** A plugin's contents and README: from the marketplace's files, or from its own repository when it lives elsewhere. */
@@ -255,7 +264,12 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function setSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
-    return { reports: withoutFileBytes([await use.setSkill(await context({ clis: true }), marketName, plugin, skill, tool, on, source)]) };
+    const ctx = await context({ clis: true });
+    const untested = on ? undefined : untestedBuild(tool, await cliVersion(ctx.binaries[tool]));
+    if (untested) return { reports: failedFor([tool], untested) };
+    // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's.
+    const { catalog } = await catalogFor(ctx, source, { counts: false });
+    return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
   return { view, detail, readme, add, refresh, forget, install, uninstall, setSkill };
