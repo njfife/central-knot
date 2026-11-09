@@ -35,6 +35,9 @@ export function loadRepoSoon(): void {
 }
 
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
+/** The check (fetch) in flight, if any: a load that overtakes it waits for this one rather than starting another. */
+let inFlight: Promise<RepoView | null> | undefined;
+
 export async function loadRepo(check = false): Promise<void> {
   // A load that overtakes a check still in flight carries the check on, so "Checking…" always ends.
   check ||= repo.checking;
@@ -47,7 +50,8 @@ export async function loadRepo(check = false): Promise<void> {
   if (!check || !view?.connected || !view.access.allowed) return;
   repo.checking = true;
   rerender();
-  try { view = (await api().repo(true)) ?? view; } catch { /* the view already shown stands */ }
+  inFlight ??= api().repo(true).finally(() => { inFlight = undefined; });
+  try { view = (await inFlight) ?? view; } catch { /* the view already shown stands */ }
   if (turn !== loads) return;
   repo.view = view;
   repo.checking = false;

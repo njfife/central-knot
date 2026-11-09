@@ -296,7 +296,9 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
+    // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
+    const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
+    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {}, edited: edited.length ? edited : undefined });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }

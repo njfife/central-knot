@@ -320,7 +320,7 @@ async function removeChecked(context: ShareContext, directory: string, expected:
 }
 
 /** Puts content about to be overwritten or removed on record first (see RecordItem.displaced). */
-function displace(item: RecordItem, tool: HarnessId, hash: string) {
+export function displace(item: RecordItem, tool: HarnessId, hash: string) {
   item.displaced ??= [];
   if (!item.displaced.some(entry => entry.hash === hash)) item.displaced.push({ tool, hash });
 }

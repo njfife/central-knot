@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { agentHash, agentText, agentTools, agentsView, applyAgents, fileFor, fromMarkdown, keepAgentVersion, keyOf, readAgentRecord, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
-import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
+import { applyChanges, deleteEverywhere, displace, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpView, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { gitEnv, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { copyTree, errorCode, itemKey, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
@@ -277,14 +277,10 @@ async function writeSkills(dir: string, skills: SkillFacts[], unsent: Unsent) {
 async function writeServers(context: ShareContext, dir: string, tools: HarnessId[], unsent: Unsent) {
   await clearLayout(dir, 'mcp', entry => entry.isFile() && entry.name.endsWith('.json'));
   const view = await mcpView(context, tools);
-  const record = await readMcpRecord(context.home);
   const entries = new Map<string, NeutralServer>();
   for (const tool of view.tools) for (const entry of (await readTool(context, tool)).entries) entries.set(`${entry.tool}\0${entry.name}`, entry.server);
   for (const facts of view.servers.filter(server => server.managed)) {
-    // The MCP view doesn't mark edits waiting to spread (skills and agents do); here they are: a recorded copy now holding other content.
-    const copies = record.items[facts.name]?.copies ?? [];
-    const edited = copies.filter(copy => !copy.status && facts.copies[copy.tool] && facts.copies[copy.tool]!.hash !== copy.hash).map(copy => copy.tool);
-    const tool = sourceTool({ ...facts, edited }, ['claude-cli']);
+    const tool = sourceTool(facts, ['claude-cli']);
     const server = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.name}`) : undefined;
     if (facts.held || !server) { unsendable(unsent, serverKey(facts.name), 'mcp', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s settings could be read for it just now.')); continue; }
     await writeDurably(join(dir, 'mcp', `${toFile(facts.name)}.json`), `${JSON.stringify(jsonEntry('claude-cli', server), null, 2)}\n`);
@@ -404,7 +400,6 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     if (inRepo?.problem) incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: inRepo.problem });
     // The last Pull couldn't finish it. Unless it was edited here since, the repo's version (as it is now) is still what comes in; an
     // edit since keeps the usual rules: it beats the repo's deletion, and gives way to the repo's edit with History keeping it.
-    // (A copy that couldn't be read when the Pull failed has nothing to compare with: the repo's version comes in.)
     else if (unfinished[key]) {
       const editedHere = editedSince(unfinished[key], atHere);
       if (editedHere && atHere && !inRepo) outgoing.push({ ...row, change: 'added', keptHere: true });
@@ -443,7 +438,7 @@ async function buildView(context: ShareContext, base?: BaseInstructions): Promis
   const sides = await stageSides(context, dir, state, base);
   // An unfinished item that is now the same here and in the repo (put right by hand, say) is finished.
   const settled = Object.keys(state.unfinished ?? {}).filter(key => !sides.unsent.has(key) && same(sides.latest.get(key), sides.here.get(key)));
-  if (settled.length) {
+  if (settled.length && access.allowed) {
     for (const key of settled) delete state.unfinished![key];
     await saveState(context.home, { ...state, unfinished: Object.keys(state.unfinished!).length ? state.unfinished : undefined });
   }
@@ -579,7 +574,7 @@ async function pullSkill(context: ShareContext, dir: string, change: RepoChange,
       // On sync's record before the copy is replaced, as sync does itself: the next pass names it in History, and nothing prunes it.
       const { record } = await readRecord(context.home);
       const recorded = record?.items[change.key];
-      if (record && recorded && !recorded.displaced?.some(entry => entry.hash === copy.hash)) { (recorded.displaced ??= []).push({ tool: writer, hash: copy.hash }); await saveRecord(context.home, record); }
+      if (record && recorded) { displace(recorded, writer, copy.hash); await saveRecord(context.home, record); }
       await replaceCopy(context, change.key, source, copy.directory, copy.hash);
     } else if (!copy) await placeCopy(context, source, { harness: writer, directory: join(view.writes[writer]!.to, item.folder!), limits: [] }, tree);
     if (!facts || copy) wrote({ tool: writer, before: copy?.hash, after: tree.hash, pending: facts?.edited?.includes(writer) });
@@ -610,8 +605,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
     const problem = await editEntry(context, writer, change.name, here?.hash, server);
     if (problem) return [notIn(change.name, problem)];
     // History accounts for this write when sync can't: a server no tool had (no facts), or this tool's own entry replaced (here).
-    const recorded = (await readMcpRecord(context.home)).items[change.name]?.copies.find(entry => entry.tool === writer && !entry.status);
-    if (server && (!facts || here)) wrote({ tool: writer, before: here?.hash, after: serverHash(server), pending: !!here && !!recorded && recorded.hash !== here.hash });
+    if (server && (!facts || here)) wrote({ tool: writer, before: here?.hash, after: serverHash(server), pending: facts?.edited?.includes(writer) });
   }
   const changes: Change[] = server ? [{ key: change.name, managed: true, off: facts?.off ?? [], use: writer, useHash: serverHash(server) }] : [];
   const done = await applyMcp(context, tools, changes, { only: only(change.name), settleMs: 0 });
@@ -633,6 +627,9 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const text = item && await readFile(join(dir, item.paths[0]), 'utf8');
   const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
   if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
+  // Only Claude Code's own settings (model, tools) differ: sync's versions don't tell those apart, so History is told, and the old
+  // file is kept again after sync's pass (which may keep the new one under the same version).
+  let settingsOnlyWrite = false;
   try {
     if (!agent) { if (existing) await removeFileChecked(existing.file, existing.text); }
     else {
@@ -645,8 +642,9 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
         await writeFileChecked(file, next, existing?.text);
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
         // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
+        settingsOnlyWrite = !!existing && existing.hash === agentHash(agent);
         if (!facts) wrote({ tool: writer, after: sha(next) });
-        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) });
+        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: settingsOnlyWrite });
       }
     }
   } catch (error) {
@@ -655,9 +653,9 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const changes: Change[] = agent ? [{ key, managed: true, off: facts?.off ?? [], use: writer, useHash: agentHash(agent) }] : [];
   const done = await applyAgents(context, tools, changes, { only: only(key), settleMs: 0 });
   if (done.stopped) return [notIn(change.name, done.stopped)];
-  // Only Claude Code's settings changed: sync may have kept the new file under the same version as the old one, so the old one is
-  // kept again, last, where Undo of this pull reads it.
-  if (existing && agent && existing.hash === agentHash(agent) && existing.text !== text) await keepAgentVersion(context, existing);
+  // (Follow-up: kept agent versions are keyed by the cross-tool identity, which ignores these settings; a later replacement at the
+  // same identity overwrites this one. Keying them by the settings too would belong in agents.ts.)
+  if (settingsOnlyWrite && existing) await keepAgentVersion(context, existing);
   return !agent || (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) ? done.results : [...done.results, notManaged(change, writer)];
 }
 
@@ -750,7 +748,8 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
     await gitOrThrow(dir, ['clean', '--quiet', '-ffdx']);
     const results: DestinationResult[] = [];
     const unfinished: Unfinished = {};
-    const unfinish = (key: string, reason: string) => { unfinished[key] = { reason, here: sides.here.get(key)?.id }; };
+    // What this computer had, to tell an edit made since; when nothing here could be read, the last synced state (the base) stands in.
+    const unfinish = (key: string, reason: string) => { unfinished[key] = { reason, here: sides.here.get(key)?.id ?? sides.base.get(key)?.id }; };
     // A repo change to an item this computer can't read right now isn't taken, and isn't lost: once the copy here reads again, it
     // comes in like any change the last Pull couldn't finish (and the repo's version wins over this computer's, as it would have).
     for (const [key, { reason }] of sides.unsent) if (repoChangeWaits(sides, state.unfinished ?? {}, key)) unfinish(key, reason);
