@@ -1442,12 +1442,14 @@ test('Pi: a managed skill reaches Pi’s own skills folder; one Pi would not loa
     const piCtx = ctx(box, { read: () => Promise.all(withPi.map(harness => discover({ home: box.home, mode: 'custom', harness }))) });
     await skill(box.home, CLAUDE, 'good');
     await skill(box.home, CLAUDE, 'bare', '---\nname: bare\n---\n\nNo description.\n');
-    const result = await applyChanges(piCtx, [manage('good'), manage('bare')]);
+    await skill(box.home, CLAUDE, 'plain', 'No frontmatter at all.\n');
+    const result = await applyChanges(piCtx, [manage('good'), manage('bare'), manage('plain')]);
     assert.equal(await readFile(join(box.home, '.pi/agent/skills/good/SKILL.md'), 'utf8'), text('good'));
     assert.equal(await exists(join(box.home, '.pi/agent/skills/bare')), false);
     assert.ok(result.results.every(entry => !(entry.item === 'bare' && entry.outcome === 'written')));
-    const bare = (await manageView(piCtx)).skills.find(item => item.key === 'bare')!;
-    assert.match(bare.cannot['pi-cli'] ?? '', /Pi will not load it: it has no description text/);
+    const view = await manageView(piCtx);
+    assert.match(view.skills.find(item => item.key === 'bare')!.cannot['pi-cli'] ?? '', /Pi will not load it: it has no description text/);
+    assert.match(view.skills.find(item => item.key === 'plain')!.cannot['pi-cli'] ?? '', /Pi will not load it: it has no YAML frontmatter/);
   } finally { await box.cleanup(); }
 });
 
