@@ -82,7 +82,8 @@ const connect = () => busy('Connecting to the repo…', async () => {
   if (!result.stopped) { repo.draftUrl = ''; repo.draftBranch = ''; }
 });
 
-const pull = () => busy('Pulling from the repo…', async () => {
+const pull = () => void pullNow().then(() => keepFocus('repo-pull'));
+const pullNow = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
   const count = result.pulled ?? 0;
   // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
@@ -98,10 +99,22 @@ const pull = () => busy('Pulling from the repo…', async () => {
   if (waiting.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
-const push = () => busy('Pushing to the repo…', async () => {
+const push = () => void pushNow().then(() => keepFocus('repo-push'));
+const pushNow = () => busy('Pushing to the repo…', async () => {
   const result = await api().pushRepo(state.home!.home);
   await settle(result, result.pushed ? `Pushed as ${result.pushed.id.slice(0, 7)} “${result.pushed.subject}”.` : 'Pushed.');
 });
+
+/** Leaves the Disconnect question; focus goes back to the button that asked it. */
+function cancelDisconnect() {
+  repo.confirmDisconnect = false;
+  rerender();
+  document.getElementById('repo-disconnect')?.focus();
+}
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && repo.confirmDisconnect) cancelDisconnect(); });
+
+/** After Pull or Push: if its button went away (nothing left to move), focus moves to the page's state line. */
+const keepFocus = (id: string) => { if (!document.getElementById(id)) document.getElementById('repo-state')?.focus(); };
 
 const disconnect = () => busy('Disconnecting…', async () => {
   // The address stays in the form, so connecting again is one click.
@@ -178,7 +191,8 @@ function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
     : !incoming && !outgoing && stuck ? [part('triangle-alert', 'tone-warning', `Up to date, except ${plural(stuck, 'item')} that can’t move`)]
     : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
     : counts;
-  return h('span.repo-state', { id: 'repo-state', role: 'status' }, parts);
+  // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
+  return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
 }
 
 /** While the repo can't be reached: said once, above both lists, and named by both buttons. */
@@ -235,7 +249,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
       repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
         h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
         button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
-        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: () => { repo.confirmDisconnect = false; rerender(); } })) : null,
+        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: cancelDisconnect })) : null,
       // When the cause is the address itself, say how to change it (only by connecting again).
       problemBand(view.problem && !repo.problem && !repo.checking ? `${view.problem}${/no repository there/i.test(view.problem) ? ' To use another address, Disconnect and connect again.' : ''}` : undefined),
       outcomeBand()),
@@ -249,7 +263,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
       view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}; Pull and Push wait until it can be reached again.`) : null,
       inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
-        : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
+        : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Refresh checks the repo for new commits.')
         : h('div.repo-sides', {},
           changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
           changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushControl, 'Nothing here that the repo doesn’t have.', pushable && !view.problem ? view.pushBlocked : undefined)),

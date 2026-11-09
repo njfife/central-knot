@@ -247,6 +247,9 @@ if (wanted('repo')) {
   await a.click('#repo-pull');
   await waitFor(a, `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
   await shot(a, 'repo-pulled', 'Clicked "Pull 3": the repo’s three items are now in the tools, Managed. Only this computer’s changes remain, ready to push.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await shot(a, 'repo-pulled-860', 'The same result at 860×560.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await a.click('#repo-push');
   await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'repo-pushed-dark', 'Clicked "Push": committed and pushed. Up to date.');
@@ -275,6 +278,7 @@ if (wanted('repo')) {
   await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '') && document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'repo-held-and-both', 'A skill no tool can read arrived in the repo, and incident was edited on both sides, then "Refresh": the unreadable one says why it can’t come in, and incident says the repo’s version wins with yours kept in History.');
   await a.theme('light'); await shot(a, 'repo-held-and-both-light', 'The same, light.'); await a.theme('dark');
+  await sizes('repo-held-and-both', 'Held and both-changed items.');
   // The repo can't be reached (its folder moved away, as a server that is down or a VPN that is off would look).
   renameSync(remote, `${remote}.away`);
   await a.click('#header-refresh');
