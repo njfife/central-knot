@@ -132,10 +132,13 @@ test('Taking a tool off takes the block out, keeps own text and edited copies, a
     await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await box.set('Shared.\n', ['claude-cli']);
     assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
-    await chmod(box.file('.copilot'), 0o555);
-    const blocked = await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
-    await chmod(box.file('.copilot'), 0o755);
-    assert.ok(blocked.left.some(entry => entry.tool === 'copilot-cli' && entry.why === 'failed'));
+    // (A read-only folder doesn't stop root, so this step only runs as an ordinary user.)
+    if (process.getuid?.() !== 0) {
+      await chmod(box.file('.copilot'), 0o555);
+      const blocked = await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
+      await chmod(box.file('.copilot'), 0o755);
+      assert.ok(blocked.left.some(entry => entry.tool === 'copilot-cli' && entry.why === 'failed'));
+    }
     await box.set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await box.set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
     assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared, now.\n' });
@@ -180,6 +183,24 @@ test('Putting back an earlier version of a tool’s file reads as an older base,
     assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'older');
     assert.equal((await box.set('Be brief.\nCite files.\n', tools)).left.length, 0);
     assert.equal(await readFile(codex, 'utf8'), now);
+    // A version whose copy was edited by hand back then stays protected as an edit when put back.
+    const handEdited = now.replace('Cite files.', 'Cite every file.');
+    await saveInstruction(box.context, await box.snapshots(), 'codex-cli', handEdited, (await box.seen())['codex-cli']!.hash, true);
+    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'edited');
+  } finally { await box.cleanup(); }
+});
+
+test('An Undo that leaves a file changed since alone keeps its record, so its copy still reads as Central Knot’s', async () => {
+  const box = await sandbox();
+  const codex = box.file('.codex/AGENTS.md');
+  try {
+    await writeFile(codex, 'Codex only.\n');
+    await box.set('Be brief.\n', tools);
+    const second = await box.set('Be brief.\nCite files.\n', tools);
+    await writeFile(codex, `Codex, edited since.\n${(await readFile(codex, 'utf8')).replace('Codex only.\n', '')}`);
+    const undone = await undoBase(box.context, await box.snapshots(), second.undo!);
+    assert.deepEqual(undone.left, [{ tool: 'codex-cli', why: 'edited' }]);
+    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'older');
   } finally { await box.cleanup(); }
 });
 

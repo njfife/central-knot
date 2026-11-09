@@ -65,16 +65,19 @@ export function withoutBase(text: string): string {
  * is how the file holds the base now. A copy edited in the file is left as it is (`edited`), chosen or not, unless the action is
  * 'putBack'. 'adopt': this file's own text became the base, so it moves into the block; plain base text Central Knot left in the
  * file (`held.leftPlain`) moves back the same way, so it is never repeated. The renderer previews with this and the main
- * process writes with it, so the review shows what is written.
+ * process writes with it, so the review shows what is written. `held` is judged against the base as stored now, not `base`.
  */
-export function fileWithBase(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string; edited?: false } | { edited: true } {
+export function fileWithBase(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string } | { left: 'edited' } {
   const { copy } = splitBase(text);
-  if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { edited: true };
+  if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { left: 'edited' };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
   // Text that is (or was) the base moves into the block: what the file had outside the block becomes nothing of its own.
   const intoBlock = action === 'adopt' || held?.leftPlain;
   return { next: withBase(intoBlock ? withOwn(text, '') : text, base) };
 }
+
+/** Every tool reading one physical file: the tool it is listed under, then the others linked to the same file. */
+export const readersOfFile = (tool: HarnessId, sameFile: HarnessId[]) => [tool, ...sameFile];
 
 /** What a save does to one physical file read by `readers`: its own text moves into the base ('adopt': the base started from it),
  *  its edited copy is replaced ('putBack'), or the base is simply saved there. */

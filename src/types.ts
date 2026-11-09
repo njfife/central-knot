@@ -384,7 +384,7 @@ export interface InstructionFile {
 }
 /** How a tool's file holds the base. */
 export interface BaseHeld {
-  /** The tool is on the base list. */
+  /** The tool is on the base list and the base isn't blank (a blank base reaches no tool). */
   chosen: boolean;
   /** Its copy: the same as the base, the older base Central Knot last wrote there, edited in the file (anything else), or none. */
   state: 'same' | 'older' | 'edited' | 'missing';
@@ -396,7 +396,8 @@ export interface BaseHeld {
 }
 export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 
-export interface InstructionSave { stopped?: string; saved?: boolean }
+/** A tool file save: stopped (why), or saved; `problem`: something after the write could not be finished, said with the result. */
+export interface InstructionSave { stopped?: string; saved?: boolean; problem?: string }
 
 /** The base instructions: one text Central Knot keeps in every chosen tool's file, after that tool's own text. */
 export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[] }
@@ -406,10 +407,10 @@ export interface BaseApply { text: string; expected: string; tools: HarnessId[];
   /** The files the review showed, by tool: the path and the hash it held then ('' for no file). Only these are written. */
   seen: Partial<Record<HarnessId, { path: string; hash: string }>>;
   adopt?: HarnessId; overwrite?: HarnessId[] }
-/** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
+/** What an apply or undo did per tool. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
   written: BaseWritten[];
-  /** Not written: its copy was edited there (or, for an undo, the file changed since), or the write failed. */
+  /** Not written: its copy was edited there (for an undo: the file changed since), or the write failed. */
   left: { tool: HarnessId; why: 'edited' | 'failed' }[];
   /** Something after the files were written could not be finished, said with the result. */ problem?: string;
   undo?: BaseUndo }

@@ -51,9 +51,9 @@ export function versionsList(versions: InstructionFile['versions'], restore: { i
 function leaveReview(tool: string) {
   const edit = state.instructionEdit;
   if (!edit) return;
-  if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
+  if (edit.wholeFile) state.instructionEdit = undefined; else edit.stage = 'edit';
   rerender();
-  document.getElementById(edit.restoring ? `ins-edit-${tool}` : `ins-text-${tool}`)?.focus();
+  document.getElementById(edit.wholeFile ? `ins-edit-${tool}` : `ins-text-${tool}`)?.focus();
 }
 
 // In the review, Esc goes back to editing.
@@ -93,7 +93,7 @@ function editor(file: InstructionFile) {
   const edit = state.instructionEdit!;
   const name = fileName(file.path);
   // With the base, the editor holds this tool's own text; the base block stays as it is. Restoring compares whole files.
-  const original = edit.restoring ? file.text : ownText(file);
+  const original = edit.wholeFile ? file.text : ownText(file);
   if (edit.stage === 'review') {
     const diff = lineDiff(original, edit.text);
     const { total, text: counts } = changeCounts(diff);
@@ -104,21 +104,21 @@ function editor(file: InstructionFile) {
       : onlyBreak ? `Review before saving ${name}: the final line break is ${edit.text.endsWith('\n') ? 'added' : 'removed'}.`
       : !file.exists ? `Review before creating ${name}: ${counts}.`
       : edit.takeOut ? `Take the base block out of ${name}: ${counts}.`
-      : edit.restoring ? `Going back to an earlier version of ${name}: ${counts}.`
+      : edit.wholeFile ? `Going back to an earlier version of ${name}: ${counts}.`
       : `Review before saving ${name}: ${counts}.`;
     const empties = changed && original.trim() && !edit.text.trim() && !file.base?.copy?.trim();
     return h('div.ins-editor', {},
       h('p.ins-review-title', {}, title),
       edit.takeOut ? h('p.base-explain', {}, `${names[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
-        : edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
+        : edit.wholeFile && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
       empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${names[file.tool]} will start sessions with no instructions from it.`)) : null,
       edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
-      legend(`${name} now`, edit.restoring && !edit.takeOut ? 'the earlier version' : 'after saving'),
+      legend(`${name} now`, edit.wholeFile && !edit.takeOut ? 'the earlier version' : 'after saving'),
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-        button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
-        button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
-        edit.restoring ? null : edit.confirmDiscard
+        button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.wholeFile ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+        button({ variant: 'ghost', size: 'small', label: edit.wholeFile ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
+        edit.wholeFile ? null : edit.confirmDiscard
           ? discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
             { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` })
           : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
@@ -186,12 +186,12 @@ function card(file: InstructionFile) {
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === own }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
-    editing ? [editor(file), baseStrip(file)]
+    editing ? [editor(file), baseStrip(file, lockedWhy)]
       : h('div.ins-body', {},
         file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
           : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
-        baseStrip(file),
+        baseStrip(file, lockedWhy),
         h('div.ins-actions', {},
           button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),

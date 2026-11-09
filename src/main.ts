@@ -542,10 +542,10 @@ app.whenReady().then(async () => {
     ? convertAgentToSkill(context(), presentTools(await read()), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
-  handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
-    ? saveInstruction(context(), await read(), tool as HarnessId, text, expected, restoring === true)
+  handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
+    ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));
-  handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId | 'base', id) : undefined));
+  handle('instructions:version', async (tool, id) => (current && (tool === 'base' || isTool(tool)) && typeof id === 'string' ? instructionVersion(context(), tool, id) : undefined));
   handle('instructions:base', async () => (current ? baseView(context()) : null));
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
