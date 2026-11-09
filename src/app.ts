@@ -110,15 +110,15 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   if (!result.stopped) { onDone(); retireTip('skills'); }
   const managed = changes.filter(change => change.managed).length;
   // History holds what Apply all replaced (a chosen copy); new copies are undone by turning Managed off, which leaves them in place.
-  const replacedSome = result.results.some(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message));
+  const replacedSome = result.results.some(entry => entry.replacedByChoice);
   // Say what was added and what was replaced, apart: only a replacement is kept in History.
   const order = Object.values(namedTools);
-  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && !!entry.replacedByChoice === replaced).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const added = writtenTo(false), replacedIn = writtenTo(true);
   const single = managed === 1 ? changes.find(change => change.managed)?.key : undefined;
   const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
   // The result matches the bar before it: how many new copies, and of which skills.
-  const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
+  const newCopies = result.results.filter(entry => entry.outcome === 'written' && !entry.replacedByChoice);
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
@@ -463,12 +463,11 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
     const twoWay = managed.filter(server => !Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
-    const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.outcome === 'written' && /^Now has/.test(entry.message));
     const undo = addedNow.length && !replacedAny;
-    state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${source(server)}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
+    state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${server.oneWay ? toolName(server.oneWay.from) : 'its source'}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
       act: undo ? addedUndo(addedNow) : undefined };
     const resumed = changes.map(change => ({ change, was: before.find(server => server.key === change.key) })).filter(({ change, was }) => change.use && change.use !== 'separate' && was?.managed && was.stopped?.length);
     // A resumed copy receives updates again: an earlier "keep my edit" no longer stands for a later edit.

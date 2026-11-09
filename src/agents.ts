@@ -256,7 +256,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
     const kept = Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
-    servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, stopped, kept });
+    servers.push({ key, name: origin.name, description: origin.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept });
   }
   return { tools: present, servers, claudePending: [], access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }
@@ -307,7 +307,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     const slot = byKey.get(change.key);
     if (!slot) continue;
     // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
-    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.' }); continue; }
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.', chooseAgain: true }); continue; }
     const first = (Object.values(slot) as AgentEntry[])[0];
     const item: AgentRecordItem = record.items[change.key] ?? { name: first.name, state: 'dont-share', off: [], hash: '', copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);

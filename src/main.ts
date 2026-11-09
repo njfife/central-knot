@@ -266,7 +266,7 @@ async function view(explicit = false): Promise<HomeView> {
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
+    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices),
     ...(await (async () => {
       const notices = pendingMcpNotices.splice(0);
       return {
