@@ -78,7 +78,7 @@ export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: st
  */
 export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
   if (!pluginTools.includes(tool)) return ['takes no plugins', 'take no plugins'];
-  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['has no command-line tool here', 'have no command-line tools here'];
+  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
   // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
   return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
 }

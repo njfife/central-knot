@@ -4,14 +4,19 @@ import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { changedWords, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
+import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { installed, partWords, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
+import { installed, partWords, partsTools, partsWhy, stateOf, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PluginDetail, PluginView, PluginsView } from './types.ts';
-import { andList, toolNames as names } from './words.ts';
+import { andList, byToolOrder, toolNames as names } from './words.ts';
 import { plural } from './model.ts';
 import { openItem } from './matrix.ts';
+
+/** A tool that takes parts, can't take this plugin, and gets none of its parts (Pi, for a plugin of agents and commands). */
+const takesNoneOf = (view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId) =>
+  partsTools.includes(tool) && !plugin.gone && !partsOf(entry, plugin.name, tool) && !installed(entry, plugin.name, tool)
+  && !!unavailable(view, entry, plugin.name, tool) && stateOf(entry, plugin.name, tool).state === 'not-installed' && !partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin));
 
 /** Tools that can take the plugin itself here (or have it): what "In each tool" describes. A tool taking its parts, or none, is left out. */
 const nativeTools = (view: PluginsView, entry: MarketplaceView, plugin: string, components: Components) =>
@@ -59,6 +64,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (chosen) return ({ install: 'Will install', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts', 'undo-parts': '' } as Record<PluginAction, string>)[chosen];
     if (installed(entry, plugin.name, tool)) return 'Installed';
     if (partsOffer(view, entry, plugin.name, tool, components)) return parts?.changed ? 'Parts out of date' : parts ? 'Parts installed' : 'Can take its parts';
+    if (takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
@@ -115,7 +121,9 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
  */
 function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginView, components: Components | undefined, detail: PluginDetail | null | undefined) {
   const tools = view.tools.filter(tool => partsOffer(view, entry, plugin.name, tool, components));
-  if (!tools.length) return null;
+  // A tool that takes parts but gets none of this plugin's (Pi and an agents-only plugin) still has its row, saying why.
+  const empty = view.tools.filter(tool => !tools.includes(tool) && takesNoneOf(view, entry, plugin, tool));
+  if (!tools.length && !empty.length) return null;
   const read = market.partsPlans.get(pluginKey(entry.source, plugin.name));
   const plans = read && !read.reading ? read.value : undefined;
   const op = (tool: HarnessId, action: PluginAction): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
@@ -138,8 +146,8 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const plan = plans?.[tool];
     const going = (plan ?? []).filter(part => !part.why);
     const pending = chosen(tool);
-    if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item.tone-accent', {}, 'Removed on Apply all: ', ...partNames(parts.items))];
-    if (pending === 'install-parts') return [h('span.plugin-outcome-item.tone-accent', {}, `${parts ? 'Updated' : 'Installed'} on Apply all: `, ...partNames(going.length ? going : parts?.items ?? []))];
+    if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
+    if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ', ...partNames(going.length ? going : parts?.items ?? []))];
     const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
     const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
     if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
@@ -150,10 +158,10 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   // Before anything is installed or chosen, tools alike share a row; after, each tool has its own, in column order.
   const settled = tools.every(tool => !partsIn(tool) && !chosen(tool));
   const groups = new Map<string, HarnessId[]>();
-  for (const tool of tools) { const key = settled ? JSON.stringify([partsWhy(view, entry, tool)[0], plans?.[tool] ?? null]) : tool; groups.set(key, [...(groups.get(key) ?? []), tool]); }
+  for (const tool of [...tools, ...empty].sort(byToolOrder)) { const key = settled ? JSON.stringify([partsWhy(view, entry, tool)[0], plans?.[tool] ?? null]) : tool; groups.set(key, [...(groups.get(key) ?? []), tool]); }
   const behind = detail && !detail.problem ? staysBehind(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
-    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts, as separate items'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
+    h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
     h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents can go in as separate items instead, and come out together.'),
     h('ul.plugin-outcome-list.plugin-parts-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-parts-tool', {}, h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, andList(group.map(tool => names[tool])))),

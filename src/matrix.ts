@@ -46,9 +46,9 @@ function partNote(skill: SampleSkill) {
   // Once read, the Plugins page knows whether the plugin is still listed; a page that can't show it isn't linked to.
   const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
   return fromPlugins(skill).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
-    h('span', {}, `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item because ${tools.length > 1 ? 'they' : 'it'} can’t take the plugin here. `,
+    h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
-        : ['Its parts are updated and removed together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
+        : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
 }
 const ago = (iso: string) => {
   const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
