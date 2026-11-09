@@ -544,3 +544,9 @@ The Mac real home was not used, because a Central Knot app was running there (a 
   - agent frontmatter ends only at a line that is `---` (P8).
 
 **Validation.** 216 unit tests. Linux e2e 121/121.
+
+## Computer use on 0024bce, November 9, 2026
+
+8 of 10 steps passed: skills and Sync off, MCP with Write now, agents with limits, the app menu, background sync with the window closed, the second launch and Quit. Fixed:
+- **MCP edits spread slowly.** Settings files were not watched, so an edit waited for the 20 s poll. Each MCP settings file's folder is now watched without recursion, and only that file's events prompt a pass. The e2e checks the edit reaches Codex within 6 s.
+- **"Could not read this home" right after closing the window,** seen again (the tester's Dock clicks timed out on its side). A window opened while a home is open now shows that home without reading it anew. A main-process log (`central-knot.log` in the app's data folder) records window life and failed requests, so the next session can show what happens on close.

@@ -1,21 +1,25 @@
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
-import { applyMcp, mcpView, restoreMcp } from './mcp.ts';
+import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, restoreAgent } from './agents.ts';
 import { cachedCatalog, install, installState, outcomes, parseCatalog, pluginTools, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from './plugins.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { ActionReport, ApplyResult, Catalog, Change, HarnessId, HomeMode, HomeView, MarketplaceView, PluginsView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
+/** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
+function log(line: string) {
+  try { appendFileSync(join(app.getPath('userData'), 'central-knot.log'), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
+}
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 const BUILD = 'com.centralknot.firstlook';
 let window: BrowserWindow;
@@ -289,6 +293,12 @@ async function startWatching() {
   roots.add(join(current.home, '.agents/skills'));
   // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
   for (const id of agentTools) roots.add(join(overrideFor(id) ?? join(current.home, harnesses[id].defaultConfig), 'agents'));
+  // MCP settings files: their folders are watched without recursion, and only an event for the file itself prompts a read.
+  const shared = context();
+  for (const id of mcpTools) {
+    const file = mcpFile(shared, id);
+    try { watchers.push(watch(dirname(file), { persistent: false }, (_event, name) => { if (!name || name === basename(file)) nudge(); })); } catch { /* not there: polling covers it */ }
+  }
   for (const root of roots) {
     try { watchers.push(watch(root, { recursive: true, persistent: false }, nudge)); } catch { /* not there: polling covers it */ }
   }
@@ -391,6 +401,8 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
 
 /** At launch: the home last opened, else the practice copy. A remembered folder that is gone falls back to the practice copy. */
 async function startHome(): Promise<HomeView | null> {
+  // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.
+  if (current) return view();
   const last = smoke ? undefined : appSettings.home;
   if (last?.mode === 'actual') return selectHome('actual');
   if (last?.mode === 'custom' && last.path) { try { await access(last.path); return await selectHome('custom', last.path); } catch { /* gone */ } }
@@ -405,7 +417,7 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
     const next = queue.then(() => work(...args));
-    queue = next.catch(() => undefined);
+    queue = next.catch(error => { log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`); });
     return next;
   });
 }
@@ -420,7 +432,11 @@ function createWindow(show: boolean) {
   });
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
-  window.on('close', event => { if (quitting || !tray) return; event.preventDefault(); window.hide(); });
+  log('window created');
+  window.on('close', event => { log(`window close (${quitting ? 'quitting' : tray ? 'hidden' : 'no menu bar icon'})`); if (quitting || !tray) return; event.preventDefault(); window.hide(); });
+  window.on('closed', () => log('window closed'));
+  window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
+  window.webContents.on('did-finish-load', () => log('page loaded'));
   window.on('focus', () => { if (unseen) { unseen = false; refreshTray(); } });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);

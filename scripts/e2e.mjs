@@ -398,6 +398,12 @@ async function practiceFlow() {
   await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
   same('Write now adds files to Claude Code and keeps its other settings', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups], ['npx', 'dark', 3]);
+  // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
+  const copilotFile = join(practice, '.copilot/mcp-config.json');
+  writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));
+  let mcpSpread = false;
+  for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readFileSync(join(practice, '.codex/config.toml'), 'utf8').includes('command = "npx-edited"'); }
+  check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
 
   // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
   await a.click('#nav-agents');
