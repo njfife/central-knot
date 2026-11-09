@@ -169,20 +169,16 @@ ul { list-style: none; }
 .btn.ghost:hover:not(:disabled) { background: var(--press); color: var(--ink); }
 .btn.link { color: var(--accent-ink); }
 .btn.link:hover:not(:disabled) { text-decoration: underline; }
-.result-count, .list-fraction { font-variant-numeric: tabular-nums; }
 
 /* Toolbar and find */
 .toolbar { container-type: inline-size; flex: none; height: 37px; display: flex; align-items: center; gap: 8px; padding: 2px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
 .toolbar-end { margin-left: auto; display: flex; align-items: center; gap: 12px; flex: none; }
-.result-count { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
 .find { position: relative; flex: 1 1 352px; min-width: 80px; max-width: 352px; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 4px 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); box-shadow: var(--lift); }
 .find:focus-within { outline: 2px solid var(--focus); outline-offset: -2px; }
 .find-glyph { color: var(--ink-soft); }
 .find-input { flex: 1; min-width: 0; border: 0; padding: 0 0 0 4px; background: transparent; color: var(--ink); font: 400 13px/20px var(--sans); outline: none !important; user-select: text; cursor: text; }
 .find-input::placeholder { color: var(--ink-soft); }
-.key-hint { flex: none; height: 20px; min-width: 20px; display: grid; place-items: center; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-soft); font: 500 11px/14px var(--sans); }
 .find .btn.micro.square { width: 20px; height: 20px; }
-@container (max-width: 639px) { .key-hint, .result-count { display: none; } }
 
 .band { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 16px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; min-width: 0; }
 .band-danger { background: var(--danger-tint); color: var(--danger); }
@@ -190,8 +186,6 @@ ul { list-style: none; }
 .band-text { color: var(--ink-soft); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .band .btn { height: 16px; padding: 0 4px; }
 
-/* Matrix */
-.matrix { container-type: inline-size; position: relative; }
 .skeleton { background: linear-gradient(90deg, var(--hover), var(--press), var(--hover)); background-size: 200% 100%; animation: shimmer 2.4s linear infinite; }
 .skeleton-bar { width: 60%; height: 16px; border-radius: 4px; }
 .skeleton-dot { width: 16px; height: 16px; border-radius: 50%; }
@@ -220,7 +214,6 @@ ul { list-style: none; }
 .list-row.selected, .list-row.selected:hover { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent); }
 .list-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .list-name { flex: 1; font-weight: 500; }
-.list-fraction { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .list-status { flex: none; width: 28px; height: 28px; display: grid; place-items: center; }
 .detail-column { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .detail-scroll, .panel-body { padding: 12px calc(16px + var(--overlay-gutter)) 12px 16px; display: flex; flex-direction: column; gap: 24px; user-select: text; }
@@ -260,7 +253,6 @@ ul { list-style: none; }
 .content { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 .content-owner { margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
 .content-block + .content-block { margin-top: 8px; }
-.status-line .status-word { font-weight: 500; }
 
 /* Tools */
 .cards-scroll { padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 16px; }
@@ -380,6 +372,8 @@ ul { list-style: none; }
 .ov { --ov-head-height: 60px; --ov-section-height: 32px; }
 .ov-head { position: sticky; top: 0; z-index: 3; height: var(--ov-head-height); background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
+/* A row scrolled into view (its details opened) lands below the pinned stack, with a little of the row above it showing */
+.ov-row { scroll-margin-top: calc(var(--ov-head-height) + var(--ov-section-height) + 36px); }
 .ov-section { position: sticky; top: var(--ov-head-height); z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; height: var(--ov-section-height); padding: 0 12px 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
 .ov-section-label { font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .ov-section-label strong { font-weight: 600; }
@@ -738,7 +732,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .details { padding-bottom: 8px; }
 .legend-cell.cell-absent { border-style: dotted; }
 .cell-cannot { background-image: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px) !important; }
-.ov-row { scroll-margin-top: calc(var(--ov-head-height) + var(--ov-section-height) + 4px); }
 .list-head { padding-right: 23px; }
 .list-head-tool > * { width: 12px !important; height: 12px !important; font-size: 7px; }
 /* UI round 5 */
@@ -777,7 +770,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .tool-menu { width: 400px; }
 .tool-menu-foot { margin: 8px 0 0; font-size: 11.5px; color: var(--ink-faint); }
 .detail-scroll .details { box-shadow: none; padding-left: 0; }
-.ov-row { scroll-margin-top: 128px; }
 .decided-undo span { text-decoration: underline; }
 /* UI round 6 */
 @keyframes row-flash { from { background: var(--selected-row); } to { background: transparent; } }
@@ -1164,8 +1156,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { padding-top: 0; padding-bottom: 0; height: auto; line-height: inherit; }
+/* No top padding: this scroller holds a sticky table header (see .ov-head), so the pages in it carry that space */
 .market-main { padding: 0 var(--market-gutter) 32px; }
-.market-main > :first-child { margin-top: 18px; }
+.market-page, .plugin-page { padding-top: 18px; }
 /* The empty page: the add box in the middle, above the examples */
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
@@ -1210,9 +1203,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The plugin table */
 .plugins-page .plugin-table { max-width: none; }
 .plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
-/* Its header is shorter than the other tables' and may grow: the hint beside the tool names wraps in a narrow window */
+/* Its header is shorter than the other tables' and grows when the hint beside the tool names wraps in a narrow window
+   (it has no section rows, so nothing is pinned under it) */
 .plugins-page .plugin-table { --ov-head-height: 48px; }
-.plugins-page .plugin-table .ov-head { min-height: var(--ov-head-height); }
+.plugins-page .plugin-table .ov-head { height: auto; min-height: var(--ov-head-height); }
 .plugins-page .plugin-table .ov-head .ov-name { align-self: end; font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 0 0 6px; }
 .plugin-row { cursor: pointer; }
 .plugin-row:hover { background: var(--hover); }

@@ -490,8 +490,15 @@ async function practiceFlow() {
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
-  const pinned = await a.run(`(() => { const box = document.querySelector('#plugins-scroll'); box.scrollTop = box.scrollHeight; const gap = document.querySelector('.plugin-table .ov-head').getBoundingClientRect().top - box.getBoundingClientRect().top; box.scrollTop = 0; return { scrolled: box.scrollHeight > box.clientHeight, gap }; })()`);
-  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { scrolled: true, gap: 0 });
+  // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
+  const pinned = await a.run(`(() => {
+    const box = document.querySelector('#plugins-scroll'), head = document.querySelector('.plugin-table .ov-head'), top = () => box.getBoundingClientRect().top;
+    box.scrollTop = head.getBoundingClientRect().top - top() + 20;
+    const gap = head.getBoundingClientRect().top - top(), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+    box.scrollTop = 0;
+    return { gap, rowUnder };
+  })()`);
+  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { gap: 0, rowUnder: true });
   await a.send('Emulation.clearDeviceMetricsOverride');
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
