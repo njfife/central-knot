@@ -161,6 +161,10 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
     assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);
     assert.equal((await agentsView(second, tools)).servers.length, 0);
+    // Restore of the pulled deletion puts Claude Code's own file back, settings and all.
+    const deleted = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
+    assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
+    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
   } finally { await box.cleanup(); }
 });
 

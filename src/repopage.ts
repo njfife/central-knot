@@ -77,7 +77,7 @@ async function settle(result: RepoResult, done: string, note?: string) {
 const connect = () => busy('Connecting to the repo…', async () => {
   const result = await api().connectRepo(repo.draftUrl, repo.draftBranch, state.home!.home);
   const view = result.view;
-  const waiting = view.connected ? view.incoming.filter(change => !change.held).length : 0;
+  const waiting = view.connected ? waitingCounts(view).pull : 0;
   await settle(result, `Connected. Nothing changed in your tools${waiting ? `; Pull brings in ${plural(waiting, 'item')} from the repo` : ''}.`);
   if (!result.stopped) { repo.draftUrl = ''; repo.draftBranch = ''; }
 });
@@ -90,13 +90,13 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   // didn't take is said in the result, by tool.
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
-  const waiting = result.waitsForClaude ?? [];
+  const claudeWaits = result.waitsForClaude ?? [];
   const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.';
   const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
-    waiting.length ? `Claude Code gets ${andList(waiting)} once it’s closed and you click Write to Claude Code.` : ''].filter(Boolean);
+    claudeWaits.length ? `Claude Code gets ${andList(claudeWaits)} once it’s closed and you click Write to Claude Code.` : ''].filter(Boolean);
   // One wording for the promise, always with History one click away.
   await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : 'any of them'} in History.` : undefined);
-  if (waiting.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
+  if (claudeWaits.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
 const push = () => void pushNow().then(() => keepFocus('repo-push'));
@@ -135,7 +135,6 @@ const kinds: Record<RepoChange['kind'], { glyph: IconName; label: string }> = {
 
 const when = (iso?: string) => (iso ? dayAndTime(iso) : undefined);
 
-/** A commit as people read it in a git client: short id, subject, when. */
 /** A commit as people read it in a git client: short id, subject, when (real spaces between, so it reads and copies as one line). */
 const commitText = (commit: RepoCommit) => h('span.repo-commit', { title: `${commit.id}\n${commit.subject}` },
   h('span.mono.repo-sha', {}, commit.id.slice(0, 7)), commit.subject ? [' ', h('span.repo-subject', {}, commit.subject)] : null,
@@ -250,8 +249,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
         button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: cancelDisconnect })) : null,
-      // When the cause is the address itself, say how to change it (only by connecting again).
-      problemBand(view.problem && !repo.problem && !repo.checking ? `${view.problem}${/no repository there/i.test(view.problem) ? ' To use another address, Disconnect and connect again.' : ''}` : undefined),
+      problemBand(view.problem && !repo.problem && !repo.checking ? view.problem : undefined),
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },

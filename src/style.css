@@ -1367,8 +1367,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
 .repo-facts dd { min-width: 0; }
 /* A commit reads as one line of text that wraps where it must: id, subject, then when, never pinned apart. */
-.repo-commit, .repo-latest { display: inline; min-width: 0; overflow-wrap: anywhere; }
-.repo-commit, .repo-latest { word-spacing: 4px; }
+.repo-commit, .repo-latest { display: inline; min-width: 0; overflow-wrap: anywhere; word-spacing: 4px; }
 .repo-commit > *, .repo-latest > * { word-spacing: normal; }
 .repo-latest > .repo-new { margin-left: 8px; }
 .repo-sha { white-space: nowrap; }
@@ -1406,8 +1405,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; border-color: currentColor; color: inherit; flex: none; }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
-.repo-aside { display: flex; align-items: baseline; gap: 6px; max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.repo-aside > svg { flex: none; align-self: center; }
+.repo-aside { max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
 #repo-disconnect-confirm { border-color: currentColor; }
 /* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */

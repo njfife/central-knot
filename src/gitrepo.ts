@@ -23,7 +23,7 @@ import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { applyChanges, deleteEverywhere, displace, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpView, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
-import { gitEnv, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
+import { NO_REPO_THERE, gitEnv, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
 
@@ -306,15 +306,21 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   const view = await agentsView(context, tools);
   const entries = new Map<string, AgentEntry>();
   for (const tool of view.tools) for (const entry of (await readAgents(context, tool)).entries) entries.set(`${entry.tool}\0${entry.key}`, entry);
+  const sources: AgentEntry[] = [];
   for (const facts of view.servers.filter(agent => agent.managed)) {
     const tool = sourceTool(facts);
     const entry = tool && tool !== UNSETTLED ? entries.get(`${tool}\0${facts.key}`) : undefined;
     if (facts.held || !entry) { markUnsendable(unsent, agentKey(facts.name), 'agent', facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : 'No tool’s file could be read for it just now.')); continue; }
-    // Claude Code's own file goes as written, with its own settings (tools, model). Another tool's is put in Claude Code's format
-    // over the repo's file, so the settings only Claude Code has stay as the repo has them.
-    const path = `agents/${toFile(entry.name)}.md`;
-    const inRepo = entry.tool === 'claude-cli' || !baseId ? undefined : (await readBlobs(dir, [`${baseId}:${path}`])).get(`${baseId}:${path}`)?.toString('utf8');
-    await writeDurably(join(dir, path), entry.tool === 'claude-cli' ? entry.text : agentText('claude-cli', entry.agent, inRepo));
+    sources.push(entry);
+  }
+  // Claude Code's own file goes as written, with its own settings (tools, model). Another tool's is put in Claude Code's format
+  // over the repo's file (all read in one go), so the settings only Claude Code has stay as the repo has them.
+  const pathOf = (entry: AgentEntry) => `agents/${toFile(entry.name)}.md`;
+  const translated = sources.filter(entry => entry.tool !== 'claude-cli');
+  const inRepo = baseId ? await readBlobs(dir, translated.map(entry => `${baseId}:${pathOf(entry)}`)) : new Map<string, Buffer>();
+  for (const entry of sources) {
+    const text = entry.tool === 'claude-cli' ? entry.text : agentText('claude-cli', entry.agent, inRepo.get(`${baseId}:${pathOf(entry)}`)?.toString('utf8'));
+    await writeDurably(join(dir, pathOf(entry)), text);
   }
 }
 
@@ -481,7 +487,9 @@ async function check(context: ShareContext, timeoutMs?: number): Promise<string 
   const found = await openClone(context);
   if (!found || !(await writeAccess(context)).allowed) return undefined;
   const fetched = await git(found.dir, ['fetch', '--quiet', '--prune', 'origin'], timeoutMs);
-  const problem = fetched.code === 0 ? undefined : whyGitFailed(fetched.code, fetched.output, 'repo');
+  const why = fetched.code === 0 ? undefined : whyGitFailed(fetched.code, fetched.output, 'repo');
+  // The address is only changed by connecting again, so that step is said where the address is the cause.
+  const problem = why === NO_REPO_THERE ? `${why} To use another address, Disconnect and connect again.` : why;
   await saveState(context.home, { ...found.state, checkedAt: new Date().toISOString(), problem });
   return problem;
 }
@@ -645,7 +653,8 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   const agent = text === undefined ? undefined : fromMarkdown(change.name, text);
   if (item && !agent) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   try {
-    if (!agent) { if (existing) await removeFileChecked(existing.file, existing.text); }
+    // Kept first, as sync keeps every file it removes, so Restore puts this tool's own file back (with its own settings).
+    if (!agent) { if (existing) { await keepAgentVersion(context, existing); await removeFileChecked(existing.file, existing.text); } }
     else {
       const next = writer === 'claude-cli' ? text! : agentText(writer, agent, existing?.text);
       const file = existing?.file ?? fileFor(context, writer, change.name);
