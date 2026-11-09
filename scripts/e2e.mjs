@@ -208,7 +208,7 @@ async function practiceFlow() {
   const configBefore = readFileSync(codexConfig, 'utf8');
   await a.click('#open-standup');
   await a.click('#enable-standup-codex-cli');
-  check('Disable waits for Apply all', readFileSync(codexConfig, 'utf8') === configBefore && (await a.text('.apply-count') ?? '').includes('1 to disable'), await a.text('.apply-count'));
+  check('Disable waits for Apply all', readFileSync(codexConfig, 'utf8') === configBefore && (await a.text('.apply-count') ?? '').includes('1 copy to disable'), await a.text('.apply-count'));
   await applyAll(a);
   check('Disable writes Codex’s own switch and keeps the copy', readFileSync(codexConfig, 'utf8').endsWith(`[[skills.config]]\npath = ${JSON.stringify(join(practice, '.codex/skills/standup/SKILL.md'))}\nenabled = false\n`) && existsSync(join(practice, '.codex/skills/standup/SKILL.md')), readFileSync(codexConfig, 'utf8'));
   same('the Codex cell is marked disabled, the others are not', [await a.exists('.ov-row[data-key="standup"] [data-tool="codex-cli"] .cell-disabled'), await a.exists('.ov-row[data-key="standup"] [data-tool="claude-cli"] .cell-disabled')], [true, false]);
