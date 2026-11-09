@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
@@ -276,5 +276,70 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Newer\./);
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion owed to a tool that was away finishes when it returns, though a stopped one-way copy stays elsewhere', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent(undefined, 'model: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(copilot, claudeAgent('Copilot only.\n'));
+    await applyAgents(box.context, tools, []);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent('Copilot only.\n'));
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion leaves the copy in a tool switched off for the agent, and still finishes in a tool that was away', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    assert.equal((await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 })).settling, true);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'] }], { now: 1500, settleMs: 2000 });
+    await applyAgents(box.context, tools, [], { now: 4000, settleMs: 2000 });
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { now: 5000, settleMs: 2000 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion first seen before an agent was unmanaged still waits the settle window once it is managed again', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }], { now: 1100, settleMs: 2000 });
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { now: 10000, settleMs: 2000 });
+    await rm(claude);
+    const pass = await applyAgents(box.context, tools, [], { now: 10001, settleMs: 2000 });
+    assert.equal(pass.writes, 0, JSON.stringify(pass.results));
+    assert.equal(pass.settling, true);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
+  const box = await sandbox();
+  try {
+    await rm(join(box.home, '.copilot/agents'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/);
   } finally { await box.cleanup(); }
 });

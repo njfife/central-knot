@@ -10,6 +10,10 @@ import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './ty
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
+/** Every file a save can write in a tool's folder. */
+export const instructionFiles: Record<HarnessId, string[]> = {
+  'claude-cli': ['CLAUDE.md'], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md'],
+};
 const versionsFolder = (home: string, tool: HarnessId) => join(storeDirectory(home), 'instructions', tool);
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */

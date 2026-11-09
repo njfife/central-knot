@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
+import { instructionFiles } from './instructions.ts';
+import { mcpFile } from './mcp.ts';
 import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
@@ -350,14 +352,19 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
   const realHome = (await real(context.realHome)) ?? context.realHome;
-  const protectedRoots = await Promise.all(['.claude', '.copilot', '.agents'].map(async name => (await real(join(realHome, name))) ?? join(realHome, name)));
+  const realContext = { ...context, home: realHome, overrides: undefined };
+  const reached = [join(realHome, '.agents'), ...harnessIds.flatMap(id => [join(realHome, harnesses[id].defaultConfig), mcpFile(realContext, id)])];
+  const protectedRoots = await Promise.all(reached.map(async path => (await real(path)) ?? path));
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
-  // Every folder this home would write, followed through links, even where it does not exist yet.
+  // Every folder and file this home would write, followed through links, even where it does not exist yet.
   const fold = (path: string) => (process.platform === 'linux' ? path : path.toLowerCase());
   const guarded = [...protectedRoots, join(realHome, '.central-knot')].map(fold);
-  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...(Object.keys(harnesses) as HarnessId[]).flatMap(id => [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)])];
+  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...harnessIds.flatMap(id => {
+    const root = configRoot(harnesses[id], context.home, context.overrides?.[id]);
+    return [root, writeRoot(harnesses[id], context.home, context.overrides?.[id]), join(root, 'agents'), mcpFile(context, id), ...instructionFiles[id].map(name => join(root, name))];
+  })];
   for (const path of writes) {
     const resolved = await landingOf(path);
     if (!resolved || guarded.some(root => inside(resolved, root))) return refused;
