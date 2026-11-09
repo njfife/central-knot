@@ -42,7 +42,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
         const info = await stat(join(skill.directory, 'SKILL.md'));
         const copy: ToolCopy = {
           hash: tree.hash, directory: skill.directory, rootLabel: skill.rootLabel, lines: skill.content.split(/\r?\n/).length, modified: info.mtime.toISOString(),
-          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, writable: await writable(context, snapshot.harness, skill.directory, problems),
+          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: await writable(context, snapshot.harness, skill.directory, problems),
         };
         entry.locations.push({ tool: snapshot.harness, copy });
         if (!entry.facts.copies[snapshot.harness]) entry.facts.copies[snapshot.harness] = copy;
@@ -116,7 +116,7 @@ const skillAt = (entry: Gathered, tool: HarnessId) => entry.skills[tool]?.find(s
  */
 function switchTarget(context: ShareContext, entry: Gathered, tool: HarnessId, placed = false): SwitchTarget | undefined {
   const copy = entry.facts.copies[tool];
-  if (copy) return targetOf(copy, skillAt(entry, tool)?.name ?? copy.folder);
+  if (copy) return targetOf(copy, copy.name ?? copy.folder);
   if (!placed) return undefined;
   return { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(rootOf(context, tool), entry.facts.name, 'SKILL.md') };
 }

@@ -5,12 +5,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, readHistory } from '../src/manage.ts';
-import { applyMcp } from '../src/mcp.ts';
+import { applyMcp, restoreMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
-import { itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
+import { choseProfileInUse, itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, heldAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
-import type { HarnessId } from '../src/types.ts';
+import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
   const before: Record<HarnessId, string> = {
@@ -57,6 +57,10 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   assert.deepEqual(none.held, {});
   // A flip that failed leaves its switch as it was: a failed turn-off isn't held, a failed turn-on still is.
   assert.deepEqual(heldAfterFailures({ 'skill:a': ['claude-cli'], 'mcp:b': [] }, [{ item: 'skill:a', name: 'a', tool: 'claude-cli', disabled: true }, { item: 'mcp:b', name: 'b', tool: 'codex-cli', disabled: false }]), { 'mcp:b': ['codex-cli'] });
+  // Which switch chose the profile in use: the latest that changed it. An undo of an older switch (Undo A after B) chooses nothing.
+  const event = (id: string, from?: string, to?: string): HistoryEvent => ({ id, at: '', key: 'profiles:switch', item: '', kind: 'profile', losers: [], orderProved: true, profile: { from, to, flips: [] } });
+  const history = [event('A', undefined, 'dev'), event('B', 'dev', 'pager'), event('undoA', 'pager', 'pager')];
+  assert.deepEqual(history.map(past => choseProfileInUse(history, past)), [false, true, false]);
   // A hold whose tool can't be read, or has no copy right now, is kept: once it reads again it is still the profile's.
   const unreadable = [item('skill:pager', { 'claude-cli': 'on' }, { 'claude-cli': 'unreadable' })];
   assert.deepEqual(planSwitch(unreadable, undefined, { 'skill:pager': ['claude-cli', 'codex-cli'] }).held, { 'skill:pager': ['claude-cli', 'codex-cli'] });
@@ -183,5 +187,12 @@ test('A managed MCP server a profile turned off keeps syncing, and stays off', a
     const codex = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
     assert.match(codex, /\[mcp_servers\.sentry\]\ncommand = "sentry"\nargs = \["--v2"\]\nenabled = false\n/);
     assert.equal(mcpDisabled('codex-cli', codex, 'sentry'), true);
+    // Restoring the earlier version after No profile turned it back on: the version comes back, the switch stays on.
+    await switchProfile(box.context, null);
+    const edit = (await readHistory(box.home)).find(event => event.kind === 'edit' && event.key === 'mcp:sentry')!;
+    assert.equal((await restoreMcp(box.context, tools, edit.id)).stopped, undefined);
+    const restored = await readFile(mcpSwitchPath(box.context, 'codex-cli'), 'utf8');
+    assert.doesNotMatch(restored, /--v2/);
+    assert.equal(mcpDisabled('codex-cli', restored, 'sentry'), false);
   } finally { await box.cleanup(); }
 });

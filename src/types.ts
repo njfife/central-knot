@@ -134,6 +134,8 @@ export interface ToolCopy {
   writable: boolean;
   /** Folder name as found, with its case. */
   folder: string;
+  /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
+  name?: string;
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */

@@ -3,17 +3,17 @@
 // removed or deleted, and Managed keeps syncing content underneath: a server or skill that is off still gets edits. The plan is
 // profileplan.ts; this file keeps the profiles and carries a plan out, one write per settings file, then one History entry.
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnesses } from './harnesses.ts';
 import { appendHistory, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { driftOf, itemId, itemKeyOf, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
+import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
 import { strings } from './values.ts';
-import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileFlip, ProfileSwitchResult, ProfilesView, Snapshot } from './types.ts';
+import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
 
@@ -111,20 +111,23 @@ export async function releaseProfileHolds(context: ShareContext, released: { ite
 // ---------- Flipping switches ----------
 
 /** How each tool's skill switch names its copy of a skill: the folder, the name the tool reads, and the copy's SKILL.md. */
-function skillTarget(snapshots: Snapshot[], manage: Awaited<ReturnType<typeof manageView>>, key: string, tool: HarnessId): SwitchTarget | undefined {
+function skillTarget(manage: Awaited<ReturnType<typeof manageView>>, key: string, tool: HarnessId): SwitchTarget | undefined {
   const copy = manage.skills.find(skill => skill.key === key)?.copies[tool];
-  if (!copy) return undefined;
-  const skill = snapshots.find(snapshot => snapshot.harness === tool)?.skills.find(entry => entry.directory === copy.directory);
-  return targetOf(copy, skill?.name ?? copy.folder);
+  return copy && targetOf(copy, copy.name ?? copy.folder);
 }
 
-/** What a switch reads once: each tool's skills (to name a copy for its switch), and every item with its switches now. */
-interface HomeRead { snapshots: Snapshot[]; manage: Awaited<ReturnType<typeof manageView>>; items: SwitchItem[] }
+/** What a switch reads once: each skill's copies (to name one for its switch), and every item with its switches now. */
+interface HomeRead { manage: Awaited<ReturnType<typeof manageView>>; items: SwitchItem[] }
 async function readHome(context: ShareContext): Promise<HomeRead> {
-  const snapshots = await context.read();
   const manage = await manageView(context);
   const mcp = await mcpView(context, manage.tools);
-  return { snapshots, manage, items: switchItems(manage, mcp) };
+  return { manage, items: switchItems(manage, mcp) };
+}
+
+/** Every tool's switch files' modification times, as one string: when it is unchanged, no switch was turned in a tool's settings. */
+export async function switchFilesStamp(context: ShareContext): Promise<string> {
+  const files = [...new Set((Object.keys(harnesses) as HarnessId[]).flatMap(tool => [switchPath(context, tool), mcpSwitchPath(context, tool)]))];
+  return (await Promise.all(files.map(file => stat(file).then(info => `${file}:${info.mtimeMs}`, () => `${file}:-`)))).join('|');
 }
 
 /** How many items the tools no longer match the profile in use on, read fresh (for the menu bar after a switch made there). */
@@ -179,7 +182,7 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
   const groups = new Map<string, ProfileFlip[]>();
   for (const flip of flips) groups.set(fileOf(context, flip), [...(groups.get(fileOf(context, flip)) ?? []), flip]);
   for (const [file, group] of groups) {
-    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.snapshots, home.manage, itemKeyOf(flip.item), flip.tool) : undefined]));
+    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.manage, itemKeyOf(flip.item), flip.tool) : undefined]));
     const failed = await writeFlips(context, file, group, targets);
     let after = '';
     try { after = await readFile(file, 'utf8'); } catch { /* every flip below then fails its check */ }
@@ -241,7 +244,7 @@ export async function switchProfile(context: ShareContext, id: string | null): P
   await saveProfiles(context.home, profiles);
   if (!done.length && before === profiles.active) return { results, flips: done };
   const fromName = profiles.profiles.find(profile => profile.id === before)?.name;
-  const event: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: target?.name ?? 'No profile', kind: 'profile', losers: [], orderProved: true,
+  const event: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: target?.name ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
     profile: { ...(before ? { from: before, fromName } : {}), ...(target ? { to: target.id, toName: target.name } : {}), flips: done } };
   await appendHistory(context, [event]);
   return { results, flips: done, event: event.id };
@@ -264,15 +267,9 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   const home = await readHome(context);
   const results: DestinationResult[] = [];
   const back: ProfileFlip[] = [];
-  // A switch changed again after this one, by hand (Disable or Enable on the Skills page) or by a later profile switch, belongs to
-  // that change now: Undo leaves it.
-  const later = history.slice(history.indexOf(past) + 1);
-  const changedSince = new Set([
-    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => `${itemId('skill', entry.key)}|${tool}`)),
-    ...later.filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => `${flip.item}|${flip.tool}`) ?? []),
-  ]);
+  const later = changedSince(history, past);
   for (const flip of past.profile.flips) {
-    if (changedSince.has(`${flip.item}|${flip.tool}`)) { results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${harnesses[flip.tool].name} since, so it stays as it is.` }); continue; }
+    if (later.has(`${flip.item}|${flip.tool}`)) { results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${harnesses[flip.tool].name} since, so it stays as it is.` }); continue; }
     const item = home.items.find(entry => entry.id === flip.item);
     if (item?.blocked[flip.tool]) { results.push({ item: flip.name, harness: flip.tool, outcome: 'held', message: item.blocked[flip.tool]! }); continue; }
     const now = item?.tools[flip.tool];
@@ -282,14 +279,12 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   }
   const { done, results: flipped } = await flipAll(context, home, back);
   results.push(...flipped);
-  // The profile in use is this switch's choice only while no later switch (or undo) has chosen since.
-  const governs = [...history].reverse().find(entry => entry.kind === 'profile')?.id === past.id;
   const before = profiles.active;
-  if (governs) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
+  if (choseProfileInUse(history, past)) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
   profiles.held = heldAfterFlips(profiles.held, done);
   await saveProfiles(context.home, profiles);
   const name = (id?: string) => profiles.profiles.find(profile => profile.id === id)?.name;
-  const undo: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: name(profiles.active) ?? 'No profile', kind: 'profile', losers: [], orderProved: true,
+  const undo: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: name(profiles.active) ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
     profile: { ...(before ? { from: before, fromName: name(before) } : {}), ...(profiles.active ? { to: profiles.active, toName: name(profiles.active) } : {}), flips: done } };
   past.undoneBy = undo.id;
   await replaceHistory(context, [...history, undo]);

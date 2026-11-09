@@ -15,8 +15,9 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import { deleteProfile, driftNow, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { driftOf, switchItems } from './profileplan.ts';
+import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
+import { driftOf, NO_PROFILE, profilesInUse, switchItems } from './profileplan.ts';
+import { plural } from './model.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -35,6 +36,8 @@ let lastManagedCount = 0;
 let lastProfiles: ProfilesView = { profiles: [], held: {} };
 /** How many switches no longer match the profile in use, as last read (the menus say so beside its name). */
 let lastDrift = 0;
+/** The switch files' modification times when drift was last looked at in the background. */
+let lastStamp = '';
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -158,12 +161,11 @@ function statusLine() {
 /** The active profile's name, or undefined for No profile. */
 const activeProfileName = () => lastProfiles.profiles.find(profile => profile.id === lastProfiles.active)?.name;
 /**
- * Profile: one click switches, from the menu bar or the app menu. The label says which is active; each profile is a radio item.
- * Shown once a profile exists; before that, "Profiles…" opens the page that makes one.
+ * Profile: one click switches, from the menu bar or the app menu. The label says which is in use; each profile is a radio item.
+ * Before any profile exists (and nothing is held off by one), "Profiles…" opens the page that makes one.
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
-  // Before any profile exists (and nothing is held off by one), "Profiles…" opens the page that makes one.
-  if (!lastProfiles.profiles.length && !Object.keys(lastProfiles.held).length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
+  if (!profilesInUse(lastProfiles)) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
   const choose = (id: string | null) => void fromTray(async () => {
     if (!current) return;
     const result = await switchProfile(context(), id);
@@ -171,20 +173,20 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // Reporting: a switch that couldn't start waits on the page like sync's failures. Otherwise its result, failures included,
     // goes to the page's band with Undo; with no window, the failures wait with sync's.
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
-    else if (page) window.webContents.send('profile:switched', id === null ? 'No profile' : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
+    else if (page) window.webContents.send('profile:switched', id === null ? NO_PROFILE : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
     else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
     // Menus: the profiles as saved, and what still differs (the page's read updates it when there is a window).
     lastProfiles = await readProfiles(current.home);
     if (!page) lastDrift = await driftNow(context());
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
-  const drift = lastDrift ? ` (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'} to apply)` : '';
-  return { label: `Profile: ${activeProfileName() ?? 'No profile'}${drift}`, submenu: [
-    { label: 'No profile', type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
+  const drift = lastDrift ? ` (${plural(lastDrift, 'item')} to apply)` : '';
+  return { label: `Profile: ${activeProfileName() ?? NO_PROFILE}${drift}`, submenu: [
+    { label: NO_PROFILE, type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
     // The profile in use no longer matches the tools: applying it again is one click here too, as in the status bar menu.
-    ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? 'No profile'} to tools (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'})`, enabled: usable, click: () => choose(lastProfiles.active ?? null) }] : []),
+    ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? NO_PROFILE} to tools (${plural(lastDrift, 'item')})`, enabled: usable, click: () => choose(lastProfiles.active ?? null) }] : []),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
   ] };
@@ -347,7 +349,10 @@ function background() {
     const result = await pass();
     // A switch turned back in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: drift is
     // looked at on its own while a profile holds anything, and the menus and the page follow it.
-    if (lastProfiles.active || Object.keys(lastProfiles.held).length) {
+    // Looked at only when a switch file changed since the last look, or the pass wrote something (an item may have come or gone).
+    const stamp = await switchFilesStamp(context()).catch(() => '');
+    if ((lastProfiles.active || Object.keys(lastProfiles.held).length) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
+      lastStamp = stamp;
       const drift = await driftNow(context()).catch(() => lastDrift);
       if (drift !== lastDrift) { lastDrift = drift; refreshTray(); if (!window.isDestroyed()) window.webContents.send('sync:changed'); }
     }
@@ -589,9 +594,9 @@ app.whenReady().then(async () => {
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
+      if (past?.kind === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
       const key = past?.key ?? '';
       const tools = (await manageView(context())).tools;
-      if (past?.kind === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);

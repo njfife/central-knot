@@ -7,7 +7,32 @@
 // - An item in the profile is turned back on only where a profile turned it off. A switch turned off by hand stays off.
 // - No profile turns back on everything profiles turned off, and holds nothing.
 import { plural } from './model.ts';
-import type { HarnessId, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
+import type { HarnessId, HistoryEvent, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
+
+/** What every screen calls having no profile in use. */
+export const NO_PROFILE = 'No profile';
+
+/** Whether profiles are in play here: one exists, or a switch still holds something off (the menus and the page show them). */
+export const profilesInUse = (view: Pick<ProfilesView, 'profiles' | 'held'>) => view.profiles.length > 0 || Object.keys(view.held).length > 0;
+
+/**
+ * The switches changed again after `past` (`item|tool`), by hand (a Disable or Enable on the Skills page) or by a later profile
+ * switch: those belong to the later change, so an Undo of `past` leaves them.
+ */
+export function changedSince(history: HistoryEvent[], past: HistoryEvent): Set<string> {
+  const later = history.slice(history.indexOf(past) + 1);
+  return new Set([
+    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => `${itemId('skill', entry.key)}|${tool}`)),
+    ...later.filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => `${flip.item}|${flip.tool}`) ?? []),
+  ]);
+}
+
+/**
+ * Whether `past` chose the profile in use: it is the latest switch that changed which profile is in use. An Apply, or an undo of
+ * an older switch, changes switches but not the profile, so it chooses nothing.
+ */
+export const choseProfileInUse = (history: HistoryEvent[], past: HistoryEvent) =>
+  [...history].reverse().find(entry => entry.kind === 'profile' && entry.profile && (entry.profile.from ?? '') !== (entry.profile.to ?? ''))?.id === past.id;
 
 export type ItemKind = 'skill' | 'mcp';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;

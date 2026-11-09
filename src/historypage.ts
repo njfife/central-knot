@@ -2,7 +2,7 @@
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { andList, toolNames } from './words.ts';
-import { flipCounts, flipWords } from './profileplan.ts';
+import { flipCounts, flipWords, NO_PROFILE } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -57,8 +57,8 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   // The tools by name, as the result of the switch said them.
   const where = switched.flips.length ? ` in ${andList([...new Set(switched.flips.map(flip => who(flip.tool)))])}` : '';
   const undid = state.history?.find(other => other.undoneBy === event.id);
-  const to = switched.toName ?? 'No profile';
-  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? 'No profile'}; back to ${to}: ${counts}${where}.`, action: 'Redo' };
+  const to = switched.toName ?? NO_PROFILE;
+  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}${where}.`, action: 'Redo' };
   return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}${where}.`, action: 'Undo' };
 }
 
@@ -80,7 +80,7 @@ const day = (iso: string) => {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
-const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? 'No profile'} is in use again if this switch is the one that chose the profile in use`
+const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${list(event.losers.map(loser => loser.tool))}`
   : event.kind === 'added' ? `Remove the copies Apply all added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`

@@ -3,7 +3,7 @@ import type { ApplyResult, Change, DesktopApi, ProfileSwitchResult, DestinationR
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { flipCounts, flipWords } from './profileplan.ts';
+import { flipCounts, flipWords, NO_PROFILE } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -244,7 +244,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const undoneBy = past?.undoneBy;
   if (past?.kind === 'profile') {
     // Said from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch chose.
-    const inUse = state.home?.profiles.profiles.find(profile => profile.id === state.home?.profiles.active)?.name ?? 'No profile';
+    const inUse = state.home?.profiles.profiles.find(profile => profile.id === state.home?.profiles.active)?.name ?? NO_PROFILE;
     const put = result.harnessWrites ? `${plural(result.harnessWrites, 'switch', 'switches')} put back` : 'no switch needed putting back';
     if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${put}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
@@ -567,7 +567,7 @@ function switchOutcome(name: string, result: ProfileSwitchResult) {
 /** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
 export const switchToProfile = (id: string | null) => busy('Switching profile…', async () => {
   const home = state.home!;
-  const name = id === null ? 'No profile' : home.profiles.profiles.find(profile => profile.id === id)?.name ?? 'that profile';
+  const name = id === null ? NO_PROFILE : home.profiles.profiles.find(profile => profile.id === id)?.name ?? 'that profile';
   const result = await api().switchProfile(id, home.home);
   if (result.view) state.home = result.view;
   if (result.stopped) { announce(result.stopped); return; }
