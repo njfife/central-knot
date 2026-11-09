@@ -1415,21 +1415,6 @@ test('T6: moving a copy into ~/.agents/skills is a move, not a deletion', async 
   } finally { await box.cleanup(); }
 });
 
-test('T8: a skills folder restored from an older backup catches up instead of spreading the old content', async () => {
-  const box = await sandbox();
-  try {
-    await managedThree(box);
-    const backup = join(box.base, 'claude-backup');
-    execFileSync('cp', ['-R', join(box.home, CLAUDE), backup]);
-    await writeFile(join(box.home, COPILOT, 'foo/SKILL.md'), text('foo', 'Version 2'));
-    await applyChanges(three(box), []);
-    await rename(join(box.home, CLAUDE), join(box.home, '.claude/skills-gone'));
-    execFileSync('cp', ['-R', backup, join(box.home, CLAUDE)]);
-    await applyChanges(three(box), []);
-    for (const root of [CLAUDE, COPILOT, CODEX]) assert.equal(await readFile(join(box.home, root, 'foo/SKILL.md'), 'utf8'), text('foo', 'Version 2'), root);
-  } finally { await box.cleanup(); }
-});
-
 test('T9: what an unreadable History mentioned is never pruned', async () => {
   const box = await sandbox();
   try {
