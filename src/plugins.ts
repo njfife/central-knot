@@ -7,7 +7,9 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { harnesses } from './harnesses.ts';
 import { inside, pluginContents, sourceOf } from './catalogdetail.ts';
-import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun, Outcome } from './types.ts';
+import { componentsFrom } from './pluginoutcomes.ts';
+export { outcomes } from './pluginoutcomes.ts';
+import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
 export type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, InstallState, NativeRun, Outcome } from './types.ts';
 
 // ---------- Shapes ----------
@@ -20,6 +22,15 @@ export interface PluginContext {
   binaries: Partial<Record<HarnessId, string>>;
   overrides?: Partial<Record<HarnessId, string>>;
   timeoutMs?: number;
+  /** Reads shared within one view, so each tool's records (and a live folder's catalog) are read once, not once per plugin. */
+  reads?: Map<string, Promise<unknown>>;
+}
+
+/** A read done once per context when the context carries a cache. */
+function once<T>(context: PluginContext, key: string, read: () => Promise<T>): Promise<T> {
+  if (!context.reads) return read();
+  if (!context.reads.has(key)) context.reads.set(key, read());
+  return context.reads.get(key) as Promise<T>;
 }
 
 export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -93,7 +104,7 @@ const catalogFolder = (context: PluginContext, source: string) => join(context.d
 async function shallowClone(context: PluginContext, url: string, target: string, ref?: string): Promise<string | true | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
-  const cloned = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), url, stage], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+  const cloned = await run('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
     const failure = classify(cloned.code, cloned.output);
@@ -104,15 +115,29 @@ async function shallowClone(context: PluginContext, url: string, target: string,
   return undefined;
 }
 
+/** Where a plugin kept in another repository is copied to, by its URL, branch and commit. */
+export const remoteCopyFolder = (context: PluginContext, remote: { url: string; ref?: string; sha?: string }) =>
+  join(context.dataDir, 'remote', createHash('sha256').update(`${remote.url}\u0000${remote.ref ?? ''}\u0000${remote.sha ?? ''}`).digest('hex').slice(0, 24));
+/** Copies being made right now, so two pages opened together share one clone instead of racing on the same folder. */
+const copying = new Map<string, Promise<string | true | undefined>>();
+
 /**
  * A plugin kept in its own repository, read so its page can show what it holds: a shallow copy kept with Central Knot's
- * other copies, reused once made. Only https Git URLs are read. Nothing in it is run.
+ * other copies, made once and made again when its marketplace is refreshed (`fresh`). Only https Git URLs are read; a
+ * pinned commit (`sha`) is checked out when the entry gives one. Nothing in it is run.
  */
-export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string }): Promise<{ folder: string; root: string } | { problem: string }> {
-  const root = join(context.dataDir, 'plugins', createHash('sha256').update(`${remote.url}\u0000${remote.ref ?? ''}`).digest('hex').slice(0, 24));
-  const have = await stat(root).then(() => true, () => false);
-  if (!have) {
-    const problem = await shallowClone(context, remote.url, root, remote.ref);
+export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string; sha?: string }, fresh = false): Promise<{ folder: string; root: string } | { problem: string }> {
+  const root = remoteCopyFolder(context, remote);
+  if (fresh || !(await stat(root).then(() => true, () => false))) {
+    const pending = copying.get(root) ?? (async () => {
+      const problem = await shallowClone(context, remote.url, root, remote.ref);
+      if (problem || !remote.sha) return problem;
+      const fetched = await run('git', ['-C', root, '-c', 'core.hooksPath=/dev/null', 'fetch', '--depth', '1', '--quiet', 'origin', remote.sha], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
+      const checked = fetched.code === 0 ? await run('git', ['-C', root, '-c', 'core.hooksPath=/dev/null', 'checkout', '--quiet', '--detach', 'FETCH_HEAD'], { env: gitEnv(), timeoutMs: 30_000 }) : fetched;
+      return checked.code === 0 ? undefined : `The commit it names (${remote.sha.slice(0, 12)}) could not be read.`;
+    })().finally(() => copying.delete(root));
+    copying.set(root, pending);
+    const problem = await pending;
     if (problem) return { problem: problem === true ? 'Its repository could not be copied.' : problem };
   }
   const folder = resolve(root, remote.path || '.');
@@ -149,7 +174,11 @@ const stringOr = (value: unknown, fallback = '') => (typeof value === 'string' ?
 export async function parseCatalog(root: string, source: string, kind: Catalog['kind']): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   let manifest: Record<string, unknown>;
-  try { manifest = JSON.parse(await readFile(join(root, '.claude-plugin/marketplace.json'), 'utf8')); }
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(root, '.claude-plugin/marketplace.json'), 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new SyntaxError('not an object');
+    manifest = parsed as Record<string, unknown>;
+  }
   catch (error) {
     const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
     return { name: '', source, kind, fetchedAt, plugins: [], problem: missing ? 'There is no marketplace here: no .claude-plugin/marketplace.json.' : 'Its marketplace.json could not be read as JSON.' };
@@ -190,45 +219,19 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
 
 /** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
 export async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
-  const contents = await pluginContents(folder, entry, root);
-  return { skills: contents.skills.length, commands: contents.commands.length, agents: contents.agents.length, hooks: contents.hooks.length > 0, mcp: contents.mcpServers.length,
-    mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin, skillNames: contents.skills.map(skill => skill.name) };
+  return componentsFrom(await pluginContents(folder, entry, root));
 }
 
-/** What each component does on each tool (capability data, Appendix D, tested versions). */
-export function outcomes(tool: HarnessId, components: Components): Outcome[] {
-  const list: Outcome[] = [];
-  const add = (present: boolean | number, component: string, result: Outcome['result'], text: string) => { if (present) list.push({ component, result, text }); };
-  if (tool === 'claude-cli') {
-    add(components.skills, 'Skills', 'works', 'keep their names');
-    add(components.commands, 'Commands', 'works', 'work as they are');
-    add(components.agents, 'Agents', 'works', 'work as they are');
-    add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
-    add(components.mcp, 'MCP servers', 'works', 'start as they are');
-  } else if (tool === 'copilot-cli') {
-    add(components.skills, 'Skills', 'works', 'keep their names');
-    add(components.commands, 'Commands', 'limited', 'become skills');
-    add(components.agents, 'Agents', 'works', 'are called plugin:agent');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
-    add(components.mcp, 'MCP servers', 'works', 'start as they are');
-  } else {
-    add(components.skills, 'Skills', 'works', 'are called plugin:skill');
-    add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
-    add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
-    add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others may not');
-    add(components.mcp, 'MCP servers', components.mcpRootVariable ? 'fails' : 'unknown', components.mcpRootVariable ? 'won’t start: Codex does not fill in ${CLAUDE_PLUGIN_ROOT}' : 'may not start: not confirmed in Codex');
-  }
-  if (components.bin) list.push({ component: 'Top-level bin/', result: tool === 'claude-cli' ? 'works' : 'unknown', text: tool === 'claude-cli' ? 'is added to the path' : 'may not be on the path: not confirmed here' });
-  return list;
-}
 
 // ---------- What each tool has ----------
 
 const configRootOf = (context: PluginContext, tool: HarnessId) => context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig);
 
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
-  try { return JSON.parse((await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
+  try { const value = JSON.parse((await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined; } catch { return undefined; }
 }
+const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
+const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async () => { try { return readCodexTables(await readFile(join(root, 'config.toml'), 'utf8')); } catch { return undefined; } });
 
 /** Only the two kinds of table Central Knot reads from Codex's config.toml: `[marketplaces.NAME]` and `[plugins."ID"]`. Never written. */
 export function readCodexTables(text: string): { marketplaces: Record<string, Record<string, string>>; plugins: Record<string, Record<string, string>> } {
@@ -252,10 +255,8 @@ const hasFiles = async (path: string) => { try { return (await readdir(path)).le
 /** The marketplace a tool has under a name, as the source it was added from. */
 export async function registeredSource(context: PluginContext, tool: HarnessId, marketplace: string): Promise<string | undefined> {
   const root = configRootOf(context, tool);
-  if (tool === 'codex-cli') {
-    try { return readCodexTables(await readFile(join(root, 'config.toml'), 'utf8')).marketplaces[marketplace]?.source; } catch { return undefined; }
-  }
-  const settings = await readJson(join(root, 'settings.json'));
+  if (tool === 'codex-cli') return (await codexTables(context, root))?.marketplaces[marketplace]?.source;
+  const settings = await recordJson(context, join(root, 'settings.json'));
   const entry = (settings?.extraKnownMarketplaces as Record<string, { source?: { source?: string; url?: string; path?: string; repo?: string } }> | undefined)?.[marketplace]?.source;
   return entry ? entry.url ?? entry.path ?? entry.repo : undefined;
 }
@@ -265,30 +266,29 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
   const root = configRootOf(context, tool);
   const id = `${plugin}@${marketplace}`;
   if (tool === 'claude-cli') {
-    const record = await readJson(join(root, 'plugins/installed_plugins.json'));
+    const record = await recordJson(context, join(root, 'plugins/installed_plugins.json'));
     const entries = (record?.plugins as Record<string, { scope?: string; installPath?: string }[]> | undefined)?.[id];
     const user = entries?.find(entry => entry.scope === 'user') ?? entries?.[0];
     if (!user?.installPath) return { state: 'not-installed' };
     return (await hasFiles(user.installPath)) ? { state: 'installed', path: user.installPath } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
   }
   if (tool === 'copilot-cli') {
-    const config = await readJson(join(root, 'config.json'));
+    const config = await recordJson(context, join(root, 'config.json'));
     const entry = (config?.installedPlugins as { name?: string; marketplace?: string; cache_path?: string; enabled?: boolean }[] | undefined)?.find(item => item.name === plugin && item.marketplace === marketplace);
     if (entry?.cache_path) return (await hasFiles(entry.cache_path)) ? { state: 'installed', path: entry.cache_path } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
     // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
-    const settings = await readJson(join(root, 'settings.json'));
+    const settings = await recordJson(context, join(root, 'settings.json'));
     const enabled = (settings?.enabledPlugins as Record<string, boolean> | undefined)?.[id] === true;
     const source = (settings?.extraKnownMarketplaces as Record<string, { source?: { source?: string; path?: string } }> | undefined)?.[marketplace]?.source;
     if (enabled && source?.source === 'directory' && source.path) {
-      const catalog = await parseCatalog(source.path, source.path, 'folder');
+      const catalog = await once(context, `catalog:${source.path}`, () => parseCatalog(source.path!, source.path!, 'folder'));
       const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
       return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
     }
     return { state: 'not-installed' };
   }
-  let tables;
-  try { tables = readCodexTables(await readFile(join(root, 'config.toml'), 'utf8')); } catch { return { state: 'not-installed' }; }
-  if (!tables.plugins[id]) return { state: 'not-installed' };
+  const tables = await codexTables(context, root);
+  if (!tables?.plugins[id]) return { state: 'not-installed' };
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const versions = await readdir(cache).catch(() => [] as string[]);
   for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version) };
@@ -365,8 +365,10 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
 }
 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
-export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId): Promise<ActionReport> {
+export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source?: string): Promise<ActionReport> {
   const name = harnesses[tool].name;
+  const registered = source ? await registeredSource(context, tool, marketplace) : undefined;
+  if (registered && source && !sameSource(registered, source)) return { tool, outcome: 'held', message: `${name}’s “${marketplace}” is a different marketplace (${registered}). Central Knot doesn’t change it.`, runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`;

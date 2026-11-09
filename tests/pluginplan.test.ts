@@ -69,3 +69,22 @@ test('Choices for a plugin or marketplace no longer listed are dropped', () => {
   prune(draft, { home: '/h', tools: ['claude-cli'], clis: {}, canWrite: true, marketplaces: [{ source: 'anthropics/skills', origins: ['central-knot'], name: 'anthropic-agent-skills', kind: 'git', plugins: [{ name: 'pdf', description: '', outcomes: {} }], states: {} }] });
   assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['pdf']);
 });
+
+test('A run goes on past a step that throws, and a refusal stops it with the rest still chosen', async () => {
+  const { runPlan } = await import('../src/pluginplan.ts');
+  const ops = [op('pdf', 'claude-cli'), op('docx', 'claude-cli'), op('xlsx', 'claude-cli')];
+  const seen: string[] = [];
+  const api = {
+    install: async (_source: string, plugin: string, tools: HarnessId[]) => {
+      seen.push(plugin);
+      if (plugin === 'pdf') throw new Error('IPC gone');
+      if (plugin === 'xlsx') return { stopped: 'Writing isn’t allowed here.', reports: [] };
+      return { reports: tools.map(tool => ({ tool, outcome: 'installed' as const, message: '', runs: [], changed: true })) };
+    },
+    uninstall: async () => ({ reports: [] }),
+  };
+  const result = await runPlan(ops, api, '/home');
+  assert.deepEqual(seen, ['pdf', 'docx', 'xlsx']);
+  assert.deepEqual(result.done.map(entry => [entry.plugin, entry.report.outcome]), [['pdf', 'failed'], ['docx', 'installed']]);
+  assert.equal(result.stopped, 'Writing isn’t allowed here.');
+});

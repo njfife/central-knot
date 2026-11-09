@@ -52,14 +52,17 @@ export function frontMatter(body: string): { name?: string; description?: string
   return { name: value('name'), description: value('description') };
 }
 
-async function skillsIn(root: string, dirs: string[]): Promise<NamedPart[]> {
+/** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
+async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
-  for (const dir of dirs) {
+  const add = async (dir: string) => {
     const body = await readInside(root, join(dir, 'SKILL.md'));
-    if (body === undefined) continue;
+    if (body === undefined) return false;
     const meta = frontMatter(body);
     found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
-  }
+    return true;
+  };
+  for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
@@ -99,11 +102,11 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   const manifest = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
   const merged = { ...manifest, ...entry };
   const listed = (key: string) => strings(merged[key])?.map(path => resolve(folder, path));
-  const skillDirs = listed('skills') ?? (await listInside(root, join(folder, 'skills'))).map(name => join(folder, 'skills', name));
+  const skillPaths = listed('skills') ?? [join(folder, 'skills')];
   const hooks = { ...(record((await jsonInside(root, join(folder, 'hooks/hooks.json')))?.hooks) ?? {}), ...(merged.hooks !== undefined ? await inlineOrFile(root, folder, merged.hooks, 'hooks') : {}) };
   const servers = { ...(record((await jsonInside(root, join(folder, '.mcp.json')))?.mcpServers) ?? {}), ...(merged.mcpServers !== undefined ? await inlineOrFile(root, folder, merged.mcpServers, 'mcpServers') : {}) };
   return {
-    skills: await skillsIn(root, skillDirs),
+    skills: await skillsIn(root, skillPaths),
     commands: await markdownIn(root, listed('commands') ?? [join(folder, 'commands')]),
     agents: await markdownIn(root, listed('agents') ?? [join(folder, 'agents')]),
     hooks: Object.keys(hooks).sort(),
@@ -128,13 +131,15 @@ export async function entryIn(root: string, plugin: string): Promise<Record<stri
 }
 
 /** Where a plugin outside the marketplace lives: a Git URL to read it from (https only), a folder in it and a branch. */
-export function remoteOf(where: unknown): { url: string; path: string; ref?: string } | undefined {
+export function remoteOf(where: unknown): { url: string; path: string; ref?: string; sha?: string } | undefined {
   const entry = record(where);
   if (!entry) return undefined;
   const path = text(entry.path).replace(/^\.?\//, '');
-  const ref = text(entry.ref) || undefined;
-  if (entry.source === 'github' && /^[\w.-]+\/[\w.-]+$/.test(text(entry.repo))) return { url: `https://github.com/${text(entry.repo)}.git`, path, ref };
-  if (['url', 'git-subdir', 'git'].includes(text(entry.source)) && /^https:\/\/\S+$/.test(text(entry.url))) return { url: text(entry.url), path, ref };
+  // A branch or tag must look like one (never an option); a pinned commit is 7 to 40 hex digits.
+  const ref = /^[\w./-]{1,200}$/.test(text(entry.ref)) && !text(entry.ref).startsWith('-') ? text(entry.ref) : undefined;
+  const sha = /^[0-9a-f]{7,40}$/i.test(text(entry.sha)) ? text(entry.sha) : undefined;
+  if (entry.source === 'github' && /^[\w.-]+\/[\w.-]+$/.test(text(entry.repo))) return { url: `https://github.com/${text(entry.repo)}.git`, path, ref, sha };
+  if (['url', 'git-subdir', 'git'].includes(text(entry.source)) && /^https:\/\/\S+$/.test(text(entry.url))) return { url: text(entry.url), path, ref, sha };
   return undefined;
 }
 

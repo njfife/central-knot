@@ -17,7 +17,7 @@ export type Block =
   | { kind: 'quote'; blocks: Block[] }
   | { kind: 'table'; head: Inline[][]; rows: Inline[][][] }
   | { kind: 'rule' };
-export interface MarkdownOptions { /** Leave out an opening heading that only repeats this name. */ skipTitle?: string; /** Leave out a first paragraph that only repeats this text. */ skipLead?: string }
+export interface MarkdownOptions { /** Leave out an opening heading that only repeats this name. */ skipTitle?: string; /** Leave out a first paragraph that mostly repeats one of these (a description already on the page). */ skipLead?: string[] }
 
 const MAX_QUOTE_DEPTH = 6;
 // Each pattern is tried only where its first character appears, and every repeat is bounded, so no README can make the
@@ -140,12 +140,21 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
 
 const plainText = (content: Inline[]): string => content.map(part => part.kind === 'text' || part.kind === 'code' ? part.text : part.kind === 'image' ? part.alt : plainText(part.kind === 'link' ? part.label : part.children)).join('');
 const same = (first: string, second: string) => first.toLowerCase().replace(/[^a-z0-9]+/g, '') === second.toLowerCase().replace(/[^a-z0-9]+/g, '');
+const words = (value: string) => new Set(value.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+/** Mostly the same words: at least 60% of the shorter text's words are in the other, or one starts with the other. */
+export function repeats(first: string, second: string): boolean {
+  if (!first.trim() || !second.trim()) return false;
+  if (same(first, second) || same(first.slice(0, second.length), second) || same(second.slice(0, first.length), first)) return true;
+  const [small, large] = [words(first), words(second)].sort((a, b) => a.size - b.size) as [Set<string>, Set<string>];
+  return small.size >= 4 && [...small].filter(word => large.has(word)).length / small.size >= 0.6;
+}
 
 /** Leaves out an opening title and lead paragraph that only repeat what the page already shows. */
 export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Block[] {
   let rest = blocks;
   if (options.skipTitle && rest[0]?.kind === 'heading' && same(plainText(rest[0].content), options.skipTitle)) rest = rest.slice(1);
-  if (options.skipLead && rest[0]?.kind === 'paragraph' && same(plainText(rest[0].content), options.skipLead)) rest = rest.slice(1);
+  const lead = rest[0]?.kind === 'paragraph' ? plainText(rest[0].content) : '';
+  if (lead && options.skipLead?.some(text => repeats(lead, text))) rest = rest.slice(1);
   return rest;
 }
 

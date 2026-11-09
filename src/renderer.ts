@@ -91,7 +91,7 @@ function renderHeader(rail: boolean) {
     h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
       onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
-      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),
+      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
   );
 }
 

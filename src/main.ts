@@ -327,7 +327,6 @@ async function startWatching() {
   poller = setInterval(background, POLL_MS);
 }
 
-// ---------- Marketplaces and plugins ----------
 
 /** Whether a Claude Code process is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
 function claudeRunning(): Promise<boolean> {

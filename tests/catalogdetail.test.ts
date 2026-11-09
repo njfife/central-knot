@@ -70,7 +70,16 @@ test('Only https links come back for sources and pages', () => {
   assert.equal(sourceOf({ source: 'url', url: 'git@github.com:example/x.git' })?.url, undefined);
   assert.equal(sourceOf({ source: 'url', url: 'http://example.com/x.git' })?.url, undefined);
   assert.equal(remoteOf({ source: 'url', url: 'file:///etc' }), undefined);
-  assert.deepEqual(remoteOf({ source: 'git-subdir', url: 'https://github.com/a/b.git', path: './plugins/x', ref: 'main' }), { url: 'https://github.com/a/b.git', path: 'plugins/x', ref: 'main' });
+  assert.deepEqual(remoteOf({ source: 'git-subdir', url: 'https://github.com/a/b.git', path: './plugins/x', ref: 'main' }), { url: 'https://github.com/a/b.git', path: 'plugins/x', ref: 'main', sha: undefined });
   assert.equal(marketplacePage('anthropics/skills'), 'https://github.com/anthropics/skills');
   assert.equal(marketplacePage('/Users/me/market'), undefined);
+});
+
+test('A skills path may name a folder of skills; a ref or sha that looks like an option is ignored', async () => {
+  const { root, cleanup } = await box();
+  try {
+    for (const name of ['one', 'two']) await put(join(root, `custom/skills/${name}/SKILL.md`), `---\nname: ${name}\n---\n`);
+    assert.deepEqual((await pluginContents(root, { skills: './custom/skills/' }, root)).skills.map(skill => skill.name), ['one', 'two']);
+    assert.deepEqual(remoteOf({ source: 'github', repo: 'a/b', ref: '--upload-pack=x', sha: 'zz' }), { url: 'https://github.com/a/b.git', path: '', ref: undefined, sha: undefined });
+  } finally { await cleanup(); }
 });

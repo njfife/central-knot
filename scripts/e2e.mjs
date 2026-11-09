@@ -493,8 +493,8 @@ async function practiceFlow() {
   check('a plugin elsewhere says where it comes from', (await a.text('[data-plugin="spark"]')).includes('From GitHub · github/copilot-plugins/plugins/spark'), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#market-tab-about');
-  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
-  check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme')).includes('What is inside') && !(await a.text('.plugin-readme')).includes('<p') && await a.exists('.plugin-readme .md-link'), await a.text('.plugin-readme'));
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
+  check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
   await a.click('#market-tab-plugins');
   await a.click('#popen-0-release-helper');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-group')); tries++) await wait(100);

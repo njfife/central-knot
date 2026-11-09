@@ -87,23 +87,26 @@ export interface DesktopApi {
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
   showFile(path: string): Promise<void>;
-  /** A marketplace's README (no plugin), or one plugin's contents and README. */
-  pluginDetail(source: string, plugin?: string): Promise<{ readme?: string } | PluginDetail | null>;
+  /** A marketplace's own README, from the copy already read. */
+  marketplaceReadme(source: string): Promise<string | null>;
+  /** One plugin's contents and README; null when its files can't be found. */
+  pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
-  plugins(): Promise<PluginsView | null>;
+  /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
+  plugins(fresh?: boolean): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
-  uninstallPlugin(marketplace: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  uninstallPlugin(source: string, marketplace: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
 }
 
-export interface PluginActionResult { stopped?: string; reports: ActionReport[]; view?: PluginsView }
+export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
 
 // ---------- Managing skills across tools ----------
 
@@ -243,10 +246,12 @@ export interface CatalogPlugin {
 
 export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string }
 
-export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string };
+export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+  /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
+  | { state: 'held'; reason: string };
 
 /** One component's outcome on one tool (capability data, Appendix D). */
-export interface Outcome { component: string; result: 'works' | 'limited' | 'ignored' | 'fails' | 'unknown'; text: string }
+export interface Outcome { component: string; result: 'works' | 'limited' | 'ignored' | 'fails' | 'unknown'; text: string; /** The tool prefixes these with the plugin's name (`plugin:skill`); the page shows the real names. */ names?: 'skill' | 'agent' }
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 

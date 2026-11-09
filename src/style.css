@@ -604,11 +604,8 @@ ul { list-style: none; }
 
 /* Plugins page */
 .market-empty { color: var(--ink-soft); font-size: 13px; }
-.market-add { flex: 1 1 360px; max-width: 560px; }
 .plugin-add .plugin-add-glyph { opacity: 0; }
 .plugin-add:hover .plugin-add-glyph, .plugin-add:focus-visible .plugin-add-glyph { opacity: 0.8; }
-.plugin-report { align-items: flex-start; }
-.plugin-report-lines p { margin: 0 0 4px; display: flex; gap: 6px; align-items: flex-start; }
 
 /* Add all, per target tool: counts drawn with the cell each group shows in that tool's column today. */
 .add-target + .add-target { border-top: 1px solid var(--line); }
@@ -740,7 +737,6 @@ ul { list-style: none; }
 button.apply-state.text-action { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; }
 button.apply-state.text-action:hover { text-decoration-color: currentColor; }
 .market-hint > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 6px; }
-.plugin-report-lines .btn { margin-left: 8px; }
 #announcement[data-quiet="true"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* UI round 3 */
@@ -844,8 +840,6 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .detail-scroll .details { box-shadow: none; padding-left: 0; }
 .ov-row { scroll-margin-top: 128px; }
 .decided-undo span { text-decoration: underline; }
-.band.plugin-report { flex-direction: column; align-items: stretch; position: relative; padding-right: 40px; }
-.band.plugin-report > .band-dismiss { position: absolute; top: 6px; right: 12px; }
 /* UI round 6 */
 @keyframes row-flash { from { background: var(--selected-row); } to { background: transparent; } }
 .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 140px; }
@@ -1315,9 +1309,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .md-link:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
 .md-image { color: var(--ink-faint); font-style: italic; }
 .plugins-page .bands > .band { padding-right: 16px; }
-.band.plugin-report { flex-direction: row; align-items: flex-start; gap: 12px; }
-.band.plugin-report .plugin-report-lines { flex: 1 1 auto; min-width: 0; }
-.band.plugin-report > .btn { flex: none; align-self: center; margin-right: 24px; }
 
 /* Round 2: one line of tool boxes on a plugin's page; a chosen box is tinted, not only dashed */
 .plugin-panel h3 { margin: 0 0 8px; }
@@ -1333,4 +1324,20 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .plugin-meta .btn { font-size: 12px; }
 .md ul { list-style: disc; } .md ol { list-style: decimal; }
-.band.plugin-report > .btn { align-self: center; }
+
+/* Round 3: where you are, one band shape, README set apart */
+.market-crumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-soft); min-width: 0; }
+.market-crumbs .crumb-here { color: var(--ink); font-weight: 600; }
+.crumb-link { all: unset; cursor: pointer; color: var(--ink-soft); }
+.crumb-link:hover { color: var(--ink); text-decoration: underline; }
+.crumb-link:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
+.market-add.market-add-first { margin-top: 0; padding-top: 0; border-top: 0; }
+.meta-dot { margin: 0 6px; color: var(--ink-faint); }
+.plugin-meta, .market-page-meta { display: flex; flex-wrap: wrap; align-items: center; }
+.plugin-tool-rows { align-items: center; }
+.plugin-tool-rows > .btn { margin-left: auto; }
+.plugin-panel-note { margin: 8px 0 0; font-size: 12px; color: var(--ink-faint); }
+.plugin-part-what { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.plugin-readme h3 { margin-bottom: 8px; }
+.plugin-readme-body { padding-left: 14px; border-left: 3px solid var(--line); }
+.plugin-readme-body .md h3, .plugin-readme-body .md h4, .plugin-readme-body .md h5, .plugin-readme-body .md h6 { font-size: 13px; color: var(--ink-soft); }

@@ -46,7 +46,7 @@ test('Deep quotes and hostile text stay cheap: no recursion without limit, no sl
 });
 
 test('An opening title and lead that only repeat the page are left out', () => {
-  const blocks = trimRepeats(parseMarkdown('# document-tools\n\nRead PDFs and tidy spreadsheets.\n\n## Use\n\nMore.'), { skipTitle: 'document-tools', skipLead: 'Read PDFs and tidy spreadsheets.' });
+  const blocks = trimRepeats(parseMarkdown('# document-tools\n\nRead PDFs and tidy spreadsheets.\n\n## Use\n\nMore.'), { skipTitle: 'document-tools', skipLead: ['Read PDFs and tidy spreadsheets.'] });
   assert.deepEqual(blocks.map(block => block.kind), ['heading', 'paragraph']);
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Use');
 });

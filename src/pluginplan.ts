@@ -1,6 +1,6 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
-import type { ActionReport, HarnessId, PluginsView } from './types.ts';
+import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
 
 export type PluginAction = 'install' | 'remove';
 /** One tool's change for one plugin from one marketplace. */
@@ -10,6 +10,9 @@ export interface PluginDone extends PluginOp { report: ActionReport }
 
 /** Chosen changes, keyed by marketplace source, plugin and tool. Nothing here has run. */
 export type PluginDraft = Map<string, PluginOp>;
+
+/** A failure for each tool of a step that could not run at all, so the report says so and Undo leaves it alone. */
+export const failedFor = (tools: HarnessId[], message: string): ActionReport[] => tools.map(tool => ({ tool, outcome: 'failed', message, runs: [] }));
 
 /** One plugin in one marketplace: two marketplaces may both offer a plugin with the same name. */
 export const pluginKey = (source: string, plugin: string) => `${source}\u0000${plugin}`;
@@ -75,4 +78,31 @@ export function describe(done: PluginDone[], names: Record<HarnessId, string>, a
     for (const entry of mine.filter(candidate => !['installed', 'uninstalled'].includes(candidate.report.outcome))) lines.push({ plugin, ok: false, text: `${names[entry.tool]}: ${entry.report.message}` });
   }
   return lines;
+}
+
+/** The two calls a run needs, as the page's API gives them (tests pass their own). */
+export interface PlanApi {
+  install(source: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
+  uninstall(source: string, market: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+}
+
+/**
+ * Runs the ops in batches() order and returns what each tool did. A step whose call throws fails for its tools and the run
+ * goes on. A refusal for the whole home (it changed, or writing isn't allowed) stops the run; that step and the rest are
+ * not recorded, so they stay chosen.
+ */
+export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onStep: (step: ReturnType<typeof batches>[number]) => void = () => {}): Promise<{ done: PluginDone[]; stopped?: string }> {
+  const done: PluginDone[] = [];
+  for (const step of batches(ops)) {
+    onStep(step);
+    let result: PluginActionResult;
+    try {
+      result = step.action === 'install'
+        ? await api.install(step.source, step.plugin, step.tools, home)
+        : await api.uninstall(step.source, step.market, step.plugin, step.tools[0]!, home);
+    } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
+    if (result.stopped) return { done, stopped: result.stopped };
+    for (const report of result.reports) done.push({ source: step.source, market: step.market, plugin: step.plugin, tool: report.tool, action: step.action, report });
+  }
+  return { done };
 }

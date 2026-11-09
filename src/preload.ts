@@ -10,6 +10,7 @@ const api: DesktopApi = {
   convertAgent: (key, home) => ipcRenderer.invoke('agents:convert', key, home),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),
+  marketplaceReadme: source => ipcRenderer.invoke('plugins:readme', source),
   pluginDetail: (source, plugin) => ipcRenderer.invoke('plugins:detail', source, plugin),
   openExternal: url => ipcRenderer.invoke('open:external', url),
   saveInstruction: (tool, text, expected, home) => ipcRenderer.invoke('instructions:save', tool, text, expected, home),
@@ -24,12 +25,12 @@ const api: DesktopApi = {
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
   restore: (eventId, resume, home, choice) => ipcRenderer.invoke('history:restore', eventId, resume, home, choice),
   deleteEverywhere: (key, resume, home) => ipcRenderer.invoke('manage:delete-everywhere', key, resume, home),
-  plugins: () => ipcRenderer.invoke('plugins:view'),
+  plugins: fresh => ipcRenderer.invoke('plugins:view', fresh),
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),
   refreshMarketplace: source => ipcRenderer.invoke('plugins:refresh', source),
   forgetMarketplace: source => ipcRenderer.invoke('plugins:forget', source),
   pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),
   installPlugin: (source, plugin, tools, home) => ipcRenderer.invoke('plugins:install', source, plugin, tools, home),
-  uninstallPlugin: (marketplace, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', marketplace, plugin, tool, home),
+  uninstallPlugin: (source, marketplace, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', source, marketplace, plugin, tool, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);
