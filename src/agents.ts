@@ -10,7 +10,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
@@ -18,21 +18,21 @@ import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, Mcp
 import { toolNames as shown } from './words.ts';
 
 type AgentTool = Exclude<HarnessId, 'pi-cli'>;
-export const agentTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'] satisfies AgentTool[];
+export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
 export interface NeutralAgent { name: string; description: string; prompt: string; fields: Record<string, unknown> }
 /** `name` is the file's base name; `key` matches it across tools, ignoring case as macOS does. `bytes` hashes the whole file. */
-export interface AgentEntry { name: string; key: string; tool: HarnessId; file: string; text: string; agent: NeutralAgent; hash: ContentHash; bytes: FileHash }
+export interface AgentEntry { name: string; key: string; tool: AgentTool; file: string; text: string; agent: NeutralAgent; hash: ContentHash; bytes: FileHash }
 type ContentHash = string; type FileHash = string; type AgentSlot = Partial<Record<HarnessId, AgentEntry>>;
 
 /** The origin's fields a destination would lose: all of them, in any tool but the origin's own (no recorded equivalent, CD §5). */
 export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: NeutralAgent }) => (tool === origin.tool ? [] : Object.keys(origin.agent.fields));
 
 const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml' };
-const suffixOf = (tool: HarnessId) => suffixes[tool as AgentTool];
-const folder = (context: ShareContext, tool: HarnessId) => join(context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig), 'agents');
-const fileFor = (context: ShareContext, tool: HarnessId, name: string) => join(folder(context, tool), `${name}${suffixOf(tool)}`);
+const folder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
+const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(folder(context, tool), `${name}${suffixes[tool]}`);
 const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
 const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
@@ -67,7 +67,7 @@ function fromToml(name: string, text: string): NeutralAgent | undefined {
 }
 
 /** Reads one tool's agents. A file that cannot be read as an agent is reported in `unreadable` and never written or deleted. */
-export async function readAgents(context: ShareContext, tool: HarnessId): Promise<{ entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; folderExists: boolean }> {
+export async function readAgents(context: ShareContext, tool: AgentTool): Promise<{ entries: AgentEntry[]; problems: string[]; unreadable: Map<string, string>; folderExists: boolean }> {
   const entries: AgentEntry[] = [];
   const problems: string[] = [];
   const unreadable = new Map<string, string>();
@@ -79,7 +79,7 @@ export async function readAgents(context: ShareContext, tool: HarnessId): Promis
     if (!gone) { problems.push(`${folder(context, tool)} could not be read.`); unreadable.set('*', folder(context, tool)); }
     return { entries, problems, unreadable, folderExists: !gone };
   }
-  const suffix = suffixOf(tool);
+  const suffix = suffixes[tool];
   for (const file of names.filter(entry => entry.endsWith(suffix) && !entry.startsWith('.') && !entry.includes('.ck-'))) {
     const name = file.slice(0, -suffix.length);
     const path = join(folder(context, tool), file);
@@ -147,7 +147,7 @@ export function agentText(tool: HarnessId, agent: Pick<NeutralAgent, 'name' | 'd
 // ---------- Record and kept versions ----------
 
 /** `file` is where the copy was; `bytes` the whole file's hash; `removing` a copy a deletion still has to remove. */
-interface AgentCopy { tool: HarnessId; file: string; hash: ContentHash; bytes: FileHash; oneWay?: boolean; stopped?: boolean; status?: 'removing'; /** Its tool's agents folder was gone when last looked at. */ away?: boolean }
+interface AgentCopy { tool: AgentTool; file: string; hash: ContentHash; bytes: FileHash; oneWay?: boolean; stopped?: boolean; status?: 'removing'; /** Its tool's agents folder was gone when last looked at. */ away?: boolean }
 interface AgentRecordItem { name: string; state: 'shared' | 'dont-share'; off: HarnessId[]; hash: ContentHash; origin?: HarnessId; copies: AgentCopy[]; separate?: boolean; deleted?: { at: string; tool: HarnessId; hash: ContentHash };
   /** Content about to be overwritten, on record before the file changes, so an interrupted pass still names it in History. */
   displaced?: { tool: HarnessId; hash: ContentHash }[] }
@@ -197,7 +197,7 @@ async function kept(context: ShareContext, key: string, hash: string): Promise<{
   } catch { return undefined; }
 }
 
-async function gatherAgents(context: ShareContext, tools: HarnessId[]) {
+async function gatherAgents(context: ShareContext, tools: AgentTool[]) {
   const byKey = new Map<string, AgentSlot>();
   const problems: string[] = [];
   const folders = new Set<HarnessId>();
@@ -221,7 +221,7 @@ async function gatherAgents(context: ShareContext, tools: HarnessId[]) {
 
 // A write or removal a crash interrupted is finished first, so a file moved aside is never read as deleted.
 async function gatherAgentsAfterRecovery(context: ShareContext, tools: HarnessId[]) {
-  const present = tools.filter(tool => agentTools.includes(tool));
+  const present = tools.filter(isAgentTool);
   for (const tool of present) await recoverParked(folder(context, tool));
   return { present, onDisk: await gatherAgents(context, present) };
 }
@@ -249,7 +249,7 @@ function fieldText(value: unknown): string {
 }
 
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
-  const present = tools.filter(tool => agentTools.includes(tool));
+  const present = tools.filter(isAgentTool);
   const { byKey, problems, unreadable, duplicates } = await gatherAgents(context, present);
   const { record = { formatVersion: AGENTS_FORMAT_VERSION, items: {} }, problem } = await inspectAgentRecord(context.home);
   if (problem) problems.unshift(problem);
@@ -285,12 +285,12 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
 /** Observed missing times per file, kept while the app runs (DEL-01's settle). A restart forgets them, which only delays a deletion. */
 const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
-interface AgentPass { context: ShareContext; present: HarnessId[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
+interface AgentPass { context: ShareContext; present: AgentTool[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
   resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number }
 interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number } type Loser = { tool: HarnessId; hash: string };
 type Situation = 'rootMoved' | 'removalOwed' | 'folderRemade' | 'stopped' | 'away' | 'off' | 'oneWay' | 'oneWayChanged' | 'deleted' | 'unchanged' | 'edited';
 type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface CopyNow<Is = Exclude<StaysRecorded, 'oneWayChanged'>> { copy: AgentCopy; entry?: AgentEntry; is: Is }
-interface Target { tool: HarnessId; entry?: AgentEntry; recorded?: CopyNow } type AgentOutcome = 'done' | 'settling';
+interface Target { tool: AgentTool; entry?: AgentEntry; recorded?: CopyNow } type AgentOutcome = 'done' | 'settling';
 /**
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
@@ -392,7 +392,7 @@ function stopOneWayCopiesChangedInTheirTool(log: PassLog, item: AgentRecordItem,
   for (const { copy, entry, is } of copies) if (is === 'oneWayChanged') log.results.push({ item: item.name, harness: copy.tool, outcome: 'held', message: `${entry ? 'Changed' : 'Deleted'} in ${harnesses[copy.tool].name}, which gets this agent one-way. Central Knot stopped updating it there; nothing spread.` });
   return copies.map(({ copy, entry, is }) => (is === 'oneWayChanged' ? { copy: { ...copy, stopped: true }, entry, is: 'stopped' } : { copy, entry, is }));
 }
-function targetsOf(pass: AgentPass, copies: CopyNow[], slot: AgentSlot, syncing: HarnessId[]): Target[] {
+function targetsOf(pass: AgentPass, copies: CopyNow[], slot: AgentSlot, syncing: AgentTool[]): Target[] {
   return syncing.filter(tool => !copies.some(({ copy, is }) => copy.tool === tool && (is === 'stopped' || !pass.onDisk.folders.has(tool)))).map(tool => ({ tool, entry: slot[tool], recorded: copies.find(({ copy, is }) => copy.tool === tool && is !== 'removalOwed') }));
 }
 function deletionStillSettling(pass: AgentPass, copies: CopyNow[]): boolean {
@@ -546,7 +546,7 @@ async function undoAddedAgent(context: ShareContext, tools: HarnessId[], history
   const record = await readAgentRecord(context.home);
   const item = record.items[key];
   if (!item || item.state !== 'shared') return { stopped: `${past.item} is not managed any more, so there is nothing to undo here.`, results: [], writes: 0 };
-  const present = tools.filter(tool => agentTools.includes(tool));
+  const present = tools.filter(isAgentTool);
   const slot = (await gatherAgents(context, present)).byKey.get(key) ?? {};
   const results: DestinationResult[] = [];
   const stayed: HarnessId[] = [];
@@ -585,9 +585,9 @@ export async function convertAgentToSkill(context: ShareContext, tools: HarnessI
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
   if (!tools.includes('pi-cli')) return { stopped: 'Pi is not in this home, so there is nowhere to convert to.' };
-  const slot = (await gatherAgents(context, tools.filter(tool => agentTools.includes(tool)))).byKey.get(key);
+  const slot = (await gatherAgents(context, tools.filter(isAgentTool))).byKey.get(key);
   // The agent's own tool, where every field lives: Claude Code first, as the fullest format.
-  const origin = (['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[]).find(tool => slot?.[tool]);
+  const origin = agentTools.find(tool => slot?.[tool]);
   const entry = origin ? slot![origin]! : undefined;
   if (!entry || !origin) return { stopped: 'That agent is not there any more.' };
   if (!entry.agent.description.trim()) return { stopped: `Pi skips a skill with no description, and “${entry.name}” has none. Add one to the agent first.` };

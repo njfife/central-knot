@@ -5,6 +5,7 @@ import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
 import { realHomeName } from './renderer.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
+import { andList, toolNames } from './words.ts';
 
 // ---------- Overview ----------
 
@@ -24,7 +25,9 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
-const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
+const everyTool = andList(Object.values(toolNames));
+const anyTool = everyTool.replace(/ and (?=[^,]*$)/, ' or ');
+const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', `None of your tools has a skill in this home. Add one in ${anyTool}, then Refresh, or choose another home at the bottom left.`, id);
 
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
@@ -81,7 +84,7 @@ export function overviewPage() {
     done ? h('div.bands', {}, done) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      h('p.overview-lead', {}, 'Central Knot keeps the skills, MCP servers and agents you choose the same in Claude Code, Copilot CLI and Codex.',
+      h('p.overview-lead', {}, `Central Knot keeps the skills and MCP servers you choose the same in ${everyTool}, and the agents in all of them but Pi.`,
         // The next step only where it can be taken: something to manage, and a home that can be written.
         !home.manage.skills.length && !home.mcp.servers.length && !(home.agents?.servers.length) ? ' Nothing found in this home yet.' : nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : ''),
       h('div.kind-cards', {},
@@ -104,7 +107,7 @@ export function overviewPage() {
 
 export function mcpPage() {
   if (!state.home) return notRead();
-  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', 'mcp-empty');
+  if (!state.home.mcp.servers.length) return nothingHere('plug', 'No MCP servers here yet', `None of your tools has an MCP server in this home. Add one in ${anyTool}, then Refresh, or choose another home at the bottom left.`, 'mcp-empty');
   return designOverview('mcp');
 }
 
