@@ -1224,3 +1224,14 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .band-text.band-strong { color: var(--ink); }
 .notice-name { text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-color: var(--ink-faint); }
 .legend-lead { color: var(--ink-faint); font-size: 12px; margin-left: 6px; }
+
+/* Round 17: the write band's action sits at the right like every band; waiting bands get a faint amber tint */
+.band-write-now > .band-text { flex: 1 1 auto; }
+.band-write-now > .btn { margin-left: auto; }
+.band-write-now, .notice-stacked { background: color-mix(in oklab, var(--warning) 6%, var(--surface)); }
+/* Claude Code's current value is older, not wrong: a muted tint, no strike */
+.change-removed { text-decoration: none; color: inherit; background: color-mix(in oklab, var(--warning) 22%, transparent); border-radius: 2px; }
+/* The legend's pending switch looks like the switches it explains */
+.legend-switch { background: var(--accent); border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); }
+.legend-switch > .switch-knob { background: #fff; }
+.details-footnote { padding-left: 0; color: var(--ink-soft); }
