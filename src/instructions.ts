@@ -78,14 +78,18 @@ async function earlierBases(home: string): Promise<string[]> {
 /** How a file holds the base: the same, an older base, edited there, or not at all. `earlier`: every earlier base text. */
 function baseState(text: string, base: string, earlier: string[], chosen: boolean): NonNullable<InstructionFile['base']> {
   const { own, copy } = splitBase(text);
-  const state = copy === undefined ? 'missing' : sameBase(copy, base) ? 'same' : earlier.some(old => sameBase(copy, old)) ? 'older' : 'edited';
-  return { chosen, state, own, copy };
+  const isABase = (part: string) => sameBase(part, base) || earlier.some(old => sameBase(part, old));
+  const state = copy === undefined ? 'missing' : sameBase(copy, base) ? 'same' : isABase(copy) ? 'older' : 'edited';
+  // No block, and all its text is a base: what was left as plain text when the tool was taken off the list.
+  return { chosen, state, own, copy, ownIsABase: copy === undefined && !!own.trim() && isABase(own) };
 }
 
-/** A file's base part when it gets the base or holds a block (left there by an Undo, or pasted in); otherwise none. */
+/** A file's base part when it gets the base, holds a block (left there by an Undo, or pasted in), or holds only base text left
+ *  when its tool was taken off the list; otherwise none. */
 function baseOf(text: string, base: BaseView, earlier: string[], tool: HarnessId) {
   const chosen = base.tools.includes(tool) && !!base.text.trim();
-  return chosen || splitBase(text).copy !== undefined ? baseState(text, base.text, earlier, chosen) : undefined;
+  const state = baseState(text, base.text, earlier, chosen);
+  return chosen || state.copy !== undefined || state.ownIsABase ? state : undefined;
 }
 
 /** Every detected tool's instruction file, read as it is now. */
@@ -137,12 +141,14 @@ async function keepAndWrite(home: string, shelf: Shelf, path: string, text: stri
   await writeFileChecked(path, text, current);
 }
 
-/** Stores the base and its tools; the base text it replaces is kept as an earlier version. */
-async function storeBase(home: string, text: string, tools: HarnessId[]) {
-  const current = (await readText(basePath(home))) ?? '';
-  if (current !== text) {
-    if (current.trim()) await keep(home, 'base', current);
-    await writeDurably(basePath(home), text);
+/**
+ * Stores the base and its tools. base.md is written only if it still holds `seen` (what the caller checked; undefined: no file),
+ * else this throws and nothing is stored. The base text it replaces is kept as an earlier version.
+ */
+async function storeBase(home: string, text: string, tools: HarnessId[], seen: string | undefined) {
+  if ((seen ?? '') !== text) {
+    if (seen?.trim()) await keep(home, 'base', seen);
+    await writeFileChecked(basePath(home), text, seen);
   }
   await writeDurably(baseToolsPath(home), `${JSON.stringify(tools)}\n`);
 }
@@ -160,7 +166,9 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   const before = await baseView(context);
-  if (before.hash !== request.expected) return { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
+  const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
+  const seenBase = await readText(basePath(context.home));
+  if (sha(seenBase ?? '') !== request.expected) return baseChanged;
   const tools = request.text.trim() ? request.tools.filter(tool => snapshots.some(entry => entry.harness === tool)) : [];
   const earlier = await earlierBases(context.home);
   const files: { tool: HarnessId; path: string; current: string | undefined }[] = [];
@@ -170,11 +178,12 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
     if (hashOf(current) !== request.seen[snapshot.harness]) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
     files.push({ tool: snapshot.harness, path, current });
   }
-  await storeBase(context.home, request.text, tools);
+  try { await storeBase(context.home, request.text, tools, seenBase); } catch { return baseChanged; }
   const result: BaseResult = { written: [], left: [], undo: { text: before.text, tools: before.tools, baseHash: sha(request.text), files: [] } };
   for (const { tool, path, current } of files) {
     const text = current ?? '';
-    const write = baseWrite(text, { base: request.text, chosen: tools.includes(tool), copyIsABase: baseState(text, before.text, earlier, true).state !== 'edited', adopt: request.adopt === tool, overwrite: request.overwrite?.includes(tool) });
+    const state = baseState(text, before.text, earlier, true);
+    const write = baseWrite(text, { base: request.text, chosen: tools.includes(tool), copyIsABase: state.state !== 'edited', ownIsABase: state.ownIsABase, adopt: request.adopt === tool, overwrite: request.overwrite?.includes(tool) });
     if (write.edited) { result.left.push({ tool, why: 'edited' }); continue; }
     const { next } = write;
     // Nothing to change, and a missing file is never created empty.
@@ -193,8 +202,10 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   // The base edited since (in Central Knot or in base.md itself) stays: an Undo never overwrites newer work.
-  if ((await baseView(context)).hash !== undo.baseHash) return { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
-  await storeBase(context.home, undo.text, undo.tools);
+  const baseChanged = { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
+  const seenBase = await readText(basePath(context.home));
+  if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
+  try { await storeBase(context.home, undo.text, undo.tools, seenBase); } catch { return baseChanged; }
   const result: BaseResult = { written: [], left: [] };
   for (const file of undo.files) {
     const snapshot = snapshots.find(entry => entry.harness === file.tool);

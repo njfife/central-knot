@@ -95,5 +95,14 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     assert.match(await readFile(codex, 'utf8'), /Shared, mine\./);
     assert.deepEqual(off.left, [{ tool: 'codex-cli', why: 'edited' }]);
     await assert.rejects(stat(copilot));
+
+    // A file that held only the base keeps it as plain text when taken off; added again, that text goes back into the block.
+    const set = async (text: string, chosen: HarnessId[]) => applyBase(box.context, await box.snapshots(), { text, expected: (await baseView(box.context)).hash, seen: await box.seen(), tools: chosen });
+    await set('Shared.\n', ['claude-cli', 'copilot-cli']);
+    await set('Shared.\n', ['claude-cli']);
+    assert.equal(await readFile(copilot, 'utf8'), 'Shared.\n');
+    await set('Shared.\n', ['claude-cli', 'copilot-cli']);
+    await set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
+    assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared, now.\n' });
   } finally { await box.cleanup(); }
 });

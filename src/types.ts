@@ -377,7 +377,10 @@ export interface InstructionFile {
   versions: InstructionVersion[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares ('edited': it is neither the base nor an earlier base, so someone wrote in it). */
-  base?: { chosen: boolean; state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string };
+  base?: { chosen: boolean; state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string;
+    /** No block, and all its text is a base text: left as plain text when the tool was taken off the list. Adding the base
+     *  again moves it back into the block instead of repeating it. */
+    ownIsABase?: boolean };
 }
 export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 

@@ -43,7 +43,7 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   const ours = edit.source?.tool === file.tool;
   const putBack = edit.source?.kind === 'putBack' && ours;
   const adopt = edit.source?.kind === 'own' && ours;
-  const write = baseWrite(file.text, { base: edit.text, chosen, copyIsABase: file.base?.state !== 'edited', adopt, overwrite: putBack });
+  const write = baseWrite(file.text, { base: edit.text, chosen, copyIsABase: file.base?.state !== 'edited', ownIsABase: file.base?.ownIsABase, adopt, overwrite: putBack });
   if (write.edited) return { next: file.text, says: chosen ? `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` : `Left as it is, block included: its copy of the base was edited in ${name}, so Central Knot doesn’t take it out.` };
   const { next } = write;
   const says = (text: string) => ({ next, says: text });
@@ -51,6 +51,7 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   if (putBack) return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`);
   if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
   if (next === file.text) return says('No change: it already has these base instructions.');
+  if (copy === undefined && file.base?.ownIsABase) return says('Its text is base instructions, left as plain text when it was taken off the list; it moves back into the base block, so it isn’t repeated.');
   if (adopt) return says(`Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`);
   if (copy === undefined) return says(own.trim() ? `The base instructions go after its ${plural(lineCount(own), 'line')} of its own.` : 'The base instructions are added.');
   return says('Its copy of the base is updated. Its own instructions stay.');

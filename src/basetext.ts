@@ -62,11 +62,12 @@ export function withoutBase(text: string): string {
  * What one tool's file becomes when the base is saved: the block added or replaced (`chosen`), or taken out (not chosen).
  * A copy edited in the file is left as it is (`edited`), whether chosen or not, unless `overwrite`. `copyIsABase`: the file's copy is the current or an
  * earlier base text, so replacing it loses nothing someone wrote. `adopt`: this file's own text became the base, so it moves
- * into the block. The renderer previews with this and the main process writes with it, so the review shows what is written.
+ * into the block; `ownIsABase` (no block, and all its text is a base) does the same, so base text left in the file when its tool
+ * was taken off the list is never repeated. The renderer previews with this and the main process writes with it, so the review shows what is written.
  */
-export function baseWrite(text: string, { base, chosen, copyIsABase, adopt = false, overwrite = false }: { base: string; chosen: boolean; copyIsABase: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
+export function baseWrite(text: string, { base, chosen, copyIsABase, ownIsABase = false, adopt = false, overwrite = false }: { base: string; chosen: boolean; copyIsABase: boolean; ownIsABase?: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
   const { copy } = splitBase(text);
   if (copy !== undefined && !sameBase(copy, base) && !copyIsABase && !overwrite) return { edited: true };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
-  return { next: withBase(adopt ? withOwn(text, '') : text, base) };
+  return { next: withBase(adopt || (copy === undefined && ownIsABase) ? withOwn(text, '') : text, base) };
 }
