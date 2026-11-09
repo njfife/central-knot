@@ -222,7 +222,7 @@ let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
 let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
 
-interface McpAndAgentsResult { failures: DestinationResult[]; stopped?: DestinationResult; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
+interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
 interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
 
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
@@ -238,10 +238,9 @@ async function pass(explicit = false): Promise<PassResult> {
   const mcp = await applyMcp(shared, tools, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
   const agents = await applyAgents(shared, tools, []).catch(crashed('Agents sync'));
-  const stopped = mcp?.stopped ?? agents?.stopped;
   return { skills, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
-    stopped: stopped ? { item: mcp?.stopped ? 'MCP sync' : 'Agents sync', outcome: 'failed', message: stopped } : undefined,
+    stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
     changed: !!(mcp?.writes || mcp?.notices?.length || agents?.writes || agents?.notices?.length) } };
 }
@@ -250,7 +249,7 @@ async function pass(explicit = false): Promise<PassResult> {
 function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
   if (!outcome) return;
   for (const failure of outcome.failures) if (!pendingResults.some(known => known.item === failure.item && known.harness === failure.harness && known.message === failure.message)) pendingResults.push(failure);
-  if (outcome.stopped && !pendingResults.some(known => known.message === outcome.stopped!.message)) pendingResults.push(outcome.stopped);
+  for (const stop of outcome.stopped) if (!pendingResults.some(known => known.message === stop.message)) pendingResults.push(stop);
   pendingMcpNotices.push(...outcome.mcpNotices);
   pendingAgentNotices.push(...outcome.agentNotices);
 }

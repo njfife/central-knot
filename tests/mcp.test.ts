@@ -246,6 +246,56 @@ test('Undo of Write to Claude Code puts back an older entry, and refuses when th
   } finally { await box.cleanup(); }
 });
 
+test('A damaged, unreadable or newer MCP record stops every write and is never rewritten; a missing one is a first run', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
+    const first = await applyMcp(box.context, tools, [{ key: 'massive', managed: true, off: [] }]);
+    assert.equal(first.writes, 2, 'a missing record is a first run');
+    const recordFile = join(box.home, '.central-knot/mcp.json');
+    const good = await readFile(recordFile, 'utf8');
+    assert.equal(JSON.parse(good).formatVersion, 1);
+    // An edit in Copilot that a pass would spread to Codex.
+    const copilot = JSON.parse(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8'));
+    copilot.mcpServers.massive.args = ['-y', 'massive@2'];
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify(copilot, null, 2));
+    const files = ['.claude.json', '.copilot/mcp-config.json', '.codex/config.toml'];
+    const before = await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8')));
+    const edit = (await readHistory(box.home)).at(-1)!;
+    const bad: [string, RegExp][] = [
+      ['{"formatVersion": 1, "items": {', /The MCP record is damaged\. Nothing was written or deleted/],
+      [JSON.stringify({ formatVersion: 1, items: [] }), /The MCP record is damaged\./],
+      [JSON.stringify({ formatVersion: 1, items: { massive: { state: 'shared', hash: 'x' } } }), /The MCP record is damaged\./],
+      [JSON.stringify({ formatVersion: 'one', items: {} }), /The MCP record is damaged\./],
+      [JSON.stringify({ items: JSON.parse(good).items }), /The MCP record is damaged\./],
+      [JSON.stringify({ ...JSON.parse(good), formatVersion: 2 }), /The MCP record was written by a newer Central Knot\. Nothing was written or deleted/],
+    ];
+    for (const [text, reason] of bad) {
+      await writeFile(recordFile, text);
+      assert.match((await applyMcp(box.context, tools, [])).stopped ?? '', reason);
+      assert.match((await applyMcp(box.context, tools, [{ key: 'massive', managed: false, off: [] }])).stopped ?? '', reason);
+      assert.match((await applyMcp(box.context, tools, [], { claudeNow: ['massive'] })).stopped ?? '', reason);
+      assert.match((await restoreMcp(box.context, tools, edit.id)).stopped ?? '', reason);
+      assert.match((await undoClaudeWrite(box.context, [{ name: 'massive', before: null, after: 'x' }])).stopped ?? '', reason);
+      const view = await mcpView(box.context, tools);
+      assert.deepEqual(view.servers.map(server => server.key), ['massive'], 'the page still reads');
+      assert.ok(view.gate.state === 'stopped' && reason.test(view.gate.reason));
+      assert.ok(view.problems.some(problem => reason.test(problem)));
+      assert.equal(await readFile(recordFile, 'utf8'), text, 'the record is left as it is');
+      assert.deepEqual(await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8'))), before, 'no tool file changed');
+    }
+    await rm(recordFile);
+    await mkdir(recordFile);
+    assert.match((await applyMcp(box.context, tools, [])).stopped ?? '', /The MCP record could not be read\. Nothing was written or deleted/);
+    assert.deepEqual(await Promise.all(files.map(file => readFile(join(box.home, file), 'utf8'))), before);
+    await rm(recordFile, { recursive: true });
+    await writeFile(recordFile, good);
+    const resumed = await applyMcp(box.context, tools, []);
+    assert.equal(resumed.stopped, undefined);
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /massive@2/, 'with the record back, the edit spreads');
+  } finally { await box.cleanup(); }
+});
+
 test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
   const box = await sandbox();
   try {

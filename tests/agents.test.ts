@@ -279,6 +279,50 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
   } finally { await box.cleanup(); }
 });
 
+test('A damaged, unreadable or newer agents record stops every write and is never rewritten; a missing one is a first run', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    const first = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(first.writes, 2, 'a missing record is a first run');
+    const recordFile = join(box.home, '.central-knot/agents.json');
+    const good = await read(box.home, '.central-knot/agents.json');
+    // An edit in Claude that a pass would spread to Copilot and Codex.
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\nBe thorough.\n'));
+    const files = ['.claude/agents/reviewer.md', '.copilot/agents/reviewer.agent.md', '.codex/agents/reviewer.toml'];
+    const before = await Promise.all(files.map(file => read(box.home, file)));
+    const added = (await readHistory(box.home)).at(-1)!;
+    const bad: [string, RegExp][] = [
+      ['{"formatVersion": 2, "items": {', /The agents record is damaged\. Nothing was written or deleted/],
+      [JSON.stringify({ formatVersion: 2, items: 'none' }), /The agents record is damaged\./],
+      [JSON.stringify({ formatVersion: 2, items: { reviewer: { name: 'reviewer', state: 'shared', off: [] } } }), /The agents record is damaged\./],
+      [JSON.stringify({ items: {} }), /The agents record is damaged\./],
+      [JSON.stringify({ ...JSON.parse(good), formatVersion: 3 }), /The agents record was written by a newer Central Knot\. Nothing was written or deleted/],
+    ];
+    for (const [text, reason] of bad) {
+      await writeFile(recordFile, text);
+      assert.match((await applyAgents(box.context, tools, [])).stopped ?? '', reason);
+      assert.match((await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }])).stopped ?? '', reason);
+      assert.match((await restoreAgent(box.context, tools, added.id)).stopped ?? '', reason);
+      const view = await agentsView(box.context, tools);
+      assert.deepEqual(view.servers.map(server => server.key), ['reviewer'], 'the page still reads');
+      assert.ok(view.gate.state === 'stopped' && reason.test(view.gate.reason));
+      assert.ok(view.problems.some(problem => reason.test(problem)));
+      assert.equal(await read(box.home, '.central-knot/agents.json'), text, 'the record is left as it is');
+      assert.deepEqual(await Promise.all(files.map(file => read(box.home, file))), before, 'no agent file changed');
+    }
+    await rm(recordFile);
+    await mkdir(recordFile);
+    assert.match((await applyAgents(box.context, tools, [])).stopped ?? '', /The agents record could not be read\. Nothing was written or deleted/);
+    assert.deepEqual(await Promise.all(files.map(file => read(box.home, file))), before);
+    await rm(recordFile, { recursive: true });
+    await writeFile(recordFile, good);
+    const resumed = await applyAgents(box.context, tools, []);
+    assert.equal(resumed.stopped, undefined);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be thorough\./, 'with the record back, the edit spreads');
+  } finally { await box.cleanup(); }
+});
+
 test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
   const box = await sandbox();
   try {
