@@ -454,7 +454,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     const readded = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !pending.some(copy => copy.tool === entry.tool));
     for (const copy of pending) {
       const here = slot[copy.tool];
-      if (readded || (here && here.bytes !== copy.bytes) || (!here && folders.has(copy.tool))) { item.copies = item.copies.filter(other => other !== copy); continue; }
+      // A file elsewhere now (a moved agents folder) is not the one the deletion was owed for.
+      if (readded || (here && (here.bytes !== copy.bytes || here.file !== copy.file)) || (!here && folders.has(copy.tool))) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (!here) continue;
       try { await keep(context, here); await removeChecked(here.file, here.text); writes++; results.push({ item: item.name, harness: copy.tool, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); item.copies = item.copies.filter(other => other !== copy); }
       catch (error) { if (errorCode(error) === 'CK_CHANGED') item.copies = item.copies.filter(other => other !== copy); }

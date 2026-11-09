@@ -138,7 +138,7 @@ export function setJsonMember(text: string, path: string[], value: unknown): str
 export type TomlValue = string | number | boolean | TomlValue[] | { [key: string]: TomlValue };
 
 /** One `key = value` line in a table, with its raw text so unknown keys can be written back exactly. */
-export interface TomlEntry { key: string; value: TomlValue; raw: string; /** Where the entry's line starts and its line ends, in the document. */ start: number; end: number }
+export interface TomlEntry { key: string; /** The key's parts as decoded, so a quoted part may itself contain dots. */ keys: string[]; value: TomlValue; raw: string; /** Where the entry's line starts and its line ends, in the document. */ start: number; end: number }
 export interface TomlTable { header: string; path: string[]; entries: TomlEntry[]; start: number; end: number }
 
 function parseKey(text: string, at: number): { key: string; next: number } {
@@ -287,7 +287,7 @@ export function readTomlTables(text: string): TomlTable[] {
     const item = parseTomlValue(text, equals + 1);
     const lineEnd = text.indexOf('\n', item.next);
     const end = lineEnd < 0 ? text.length : lineEnd + 1;
-    current.entries.push({ key: keys.join('.'), value: item.value, raw: text.slice(lineStart, end), start: lineStart, end });
+    current.entries.push({ key: keys.join('.'), keys, value: item.value, raw: text.slice(lineStart, end), start: lineStart, end });
     at = end;
   }
   current.end = text.length;

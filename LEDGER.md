@@ -550,3 +550,16 @@ The Mac real home was not used, because a Central Knot app was running there (a 
 8 of 10 steps passed: skills and Sync off, MCP with Write now, agents with limits, the app menu, background sync with the window closed, the second launch and Quit. Fixed:
 - **MCP edits spread slowly.** Settings files were not watched, so an edit waited for the 20 s poll. Each MCP settings file's folder is now watched without recursion, and only that file's events prompt a pass. The e2e checks the edit reaches Codex within 6 s.
 - **"Could not read this home" right after closing the window,** seen again (the tester's Dock clicks timed out on its side). A window opened while a home is open now shows that home without reading it anew. A main-process log (`central-knot.log` in the app's data folder) records window life and failed requests, so the next session can show what happens on close.
+
+## Seventh check, Astra (on 0024bce), November 9, 2026
+
+"Not yet", with 4 blocking cases in MCP and 2 less likely ones; nothing new in skills or agents. All are fixed, and the reproductions are kept in `tests/seventh-check-astra.test.ts` (8 tests; the independent TOML check uses Python's `tomllib` where it exists).
+
+- **Every inline form of a Codex server is held,** never given a second definition. That covers a root `mcp_servers = { docs = { … } }`, a quoted name with dots (`"docs.v2"`) under `[mcp_servers]`, and dotted keys. TOML entries now keep their decoded key parts, so a dot inside a quoted name is never split (R1).
+- **Dotted `env.X` and `http_headers.X` in a server's table are read** as its env and headers, and a rewrite writes them as a table without duplicates. Other dotted keys in a server's table hold the server (R2).
+- **`"mcpServers": null`** (or any non-object) makes the file unreadable; it is never read as no servers. A missing member is still "no servers section" (R3).
+- **Crash recovery follows a linked settings file** into the folder its target is in (R4).
+- **Kept settings per event.** Each replaced or removed MCP entry's own settings are kept under an unchanging name that the History event records. Restore puts back exactly what that event replaced; a later version never overwrites it (R5).
+- **A pending removal follows only its recorded file.** For MCP and agents, a moved config root drops it, never deletes an entry in the new place (R6).
+
+**Validation.** 224 unit tests. Linux e2e 122/122.

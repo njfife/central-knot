@@ -180,7 +180,7 @@ export interface HistoryEvent {
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen';
   winner?: { tool: HarnessId; hash: string };
   /** Content that gave way, kept in Central Knot's store. */
-  losers: { tool: HarnessId; hash: string }[];
+  losers: { tool: HarnessId; hash: string; /** MCP: which kept copy of that tool's own settings this replaced, for an exact Restore. */ kept?: string }[];
   /** The synced content before this event, to put back on Undo. */
   previous?: string;
   orderProved: boolean;

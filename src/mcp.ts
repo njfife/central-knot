@@ -4,8 +4,8 @@
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, join } from 'node:path';
 import { harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
@@ -92,9 +92,15 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       const inline = new Set<string>();
       for (const table of tables) {
         for (const entry of table.entries) {
-          const path = [...table.path, ...entry.key.split('.')];
-          if (path[0] === 'mcp_servers' && path.length >= 2 && table.path.length < 2) inline.add(path[1]);
+          const path = [...table.path, ...entry.keys];
+          if (path[0] !== 'mcp_servers' || table.path.length >= 2) continue;
+          // `mcp_servers = { docs = { … } }`: every server in it is inline.
+          if (path.length === 1) { if (entry.value && typeof entry.value === 'object' && !Array.isArray(entry.value)) for (const name of Object.keys(entry.value)) inline.add(name); continue; }
+          inline.add(path[1]);
         }
+        // Other dotted keys inside a server's own table (beyond `env.X` and `http_headers.X`, which are read) are a form Central
+        // Knot does not edit: the server is held.
+        if (table.path.length === 2 && table.path[0] === 'mcp_servers' && table.entries.some(entry => entry.keys.length > 1 && !(entry.keys.length === 2 && ['env', 'http_headers'].includes(entry.keys[0])))) inline.add(table.path[1]);
       }
       for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers')) {
         const name = table.path[1];
@@ -102,14 +108,16 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
         const subtables = tables.filter(candidate => candidate.path.length >= 3 && candidate.path[0] === 'mcp_servers' && candidate.path[1] === name);
         const envTable = subtables.find(candidate => candidate.path.length === 3 && candidate.path[2] === 'env');
         const headersTable = subtables.find(candidate => candidate.path.length === 3 && candidate.path[2] === 'http_headers');
-        const env = envTable ? Object.fromEntries(envTable.entries.map(entry => [entry.key, String(entry.value)])) : strings(value('env'));
-        const headers = headersTable ? Object.fromEntries(headersTable.entries.map(entry => [entry.key, String(entry.value)])) : strings(value('http_headers'));
+        // A map written as a table, inline, or as dotted keys in the server's own table (`env.REGION = "west"`) reads the same.
+        const dotted = (key: string) => { const pairs = table.entries.filter(entry => entry.keys.length === 2 && entry.keys[0] === key).map(entry => [entry.keys[1], String(entry.value)]); return pairs.length ? Object.fromEntries(pairs) : undefined; };
+        const env = envTable ? Object.fromEntries(envTable.entries.map(entry => [entry.key, String(entry.value)])) : strings(value('env')) ?? dotted('env');
+        const headers = headersTable ? Object.fromEntries(headersTable.entries.map(entry => [entry.key, String(entry.value)])) : strings(value('http_headers')) ?? dotted('http_headers');
         const url = typeof value('url') === 'string' ? value('url') as string : undefined;
         const server: NeutralServer = {
           transport: url ? 'http' : 'stdio', command: typeof value('command') === 'string' ? value('command') as string : undefined, args: list(value('args')),
           env: nonEmpty(env), cwd: typeof value('cwd') === 'string' ? value('cwd') as string : undefined, url, headers: nonEmpty(headers),
         };
-        const extras: Record<string, unknown> = Object.fromEntries(table.entries.filter(entry => !['command', 'args', 'env', 'cwd', 'url', 'http_headers'].includes(entry.key)).map(entry => [entry.key, entry.raw]));
+        const extras: Record<string, unknown> = Object.fromEntries(table.entries.filter(entry => !['command', 'args', 'env', 'cwd', 'url', 'http_headers'].includes(entry.keys[0])).map(entry => [entry.key, entry.raw]));
         // Codex's own subtables (env_http_headers, tool settings…) are this tool's: kept whole, as written, under their header.
         for (const sub of subtables.filter(candidate => candidate !== envTable && candidate !== headersTable)) extras[`[${sub.path.slice(2).join('.')}]`] = text.slice(sub.start, sub.end);
         if (!inline.has(name)) entries.push({ name, tool, file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) });
@@ -117,11 +125,13 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       return { entries, exists: true, text, invalid: [...inline], section: tables.some(table => table.path[0] === 'mcp_servers') || inline.size > 0 };
     }
     const parsed = JSON.parse(text.replace(/^﻿/, '')) as { mcpServers?: unknown };
-    const servers = parsed && typeof parsed === 'object' ? parsed.mcpServers ?? {} : {};
+    const section = !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed;
+    // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
+    const servers = section ? parsed.mcpServers : {};
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
     const all = Object.entries(servers as Record<string, unknown>);
     const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
-    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text, section: !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed };
+    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text, section };
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
@@ -177,6 +187,15 @@ async function editEntry(context: ShareContext, tool: HarnessId, name: string, e
   return undefined;
 }
 
+/** Crash recovery for a tool's settings file: its own folder, and the folder a linked file points into. */
+async function recoverSettings(context: ShareContext, tool: HarnessId) {
+  const file = mcpFile(context, tool);
+  await recoverParked(dirname(file));
+  try { if ((await lstat(file)).isSymbolicLink()) await recoverParked(dirname(await realpath(file))); } catch { /* not there */ }
+  // A link whose target was moved aside by a crash points at nothing: what it points at is still the right name to recover.
+  try { const target = await readlink(file); await recoverParked(dirname(isAbsolute(target) ? target : join(dirname(file), target))); } catch { /* not a link */ }
+}
+
 // ---------- Kept versions (CON-02) ----------
 
 /**
@@ -184,11 +203,20 @@ async function editEntry(context: ShareContext, tool: HarnessId, name: string, e
  * settings (a Codex `enabled = false`, a timeout), so Restore puts each tool's entry back as it was. Never pruned.
  */
 const keptBase = (context: ShareContext, name: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name));
-async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry) {
+async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
   const hash = serverHash(server);
   const path = join(keptBase(context, name), `${hash}.json`);
   try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
-  if (entry) await writeDurably(join(keptBase(context, name), hash, `${entry.tool}.json`), `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`);
+  if (!entry) return undefined;
+  const text = `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`;
+  // The latest settings for this version, and an unchanging copy History can name, so a later version never overwrites an older one.
+  const ref = `${entry.tool}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
+  await writeDurably(join(keptBase(context, name), hash, `${entry.tool}.json`), text);
+  try { await stat(join(keptBase(context, name), hash, `${ref}.json`)); } catch { await writeDurably(join(keptBase(context, name), hash, `${ref}.json`), text); }
+  return ref;
+}
+async function keptExtras(context: ShareContext, name: string, hash: string, ref: string): Promise<Record<string, unknown> | undefined> {
+  try { return JSON.parse(await readFile(join(keptBase(context, name), hash, `${ref}.json`), 'utf8')).extras; } catch { return undefined; }
 }
 async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
   try {
@@ -281,8 +309,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   if (gate.state !== 'ready') await remember(context, owner.generation);
 
   const present = tools.filter(tool => mcpTools.includes(tool));
-  // A write a crash interrupted is finished first, so a settings file moved aside is never read as missing.
-  for (const tool of present) await recoverParked(dirname(mcpFile(context, tool)));
+  // A write a crash interrupted is finished first, so a settings file moved aside is never read as missing (where a linked file points, too).
+  for (const tool of present) await recoverSettings(context, tool);
   const { byName, unreadable, missingFiles, invalid, noSection } = await gatherAll(context, present);
   const record = await readMcpRecord(context.home);
   // A settings file that lost every server at once (rewritten without a servers section, or two or more managed servers all gone
@@ -357,6 +385,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }
       if (!edited.length) {
         const removed: HarnessId[] = [];
+        const gone: { tool: HarnessId; hash: string; kept?: string }[] = [];
         const leftover: McpCopy[] = [];
         // Only this server's own recorded copies go; a different entry with this name that was never synced stays.
         for (const copy of recordedCopies) {
@@ -364,7 +393,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
           const entry = slot[copy.tool];
           if (away(copy.tool) || !live.includes(copy.tool)) { if (!item.off.includes(copy.tool)) leftover.push({ ...copy, status: 'removing' }); continue; }
           if (!entry) continue;
-          await keep(context, name, entry.server, entry);
+          const ref = await keep(context, name, entry.server, entry);
+          gone.push({ tool: copy.tool, hash: entry.hash, kept: ref });
           if (copy.tool === 'claude-cli' && !claudeNow(name)) {
             leftover.push({ ...copy, status: 'removing' });
             results.push({ item: name, harness: copy.tool, outcome: 'held', message: 'Deleted elsewhere. Close Claude, then use Write now to remove it from Claude Code.' });
@@ -378,7 +408,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
           results.push({ item: name, harness: copy.tool, outcome: 'removed', message: `Deleted in ${harnesses[missing[0].tool].name}, so removed here too.` });
         }
         for (const entry of entries) if (!recorded.has(entry.tool)) results.push({ item: name, harness: entry.tool, outcome: 'held', message: `${harnesses[entry.tool].name} has a different “${name}” that was never synced. It stays.` });
-        const id = event({ key: `mcp:${name}`, item: name, kind: 'deleted', winner: { tool: missing[0].tool, hash: item.hash }, losers: [], orderProved: true, previous: item.hash });
+        const id = event({ key: `mcp:${name}`, item: name, kind: 'deleted', winner: { tool: missing[0].tool, hash: item.hash }, losers: gone, orderProved: true, previous: item.hash });
         notices.push({ key: `mcp:${name}`, item: name, kind: 'deleted', winner: missing[0].tool, losers: removed, orderProved: true, history: id });
         item.state = 'dont-share';
         item.deleted = { at: new Date(now).toISOString(), tool: missing[0].tool, hash: item.hash };
@@ -401,7 +431,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     // An edit made to a copy that was behind (Claude Code waiting for Write now) competes with the newer content it never saw.
     const fromBehind = edited.some(entry => recorded.get(entry.tool) !== item.hash);
     const competing = (edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1) || fromBehind;
-    const replaced: { tool: HarnessId; hash: string }[] = [];
+    const replaced: { tool: HarnessId; hash: string; kept?: string }[] = [];
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();
     await keep(context, name, source.server, source);
@@ -411,13 +441,14 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const reason = cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
-      if (here) { await keep(context, name, here.server, here); await displace(item, tool, here.hash); }
+      const ref = here ? await keep(context, name, here.server, here) : undefined;
+      if (here) await displace(item, tool, here.hash);
       // The destination's own settings come from the file as reread just before writing, never from an older read.
       const problem = await editEntry(context, tool, name, here?.hash, source.server);
       if (problem) { if (here) undisplace(item, tool, here.hash); results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
       writes++;
       holds.set(tool, source.hash);
-      if (here) replaced.push({ tool, hash: here.hash });
+      if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
@@ -453,6 +484,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     for (const copy of pending) {
       const entry = slot[copy.tool];
       if (item.state === 'shared' || unreadable.has(copy.tool)) { if (item.state === 'shared') item.copies = item.copies.filter(other => other !== copy); continue; }
+      // The tool now uses another settings file (a moved config root): an entry there is not the one the deletion was owed for.
+      if (copy.file && copy.file !== mcpFile(context, copy.tool)) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (missingFiles.has(copy.tool)) continue;
       if (!entry || entry.hash !== copy.hash) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (copy.tool === 'claude-cli' && !claudeNow(name)) continue;
@@ -516,7 +549,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const record = await readMcpRecord(context.home);
   const item: McpRecordItem = record.items[name] ?? { state: 'shared', off: [], hash: '', copies: [] };
   const present = tools.filter(tool => mcpTools.includes(tool));
-  for (const tool of present) await recoverParked(dirname(mcpFile(context, tool)));
+  for (const tool of present) await recoverSettings(context, tool);
   const { byName, unreadable, invalid } = await gatherAll(context, present);
   const slot = byName.get(name) ?? {};
   if (invalid.has(name)) return { stopped: `An entry for “${name}” is not a server entry right now. Fix it, then restore.`, results: [], writes: 0 };
@@ -532,8 +565,11 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const holds = new Map<HarnessId, string>();
   for (const tool of present.filter(candidate => !item.off.includes(candidate) && !unreadable.has(candidate))) {
     const here = slot[tool];
-    const extras = version.extras[tool];
-    if (here?.hash === hash && (!version.extras[tool] || JSON.stringify(here.extras) === JSON.stringify(version.extras[tool]))) { holds.set(tool, hash); continue; }
+    // This tool's own settings as the event replaced them, when it names them; a tool without an entry gets the latest kept ones;
+    // otherwise its current settings stay.
+    const ref = past.losers.find(loser => loser.tool === tool && loser.kept && loser.hash === hash)?.kept;
+    const extras = ref ? await keptExtras(context, name, hash, ref) : here ? undefined : version.extras[tool];
+    if (here?.hash === hash && (!extras || JSON.stringify(here.extras) === JSON.stringify(extras))) { holds.set(tool, hash); continue; }
     if (here) holds.set(tool, here.hash);
     const reason = cannotHold(tool, version.server);
     if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
