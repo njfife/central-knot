@@ -66,6 +66,12 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       const before = text.slice(0, at);
       return `${before}${before.endsWith('\n') ? '' : '\n'}enabled = false\n${text.slice(at)}`;
     }
-    case 'pi-cli': return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
+    case 'pi-cli': {
+      // Only an entry that is there is switched: one removed meanwhile is never made again as a bare switch.
+      const servers = parseJson(text).mcpServers;
+      const entry = servers && typeof servers === 'object' ? (servers as Record<string, unknown>)[name] : undefined;
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`Pi has no "${name}" server to switch.`);
+      return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
+    }
   }
 }

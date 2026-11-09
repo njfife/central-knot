@@ -350,11 +350,15 @@ function background() {
     // A switch turned back in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: drift is
     // looked at on its own while a profile holds anything, and the menus and the page follow it.
     // Looked at only when a switch file changed since the last look, or the pass wrote something (an item may have come or gone).
+    // A switch file that changed always reads the page again (its marks show each switch), and the menus follow the drift.
     const stamp = await switchFilesStamp(context()).catch(() => '');
-    if ((lastProfiles.active || Object.keys(lastProfiles.held).length) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
+    if (profilesInUse(lastProfiles) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
+      const switched = stamp !== lastStamp;
       lastStamp = stamp;
       const drift = await driftNow(context()).catch(() => lastDrift);
-      if (drift !== lastDrift) { lastDrift = drift; refreshTray(); if (!window.isDestroyed()) window.webContents.send('sync:changed'); }
+      const drifted = drift !== lastDrift;
+      if (drifted) { lastDrift = drift; refreshTray(); }
+      if ((switched || drifted) && !window.isDestroyed()) window.webContents.send('sync:changed');
     }
     // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
     if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');

@@ -13,7 +13,7 @@ import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, 
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
 import { strings } from './values.ts';
-import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
+import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
 
@@ -59,7 +59,7 @@ async function whyReadOnly(context: ShareContext): Promise<string | undefined> {
  * tick sent close together never undo each other. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
  * made again with that id (Undo of Delete), so History's switches still name it.
  */
-export async function saveProfile(context: ShareContext, input: { id?: string; name?: string; items?: string[]; restore?: boolean }): Promise<{ problem?: string; id?: string }> {
+export async function saveProfile(context: ShareContext, input: ProfileEdit): Promise<{ problem?: string; id?: string }> {
   const stop = await whyReadOnly(context);
   if (stop) return { problem: stop };
   const view = await readProfiles(context.home);
@@ -184,12 +184,12 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
   for (const [file, group] of groups) {
     const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.manage, itemKeyOf(flip.item), flip.tool) : undefined]));
     const failed = await writeFlips(context, file, group, targets);
-    let after = '';
-    try { after = await readFile(file, 'utf8'); } catch { /* every flip below then fails its check */ }
+    let after: string | undefined;
+    try { after = await readFile(file, 'utf8'); } catch { /* every flip below fails: what the tool sees can't be confirmed */ }
     for (const flip of group) {
-      let reason = failed.get(flip);
+      let reason = failed.get(flip) ?? (after === undefined ? `${file} could not be read back.` : undefined);
       if (!reason) {
-        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after, itemKeyOf(flip.item)) : switchState(context, flip.tool, after, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
+        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after!, itemKeyOf(flip.item)) : switchState(context, flip.tool, after!, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
         catch { reason = `${file} could not be read back.`; }
       }
       if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${harnesses[flip.tool].name}: ${reason}` }); continue; }

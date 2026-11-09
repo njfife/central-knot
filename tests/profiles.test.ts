@@ -35,6 +35,8 @@ test('Each tool’s MCP switch: off writes its own form, on takes it out, and ev
     if (tool === 'claude-cli') assert.deepEqual(JSON.parse(back), JSON.parse(before[tool]), tool);
     else assert.equal(back, before[tool], tool);
   }
+  // A server removed from the file meanwhile is never made again as a bare switch.
+  assert.throws(() => withMcpSwitch('pi-cli', '{ "mcpServers": {} }', 'docs', true), /no "docs" server/);
 });
 
 const item = (id: string, tools: SwitchItem['tools'], blocked: SwitchItem['blocked'] = {}): SwitchItem => ({ id, kind: id.startsWith('mcp:') ? 'mcp' : 'skill', key: itemKeyOf(id), name: id, description: '', tools, blocked, blockedFile: {} });

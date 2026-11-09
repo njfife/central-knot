@@ -1,5 +1,5 @@
 import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, ProfileEdit, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -577,7 +577,7 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
 api().onProfileSwitched((name, result) => { switchOutcome(name, result); rerender(); });
 
 /** Saves a profile: only the fields given change. A new or restored profile opens; an edit leaves the page where it is. */
-export const saveProfileDef = (profile: { id?: string; name?: string; items?: string[]; restore?: boolean }, said?: string) => busy('Saving profile…', async () => {
+export const saveProfileDef = (profile: ProfileEdit, said?: string) => busy('Saving profile…', async () => {
   const result = await api().saveProfile(profile, state.home!.home);
   if (result.view) state.home = result.view;
   if (result.problem) { announce(result.problem); return; }

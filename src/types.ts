@@ -110,7 +110,7 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
-  saveProfile(profile: { id?: string; name?: string; items?: string[]; restore?: boolean }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
+  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
   /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
@@ -427,6 +427,12 @@ export interface ProfilesView {
   /** Why profiles can't be read or saved here, if they can't. */
   problem?: string;
 }
+
+/**
+ * A profile to add (no `id`) or change: only the fields given change, so a rename and a tick never undo each other. `restore` makes
+ * a deleted profile again with its own `id` (Undo of Delete).
+ */
+export interface ProfileEdit { id?: string; name?: string; items?: string[]; restore?: boolean }
 
 /** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
 export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
