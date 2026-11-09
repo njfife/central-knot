@@ -525,3 +525,22 @@ The Mac real home was not used, because a Central Knot app was running there (a 
 - **Background failures are shown:** failed MCP and agents passes, and copies they could not write, reach the page's band, de-duplicated (suspected item 7).
 
 **Validation.** 206 unit tests. Linux e2e 121/121.
+
+## Sixth check, Opus (on 15c8652), November 9, 2026
+
+"Not yet" for MCP, which writes the file Nathan uses every day; skills and agents held up. The real home was not used, because the computer-use session's app was running. Several findings were already fixed in a7de923 (Codex subtables, including per-tool approval settings, kept and restored; `http_headers` tables read; background failures shown). This round fixes the rest. The probes are kept in `tests/sixth-check-opus.test.ts` (10 tests).
+
+- **Codex servers written inline or as dotted keys** (`[mcp_servers]` with `docs = { … }`) are held and never get a second definition. Before, Central Knot wrote a duplicate that Codex refused to load (P3, checked by Opus against the real Codex binary).
+- **A settings file reset is not deletions.** A file rewritten without a servers section, or one where two or more managed servers vanish together, is a reset: its servers are put back, with the reset notice (P4). Deleting a single server in a tool still spreads.
+- **An edit to a copy that was behind** (Claude Code waiting for Write now) is a conflict, not a silent one-sided edit, and it is told as one (P9).
+- **Write now refuses while Claude Code is running** (`pgrep -x claude`, real home only). A running Claude Code would write its older copy back (P10, MCP-02's risk).
+- **One write error never stops the MCP pass:** `editEntry` returns a message for any failure (P7).
+- **Writes through links:** a symlinked settings or agent file is written where it points, and the link stays (P5).
+- **No hard links on the disk:** the old file is put back first, then the ordinary replace runs, so it is never left under its temporary name.
+- **Choices are checked:** a chosen MCP or agent copy that changed after the page showed it is refused before anything is recorded.
+- **Write now with Sync on** is no longer scoped as if Sync were off.
+- **Cosmetic:**
+  - a comment just above the next TOML table stays when a server's table is rewritten (P6);
+  - agent frontmatter ends only at a line that is `---` (P8).
+
+**Validation.** 216 unit tests. Linux e2e 121/121.

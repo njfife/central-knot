@@ -208,29 +208,50 @@ const occupiedError = () => Object.assign(new Error('Something that is not reada
  * moved aside and checked there, then the new one is put in place exclusively: a save that lands meanwhile is never overwritten.
  */
 export async function writeFileChecked(path: string, text: string, expected: string | undefined) {
+  // A settings file that is a link (dotfiles) is written where it points, so the link and its target stay as they are.
+  try { if ((await lstat(path)).isSymbolicLink()) path = await realpath(path); } catch { /* new file */ }
   await mkdir(dirname(path), { recursive: true });
   let mode = 0o600;
   try { mode = (await stat(path)).mode & 0o777; } catch { /* new file */ }
   const temporary = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.tmp`);
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
+  let parkedThere = false;
   await writeFile(temporary, text, { mode });
   try {
     if (expected !== undefined) {
-      try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
+      try { await rename(path, parked); parkedThere = true; } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
       let held: string | undefined;
       try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
-      if (held !== expected) { await link(parked, path).catch(() => undefined); throw changedWhileSyncing(); }
+      if (held !== expected) { if (await putBack(parked, path)) parkedThere = false; throw changedWhileSyncing(); }
     }
     try { await link(temporary, path); }
     catch (error) {
       // Something was saved there after the old file was moved aside: that save stays; the old file (as read) is not needed.
       if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
-      if (expected !== undefined) await link(parked, path).catch(() => undefined);
+      // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
+      if (parkedThere && await putBack(parked, path)) parkedThere = false;
+      if (errorCode(error) === 'EPERM' || errorCode(error) === 'ENOTSUP' || errorCode(error) === 'EXDEV') {
+        if (expected === undefined) { try { await lstat(path); throw occupiedError(); } catch (missing) { if (errorCode(missing) !== 'ENOENT') throw missing; } }
+        else if ((await readFile(path, 'utf8').catch(() => undefined)) !== expected) throw changedWhileSyncing();
+        await rename(temporary, path);
+        return;
+      }
       throw error;
     }
   } finally {
     await unlink(temporary).catch(() => undefined);
-    await unlink(parked).catch(() => undefined);
+    // Moved aside and not put back: its replacement is in place (or a newer save is), and its content was kept before the write.
+    if (parkedThere) await unlink(parked).catch(() => undefined);
+  }
+}
+
+/** Puts a moved-aside file back where it was, never over something saved there since. True when it is back. */
+async function putBack(parked: string, path: string): Promise<boolean> {
+  try { await link(parked, path); await unlink(parked).catch(() => undefined); return true; }
+  catch (error) {
+    if (errorCode(error) === 'EEXIST') return false;
+    try { await lstat(path); return false; } catch { /* still empty */ }
+    try { await rename(parked, path); return true; } catch { return false; }
   }
 }
 
@@ -260,7 +281,7 @@ export async function removeFileChecked(path: string, expected: string) {
   await rename(path, parked);
   let held: string | undefined;
   try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
-  if (held !== expected) { await link(parked, path).catch(() => undefined); await unlink(parked).catch(() => undefined); throw changedWhileSyncing(); }
+  if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
   await unlink(parked);
 }
 

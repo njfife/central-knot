@@ -79,7 +79,7 @@ function fromJson(name: string, tool: HarnessId, file: string, raw: Record<strin
  * Reads one tool's servers. A file that cannot be read gives a problem, never a guess. `text` is the file as read, so a write can
  * check nothing changed since.
  */
-export async function readTool(context: ShareContext, tool: HarnessId): Promise<{ entries: McpEntry[]; problem?: string; exists: boolean; text?: string; /** Server names whose entry is there but is not a server (say, null): held, never read as absent. */ invalid?: string[] }> {
+export async function readTool(context: ShareContext, tool: HarnessId): Promise<{ entries: McpEntry[]; problem?: string; exists: boolean; text?: string; /** Server names whose entry is there but is not a server (say, null), or is written in a form Central Knot does not edit: held, never read as absent or written. */ invalid?: string[]; /** Whether the file has a servers section at all: a file rewritten without one is a reset, not deletions. */ section?: boolean }> {
   const file = mcpFile(context, tool);
   let text: string;
   try { text = await readFile(file, 'utf8'); } catch (error) { return { entries: [], exists: false, problem: errorCode(error) === 'ENOENT' ? undefined : `${file} could not be read.` }; }
@@ -87,6 +87,15 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
     if (tool === 'codex-cli') {
       const tables = readTomlTables(text);
       const entries: McpEntry[] = [];
+      // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
+      // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.
+      const inline = new Set<string>();
+      for (const table of tables) {
+        for (const entry of table.entries) {
+          const path = [...table.path, ...entry.key.split('.')];
+          if (path[0] === 'mcp_servers' && path.length >= 2 && table.path.length < 2) inline.add(path[1]);
+        }
+      }
       for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers')) {
         const name = table.path[1];
         const value = (key: string) => table.entries.find(entry => entry.key === key)?.value;
@@ -103,16 +112,16 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
         const extras: Record<string, unknown> = Object.fromEntries(table.entries.filter(entry => !['command', 'args', 'env', 'cwd', 'url', 'http_headers'].includes(entry.key)).map(entry => [entry.key, entry.raw]));
         // Codex's own subtables (env_http_headers, tool settings…) are this tool's: kept whole, as written, under their header.
         for (const sub of subtables.filter(candidate => candidate !== envTable && candidate !== headersTable)) extras[`[${sub.path.slice(2).join('.')}]`] = text.slice(sub.start, sub.end);
-        entries.push({ name, tool, file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) });
+        if (!inline.has(name)) entries.push({ name, tool, file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) });
       }
-      return { entries, exists: true, text };
+      return { entries, exists: true, text, invalid: [...inline], section: tables.some(table => table.path[0] === 'mcp_servers') || inline.size > 0 };
     }
     const parsed = JSON.parse(text.replace(/^﻿/, '')) as { mcpServers?: unknown };
     const servers = parsed && typeof parsed === 'object' ? parsed.mcpServers ?? {} : {};
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
     const all = Object.entries(servers as Record<string, unknown>);
     const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
-    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text };
+    return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text, section: !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed };
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
   }
@@ -162,7 +171,8 @@ async function editEntry(context: ShareContext, tool: HarnessId, name: string, e
   try { await writeFileChecked(file, writeEntry(now.text ?? '', tool, name, server, extras ?? current?.extras ?? {}), now.exists ? now.text : undefined); }
   catch (error) {
     if (errorCode(error) === 'CK_CHANGED' || errorCode(error) === 'CK_OCCUPIED') return `${harnesses[tool].name}'s settings file changed just now. Nothing was written; it is read again next time.`;
-    throw error;
+    // Any other failure (permissions, a full disk) stops this one write, never the rest of the pass.
+    return `Could not write ${harnesses[tool].name}'s settings file: ${error instanceof Error ? error.message : String(error)}`;
   }
   return undefined;
 }
@@ -208,14 +218,16 @@ async function gatherAll(context: ShareContext, tools: HarnessId[]) {
   const unreadable = new Set<HarnessId>();
   const missingFiles = new Set<HarnessId>();
   const invalid = new Map<string, HarnessId[]>();
+  const noSection = new Set<HarnessId>();
   for (const tool of tools) {
     const read = await readTool(context, tool);
     if (read.problem) { problems.push(read.problem); unreadable.add(tool); }
-    for (const name of read.invalid ?? []) { invalid.set(name, [...(invalid.get(name) ?? []), tool]); problems.push(`${mcpFile(context, tool)}: “${name}” is not a server entry, so it is left alone.`); }
+    for (const name of read.invalid ?? []) { invalid.set(name, [...(invalid.get(name) ?? []), tool]); problems.push(`${mcpFile(context, tool)}: “${name}” is not written as a server table Central Knot can edit, so it is left alone.`); }
+    if (read.exists && !read.problem && !read.section) noSection.add(tool);
     if (!read.exists) missingFiles.add(tool);
     for (const entry of read.entries) { const slot = byName.get(entry.name) ?? {}; slot[tool] = entry; byName.set(entry.name, slot); }
   }
-  return { byName, problems, unreadable, missingFiles, invalid };
+  return { byName, problems, unreadable, missingFiles, invalid, noSection };
 }
 
 /** Claude Code entries waiting for Write now (MCP-02): a copy to add or bring up to date, or one a deletion still has to remove. */
@@ -271,12 +283,22 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const present = tools.filter(tool => mcpTools.includes(tool));
   // A write a crash interrupted is finished first, so a settings file moved aside is never read as missing.
   for (const tool of present) await recoverParked(dirname(mcpFile(context, tool)));
-  const { byName, unreadable, missingFiles, invalid } = await gatherAll(context, present);
+  const { byName, unreadable, missingFiles, invalid, noSection } = await gatherAll(context, present);
   const record = await readMcpRecord(context.home);
+  // A settings file that lost every server at once (rewritten without a servers section, or two or more managed servers all gone
+  // together, as when a tool resets its file) is a reset: its servers are put back, never deleted everywhere.
+  const resetTools = new Set<HarnessId>();
+  for (const tool of present) {
+    if (missingFiles.has(tool) || unreadable.has(tool)) continue;
+    const held = Object.entries(record.items).filter(([, item]) => item.state === 'shared' && !item.off.includes(tool) && item.copies.some(copy => copy.tool === tool && !copy.status && !copy.away));
+    const gone = held.filter(([name]) => !byName.get(name)?.[tool]);
+    if (gone.length && (noSection.has(tool) || (held.length >= 2 && gone.length === held.length))) resetTools.add(tool);
+  }
   const results: DestinationResult[] = [];
   const events: HistoryEvent[] = [];
   const notices: SyncNotice[] = [];
   const event = (fields: Omit<HistoryEvent, 'id' | 'at'>) => { const made: HistoryEvent = { id: randomUUID(), at: new Date().toISOString(), ...fields }; events.push(made); return made.id; };
+  for (const tool of resetTools) notices.push({ key: '', item: '', kind: 'reset', winner: tool, losers: [], orderProved: true, history: '' });
   let writes = 0;
   let settling = false;
   const claudeNow = (name: string) => !!options.claudeNow?.includes(name);
@@ -289,6 +311,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   for (const change of changes) {
     const slot = byName.get(change.key);
     if (!slot) continue;
+    // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.` }); continue; }
     const item: McpRecordItem = record.items[change.key] ?? { state: 'dont-share', off: [], hash: '', copies: [] };
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
     item.off = change.off;
@@ -313,7 +337,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     // A tool whose settings file is missing right now is away: its copy is neither updated nor read as deleted. When the file is
     // back without the entry (a reset or reinstall), the entry is put back.
     const away = (tool: HarnessId) => missingFiles.has(tool) && item.copies.some(copy => copy.tool === tool && !copy.status);
-    item.copies = item.copies.filter(copy => copy.status || away(copy.tool) || !copy.away || !!slot[copy.tool]);
+    item.copies = item.copies.filter(copy => copy.status || away(copy.tool) || !(copy.away || resetTools.has(copy.tool)) || !!slot[copy.tool]);
     for (const copy of item.copies) if (!copy.status) { if (away(copy.tool)) copy.away = true; else delete copy.away; }
     const live = syncing.filter(tool => !away(tool));
     const entries = live.map(tool => slot[tool]).filter((entry): entry is McpEntry => !!entry);
@@ -374,7 +398,9 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (!source) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
     // An unrecorded copy that differs, with no baseline to call it behind, is a same-name collision: it needs a choice.
     if (!chosenNow.has(name) && entries.some(entry => !recorded.has(entry.tool) && entry.hash !== source.hash && entry.hash !== item.hash)) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
-    const competing = edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1;
+    // An edit made to a copy that was behind (Claude Code waiting for Write now) competes with the newer content it never saw.
+    const fromBehind = edited.some(entry => recorded.get(entry.tool) !== item.hash);
+    const competing = (edited.length > 1 && new Set(edited.map(entry => entry.hash)).size > 1) || fromBehind;
     const replaced: { tool: HarnessId; hash: string }[] = [];
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();

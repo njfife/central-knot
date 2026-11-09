@@ -37,12 +37,13 @@ const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */
 export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
 
-const FRONT = /^(﻿?---\r?\n)([\s\S]*?)(\r?\n?---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
+/** Frontmatter: `---` on its own first line, then up to the next line that is `---` (at a line start, as Claude Code reads it). */
+const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
 
 function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
   const match = FRONT.exec(text);
   if (!match) return undefined;
-  const document = parseDocument(match[2]);
+  const document = parseDocument(match[2].replace(/\r?\n$/, ''));
   if (document.errors.length) return undefined;
   const front = (document.toJS() ?? {}) as Record<string, unknown>;
   if (typeof front !== 'object' || Array.isArray(front)) return undefined;
@@ -133,10 +134,10 @@ export function agentText(tool: HarnessId, agent: Pick<NeutralAgent, 'name' | 'd
   }
   const match = existing ? FRONT.exec(existing) : undefined;
   if (!match) return `---\nname: ${yamlScalar(agent.name)}\ndescription: ${yamlScalar(agent.description)}\n---\n\n${agent.prompt}`;
-  const front = setFrontLines(match[2], [['name', agent.name], ['description', agent.description]]);
-  const close = /^\r?\n/.test(match[3]) ? match[3] : `\n${match[3]}`;
+  const newline = match[1].endsWith('\r\n') ? '\r\n' : '\n';
+  const front = setFrontLines(match[2].replace(/\r?\n$/, ''), [['name', agent.name], ['description', agent.description]]);
   const gap = /^\r?\n/.exec(match[4])?.[0] ?? '\n';
-  return `${match[1]}${front}${close}${gap}${agent.prompt}`;
+  return `${match[1]}${front}${newline}${match[3]}${gap}${agent.prompt}`;
 }
 
 const writeChecked = writeFileChecked;
@@ -292,6 +293,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   for (const change of changes) {
     const slot = byKey.get(change.key);
     if (!slot) continue;
+    // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.' }); continue; }
     const first = (Object.values(slot) as AgentEntry[])[0];
     const item: AgentRecordItem = record.items[change.key] ?? { name: first.name, state: 'dont-share', off: [], hash: '', copies: [] };
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';

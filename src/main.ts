@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -296,6 +297,12 @@ async function startWatching() {
 
 // ---------- Marketplaces and plugins ----------
 
+/** Whether a Claude Code process is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
+function claudeRunning(): Promise<boolean> {
+  if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
+  return new Promise(done => execFile('pgrep', ['-x', 'claude'], error => done(!error)));
+}
+
 /** A tool's own CLI, never an app's bundled copy (CD §3), searched as version probes are. */
 async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   const found: Partial<Record<HarnessId, string>> = {};
@@ -513,8 +520,9 @@ app.whenReady().then(async () => {
   handle('agents:apply', async (list, home) => (home === current?.home
     ? applyAgents(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+  // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
-    ? applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), only: new Set(names.filter((name): name is string => typeof name === 'string')) })
+    ? await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then Write now.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })

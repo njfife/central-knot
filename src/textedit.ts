@@ -317,13 +317,26 @@ export function setTomlTable(text: string, prefix: string[], name: string, body:
     if (body === undefined) return text;
     return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text.trim() ? '\n' : ''}${body}`;
   }
+  // A table's text runs to the next header, but comment lines at its end sit just above that header and belong to what follows:
+  // they stay. Only the table's own lines are replaced or removed.
+  const ownEnd = (table: TomlTable) => {
+    const lines = text.slice(table.start, table.end).split(/(?<=\n)/);
+    let cut = lines.length;
+    for (let index = lines.length - 1; index > 0; index--) {
+      const line = lines[index].trim();
+      if (line.startsWith('#')) { cut = index; continue; }
+      if (line === '') continue;
+      break;
+    }
+    return table.start + lines.slice(0, cut).join('').length;
+  };
   // Rebuild in place of the first of its tables; drop its other tables wherever they are.
   let out = '';
   let cursor = 0;
   mine.forEach((table, index) => {
     out += text.slice(cursor, table.start);
     if (index === 0 && body !== undefined) out += body.endsWith('\n') ? body : `${body}\n`;
-    cursor = table.end;
+    cursor = ownEnd(table);
   });
   out += text.slice(cursor);
   return out;
