@@ -4,7 +4,7 @@
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, emptyState, h, icon, middle } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, middle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -833,7 +833,7 @@ export function outcomeBand(withAction = true): HTMLElement | null {
     !withAction ? null : outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
       : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
-    h('button.band-dismiss', { type: 'button', id: 'outcome-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.outcome = undefined; rerender(); } }, icon('x', 12)));
+    closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));
 }
 
 /** Sync off: what waits, and the two ways on. Shown on every managed page, since the switch covers all of them. */
@@ -862,7 +862,7 @@ function helpBand(): HTMLElement | null {
       h('span.tone-muted', {}, ...(kind === 'agents' && list.some(skill => Object.keys(skill.limits ?? {}).length)
         ? ['Once it’s Managed, click a tool’s box to leave that tool out.']
         : ['Click a tool’s box to include it or leave it out. Turning Managed off keeps existing copies.']))),
-    h('button.band-dismiss', { type: 'button', id: 'help-dismiss', 'aria-label': 'Hide this tip', title: 'Hide this tip', onclick: () => { writeFlag(key); rerender(); } }, icon('x', 12)));
+    closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }
 
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
@@ -900,7 +900,7 @@ function mcpNotices() {
       decisions.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, h('p.sync-notice', { 'data-kind': 'stopped' }, icon('circle-pause', 14, 'tone-warning'),
         h('span.notice-text', {}, h('strong.item-name', {}, skill.name ?? skill.key), ` was edited in ${names[tool]}, so ${names[tool]}’s copy stopped updating`, h('span.notice-age', {}, ` · ${age(key)}`)),
         h('span.notice-actions', {}, stoppedActions(skill, tool, source)),
-        h('button.band-dismiss.notice-dismiss', { type: 'button', id: `stopped-dismiss-${skill.key}-${tool}`, 'aria-label': 'Decide later', title: 'Decide later; the amber box stays', onclick: () => { state.dismissed.add(key); rerender(); } }, icon('x', 12))))));
+        closeButton(() => { state.dismissed.add(key); rerender(); }, { id: `stopped-dismiss-${skill.key}-${tool}`, label: 'Decide later', title: 'Decide later; the amber box stays', look: '.notice-dismiss' })))));
     }
   }
   // A notice that needs a choice comes before the ones that only tell.
@@ -1131,7 +1131,7 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
       notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
       action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : null,
       writeClaude ? h('span.tone-faint.notice-quit', {}, state.home?.mode === 'fixture' ? 'On your real tools, quit Claude Code first.' : 'Quit Claude Code first.') : null),
-    h('button.band-dismiss.notice-dismiss', { type: 'button', id: `notice-dismiss-${notice.history || notice.item}`, 'aria-label': `Dismiss this notice about ${notice.item || 'the reset'}`, title: 'Dismiss', onclick: (event: Event) => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); } }, icon('x', 12)),
+    closeButton(event => { event.stopPropagation(); state.dismissed.add(notice.history || notice.item); rerender(); }, { id: `notice-dismiss-${notice.history || notice.item}`, label: `Dismiss this notice about ${notice.item || 'the reset'}`, title: 'Dismiss', look: '.notice-dismiss' }),
     notice.history ? changePanel(notice.history) : null);
 }
 

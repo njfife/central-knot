@@ -1,6 +1,7 @@
 // A small Markdown reader for READMEs from marketplaces, in two parts: parseMarkdown turns text into plain data (tested
 // without a DOM), and markdown builds elements from that data with text nodes only. Raw HTML is shown as text or dropped,
 // images as their alt text, and only https links can be followed, in the browser.
+import { isHttps } from './values.ts';
 import { h } from './dom.ts';
 
 export type Inline =
@@ -48,7 +49,7 @@ const HTML_TAG = /<\/?(?:a|abbr|b|blockquote|br|center|code|details|div|em|h[1-6
 const STARTS = /[*_![<h\\]/g;
 
 /** An https link stays a link; anything else (relative paths, other schemes) is just its label. */
-const linkOrText = (label: Inline[], url: string): Inline[] => (/^https:\/\/\S+$/.test(url) ? [{ kind: 'link', label, url }] : label);
+const linkOrText = (label: Inline[], url: string): Inline[] => (isHttps(url) ? [{ kind: 'link', label, url }] : label);
 
 /** Text with no code spans in it: tags are dropped (autolinks kept), then emphasis and links are found. */
 function inlineText(text: string): Inline[] {
@@ -181,9 +182,13 @@ const names = (text: string, name: string) => {
   return at >= 0 && edge(text[at - 1]) && edge(text[at + name.length]);
 };
 
+/** A README heading for a plugin's parts: "Skills", "Commands", "Agents", "Included skills"… */
+const PARTS_HEADING = /^(?:included |available |the )?(?:skills?|commands?|agents?|slash commands)$/i;
+
 /**
- * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and any list of two or
- * more items that each name something in `skipListsOf` (with its heading, when the list was all that heading held).
+ * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and what only names the
+ * parts in `skipListsOf` again. That is a list of two or more items that each name a part, and, under a heading such as
+ * "Skills", a part's own sub-section (its heading is the part's name). A heading left with nothing under it goes too.
  */
 export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Block[] {
   let rest = blocks;
@@ -193,11 +198,28 @@ export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Blo
   const listed = (options.skipListsOf ?? []).filter(name => name.length >= 3);
   if (!listed.length) return rest;
   const kept: Block[] = [];
-  for (const [at, block] of rest.entries()) {
-    const repeated = block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => names(plainText(item), name)));
-    if (!repeated) { kept.push(block); continue; }
-    const next = rest[at + 1];
-    if (kept.at(-1)?.kind === 'heading' && (!next || next.kind === 'heading')) kept.pop();
+  let partsLevel: number | undefined;
+  for (let at = 0; at < rest.length; at++) {
+    const block = rest[at]!;
+    if (block.kind === 'heading') {
+      const title = plainText(block.content).trim();
+      if (partsLevel !== undefined && block.level <= partsLevel) partsLevel = undefined;
+      if (PARTS_HEADING.test(title)) partsLevel = block.level;
+      else if (partsLevel !== undefined && listed.some(name => same(title, name))) {
+        let end = at + 1;
+        while (end < rest.length && !(rest[end]!.kind === 'heading' && (rest[end] as { level: number }).level <= block.level)) end++;
+        at = end - 1;
+        continue;
+      }
+    }
+    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => names(plainText(item), name)))) continue;
+    kept.push(block);
+  }
+  // From the end, so a heading emptied by one below it goes as well.
+  for (let at = kept.length - 1; at >= 0; at--) {
+    const block = kept[at]!;
+    const next = kept[at + 1];
+    if (block.kind === 'heading' && (!next || (next.kind === 'heading' && next.level <= block.level))) kept.splice(at, 1);
   }
   return kept;
 }

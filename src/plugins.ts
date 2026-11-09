@@ -9,7 +9,9 @@ import { configRoot, harnesses } from './harnesses.ts';
 import { MANIFEST, inside, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
-import { githubRepo, isFolder, isHttps, record, text } from './values.ts';
+import { cliMissing } from './pluginstatus.ts';
+import { githubRepo, isFolder, isHttps, record, strings, text } from './values.ts';
+import { toolNames } from './words.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
 
 // ---------- Shapes ----------
@@ -184,10 +186,10 @@ function copilotRefusal(name: string, where: unknown): string | undefined {
  * One marketplace.json entry as a plugin the page can show, or undefined when its name isn't one the tools accept. A
  * plugin stored in the marketplace (a string `source`) gets its folder and counts; one kept elsewhere gets where it lives.
  */
-async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string): Promise<CatalogPlugin | undefined> {
+async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean): Promise<CatalogPlugin | undefined> {
   if (typeof item.name !== 'string' || !SAFE_NAME.test(item.name)) return undefined;
-  const author = typeof item.author === 'string' ? item.author : text(record(item.author)?.name);
-  const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
+  const author = text(item.author) || text(record(item.author)?.name);
+  const words = [...(strings(item.keywords) ?? []), ...(strings(item.tags) ?? [])];
   const plugin: CatalogPlugin = {
     name: item.name, description: text(item.description), version: text(item.version) || undefined, displayName: text(item.displayName) || undefined,
     category: text(item.category) || undefined, author: author || undefined, homepage: isHttps(item.homepage) ? item.homepage : undefined,
@@ -195,19 +197,33 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
   };
   if (typeof item.source === 'string') {
     const where = item.source;
+    // marketplace.json's metadata.pluginRoot is the folder a bare name ("formatter") is looked up in; a path that says
+    // where it starts ("./plugins/formatter", "../shared") is taken from the marketplace's root as written.
     const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
     // A path outside the marketplace, through a link or not, is not read.
-    if (await inside(root, folder)) { plugin.folder = folder; plugin.components = await componentsOf(folder, item, root); }
+    if (await inside(root, folder)) { plugin.folder = folder; if (counts) plugin.components = await componentsOf(folder, item, root); }
   }
   return plugin;
+}
+
+/** At most this many plugins' files are read at once while a catalog is read. */
+const READS_AT_ONCE = 8;
+/** `work` for every item, at most `limit` at a time, results in the items' order. */
+async function eachLimited<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => { while (next < items.length) { const at = next++; results[at] = await work(items[at]!); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**
  * Reads the marketplace.json in `root` (a folder, or Central Knot's copy of a Git marketplace) into a catalog: its name,
  * owner and description, and its plugins sorted by name. A file that is missing, outside `root`, unreadable or misnamed
- * gives a catalog with no plugins and a `problem` to show. Nothing is fetched or run.
+ * gives a catalog with no plugins and a `problem` to show. Nothing is fetched or run. `counts: false` skips reading each
+ * plugin's files for the counts its row shows; installing and reading one plugin's page don't need them.
  */
-export async function parseCatalog(root: string, source: string, kind: Catalog['kind']): Promise<Catalog> {
+export async function parseCatalog(root: string, source: string, kind: Catalog['kind'], { counts = true } = {}): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   const failed = (problem: string): Catalog => ({ name: '', source, kind, fetchedAt, plugins: [], problem });
   const read = await readManifest(root);
@@ -219,7 +235,7 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   if (!SAFE_NAME.test(name)) return failed(`Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.`);
   const metadata = record(manifest.metadata);
   const entries = (Array.isArray(manifest.plugins) ? manifest.plugins : []).map(record).filter((item): item is Record<string, unknown> => !!item);
-  const plugins = (await Promise.all(entries.map(item => catalogEntry(item, root, text(metadata?.pluginRoot))))).filter((plugin): plugin is CatalogPlugin => !!plugin);
+  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts))).filter((plugin): plugin is CatalogPlugin => !!plugin);
   const copilotRefuses = entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
     copilotRefuses, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
@@ -235,8 +251,9 @@ export async function componentsOf(folder: string, entry: Record<string, unknown
 
 const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
+/** A tool's JSON record as an object; Copilot's config.json starts with `//` comment lines, which are dropped first. */
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
-  try { const value = JSON.parse((await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined; } catch { return undefined; }
+  try { return record(JSON.parse((await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, ''))); } catch { return undefined; }
 }
 const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
 type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>>;
@@ -290,7 +307,7 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
     const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
     const folderPath = text(source?.path);
     if (enabled && source?.source === 'directory' && folderPath) {
-      const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder'));
+      const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
       const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
       return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
     }
@@ -319,7 +336,7 @@ const readOrNull = (path: string) => readFile(path, 'utf8').catch(() => null);
 async function native(context: PluginContext, tool: HarnessId, args: string[]): Promise<NativeRun> {
   const binary = context.binaries[tool];
   const command = `${harnesses[tool].binary} ${args.join(' ')}`;
-  if (!binary) return { tool, command, ok: false, output: `${harnesses[tool].name} CLI was not found, so its own plugin commands can’t run.`, changed: [] };
+  if (!binary) return { tool, command, ok: false, output: `${cliMissing(tool)}, so its own plugin commands can’t run.`, changed: [] };
   const files = touched(context, tool);
   const before = await Promise.all(files.map(readOrNull));
   // An app opened from Finder or a launcher gets a short PATH. A CLI that is a script (Codex runs on Node) finds its
@@ -347,15 +364,16 @@ async function native(context: PluginContext, tool: HarnessId, args: string[]): 
 /** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
 export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: HarnessId): Promise<ActionReport> {
   const runs: NativeRun[] = [];
-  const name = harnesses[tool].name;
+  const name = toolNames[tool];
   if (tool === 'copilot-cli') {
     const refusal = catalog.copilotRefuses;
     if (refusal) return { tool, outcome: 'held', message: `${refusal} Nothing was added to Copilot CLI.`, runs };
   }
-  const already = await installState(context, tool, catalog.name, plugin);
-  if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
+  // Held first: a same-named plugin installed from the other marketplace is not this one "already installed".
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { tool, outcome: 'held', message: `${name} already has a different marketplace named “${catalog.name}” (${held}). Central Knot doesn’t replace it.`, runs };
+  const already = await installState(context, tool, catalog.name, plugin);
+  if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
   if (!(await registeredSource(context, tool, catalog.name))) {
     const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
@@ -374,7 +392,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
 export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source?: string): Promise<ActionReport> {
-  const name = harnesses[tool].name;
+  const name = toolNames[tool];
   const held = source ? await heldBy(context, tool, marketplace, source) : undefined;
   if (held) return { tool, outcome: 'held', message: `${name}’s “${marketplace}” is a different marketplace (${held}). Central Knot doesn’t change it.`, runs: [] };
   const before = await installState(context, tool, marketplace, plugin);

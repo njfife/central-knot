@@ -76,11 +76,13 @@ async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** Markdown files (commands, agents) in the given files and folders. */
+/** Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down. */
 async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
+  const filesIn = async (folder: string) => (await listInside(root, folder)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
   for (const path of paths) {
-    const files = path.endsWith('.md') ? [path] : (await listInside(root, path)).filter(name => name.endsWith('.md')).map(name => join(path, name));
+    const files = path.endsWith('.md') ? [path]
+      : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
       const body = await textInside(root, file);
       if (body === undefined) continue;
@@ -98,10 +100,18 @@ function serverRuns(server: unknown): string {
   return text(entry.url) || [text(entry.command), ...(strings(entry.args) ?? [])].filter(Boolean).join(' ');
 }
 
-/** A section given inline or as a path to a JSON file (plugin.json allows both for hooks and MCP servers). */
-async function inlineOrFile(root: string, folder: string, value: unknown, key: string): Promise<Record<string, unknown>> {
-  const found = typeof value === 'string' ? await jsonInside(root, resolve(folder, value)) : record(value);
-  return record(found?.[key]) ?? found ?? {};
+/**
+ * One plugin section (hooks, MCP servers, LSP servers): its default file in the plugin folder, merged with what the
+ * plugin's entry names, which may be inline, a path to a JSON file, or a list of paths. A file or inline value may hold
+ * the section under its own key (`{"mcpServers": {…}}`) or be the section itself (`{"github": {…}}`); plugins in the
+ * wild use both, so both are read.
+ */
+async function section(root: string, folder: string, named: unknown, key: string, defaultFile: string): Promise<Record<string, unknown>> {
+  const unwrap = (value: Record<string, unknown> | undefined) => record(value?.[key]) ?? value ?? {};
+  const fromFile = async (path: string) => unwrap(await jsonInside(root, resolve(folder, path)));
+  const paths = typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : [];
+  const parts = [await fromFile(defaultFile), ...(await Promise.all(paths.map(fromFile))), unwrap(record(named))];
+  return Object.assign({}, ...parts);
 }
 
 /**
@@ -109,20 +119,21 @@ async function inlineOrFile(root: string, folder: string, value: unknown, key: s
  * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginContents> {
-  const manifest = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
-  const merged = { ...manifest, ...entry };
-  const listed = (key: string) => strings(merged[key])?.map(path => resolve(folder, path));
-  const skillPaths = listed('skills') ?? [join(folder, 'skills')];
-  const hooks = { ...(record((await jsonInside(root, join(folder, 'hooks/hooks.json')))?.hooks) ?? {}), ...(merged.hooks !== undefined ? await inlineOrFile(root, folder, merged.hooks, 'hooks') : {}) };
-  const servers = { ...(record((await jsonInside(root, join(folder, '.mcp.json')))?.mcpServers) ?? {}), ...(merged.mcpServers !== undefined ? await inlineOrFile(root, folder, merged.mcpServers, 'mcpServers') : {}) };
+  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
+  // The marketplace entry wins over plugin.json, as the tools read it.
+  const declared = { ...pluginJson, ...entry };
+  const listed = (key: string) => strings(declared[key])?.map(path => resolve(folder, path));
+  const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
+  const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
+  const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, skillPaths),
+    skills: await skillsIn(root, listed('skills') ?? [join(folder, 'skills')]),
     commands: await markdownIn(root, listed('commands') ?? [join(folder, 'commands')]),
     agents: await markdownIn(root, listed('agents') ?? [join(folder, 'agents')]),
     hooks: Object.keys(hooks).sort(),
     mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
-    lspServers: Object.keys(record(merged.lspServers) ?? {}).sort(),
+    lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
   };
 }

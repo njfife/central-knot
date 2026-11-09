@@ -246,7 +246,25 @@ export interface CatalogPlugin {
   entry?: Record<string, unknown>;
 }
 
-export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string; /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */ copilotRefuses?: string }
+/** A marketplace as read from its marketplace.json. */
+export interface Catalog {
+  /** The name it gives itself; tools address its plugins as plugin@name. */
+  name: string;
+  /** Where it was added from: owner/repo, a Git URL or a folder. */
+  source: string;
+  kind: 'folder' | 'git';
+  /** When it was read (a Git copy: when it was fetched). */
+  fetchedAt: string;
+  plugins: CatalogPlugin[];
+  /** Why it couldn't be read; then it has no plugins. */
+  problem?: string;
+  /** The folder its files were read from. */
+  root?: string;
+  owner?: string;
+  description?: string;
+  /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
+  copilotRefuses?: string;
+}
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */

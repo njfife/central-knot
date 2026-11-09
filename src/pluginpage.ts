@@ -33,12 +33,12 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
 
 /**
  * Where to install it: a box per tool with a second line that is always there (so the card never changes height), and
- * in the heading row (always the same height) the one button for every tool still without it, or how to uninstall.
+ * at the right of the heading row (always the same height) one button: choose it for every tool still without it, or,
+ * once every tool has it, choose to uninstall it from all of them.
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
   const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
-  const allChosen = allQueued(market.draft, ops);
   // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
   const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
   const status = (tool: HarnessId) => {
@@ -48,16 +48,16 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
-  const anyChosen = view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool));
-  const anyInstalled = view.tools.some(tool => installed(entry, plugin.name, tool));
-  const chooseAll = ops.length && view.canWrite
-    ? button({ variant: 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
-      onclick: () => { toggleMany(market.draft, ops); clearNotice(); rerender(); } })
+  // Once no tool is missing it, the same button chooses its uninstall everywhere it can be uninstalled.
+  const removable = view.tools.filter(tool => installed(entry, plugin.name, tool) && view.clis[tool] && !unavailable(view, entry, plugin.name, tool));
+  const removals: PluginOp[] = removable.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
+  const [batch, verb] = ops.length ? [ops, 'Choose'] as const : [removals, 'Uninstall from'] as const;
+  const label = allQueued(market.draft, batch) ? 'Choose none' : batch.length > 1 ? `${verb} all ${batch.length}` : `${verb} ${names[batch[0]?.tool ?? 'claude-cli']}`;
+  const allButton = batch.length && view.canWrite
+    ? button({ variant: 'outline', size: 'small', label, id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } })
     : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
-    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'),
-      !anyChosen && anyInstalled ? h('span.plugin-panel-hint', {}, 'To uninstall, click its check, then Apply all.') : null,
-      chooseAll),
+    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'), allButton),
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
@@ -65,9 +65,10 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     })));
 }
 
-/** One group of named parts, each description held to two lines (the whole of it on hover). */
+/** One group of named parts, each description held to two lines; a click on it shows the whole of it. */
 const partList = (parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => h('li', {},
-  h('code.plugin-name', {}, part.name), part.text ? h(`span.plugin-part-what${part.mono ? '.mono' : ''}`, { title: part.text }, part.text) : null)));
+  h('code.plugin-name', {}, part.name),
+  part.text ? h(`span.plugin-part-what${part.mono ? '.mono' : ''}`, { title: part.text, onclick: (event: Event) => (event.currentTarget as HTMLElement).classList.toggle('expanded') }, part.text) : null)));
 const group = (title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(parts.map(part => ({ name: part.name, text: part.description })))) : null;
 
 /** The plugin's parts by name, with what each says it does. */
@@ -75,14 +76,15 @@ function contentsBlock(plugin: PluginView, detail: PluginDetail | null | undefin
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
   if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
-  const empty = !detail.skills.length && !detail.commands.length && !detail.agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length;
+  const empty = !detail.skills.length && !detail.commands.length && !detail.agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem) : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
     group('Skills', detail.skills), group('Commands', detail.commands), group('Agents', detail.agents),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
-    detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(detail.lspServers.map(name => ({ name, text: '' })))) : null);
+    detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(detail.lspServers.map(name => ({ name, text: '' })))) : null,
+    detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList([{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
 }
 
 export function pluginPage(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {

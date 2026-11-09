@@ -1,10 +1,20 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
+import { installed, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
+import { andList, toolNames as names } from './words.ts';
 
 export type PluginAction = 'install' | 'remove';
 /** One tool's change for one plugin from one marketplace. */
-export interface PluginOp { /** The marketplace as added (its address). */ source: string; /** The name its catalog gives it: plugin@marketName. */ marketName: string; plugin: string; tool: HarnessId; action: PluginAction }
+export interface PluginOp {
+  /** The marketplace as added (its address). */
+  source: string;
+  /** The name its catalog gives it, as the tools write plugin@marketName. */
+  marketName: string;
+  plugin: string;
+  tool: HarnessId;
+  action: PluginAction;
+}
 /** One line of a run's result: a plugin and what happened to it ("installed in Codex"), or one tool's failure. */
 export interface ResultLine { source: string; plugin: string; ok: boolean; text: string }
 /** What one op did, as its tool reported it. */
@@ -45,14 +55,15 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
 
 /**
  * Drops choices that no longer mean anything, so none is counted or run unseen: a plugin or marketplace no longer
- * listed, a tool whose CLI is gone or that holds another marketplace of this name, an install already in place, and an
- * uninstall of something no longer installed.
+ * listed, a tool that can't take it now (pluginstatus.unavailable: held, no CLI, refused), an install already in place,
+ * and an uninstall of something no longer installed or whose CLI is gone.
  */
 export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   for (const [key, op] of draft) {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
-    const state = entry?.plugins.some(plugin => plugin.name === op.plugin) ? entry.states[op.plugin]?.[op.tool]?.state ?? 'not-installed' : undefined;
-    const stale = !state || !view?.clis[op.tool] || state === 'held' || (op.action === 'install' && state === 'installed') || (op.action === 'remove' && state !== 'installed');
+    const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
+    const stale = !view || !entry || !listed || !!unavailable(view, entry, op.plugin, op.tool)
+      || (op.action === 'install' ? installed(entry, op.plugin, op.tool) : !installed(entry, op.plugin, op.tool) || !view.clis[op.tool]);
     if (stale) draft.delete(key);
   }
 }
@@ -89,7 +100,7 @@ export const succeeded = (report: ActionReport) => report.outcome === 'installed
  * is said as such ("already in Codex"), never as a change this run made. For an Undo, the verbs say what came back:
  * "removed from" for an install reversed, "put back in" for an uninstall reversed.
  */
-export function describe(done: PluginDone[], names: Record<HarnessId, string>, andList: (items: string[]) => string, undo = false): ResultLine[] {
+export function describe(done: PluginDone[], undo = false): ResultLine[] {
   const lines: ResultLine[] = [];
   const verbs = undo ? { installed: 'put back in', uninstalled: 'removed from' } : { installed: 'installed in', uninstalled: 'uninstalled from' };
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {

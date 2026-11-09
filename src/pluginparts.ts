@@ -20,13 +20,12 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   const id = `pcell-${marketIndex}-${plugin.name}-${tool}`;
   const working = market.working;
   if (working?.source === entry.source && working.plugin === plugin.name && working.tools.includes(tool)) {
-    return h('div.ov-cell', { role: 'cell' }, h('span.cell-button.cell-working', { id, 'aria-label': `${names[tool]}: working…`, title: 'Running that tool’s own command…' }, icon('refresh-cw', 14, 'spin')));
+    return h('div.ov-cell', { role: 'cell' },
+      h('span.cell-button.cell-working', { id, 'aria-label': `${names[tool]}: working…`, title: 'Running that tool’s own command…' }, icon('refresh-cw', 14, 'spin')));
   }
   const status = stateOf(entry, plugin.name, tool);
   const pending = queued(market.draft, entry.source, plugin.name, tool);
-  const busy = !!app.busy || !view.canWrite;
-  // A box that can't be clicked says why, never "Click to …".
-  const cantWhy = !view.canWrite ? 'Preview only: nothing can be installed or uninstalled in this home.' : !view.clis[tool] ? `${cliMissing(tool)}.` : '';
+  const name = names[tool];
   const choose = (action: 'install' | 'remove') => (event: Event) => {
     event.stopPropagation();
     toggle(market.draft, { source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
@@ -34,19 +33,27 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     rerender();
   };
   /** look: the cell's classes; state: its data-state for tests and styles; action: what a click chooses (none: not clickable). */
-  const box = (look: string, state: string, title: string, glyph: Element | null, action?: 'install' | 'remove', disabled = busy) =>
-    h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${look}`, { type: 'button', id, title, 'aria-label': title, disabled, 'data-state': state, onclick: action ? choose(action) : undefined }, glyph));
+  const box = ({ look, state, title, glyph, action, disabled = !!app.busy || !view.canWrite }: { look: string; state: string; title: string; glyph: Element; action?: 'install' | 'remove'; disabled?: boolean }) =>
+    h('div.ov-cell', { role: 'cell' },
+      h(`button.cell-button.${look}`, { type: 'button', id, title, 'aria-label': title, disabled, 'data-state': state, onclick: action ? choose(action) : undefined }, glyph));
+
   const why = unavailable(view, entry, plugin.name, tool);
-  if (why) return box('cell-cannot', 'cannot', `${names[tool]}: ${why}`, h('span.cannot-dash', { 'aria-hidden': 'true' }, '–'), undefined, true);
+  if (why) return box({ look: 'cell-cannot', state: 'cannot', title: `${name}: ${why}`, glyph: h('span.cannot-dash', { 'aria-hidden': 'true' }, '–'), disabled: true });
+  // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops it.
+  const preview = view.canWrite ? '' : 'Preview only: nothing can be installed or uninstalled in this home.';
   if (status.state === 'installed') {
-    const text = `${names[tool]}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
-    if (pending === 'remove') return box('cell-pending.cell-pending-remove', 'remove', `${names[tool]}: uninstalled on Apply all. Click to keep it.`, icon('x', 15), 'remove');
-    return box('cell-synced.cell-on', 'installed', cantWhy ? `${text}. Can’t uninstall here: ${cantWhy}` : `${text}. Click to uninstall on Apply all.`, icon('check', 16), 'remove', busy || !view.clis[tool]);
+    const text = `${name}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
+    if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
+    const cantUninstall = preview || (view.clis[tool] ? '' : `${cliMissing(tool)}.`);
+    return box({ look: 'cell-synced.cell-on', state: 'installed', title: cantUninstall ? `${text}. Can’t uninstall here: ${cantUninstall}` : `${text}. Click to uninstall on Apply all.`,
+      glyph: icon('check', 16), action: 'remove', disabled: !!app.busy || !!cantUninstall });
   }
   // Chosen differs from empty by shape, not only colour: a dashed check where the empty box has a plus.
-  if (pending === 'install') return box('cell-pending.cell-chosen.cell-on', 'install', `${names[tool]}: installed on Apply all. Click to leave it out.`, icon('check', 15), 'install');
-  if (status.state === 'not-known') return box('cell-differs', 'not-known', cantWhy ? `${status.reason} ${cantWhy}` : `${status.reason} Click to install again on Apply all.`, icon('circle-question-mark', 16), 'install');
-  return box('cell-absent.plugin-add', 'absent', cantWhy ? `Not installed in ${names[tool]}. ${cantWhy}` : `Not installed in ${names[tool]}. Click to install on Apply all.`, icon('plus', 14, 'plugin-add-glyph'), 'install');
+  if (pending === 'install') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'install', title: `${name}: installed on Apply all. Click to leave it out.`, glyph: icon('check', 15), action: 'install' });
+  if (status.state === 'not-known') {
+    return box({ look: 'cell-differs', state: 'not-known', title: `${status.reason} ${preview || 'Click to install again on Apply all.'}`, glyph: icon('circle-question-mark', 16), action: 'install' });
+  }
+  return box({ look: 'cell-absent.plugin-add', state: 'absent', title: `Not installed in ${name}. ${preview || 'Click to install on Apply all.'}`, glyph: icon('plus', 14, 'plugin-add-glyph'), action: 'install' });
 }
 
 /** Rendered READMEs by text and context: a redraw (every box click) reuses the built nodes instead of parsing again. */

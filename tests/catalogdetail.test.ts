@@ -52,6 +52,25 @@ test('Hooks and MCP servers given as paths in plugin.json are read, and both cou
   } finally { await cleanup(); }
 });
 
+test('Server and hook files are read in every shape plugins use: flat or wrapped, a list of paths, and LSP servers', async () => {
+  const { root, cleanup } = await box();
+  try {
+    // A flat .mcp.json (servers at the top, as GitHub's plugin in the official marketplace has it).
+    await put(join(root, '.mcp.json'), JSON.stringify({ github: { url: 'https://api.example/mcp' } }));
+    await put(join(root, 'extra/one.json'), JSON.stringify({ mcpServers: { one: { command: '${CLAUDE_PLUGIN_ROOT}/one' } } }));
+    await put(join(root, 'extra/two.json'), JSON.stringify({ two: { command: 'two' } }));
+    await put(join(root, '.lsp.json'), JSON.stringify({ gopls: { command: 'gopls' } }));
+    await put(join(root, 'hooks/hooks.json'), JSON.stringify({ PreToolUse: [] }));
+    await put(join(root, 'commands/git/commit.md'), '---\ndescription: Commits\n---\n');
+    const contents = await pluginContents(root, { mcpServers: ['./extra/one.json', './extra/two.json'], lspServers: { rust: { command: 'ra' } } }, root);
+    assert.deepEqual(contents.mcpServers.map(server => server.name), ['github', 'one', 'two']);
+    assert.equal(contents.mcpUsesPluginRoot, true);
+    assert.deepEqual(contents.lspServers, ['gopls', 'rust']);
+    assert.deepEqual(contents.hooks, ['PreToolUse']);
+    assert.deepEqual(contents.commands.map(command => command.name), ['commit']);
+  } finally { await cleanup(); }
+});
+
 test('Nothing outside the marketplace is read, through a listed path or a link', { skip: noLinks }, async () => {
   const { base, root, cleanup } = await box();
   try {

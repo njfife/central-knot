@@ -55,6 +55,19 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
   } finally { await box.cleanup(); }
 });
 
+test('A bare plugin source is looked up under metadata.pluginRoot; a ./ path starts at the marketplace root', async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'm', metadata: { pluginRoot: './plugins' }, plugins: [{ name: 'bare', source: 'bare' }, { name: 'rooted', source: './rooted' }] }));
+    await put(join(root, 'plugins/bare/skills/a/SKILL.md'), '---\nname: a\n---\n');
+    await put(join(root, 'rooted/skills/b/SKILL.md'), '---\nname: b\n---\n');
+    const catalog = await parseCatalog(root, root, 'folder');
+    assert.deepEqual(catalog.plugins.map(plugin => [plugin.name, plugin.folder, plugin.components?.skills]), [['bare', join(root, 'plugins/bare'), 1], ['rooted', join(root, 'rooted'), 1]]);
+    assert.equal((await parseCatalog(root, root, 'folder', { counts: false })).plugins[0]!.components, undefined, 'counts are skipped when not asked for');
+  } finally { await box.cleanup(); }
+});
+
 test('Copilot’s whole-marketplace refusals are found before anything is added', async () => {
   const box = await sandbox();
   try {

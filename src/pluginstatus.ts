@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 
@@ -31,8 +31,8 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
 export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
 
-const limitWords: Record<Outcome['result'], string> = { works: '', limited: 'limited', ignored: 'ignored', fails: 'won’t work', unknown: 'not confirmed' };
-/** The parts that won't fully work in a tool, short: "MCP servers won’t work", "Agents ignored +1". Empty when all work. */
+const limitWords: Record<Outcome['result'], string> = { works: '', limited: 'limited', ignored: 'ignored', fails: 'won’t work', unknown: 'may not work' };
+/** The parts that won't fully work in a tool, by what happens: "MCP servers may not work", "Agents ignored +1". Empty when all work. */
 export function limitNote(limits: Outcome[]): string {
   const first = limits.find(outcome => outcome.result !== 'works');
   if (!first) return '';
@@ -45,3 +45,6 @@ export function summaryOf(parts: Components): string {
   return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),
     parts.hooks && 'hooks', parts.mcp && plural(parts.mcp, 'MCP server'), parts.bin && 'a bin/ folder'].filter(Boolean).join(' · ');
 }
+
+/** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
+export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));

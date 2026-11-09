@@ -58,6 +58,12 @@ test('A list that only names parts already on the page is left out, with a headi
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Setup');
 });
 
+test('Under a Skills heading, a skill’s own sub-section is left out; other sections stay', () => {
+  const source = '## What it does\n\nApps.\n\n## Skills\n\n### spark-app-template\n\nActivated when…\n\n- Tech stack\n- Design\n\n## Stack variations\n\nA table.\n';
+  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['spark-app-template'] });
+  assert.deepEqual(blocks.map(block => block.kind === 'heading' ? text(block.content) : block.kind), ['What it does', 'paragraph', 'Stack variations', 'paragraph']);
+});
+
 test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {
   const badge = parseInline('[![CI](https://img.example/ci.svg)](https://example.com/ci) done');
   assert.deepEqual(badge[0], { kind: 'link', label: [{ kind: 'text', text: 'CI' }], url: 'https://example.com/ci' });

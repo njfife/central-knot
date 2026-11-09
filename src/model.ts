@@ -1,8 +1,7 @@
 import type { HarnessId, Snapshot } from './types.ts';
 
-const shortNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 const monograms: Record<HarnessId, string> = { 'claude-cli': 'Cc', 'copilot-cli': 'Cp', 'codex-cli': 'Cx', 'pi-cli': 'Pi' };
-export const toolName = (tool: HarnessId) => shortNames[tool];
+export { toolName } from './words.ts';
 export const toolMonogram = (tool: HarnessId) => monograms[tool];
 export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${snapshot.surface}`;
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;

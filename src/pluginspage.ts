@@ -2,14 +2,14 @@
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
 import { rerender, showPage, state as app } from './app.ts';
-import { button, emptyState, h, icon } from './dom.ts';
+import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
-import { describe, pluginKey, queued, resultParts, resultSentence, succeeded, summary } from './pluginplan.ts';
+import { describe, pluginKey, queued, resultParts, resultSentence, succeeded, summary, type ResultLine } from './pluginplan.ts';
 import { cliMissing, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
-import { addMarketplace, applyPluginOps, browse, clearNotice, current, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, undoOps } from './pluginstate.ts';
+import { addMarketplace, applyPluginOps, browse, clearNotice, current, shownPlugins, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -27,7 +27,7 @@ function addBox(first: boolean) {
   const input = h('input.market-add-input', { id: 'marketplace-source', type: 'text', placeholder: 'owner/repo, Git URL or folder', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: market.draftSource,
     oninput: (event: Event) => { market.draftSource = (event.target as HTMLInputElement).value; const go = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (go) go.disabled = !!app.busy || !market.draftSource.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); if (event.key === 'Escape' && !first) { market.addOpen = false; rerender(); } } });
-  const close = first ? null : h('button.band-dismiss', { type: 'button', id: 'close-add-marketplace', 'aria-label': 'Close', title: 'Close', onclick: () => { market.addOpen = false; market.draftSource = ''; rerender(); } }, icon('x', 12));
+  const close = first ? null : closeButton(() => { market.addOpen = false; market.draftSource = ''; rerender(); }, { id: 'close-add-marketplace', label: 'Close' });
   return h(`div.market-add.market-add-open${first ? '.market-add-first' : ''}`, {},
     h('div.market-add-head', {}, h('label.market-add-label', { for: 'marketplace-source' }, 'Add a marketplace'), close),
     input,
@@ -37,7 +37,7 @@ function addBox(first: boolean) {
 }
 
 /** Every marketplace, with how many plugins it lists, installed and chosen; the add box below. */
-function marketList(view: PluginsView, shown?: MarketplaceView) {
+function marketList(view: PluginsView, shown: MarketplaceView) {
   const item = (entry: MarketplaceView) => {
     const count = (test: (plugin: PluginView) => boolean) => entry.plugins.filter(test).length;
     const installedCount = count(plugin => view.tools.some(tool => stateOf(entry, plugin.name, tool).state === 'installed'));
@@ -47,8 +47,7 @@ function marketList(view: PluginsView, shown?: MarketplaceView) {
       h('span.market-item-name', {}, titleOf(entry)), h('span.market-item-meta', {}, meta)));
   };
   return h('nav.market-list', { 'aria-label': 'Marketplaces' },
-    view.marketplaces.length ? [h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item))] : null,
-    addBox(!view.marketplaces.length));
+    h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), addBox(false));
 }
 
 /** One row per plugin: what it is and holds, and a box per tool. The row opens the plugin's page. */
@@ -69,13 +68,11 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
 
-/** Words to match: name, description, category and keywords. */
-const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));
-
 function findBox(entry: MarketplaceView) {
   return h('input.market-find', { id: 'plugin-find', type: 'search', placeholder: `Find in ${plural(entry.plugins.length, 'plugin')}`, 'aria-label': 'Find plugins', value: market.nav.find,
     oninput: (event: Event) => {
-      market.nav = { ...market.nav, find: (event.target as HTMLInputElement).value };
+      // Typing on About goes to the plugins it finds.
+      market.nav = { ...market.nav, find: (event.target as HTMLInputElement).value, tab: 'plugins' };
       rerender();
       // The redraw makes a new box; the caret goes back to where the person was typing.
       const box = document.getElementById('plugin-find') as HTMLInputElement | null;
@@ -86,7 +83,7 @@ function findBox(entry: MarketplaceView) {
 function categoryChips(entry: MarketplaceView, categories: string[]) {
   const count = (category?: string) => (category ? entry.plugins.filter(plugin => plugin.category === category).length : entry.plugins.length);
   return h('div.market-chips', { role: 'group', 'aria-label': 'Category' }, [undefined, ...categories].map(category =>
-    h(`button.market-chip${market.nav.category === category ? '.selected' : ''}`, { type: 'button', 'aria-pressed': String(market.nav.category === category), onclick: () => browse({ category }) },
+    h(`button.market-chip${market.nav.category === category ? '.selected' : ''}`, { type: 'button', 'aria-pressed': String(market.nav.category === category), onclick: () => browse({ category, tab: 'plugins' }) },
       category ?? 'All', h('span.market-chip-count', {}, String(count(category))))));
 }
 
@@ -100,7 +97,7 @@ function filters(entry: MarketplaceView): HTMLElement | null {
 }
 
 function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
-  const shown = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
+  const shown = shownPlugins(entry);
   const someCan = view.canWrite && view.tools.some(tool => view.clis[tool]);
   const cannot = view.tools.filter(tool => !view.clis[tool]);
   const refusal = view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? entry.copilotRefuses : undefined;
@@ -147,17 +144,20 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
     market.nav.tab === 'about' ? aboutTab(entry) : pluginsTab(view, entry, marketIndex));
 }
 
-/** What the boxes mean, only for the kinds on screen, and only when there is more than one to tell apart. */
+/**
+ * What the boxes mean, only for marks on screen that need saying: a plus and a check explain themselves, so the key names
+ * only "unknown", "not available" and what Apply all will do.
+ */
 function legend(view: PluginsView, entry: MarketplaceView) {
-  const states = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => (unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state))));
+  const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => (unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state))));
   const chosen = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => queued(market.draft, entry.source, plugin.name, tool))).filter(Boolean));
-  if (states.size + chosen.size < 2) return null;
+  const unknown = marks.has('not-known');
+  const cannot = marks.has('cannot');
+  if (!unknown && !cannot && !chosen.size) return null;
   const item = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
-    states.has('installed') ? item('Installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('check', 11))) : null,
-    states.has('not-installed') ? item('Not installed', h('span.legend-cell.cell-absent', {}, icon('plus', 10))) : null,
-    states.has('not-known') ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
-    states.has('cannot') ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
+    unknown ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
+    cannot ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
     chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
     chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
     chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
@@ -178,13 +178,13 @@ function undoButton(): HTMLElement | null {
   return undo;
 }
 
-const dismiss = (onclick: () => void, id?: string) => h('button.band-dismiss', { type: 'button', id, 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { onclick(); rerender(); } }, icon('x', 12));
+const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclick(); rerender(); }, { id });
 
 /**
  * The toolbar's right side: what is chosen (with Discard and Apply all), or else what just happened (each plugin named a
  * link to its page, with Undo), or else the last notice ("… added"). Shown in place, so nothing on the page moves.
  */
-function toolbarRight(): HTMLElement | null {
+function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
   if (counts.plugins) {
     return h('div.apply', {},
@@ -193,7 +193,6 @@ function toolbarRight(): HTMLElement | null {
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
   const last = market.lastRun;
-  const lines = last ? describe(last.reports, names, andList, last.undo) : [];
   const parts = last ? resultParts(lines, last.undo) : [];
   if (last && parts.length) {
     const sentence = parts.map((part, at) => (typeof part === 'string' ? part
@@ -211,9 +210,8 @@ function toolbarRight(): HTMLElement | null {
  * What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. When
  * nothing in the run succeeded, its Undo (if any) is here, since the toolbar has no result to put it beside.
  */
-function problemBand() {
+function problemBand(lines: ResultLine[]) {
   const last = market.lastRun;
-  const lines = last ? describe(last.reports, names, andList, last.undo) : [];
   const failures = lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
   const undo = lines.some(line => line.ok) ? null : undoButton();
@@ -227,17 +225,20 @@ function problemBand() {
 const openPlugin = (entry: MarketplaceView) => (market.nav.plugin ? entry.plugins.find(candidate => candidate.name === market.nav.plugin) : undefined);
 
 /**
- * The toolbar, always there so the page never jumps: at the left, where the person is inside a plugin (team-tools ›
- * document-tools), or the marketplace's filters; at the right, toolbarRight.
+ * The toolbar, always there once a marketplace is listed, so the page never jumps. Its left part lines up with the
+ * marketplace column's content: where the person is inside a plugin (← team-tools › document-tools), or the
+ * marketplace's filters. At the right, toolbarRight. With no marketplaces it shows only when toolbarRight has something.
  */
-function toolbar(shown?: MarketplaceView) {
-  const plugin = shown && openPlugin(shown);
-  const left = shown && plugin
+function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
+  const right = toolbarRight(lines);
+  if (!shown) return right ? h('div.toolbar.plugins-toolbar', {}, h('span.toolbar-spacer'), right) : null;
+  const plugin = openPlugin(shown);
+  const left = plugin
     ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), titleOf(shown)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
-    : shown && market.nav.tab === 'plugins' ? filters(shown) : null;
-  return h('div.toolbar.plugins-toolbar', {}, left, h('span.toolbar-spacer'), toolbarRight());
+    : filters(shown);
+  return h('div.toolbar.plugins-toolbar.plugins-toolbar-aligned', {}, left, h('span.toolbar-spacer'), right);
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */
@@ -252,19 +253,20 @@ export function pluginsPage() {
   const view = market.view;
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.activity ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
   const shown = current();
+  const lines = market.lastRun ? describe(market.lastRun.reports, market.lastRun.undo) : [];
+  // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
+  const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
+    h('div.market-empty-add', {},
+      addBox(true),
+      h('div.market-examples', {}, h('span', {}, 'Or try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
+      h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.')));
   return h('div.page.plugins-page', {},
-    toolbar(shown?.entry),
+    toolbar(shown?.entry, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
       market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, activityText[market.activity])) : null,
-      problemBand()),
-    h('div.market-layout', {},
-      marketList(view, shown?.entry),
-      h('div.scroll.market-main', { id: 'plugins-scroll' },
-        shown
-          ? marketPage(view, shown.entry, shown.index)
-          : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
-            h('div', {},
-              h('div.market-examples', {}, h('span', {}, 'Try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
-              h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.'))))));
+      problemBand(lines)),
+    shown
+      ? h('div.market-layout', {}, marketList(view, shown.entry), h('div.scroll.market-main', { id: 'plugins-scroll' }, marketPage(view, shown.entry, shown.index)))
+      : h('div.scroll.market-main', { id: 'plugins-scroll' }, empty));
 }
