@@ -6,7 +6,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
-import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
+import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
@@ -329,7 +329,7 @@ async function startWatching() {
   const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
   roots.add(join(current.home, '.agents/skills'));
   // Agents folders too: an agent edited in one tool spreads like a skill (D-32).
-  for (const id of agentTools) roots.add(join(overrideFor(id) ?? join(current.home, harnesses[id].defaultConfig), 'agents'));
+  for (const id of agentTools) roots.add(join(configRoot(harnesses[id], current.home, overrideFor(id)), 'agents'));
   // MCP settings files: their folders are watched without recursion, and only an event for the file itself prompts a read.
   const shared = context();
   for (const id of mcpTools) {
@@ -537,7 +537,7 @@ app.whenReady().then(async () => {
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
-  // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
+  // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, resume, home) => (home === current?.home
     ? applyMcp(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
