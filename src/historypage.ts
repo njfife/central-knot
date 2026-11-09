@@ -1,6 +1,6 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
-import { outcomeBand } from './matrix.ts';
+import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
@@ -92,6 +92,7 @@ export function historyPage() {
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
-      event.undoneBy ? h('span.history-done', {}, 'Undone') : actions(event, about.action))];
+      event.undoneBy ? h('span.history-done', {}, 'Undone') : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key) : null, actions(event, about.action)),
+      changePanel(event.id))];
   }))));
 }

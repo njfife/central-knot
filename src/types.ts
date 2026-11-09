@@ -79,6 +79,8 @@ export interface DesktopApi {
   instructions(): Promise<InstructionFile[] | null>;
   /** Convert to skill (AGT-02): an agent as a Pi skill. */
   convertAgent(key: string, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
+  /** A skill edit's SKILL.md before and after, for "See change". */
+  eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;

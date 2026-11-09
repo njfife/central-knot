@@ -1056,6 +1056,16 @@ async function undoChoice(context: ShareContext, record: SyncRecord, history: Hi
   return { results, harnessWrites: writes };
 }
 
+/** What an edit changed, for "See change": the skill's SKILL.md before and after, from Central Knot's store. */
+export async function eventChange(context: ShareContext, eventId: string): Promise<{ before: string; after: string } | undefined> {
+  const past = (await readHistory(context.home)).find(entry => entry.id === eventId);
+  if (!past || !past.previous || !past.winner?.hash || past.key.includes(':')) return undefined;
+  try {
+    const [before, after] = await Promise.all([past.previous, past.winner.hash].map(hash => readFile(join(storedRevision(context, past.key, hash), 'SKILL.md'), 'utf8')));
+    return { before, after };
+  } catch { return undefined; }
+}
+
 /** Delete everywhere: removes a managed skill from every tool it syncs to, keeping its content for Restore (D-04's offer, DEL-02). */
 export async function deleteEverywhere(context: ShareContext, key: string, resume = false): Promise<ApplyResult> {
   try {

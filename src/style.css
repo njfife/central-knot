@@ -1061,3 +1061,15 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .market-hint > svg { align-self: center; margin-top: 0; }
 .market-hint .btn { padding-top: 0; padding-bottom: 0; height: auto; line-height: inherit; }
 #overview-scroll > * { max-width: 932px; }
+
+/* Round 10: a deleted item's trace in the table */
+.ov-ghost { color: var(--ink-faint); }
+.ov-ghost .ov-name-text { color: var(--ink-faint); text-decoration-color: var(--ink-faint); }
+.ov-ghost-text { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink-soft); }
+.row-open-spacer { display: inline-block; width: 22px; flex: none; }
+
+/* Round 10: See change */
+.sync-notice > .change-panel, .history-row > .change-panel { flex-basis: 100%; grid-column: 1 / -1; margin: 4px 0 2px 22px; max-height: 260px; }
+.history-row > .change-panel { margin-left: 0; }
+.ins-fold-static { display: block; color: var(--ink-faint); }
+.see-change { color: var(--ink-soft); }

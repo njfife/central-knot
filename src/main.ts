@@ -8,7 +8,7 @@ import { discover } from './discovery.ts';
 import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncGate, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
+import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
@@ -558,6 +558,7 @@ app.whenReady().then(async () => {
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
+  handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), presentTools(await read()), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));

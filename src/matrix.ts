@@ -6,6 +6,7 @@ import { button, emptyState, h, icon, middle } from './dom.ts';
 import { brands, type IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice } from './types.ts';
+import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
 const names: Record<Tool, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
@@ -821,6 +822,47 @@ function forgetOtherHomes() {
 }
 
 /** The sync notices on screen now, not yet dismissed. */
+// ---------- See change: what an edit did, before Undo ----------
+const changes = new Map<string, { before: string; after: string } | null>();
+const openChanges = new Set<string>();
+
+/** A quiet link that opens the edit's before and after under the notice or History row. Skills only: their store keeps SKILL.md. */
+export function seeChangeLink(eventId: string, key: string) {
+  if (!eventId || key.includes(':') || changes.get(eventId) === null) return null;
+  const open = openChanges.has(eventId);
+  return h('button.text-action.see-change', { type: 'button', id: `see-change-${eventId}`, 'aria-expanded': String(open), onclick: (event: Event) => {
+    event.stopPropagation();
+    if (open) { openChanges.delete(eventId); rerender(); return; }
+    openChanges.add(eventId);
+    if (changes.has(eventId)) { rerender(); return; }
+    void window.centralKnot.eventChange(eventId).then(found => { changes.set(eventId, found ?? null); rerender(); });
+  } }, open ? 'Hide change' : 'See change');
+}
+
+/** The edit as a small diff: added and removed lines, with unchanged runs folded. */
+export function changePanel(eventId: string) {
+  if (!openChanges.has(eventId)) return null;
+  const found = changes.get(eventId);
+  if (found === undefined) return h('p.change-panel.tone-faint', {}, 'Reading the change…');
+  if (found === null) return h('p.change-panel.tone-faint', {}, 'The earlier version is no longer kept, so the change can’t be shown.');
+  const diff = lineDiff(found.before, found.after);
+  return h('pre.change-panel.ins-diff', { tabindex: '0', 'aria-label': 'What the edit changed' }, folded(diff, false).map(line => line.kind === 'fold'
+    ? h('span.ins-fold-static', {}, `… ${line.count} unchanged ${line.count === 1 ? 'line' : 'lines'}\n`)
+    : h(`span.ins-line.ins-${line.kind}`, {}, h('span.ins-mark', { 'aria-hidden': 'true' }, line.kind === 'added' ? '+' : line.kind === 'removed' ? '−' : ''), h('span.ins-code', {}, `${line.text}\n`))));
+}
+
+/** A deletion that spread leaves a trace in the table while its notice stands: the name, where it was deleted, and Restore. */
+function ghostRows() {
+  if (designMode) return null;
+  const present = new Set(committedList().map(skill => (skill.name ?? skill.key).toLowerCase()));
+  const gone = visibleNotices().filter(notice => notice.kind === 'deleted' && notice.history && notice.item && !present.has(notice.item.toLowerCase()));
+  if (!gone.length) return null;
+  return h('div', { role: 'rowgroup' }, gone.map(notice => h('div.ov-row.ov-ghost', { role: 'row', 'data-ghost': notice.item },
+    h('div.ov-name', { role: 'cell' }, h('span.row-open-spacer'), h('s.ov-name-text', {}, notice.item)),
+    h('div.ov-ghost-text', { role: 'cell' }, `Deleted in ${names[notice.winner] ?? notice.winner}${notice.losers.length ? `, removed from ${andList(notice.losers.map(tool => names[tool] ?? tool))}` : ''}`,
+      button({ variant: 'outline', size: 'small', label: 'Restore', id: `ghost-restore-${notice.history}`, attrs: { title: `Put ${notice.item} back in every tool it synced to` }, onclick: () => void restoreEvent(notice.history) })))));
+}
+
 function visibleNotices() {
   if (!state.home) return [];
   const told = kind === 'skills' ? [...state.home.manage.notices, ...(state.applied?.notices ?? [])] : [...(listView()?.notices ?? []), ...((kind === 'agents' ? state.agentsResult : state.mcpResult)?.notices ?? [])];
@@ -879,7 +921,9 @@ function syncNotice(notice: SyncNotice, writeClaude?: () => void) {
     h('span.notice-text', {}, ...said.map(part => typeof part === 'string' ? part.replace(/\.$/, '') : part), writeClaude ? '. Claude Code still has the old copy: quit Claude Code, then click Write to Claude Code.' : '', h('span.notice-age', {}, ` · ${age(notice.history || `${notice.kind}:${notice.item}`)}`)),
     h('span.notice-actions', {},
       writeClaude ? button({ variant: 'primary', size: 'small', label: 'Write to Claude Code', id: 'mcp-write-claude', onclick: writeClaude }) : null,
-      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : shownRow));
+      notice.kind === 'edit' || notice.kind === 'conflict' ? seeChangeLink(notice.history, notice.key) : null,
+      action, history, quiet ? smallAction('Turn sync on', `notice-sync-on-${notice.history || notice.item}`, () => void setSync(true)) : shownRow),
+    notice.history ? changePanel(notice.history) : null);
 }
 
 export function designOverview(which: Kind = 'skills') {
@@ -905,7 +949,8 @@ export function designOverview(which: Kind = 'skills') {
           h('div.ov-fill')),
         (managedDrawn = shown.some(skill => committedOf(skill.key).managed), null),
         section('Managed', shown.filter(skill => committedOf(skill.key).managed), shown.filter(skill => skill.managed).length),
-        section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length))),
+        section('Unmanaged', shown.filter(skill => !committedOf(skill.key).managed), shown.filter(skill => !skill.managed).length),
+        ghostRows())),
       legend(all)));
 }
 

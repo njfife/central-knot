@@ -210,7 +210,10 @@ async function practiceFlow() {
   check('and says so, with Undo', (await a.text('.sync-notices') ?? '').includes("standup was edited in Claude Code and copied to"), await a.text('.bands'));
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
   await a.shot('practice-edit-spread');
-  await a.run(`document.querySelector('.sync-notice[data-kind="edit"] button').click()`);
+  await a.run(`document.querySelector('.sync-notice[data-kind="edit"] .see-change').click()`);
+  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice .change-panel .ins-added')); tries++) await wait(100);
+  check('See change shows the edit before Undo', (await a.text('.sync-notice .change-panel .ins-added') ?? '').includes('Edited in Claude Code.'), await a.text('.sync-notices'));
+  await a.run(`document.querySelector('.sync-notice[data-kind="edit"] [id^="notice-undo-"]').click()`);
   await a.settle();
   same('Undo puts the old version back everywhere', [readFileSync(standupPath('claude'), 'utf8'), readFileSync(standupPath('copilot'), 'utf8')], [standupBefore, standupBefore]);
   rmSync(join(practice, '.copilot/skills/release-notes'), { recursive: true });
@@ -220,6 +223,7 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   same('then the deletion spreads', [existsSync(join(practice, '.claude/skills/release-notes')), existsSync(join(practice, '.codex/skills/release-notes'))], [false, false]);
   check('with a notice offering Restore', (await a.text('.sync-notices') ?? '').includes('release-notes was deleted in Copilot CLI'), await a.text('.bands'));
+  check('and the table keeps a trace with Restore', await a.exists('[data-ghost="release-notes"] button'));
   await a.click('#nav-history');
   check('History lists it', (await a.text('#history-scroll') ?? '').includes('release-notes'), await a.text('#history-scroll'));
   await a.shot('practice-history');
