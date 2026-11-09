@@ -9,3 +9,6 @@ export const toolName = (tool: string) => (toolNames as Record<string, string>)[
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));
 
+
+/** The tools in the order the pages show them, for naming several in a sentence ("Codex and Pi"). */
+export const toolOrder = Object.keys(toolNames) as HarnessId[];

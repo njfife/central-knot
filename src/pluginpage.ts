@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { installed, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
+import { installed, partWords, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -56,7 +56,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     const parts = partsOf(entry, plugin.name, tool);
-    if (chosen) return ({ install: 'Will install', remove: 'Will uninstall', parts: parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts', 'undo-parts': '' } as Record<PluginAction, string>)[chosen];
+    if (chosen) return ({ install: 'Will install', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts', 'undo-parts': '' } as Record<PluginAction, string>)[chosen];
     if (installed(entry, plugin.name, tool)) return 'Installed';
     if (partsOffer(view, entry, plugin.name, tool, components)) return parts?.changed ? 'Parts out of date' : parts ? 'Parts installed' : 'Can take its parts';
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
@@ -86,7 +86,6 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)))))));
 }
 
-const kindWords: Record<PartPlan['kind'], [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
 
 /** What stays with the plugin in any tool without it: the parts that are never installed on their own. */
 function staysBehind(detail: PluginDetail): string[] {
@@ -105,7 +104,7 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
     : h('code.plugin-name', {}, name));
   return (['skill', 'mcp', 'agent'] as const).filter(kind => parts.some(part => part.kind === kind)).flatMap((kind, at) => {
     const names = parts.filter(part => part.kind === kind).map(part => part.name);
-    return [at ? ' · ' : '', `${kindWords[kind][names.length > 1 ? 1 : 0]} `, ...names.flatMap((name, index) => [index ? ', ' : '', named(kind, name)])];
+    return [at ? ' · ' : '', `${partWords[kind][names.length > 1 ? 1 : 0]} `, ...names.flatMap((name, index) => [index ? ', ' : '', named(kind, name)])];
   });
 }
 
@@ -131,8 +130,8 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const choose = (batch: PluginOp[], label: string, id: string, variant: 'outline' | 'ghost', glyph?: Parameters<typeof icon>[0]) => button({ variant, size: 'small', id, disabled: !!app.busy, icon: glyph,
     label, onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); } });
   const which = (list: HarnessId[]) => (list.length > 2 ? `all ${list.length} tools` : andList(list.map(tool => names[tool])));
-  const next = changed.length ? choose(changed.map(tool => op(tool, 'parts')), `Update parts in ${which(changed)}`, `pparts-${plugin.name}`, 'outline')
-    : without.length ? choose(without.map(tool => op(tool, 'parts')), `Install parts in ${which(without)}`, `pparts-${plugin.name}`, 'outline') : null;
+  const next = changed.length ? choose(changed.map(tool => op(tool, 'install-parts')), `Update parts in ${which(changed)}`, `pparts-${plugin.name}`, 'outline')
+    : without.length ? choose(without.map(tool => op(tool, 'install-parts')), `Install parts in ${which(without)}`, `pparts-${plugin.name}`, 'outline') : null;
   const removal = holding.length ? choose(holding.map(tool => op(tool, 'remove-parts')), `Remove parts from ${which(holding)}`, `punparts-${plugin.name}`, next ? 'ghost' : 'outline', 'circle-minus') : null;
   // One line per tool, in words: what Apply all will do, what is there (and from which version), what changed, or what can go in.
   const line = (tool: HarnessId): (string | HTMLElement)[] => {
@@ -141,8 +140,8 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const going = (plan ?? []).filter(part => !part.why);
     const pending = chosen(tool);
     if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item.tone-accent', {}, 'Removed on Apply all: ', ...partNames(parts.items))];
-    if (pending === 'parts') return [h('span.plugin-outcome-item.tone-accent', {}, `${parts ? 'Updated' : 'Installed'} on Apply all: `, ...partNames(going.length ? going : parts?.items ?? []))];
-    const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${kindWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
+    if (pending === 'install-parts') return [h('span.plugin-outcome-item.tone-accent', {}, `${parts ? 'Updated' : 'Installed'} on Apply all: `, ...partNames(going.length ? going : parts?.items ?? []))];
+    const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
     const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The agent ${part.name}: ${part.limit}`));
     if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
     if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true))];

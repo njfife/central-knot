@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartsState, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartKind, PartsState, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 
@@ -63,8 +63,10 @@ export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId)
  * for Pi) an agent. Parts already there always count, so they can be updated or removed.
  */
 export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
-  if (!partsTools.includes(tool) || installed(entry, plugin, tool)) return false;
+  if (!partsTools.includes(tool)) return false;
+  // Parts there are always offered, so they can be updated or removed, even once the plugin could go there itself.
   if (partsOf(entry, plugin, tool)) return true;
+  if (installed(entry, plugin, tool)) return false;
   if (!unavailable(view, entry, plugin, tool) || stateOf(entry, plugin, tool).state !== 'not-installed') return false;
   return !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
 }
@@ -80,10 +82,12 @@ export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: Harnes
   return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
 }
 
+/** Each kind of part in words: [one, several]. */
+export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
+
 /** "2 skills · 1 MCP server", from parts as recorded. */
-export function partsSummary(items: PartsState['items']): string {
-  const by = (kind: string, word: string) => { const n = items.filter(item => item.kind === kind).length; return n ? plural(n, word) : ''; };
-  return [by('skill', 'skill'), by('mcp', 'MCP server'), by('agent', 'agent')].filter(Boolean).join(' · ');
+export function partsSummary(items: PartsState['items'], separator = ' · '): string {
+  return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
 }
 
 /** "version 1.2", or nothing when the catalog gave none. */
@@ -98,7 +102,7 @@ export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourc
 
 /** Tools that can still take this plugin: available there and not installed yet. */
 export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
-  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
+  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool) && !partsOf(entry, plugin, tool));
 
 /**
  * The parts that won't fully work in a tool, short, in the words "In each tool" uses up to its colon: "MCP servers may

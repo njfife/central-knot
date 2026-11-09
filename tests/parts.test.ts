@@ -25,7 +25,7 @@ async function sandbox() {
     figma: { command: 'npx', args: ['-y', 'figma-mcp'], env: { FIGMA_TOKEN: 'figd_abc123' } },
     local: { command: '${CLAUDE_PLUGIN_ROOT}/bin/server' },
   } }));
-  for (const folder of ['.codex', '.pi/agent']) await mkdir(join(home, folder), { recursive: true });
+  for (const folder of ['.codex', '.copilot', '.pi/agent']) await mkdir(join(home, folder), { recursive: true });
   const context: ShareContext = { home, mode: 'custom', read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') };
   const files = () => pluginFiles(plugin, {}, join(base, 'market'));
   return { home, plugin, context, files, cleanup: () => rm(base, { recursive: true, force: true }) };
@@ -45,6 +45,12 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     assert.match(codex.message, /local: It runs from the plugin’s own folder/);
     assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /developer_instructions/);
 
+    const copilot = await installParts(box.context, { ...target, tool: 'copilot-cli' }, await box.files());
+    assert.equal(copilot.outcome, 'installed', copilot.message);
+    const copilotMcp = JSON.parse(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8'));
+    assert.deepEqual(copilotMcp.mcpServers.figma, { type: 'local', command: 'npx', args: ['-y', 'figma-mcp'], env: { FIGMA_TOKEN: 'figd_abc123' }, tools: ['*'] });
+    assert.match(await readFile(join(box.home, '.copilot/agents/designer.agent.md'), 'utf8'), /description: Turns designs into code/);
+
     const pi = await installParts(box.context, { ...target, tool: 'pi-cli' }, await box.files());
     assert.equal(pi.outcome, 'installed', pi.message);
     const piMcp = JSON.parse(await readFile(join(box.home, '.pi/agent/mcp.json'), 'utf8'));
@@ -60,7 +66,7 @@ test('Parts go into Codex and Pi in their own formats, values as they are, and U
     await assert.rejects(readFile(join(box.home, '.codex/skills/figma-design/SKILL.md')));
     await assert.rejects(readFile(join(box.home, '.codex/agents/designer.toml')));
     assert.doesNotMatch(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma/);
-    assert.deepEqual((await readParts(box.home)).map(entry => entry.tool), ['pi-cli']);
+    assert.deepEqual((await readParts(box.home)).map(entry => entry.tool), ['copilot-cli', 'pi-cli']);
   } finally { await box.cleanup(); }
 });
 
@@ -97,10 +103,10 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
   try {
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     const installed = (await readParts(box.home))[0]!;
-    assert.equal(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.equal(await partsDigest(await box.files()), installed.digest);
     await writeFile(join(box.plugin, 'skills', 'figma-design', 'SKILL.md'), SKILL.replace('Use the figma server.', 'Use the figma server, v2.'));
     await rm(join(box.plugin, 'agents'), { recursive: true });
-    assert.notEqual(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.notEqual(await partsDigest(await box.files()), installed.digest);
 
     const updated = await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
     assert.equal(updated.outcome, 'installed', updated.message);
@@ -113,5 +119,16 @@ test('A changed plugin shows as changed, and updating replaces unchanged parts a
     assert.doesNotMatch(await readFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), 'utf8'), /v2/);
     assert.match(await readFile(join(box.home, '.codex/agents/designer.toml'), 'utf8'), /You design/);
     assert.equal((await readParts(box.home))[0]?.version, '1.0.0');
+
+    // A servers file that can't be read now is no sign the plugin dropped its server: the installed one stays.
+    await writeFile(join(box.plugin, '.mcp.json'), '{ not json');
+    await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /figma-mcp/);
+    // A setting of Codex's own added to the server is an edit: removing the parts leaves that server.
+    const config = join(box.home, '.codex/config.toml');
+    await writeFile(config, (await readFile(config, 'utf8')).replace('[mcp_servers.figma]\n', '[mcp_servers.figma]\nenabled = false\n'));
+    const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
+    assert.match(removed.notes?.join(' ') ?? '', /MCP server “figma” as it is: it was changed/);
+    assert.match(await readFile(config, 'utf8'), /enabled = false/);
   } finally { await box.cleanup(); }
 });

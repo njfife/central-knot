@@ -2,7 +2,7 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
-import { andList, toolNames } from './words.ts';
+import { andList, toolNames, toolOrder } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -30,8 +30,7 @@ function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: Harnes
     found.set(key, entry);
   }
   // Tools in column order, as everywhere else ("Codex and Pi").
-  const order = Object.keys(toolNames);
-  return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort((first, second) => order.indexOf(first) - order.indexOf(second)) }));
+  return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort((first, second) => toolOrder.indexOf(first) - toolOrder.indexOf(second)) }));
 }
 
 /** Opens a plugin's page on Plugins, where its parts are updated or removed together. */

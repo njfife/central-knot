@@ -12,6 +12,8 @@ const README_LIMIT = 60_000;
 const READ_LIMIT = 256 * 1024;
 /** A marketplace.json lists every plugin, so it may be far larger than any other file read here. */
 const MANIFEST_LIMIT = 8 * 1024 * 1024;
+/** Values only Claude Code fills in (the plugin's own folder, its data folder, install-time settings): such a server can't run on its own. */
+export const PLUGIN_ONLY = /\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|user_config\.)/;
 /** Where a marketplace describes itself, relative to its root. */
 export const MANIFEST = '.claude-plugin/marketplace.json';
 
@@ -143,14 +145,21 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   };
 }
 
-/** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
-export interface PluginFiles { skills: { name: string; dir: string }[]; agents: { name: string; file: string; text: string; whole: boolean }[]; servers: Record<string, unknown> }
+/**
+ * The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts).
+ * `serversUnread`: a servers file is there but couldn't be read as JSON, so `servers` may be missing some: an update then
+ * keeps the servers already installed rather than reading their absence as the plugin dropping them.
+ */
+export interface PluginFiles { skills: { name: string; dir: string }[]; agents: { name: string; text: string; whole: boolean }[]; servers: Record<string, unknown>; serversUnread: boolean }
 export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
   const { declared, listed } = await declaredOf(folder, entry, root);
+  const serverFiles = ['.mcp.json', ...(typeof declared.mcpServers === 'string' ? [declared.mcpServers] : strings(declared.mcpServers) ?? [])];
+  const unread = await Promise.all(serverFiles.map(async path => { const read = await readInside(root, resolve(folder, path)); return !!read && (!read.whole || !parseObject(read.text)); }));
   return {
     skills: (await skillFolders(root, listed('skills', 'skills'))).map(found => ({ name: basename(found.dir), dir: found.dir })),
-    agents: (await markdownFiles(root, listed('agents', 'agents'))).map(found => ({ name: basename(found.file, '.md'), file: found.file, text: found.text, whole: found.whole })),
+    agents: (await markdownFiles(root, listed('agents', 'agents'))).map(found => ({ name: basename(found.file, '.md'), text: found.text, whole: found.whole })),
     servers: await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json'),
+    serversUnread: unread.some(Boolean),
   };
 }
 

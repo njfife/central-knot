@@ -287,7 +287,7 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
 // ---------- A plugin's parts in a tool without plugins (parts.ts) ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';
 /** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
-export interface PartItem { kind: PartKind; name: string; hash: string }
+export interface PartItem { kind: PartKind; name: string; hash: string; /** What it was on disk once written (for an MCP entry, with the tool's own settings), to tell a later edit. */ seen?: string }
 /** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
 export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
 /** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. */

@@ -2,16 +2,18 @@
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
 import { cantUninstall, installed, partsOf, partsOffer, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
-import { andList, toolNames as names } from './words.ts';
+import { andList, toolNames as names, toolOrder } from './words.ts';
 
 /**
  * install, remove: the plugin itself, through the tool's own command. parts: its parts as separate items in a tool that
  * can't take the plugin (installed, or brought up to date); remove-parts: those parts out again; undo-parts: an Undo of a
  * parts run (`run`), which only Undo makes.
  */
-export type PluginAction = 'install' | 'remove' | 'parts' | 'remove-parts' | 'undo-parts';
-const PARTS: PluginAction[] = ['parts', 'remove-parts', 'undo-parts'];
-export const isParts = (action: PluginAction) => PARTS.includes(action);
+export type PluginAction = 'install' | 'remove' | 'install-parts' | 'remove-parts' | 'undo-parts';
+/** The parts engine's mode for a parts action (installing also brings parts up to date); undefined for the plugin itself. */
+const PARTS_MODES: Partial<Record<PluginAction, 'install' | 'remove' | 'undo'>> = { 'install-parts': 'install', 'remove-parts': 'remove', 'undo-parts': 'undo' };
+export const partsMode = (action: PluginAction) => PARTS_MODES[action];
+export const isParts = (action: PluginAction) => partsMode(action) !== undefined;
 /** One tool's change for one plugin from one marketplace. */
 export interface PluginOp {
   /** The marketplace as added (its address). */
@@ -35,9 +37,6 @@ export interface ResultLine {
 }
 /** What one op did, as its tool reported it. */
 export interface PluginDone extends PluginOp { report: ActionReport }
-
-/** The page's column order. */
-const toolOrder = Object.keys(names);
 
 /** Chosen changes, keyed by marketplace source, plugin and tool. Nothing here has run. */
 export type PluginDraft = Map<string, PluginOp>;
@@ -86,7 +85,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
     const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
       : op.action === 'remove' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool)
-      : op.action === 'parts' ? !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
+      : op.action === 'install-parts' ? !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
       : op.action === 'remove-parts' ? !parts || !view.canWrite : true);
     if (stale) draft.delete(key);
   }
@@ -96,7 +95,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
 export function summary(draft: PluginDraft) {
   const ops = [...draft.values()];
   const count = (action: PluginAction) => ops.filter(op => op.action === action).length;
-  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'), parts: count('parts'), partsRemovals: count('remove-parts') };
+  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'), partsRemovals: count('remove-parts') };
 }
 
 /** Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then removals and parts tool by tool. */
@@ -112,10 +111,14 @@ export function batches(ops: PluginOp[]): { source: string; marketName: string; 
   return out;
 }
 
-/** The way back: only what this run really changed, reversed. "Already installed", failures and unknowns are left alone. */
+/**
+ * The way back: only what this run really changed, reversed, last first (a later step may have taken what an earlier one
+ * freed, such as a skill name, so it is undone first). "Already installed", failures and unknowns are left alone.
+ */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed && (!isParts(entry.action) || entry.report.partsRun))
-  .map(({ report, ...op }) => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: op.action === 'install' ? 'remove' : 'install' }));
+  .map(({ report, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: op.action === 'install' ? 'remove' : 'install' }))
+  .reverse();
 
 /** A tool did what was asked (installed or uninstalled), whether this run changed it or it already was. */
 export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'uninstalled';
@@ -199,10 +202,10 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
     onStep(step);
     let result: PluginActionResult;
     try {
-      const mode = ({ parts: 'install', 'remove-parts': 'remove', 'undo-parts': 'undo' } as const)[step.action as 'parts'];
+      const mode = partsMode(step.action);
       result = step.action === 'install' ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
-        : api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, mode, step.run, home) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') };
+        : api.parts && mode ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, mode, step.run, home) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };
     for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.run ? { run: step.run } : {}), report });

@@ -133,28 +133,47 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** A plugin's skill folders, agent files and MCP servers: from the marketplace's files, or from its own repository. */
-  async function filesOf(ctx: engine.PluginContext, catalog: Catalog, plugin: string): Promise<{ files?: PluginFiles; version?: string; problem?: string }> {
+  /**
+   * Where a plugin's files are: its folder in the marketplace, or a copy of the repository it lives in (read now if
+   * needed), with the entry listing its components (for a plugin elsewhere, without the `source` naming that repository).
+   */
+  async function locate(ctx: engine.PluginContext, catalog: Catalog, plugin: string): Promise<{ folder: string; entry: Record<string, unknown>; root: string; readme: boolean } | { problem: string; nowhere?: true }> {
     const item = catalog.plugins.find(entry => entry.name === plugin);
-    if (!item || !catalog.root) return { problem: 'It is no longer in the marketplace as last read. Refresh the marketplace.' };
-    if (item.folder) return { files: await pluginFiles(item.folder, item.entry ?? {}, catalog.root), version: item.version };
-    if (!item.remote) return { problem: 'Its files can’t be read.' };
+    if (!item || !catalog.root) return { problem: 'It is no longer in the marketplace as last read. Refresh the marketplace.', nowhere: true };
+    // A plugin that is the marketplace's own root shares the marketplace's README, which its page already shows.
+    if (item.folder) return { folder: item.folder, entry: item.entry ?? {}, root: catalog.root, readme: resolve(item.folder) !== resolve(catalog.root) };
+    if (!item.remote) return { problem: 'Its files can’t be read.', nowhere: true };
     const copy = await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };
     const { source: _where, ...listed } = item.entry ?? {};
-    return { files: await pluginFiles(copy.folder, listed, copy.root), version: item.version };
+    return { folder: copy.folder, entry: listed, root: copy.root, readme: true };
   }
 
-  /** This marketplace's plugins whose parts are in a tool, each saying whether the plugin's parts have changed since. */
+  /** A plugin's skill folders, agent files and MCP servers, for its parts. */
+  async function filesOf(ctx: engine.PluginContext, catalog: Catalog, plugin: string): Promise<{ files?: PluginFiles; problem?: string }> {
+    const where = await locate(ctx, catalog, plugin);
+    return 'problem' in where ? where : { files: await pluginFiles(where.folder, where.entry, where.root) };
+  }
+
+  /**
+   * This marketplace's plugins whose parts are in a tool, each saying whether the plugin has changed since: its parts'
+   * content, or its version. Each plugin's files are read once, however many tools hold its parts.
+   */
   async function partsStates(ctx: engine.PluginContext, catalog: Catalog, source: string): Promise<MarketplaceView['parts']> {
     const share = host.share?.();
     if (!share) return undefined;
     const states: NonNullable<MarketplaceView['parts']> = {};
+    const digests = new Map<string, Promise<string | undefined>>();
+    const digestOf = (plugin: string) => {
+      if (!digests.has(plugin)) digests.set(plugin, filesOf(ctx, catalog, plugin).then(read => (read.files ? partsDigest(read.files) : undefined), () => undefined));
+      return digests.get(plugin)!;
+    };
     for (const install of (await readParts(share.home)).filter(entry => entry.source === source && entry.marketName === catalog.name)) {
       const item = catalog.plugins.find(entry => entry.name === install.plugin);
-      const read = item ? await filesOf(ctx, catalog, install.plugin).catch(() => ({ files: undefined })) : {};
-      const digest = read.files ? await partsDigest(share, read.files, install.tool) : undefined;
+      const digest = item ? await digestOf(install.plugin) : undefined;
       const state: PartsState = { version: install.version, at: install.at, items: install.items.map(({ kind, name }) => ({ kind, name })) };
-      if (digest && digest !== install.digest) { state.changed = true; if (item?.version && item.version !== install.version) state.now = item.version; }
+      const newVersion = !!item?.version && !!install.version && item.version !== install.version;
+      if ((digest && digest !== install.digest) || newVersion) { state.changed = true; if (newVersion) state.now = item!.version; }
       (states[install.plugin] ??= {})[install.tool] = state;
     }
     return states;
@@ -198,15 +217,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function detail(source: string, plugin: string): Promise<PluginDetail | null> {
     const ctx = await context();
     const { catalog } = await catalogFor(ctx, source, { counts: false });
-    const item = catalog?.plugins.find(entry => entry.name === plugin);
-    if (!catalog?.root || !item) return null;
-    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, catalog.root, resolve(item.folder) !== resolve(catalog.root));
-    if (!item.remote) return null;
-    const copy = await use.readRemotePlugin(ctx, item.remote);
-    if ('problem' in copy) return { ...empty, problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };
-    // The entry may list its components; its `source` names the repository, not a path in it.
-    const { source: _where, ...listed } = item.entry ?? {};
-    return pluginDetail(copy.folder, listed, copy.root);
+    if (!catalog) return null;
+    const where = await locate(ctx, catalog, plugin);
+    // Nowhere to read it from: no detail at all. A repository that couldn't be read: an empty detail saying why.
+    if ('problem' in where) return where.nowhere ? null : { ...empty, problem: where.problem };
+    return pluginDetail(where.folder, where.entry, where.root, where.readme);
   }
 
   /** The marketplace's own README, from the copy already read. */
@@ -310,7 +325,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!catalog || catalog.name !== marketName) return { reports: [{ ...failedFor([tool], 'Its marketplace changed. Refresh, then choose it again.')[0]!, parts: true }] };
     const read = await filesOf(ctx, catalog, plugin);
     if (!read.files) return { reports: [{ ...failedFor([tool], read.problem ?? 'Its files can’t be read.')[0]!, parts: true }] };
-    return { reports: [await installParts(share, { source, marketName, plugin, version: read.version, tool }, read.files)] };
+    const version = catalog.plugins.find(entry => entry.name === plugin)?.version;
+    return { reports: [await installParts(share, { source, marketName, plugin, version, tool }, read.files)] };
   }
 
   return { view, detail, readme, add, refresh, forget, install, uninstall, partsPlan, parts };

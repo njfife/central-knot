@@ -21,7 +21,7 @@ test('Install in all queues every tool, and a second click clears them all', () 
   const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, parts: 0, partsRemovals: 0 });
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, partsRemovals: 0 });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });
@@ -43,7 +43,7 @@ test('Undo reverses only what really changed, and the report names each plugin o
     // Already installed before this run (the view was stale): Undo must not remove what the person already had.
     { ...op('pdf', 'claude-cli'), source: 'other/market', report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
   ];
-  assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['pdf', 'claude-cli', 'remove'], ['docx', 'copilot-cli', 'install']]);
+  assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['docx', 'copilot-cli', 'install'], ['pdf', 'claude-cli', 'remove']]);
   assert.deepEqual(resultLines(done), [
     { source: 'anthropics/skills', plugin: 'pdf', ok: true, text: 'installed in Claude Code', short: 'installed in Claude Code' },
     { source: 'anthropics/skills', plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.', short: 'Codex: It stopped with exit code 1.' },

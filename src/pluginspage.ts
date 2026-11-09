@@ -175,7 +175,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     marks.has('parts-changed') ? item('Parts out of date: click to update', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
     chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
     chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
-    chosen.has('parts') ? item('parts installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
+    chosen.has('install-parts') ? item('parts installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
     chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null,
     chosen.has('remove-parts') ? item('parts removed', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
 }
@@ -199,7 +199,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
   // Parts chosen where some are already there are an update; elsewhere an install.
   const partsCounts = () => {
-    const ops = [...market.draft.values()].filter(op => op.action === 'parts');
+    const ops = [...market.draft.values()].filter(op => op.action === 'install-parts');
     const updates = ops.filter(op => { const entry = market.view?.marketplaces.find(candidate => candidate.source === op.source); return !!entry && !!partsOf(entry, op.plugin, op.tool); }).length;
     return [ops.length - updates ? `install parts in ${plural(ops.length - updates, 'tool')}` : '', updates ? `update parts in ${plural(updates, 'tool')}` : ''];
   };

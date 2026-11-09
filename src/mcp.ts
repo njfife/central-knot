@@ -206,7 +206,7 @@ async function recoverSettings(context: ShareContext, tool: HarnessId) {
  * settings (a Codex `enabled = false`, a timeout), so Restore puts each tool's entry back as it was. Never pruned.
  */
 const keptBase = (context: ShareContext, name: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name));
-async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
+export async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
   const hash = serverHash(server);
   const path = join(keptBase(context, name), `${hash}.json`);
   try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
@@ -222,7 +222,7 @@ async function keep(context: ShareContext, name: string, server: NeutralServer, 
 async function keptExtras(context: ShareContext, name: string, hash: string, ref: string): Promise<Record<string, unknown> | undefined> {
   try { return JSON.parse(await readFile(join(keptBase(context, name), hash, `${ref}.json`), 'utf8')).extras; } catch { return undefined; }
 }
-async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
+export async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
   try {
     const server = JSON.parse(await readFile(join(keptBase(context, name), `${hash}.json`), 'utf8'));
     const extras: Partial<Record<HarnessId, Record<string, unknown>>> = {};
