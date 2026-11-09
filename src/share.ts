@@ -2,7 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
+import { instructionFiles } from './instructions.ts';
+import { mcpFile } from './mcp.ts';
 import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
@@ -125,23 +127,23 @@ const copilotLosses: Record<string, string> = {
 };
 
 export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
-  if (harness === 'copilot-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
-    if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
-    if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
-    return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+  switch (harness) {
+    case 'copilot-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
+      if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
+      return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+    case 'codex-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+      if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'pi-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
+      if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'claude-cli':
+      return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }
-  if (harness === 'codex-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
-    if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  if (harness === 'pi-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
-    if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
 }
 
 // ---------- State ----------
@@ -323,7 +325,7 @@ export async function remember(context: ShareContext, generation: string) {
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
+export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {
@@ -350,14 +352,19 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
   const realHome = (await real(context.realHome)) ?? context.realHome;
-  const protectedRoots = await Promise.all(['.claude', '.copilot', '.agents'].map(async name => (await real(join(realHome, name))) ?? join(realHome, name)));
+  const realContext = { ...context, home: realHome, overrides: undefined };
+  const reached = [join(realHome, '.agents'), ...harnessIds.flatMap(id => [join(realHome, harnesses[id].defaultConfig), mcpFile(realContext, id)])];
+  const protectedRoots = await Promise.all(reached.map(async path => (await real(path)) ?? path));
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
-  // Every folder this home would write, followed through links, even where it does not exist yet.
+  // Every folder and file this home would write, followed through links, even where it does not exist yet.
   const fold = (path: string) => (process.platform === 'linux' ? path : path.toLowerCase());
   const guarded = [...protectedRoots, join(realHome, '.central-knot')].map(fold);
-  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...(Object.keys(harnesses) as HarnessId[]).flatMap(id => [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)])];
+  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...harnessIds.flatMap(id => {
+    const root = configRoot(harnesses[id], context.home, context.overrides?.[id]);
+    return [root, writeRoot(harnesses[id], context.home, context.overrides?.[id]), join(root, 'agents'), mcpFile(context, id), ...instructionFiles[id].map(name => join(root, name))];
+  })];
   for (const path of writes) {
     const resolved = await landingOf(path);
     if (!resolved || guarded.some(root => inside(resolved, root))) return refused;

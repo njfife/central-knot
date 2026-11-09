@@ -56,7 +56,7 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
+export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string; replaced?: true; chooseAgain?: true }
 
 export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
 
@@ -65,11 +65,11 @@ export interface DesktopApi {
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
   history(): Promise<HistoryEvent[]>;
-  applyMcp(changes: Change[], home: string): Promise<McpResult>;
+  applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
   unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
-  applyAgents(changes: Change[], home: string): Promise<McpResult>;
+  applyAgents(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
@@ -156,6 +156,7 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: for each tool that cannot hold every field, the With limits label naming what it lacks (TRN-01). */
   limits?: Partial<Record<HarnessId, string>>;
+  oneWay?: { from: HarnessId; lost: string[] };
   /** Agents: the source's own settings that stay in its tool, with their values as written ("tools: Read, Grep"). */
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
