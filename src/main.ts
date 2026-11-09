@@ -113,8 +113,9 @@ let quitting = false;
 /** Sync changed something while the window was closed or in the background: the menu bar icon shows it until seen. */
 let unseen = false;
 function showWindow() {
-  if (!app.isReady()) return;
-  if (!window || window.isDestroyed()) { createWindow(true); return; }
+  // Startup makes the first window. macOS sends `activate` during startup too: that must never make a second one.
+  if (!app.isReady() || !window) return;
+  if (window.isDestroyed()) { createWindow(true); return; }
   if (window.isMinimized()) window.restore();
   window.show();
   window.focus();
@@ -425,6 +426,8 @@ function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>)
 /** The main window. Closing it hides it (PLT-04); if it is ever gone, Open from the menu bar makes a new one. */
 let loading: Promise<void> = Promise.resolve();
 function createWindow(show: boolean) {
+  // One window at a time: a second would get no answers (requests are only taken from the current window).
+  if (window && !window.isDestroyed()) { if (show) { window.show(); window.focus(); } return; }
   window = new BrowserWindow({
     width: 1280, height: 800, minWidth: 860, minHeight: 560, show,
     title: 'Central Knot', backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc',

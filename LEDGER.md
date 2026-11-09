@@ -563,3 +563,9 @@ The Mac real home was not used, because a Central Knot app was running there (a 
 - **A pending removal follows only its recorded file.** For MCP and agents, a moved config root drops it, never deletes an entry in the new place (R6).
 
 **Validation.** 224 unit tests. Linux e2e 122/122.
+
+## Close and reopen on the Mac (1b2058b): the second window, November 9, 2026
+
+The new log showed two windows created at launch, 93 ms apart. macOS sends `activate` during startup, before startup has made its window. The reopen handler saw no window and made one, then startup made another. Only the second window's requests are accepted, so the first failed to read and showed "Could not read this home". Closing the working window uncovered it. This is the "Could not read this home" every computer-use session saw since e805d21.
+- **Fixed:** `activate` never makes a window before startup has made the first. `createWindow` only ever makes one at a time; a live window is shown instead.
+- The e2e checks there is one page at launch, which matters on macOS.
