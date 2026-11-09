@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, constants, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
@@ -562,6 +562,8 @@ app.whenReady().then(async () => {
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
+  // Reveal only: the file manager selects it; nothing is opened, run or written.
+  handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), presentTools(await read()), key)

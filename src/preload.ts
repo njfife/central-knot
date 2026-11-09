@@ -9,6 +9,7 @@ const api: DesktopApi = {
   instructions: () => ipcRenderer.invoke('instructions:view'),
   convertAgent: (key, home) => ipcRenderer.invoke('agents:convert', key, home),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
+  showFile: path => ipcRenderer.invoke('file:show', path),
   saveInstruction: (tool, text, expected, home) => ipcRenderer.invoke('instructions:save', tool, text, expected, home),
   instructionVersion: (tool, id) => ipcRenderer.invoke('instructions:version', tool, id),
   applyMcp: (changes, home) => ipcRenderer.invoke('mcp:apply', changes, home),

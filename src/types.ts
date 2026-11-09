@@ -83,6 +83,8 @@ export interface DesktopApi {
   convertAgent(key: string, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   /** A skill edit's SKILL.md before and after, for "See change". */
   eventChange(eventId: string): Promise<{ before: string; after: string } | undefined>;
+  /** Shows a file in the system file manager (Finder, Explorer); nothing is opened or changed. */
+  showFile(path: string): Promise<void>;
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   plugins(): Promise<PluginsView | null>;

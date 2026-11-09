@@ -1263,3 +1263,10 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .band.band-quiet { font-size: 12px; color: var(--ink-faint); padding-top: 4px; padding-bottom: 4px; }
 button.apply-state.apply-quiet.text-action { color: var(--ink-soft); text-decoration-color: color-mix(in oklab, var(--ink-soft) 50%, transparent); }
 button.apply-state.apply-waiting.text-action { color: var(--warning); text-decoration-color: color-mix(in oklab, var(--warning) 50%, transparent); }
+/* Round 21: settings files name their tool and show the full path, with Show in folder */
+.details-path-line { justify-content: flex-start; gap: 8px; }
+.details-path-tool { min-width: 92px; color: var(--ink-soft); }
+.details-path-full { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.details-path-show { font-size: 12px; margin-left: 4px; }
+.details-path-bare { margin: 2px 0 0; }
+.details-tool > .details-path-bare { padding-left: calc(196px + 8px); }
