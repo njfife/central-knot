@@ -52,7 +52,7 @@ export const market = {
 
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
-  peek = undefined;
+  peeks.clear();
   market.view = undefined; market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
   market.readmes.clear(); market.details.clear(); market.opened.clear(); market.nav = startNav();
 }
@@ -129,23 +129,21 @@ export function browse(patch: Partial<typeof market.nav>): void {
   document.getElementById('plugins-scroll')?.scrollTo(0, 0);
 }
 
-/** The quiet read below while it runs or after it failed; a home switch (resetMarket) drops it, so its answer is ignored. */
-let peek: { failed: boolean } | undefined;
-export const peekState = () => (peek ? (peek.failed ? 'failed' : 'reading') : undefined);
+/** The quiet read below: reading, then the view, or null when it failed. A home switch (resetMarket) clears it, so an old answer is dropped. */
+const peeks = new Map<'view', Read<PluginsView | null>>();
+export const peekState = (): 'reading' | 'failed' | undefined => { const read = peeks.get('view'); return read?.reading ? 'reading' : read && !read.value ? 'failed' : undefined; };
 /**
- * Another page's quiet look at what is installed where (Harnesses), with no busy state and no reads ahead. Reads once unless
- * `again` (Refresh, Try again); choices already made on Plugins are kept where they still apply.
+ * Another page's quiet look at what is installed where (Harnesses), with no busy state and no reads ahead. Reads once per home,
+ * done or failed, unless `again` (Refresh, Try again); choices already made on Plugins are kept where they still apply.
  */
 export function peekPlugins(again = false): void {
-  if ((market.view && !again) || peekState() === 'reading') return;
-  const mine: { failed: boolean } = peek = { failed: false };
-  void api().plugins(false).then(view => view ?? Promise.reject(), () => Promise.reject()).then(view => {
-    if (peek !== mine) return;
-    peek = undefined;
-    market.view = view;
-    prune(market.draft, view);
+  if (again) peeks.delete('view');
+  else if (market.view) return;
+  readInto(peeks, 'view', () => api().plugins(false).catch(() => null), () => {
+    const read = peeks.get('view');
+    if (read && !read.reading && read.value) { market.view = read.value; prune(market.draft, read.value); }
     rerender();
-  }, () => { if (peek === mine) { mine.failed = true; rerender(); } });
+  });
 }
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */

@@ -3,6 +3,7 @@ import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, Ins
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
+import { readInto, type Read } from './reads.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -93,7 +94,7 @@ function accept(view: HomeView) {
   state.instructionEdit = undefined;
   // Another home has other instruction files: the pages that show them read again.
   state.instructions = undefined;
-  instructionRead = undefined;
+  instructionReads.clear();
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -191,9 +192,9 @@ export function showPage(page: Page) {
   if (page === 'history') void loadHistory();
   if (page === 'settings') void loadSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
-  if (page === 'instructions') void loadInstructions();
-  // The sidebar's Harnesses always opens the list of every harness, even from one harness's page.
-  if (page === 'harnesses') state.harness = undefined;
+  if (page === 'instructions') readInstructionsQuietly(true);
+  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it started on.
+  if (page === 'harnesses' && !state.busy) state.harness = undefined;
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -275,26 +276,25 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
 
 // ---------- Instructions ----------
 
-export const loadInstructions = () => busy('Reading instruction files…', async () => {
-  state.instructions = (await api().instructions()) ?? undefined;
-  announce('', true);
-});
-
-/** A quiet read of the instruction files, with no busy state, for pages that show them (Instructions after a home switch, Harnesses). */
-let instructionRead: { home: string; failed: boolean } | undefined;
-/** Whether the quiet read is under way or failed for this home; undefined once it is done (or never started). */
-export const instructionReadState = () => (instructionRead && instructionRead.home === state.home?.home ? (instructionRead.failed ? 'failed' : 'reading') : undefined);
-/** Reads the files unless they are here or being read; `again` reads them even so (Refresh, Try again). A slower older read is dropped. */
+/** The instruction-file read per home: reading, then the files, or null when it failed (shown with Try again until asked again). */
+const instructionReads = new Map<string, Read<InstructionFile[] | null>>();
+export const instructionReadState = (): 'reading' | 'failed' | undefined => {
+  const read = state.home && instructionReads.get(state.home.home);
+  return read?.reading ? 'reading' : read && !read.value ? 'failed' : undefined;
+};
+/**
+ * Reads the instruction files quietly, with no busy state, for the pages that show them (Instructions, Harnesses). A read
+ * already made for this home, done or failed, is not repeated; `again` reads anew (opening Instructions, Refresh, Try again).
+ */
 export function readInstructionsQuietly(again = false) {
   const home = state.home?.home;
-  if (!home || (!again && (state.instructions || instructionReadState() === 'reading'))) return;
-  const mine: { home: string; failed: boolean } = instructionRead = { home, failed: false };
-  void api().instructions().then(files => files ?? Promise.reject(), () => Promise.reject()).then(files => {
-    if (instructionRead !== mine) return;
-    instructionRead = undefined;
-    state.instructions = files;
+  if (!home) return;
+  if (again) instructionReads.delete(home);
+  readInto(instructionReads, home, () => api().instructions().catch(() => null), () => {
+    const read = instructionReads.get(home);
+    if (read && !read.reading && read.value && state.home?.home === home) state.instructions = read.value;
     rerender();
-  }, () => { if (instructionRead === mine) { mine.failed = true; rerender(); } });
+  });
 }
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */

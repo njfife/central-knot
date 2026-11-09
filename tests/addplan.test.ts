@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planAdd, withOnlyBoth } from '../src/addplan.ts';
+import { planAdd, withHolders, withOnlyBoth } from '../src/addplan.ts';
 import type { SampleSkill } from '../src/design.ts';
 
 const tools = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -57,4 +57,9 @@ test('Adding to one harness from its own page enrols only the two tools named', 
   assert.deepEqual(keys(plan.resume), ['managed']);
   assert.deepEqual(withOnlyBoth(skill('fresh', { 'copilot-cli': 'a' }), 'copilot-cli', 'claude-cli', tools).off, ['codex-cli']);
   assert.deepEqual(withOnlyBoth(skill('managed', {}, { managed: true, off: ['claude-cli', 'codex-cli'] }), 'copilot-cli', 'claude-cli', tools).off, ['codex-cli'], 'a managed skill keeps the tools it syncs to');
+});
+
+test('Ticking a harness\'s own box adds it there and keeps the tools that have it, writing to none that lack it', () => {
+  assert.deepEqual(withHolders(skill('notes', { 'copilot-cli': 'a', 'codex-cli': 'a' }), 'claude-cli', tools).off, []);
+  assert.deepEqual(withHolders(skill('notes', { 'copilot-cli': 'a' }), 'claude-cli', tools).off, ['codex-cli']);
 });

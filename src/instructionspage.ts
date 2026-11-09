@@ -10,6 +10,9 @@ import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
+/** How many lines a file's text has, a final newline not counting as one more. */
+export const lineCount = (text: string) => text.replace(/\n$/, '').split('\n').length;
+
 /** A path's last part: the file's own name. */
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
@@ -34,7 +37,9 @@ const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : '
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
-  if (event.key !== 'Escape' || (state.page !== 'instructions' && state.page !== 'harnesses') || edit?.stage !== 'review') return;
+  // Only where the editor is on screen: Instructions, or a harness's Instructions tab.
+  const shown = state.page === 'instructions' || (state.page === 'harnesses' && !!state.harness && state.harnessTab === 'instructions');
+  if (event.key !== 'Escape' || !shown || edit?.stage !== 'review') return;
   event.preventDefault();
   if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
   rerender();
@@ -151,7 +156,9 @@ export function instructionCard(file: InstructionFile) {
             if (open && openFile && open.text !== openFile.text) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
             startInstructionEdit(file);
           } }),
-          lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
+          lockedWhy ? h('span.ins-locked', {}, lockedWhy,
+            // On a harness's page the other file's editor is on another harness's page: a link goes there.
+            otherDirty && state.page === 'harnesses' ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, onclick: () => { state.harness = other!.tool; state.harnessTab = 'instructions'; rerender(); } })] : null) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
         h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),

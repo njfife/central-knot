@@ -16,7 +16,7 @@ import type { HomeMode, ManageView } from './types.ts';
 const region = (id: string) => document.getElementById(id)!;
 /** The real home is named for the machine it is on. */
 export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
+export const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
 const MATRIX_MINIMUM = 760;
 
 /** Window width decides the frame: rail or sidebar, one pane or two. */

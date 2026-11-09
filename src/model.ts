@@ -8,5 +8,3 @@ export const fullToolName = (snapshot: Snapshot) => `${snapshot.harnessName} ${s
 export const clockTime = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 
-/** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */
-export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder.normalize('NFC').toLowerCase())).size;

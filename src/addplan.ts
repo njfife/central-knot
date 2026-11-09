@@ -33,6 +33,13 @@ export const withBoth = (skill: SampleSkill, from: Tool, to: Tool): SampleSkill 
 export const withOnlyBoth = (skill: SampleSkill, from: Tool, to: Tool, tools: Tool[]): SampleSkill =>
   skill.managed ? withBoth(skill, from, to) : { ...withBoth(skill, from, to), off: tools.filter(tool => tool !== from && tool !== to) };
 
+/**
+ * Turned on for `here` from that harness's own box: a skill not managed yet syncs between the tools that already have it and
+ * `here`, so no tool that lacks it gets a copy. (Add from… names one source, so it uses withOnlyBoth: that source and `here`.)
+ */
+export const withHolders = (skill: SampleSkill, here: Tool, tools: Tool[]): SampleSkill =>
+  ({ ...skill, managed: true, separate: false, off: tools.filter(tool => tool !== here && skill.copies[tool] === undefined) });
+
 /** Sorts one tool's skills by what adding them to another would do. `list` is the page as it will be after Apply all. `onlyBoth`: see withOnlyBoth. */
 export function planAdd(list: SampleSkill[], from: Tool, to: Tool, tools: Tool[], { onlyBoth = false } = {}): AddPlan {
   const plan: AddPlan = { fresh: [], same: [], resume: [], differ: [], blocked: [], synced: [], skip: [] };

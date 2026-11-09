@@ -9,7 +9,7 @@ import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
-import { planAdd as planAddPure, withBoth, withOnlyBoth } from './addplan.ts';
+import { planAdd as planAddPure, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
 const ago = (iso: string) => {
@@ -31,11 +31,16 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
 });
 
+/** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
+const rowOf = (fact: SkillFacts, waiting: Set<string>): SampleSkill => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
+
 /** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
 export type Kind = 'skills' | 'mcp' | 'agents';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
+/** Each kind's noun in a sentence, one and many: "1 skill", "2 MCP servers". */
+export const kindNoun: Record<Kind, [string, string]> = { skills: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agents: ['agent', 'agents'] };
 let kind: Kind = 'skills';
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
@@ -45,7 +50,7 @@ function committedList(): SampleSkill[] {
   if (!source || !facts) return [];
   // MCP: Claude Code's entries wait for Write now; their cells say so instead of reading as differing copies.
   const waiting = kind === 'mcp' ? new Set(listView()?.claudePending ?? []) : new Set<string>();
-  if (factsCache[kind]?.from !== source) factsCache[kind] = { from: source, list: facts.map(fact => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli' as Tool] : undefined })) };
+  if (factsCache[kind]?.from !== source) factsCache[kind] = { from: source, list: facts.map(fact => rowOf(fact, waiting)) };
   return factsCache[kind]!.list;
 }
 /** The harness a Harnesses page shows: its column comes first, and bulk actions keep to what it has. */
@@ -64,7 +69,7 @@ const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, tool
  * Harnesses page, read from the facts the same way the table reads them. `waiting`: MCP servers waiting for Claude Code.
  */
 export const differingIn = (facts: SkillFacts[], tools: Tool[], tool: Tool, waiting: string[] = []) =>
-  facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && syncOf({ ...fromFacts(fact), waits: waiting.includes(fact.key) ? ['claude-cli'] : undefined }, tools) === 'attention').length;
+  facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && syncOf(rowOf(fact, new Set(waiting)), tools) === 'attention').length;
 const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
 const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
 type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
@@ -149,9 +154,8 @@ function setManaged(keys: string[], managed: boolean) {
 function setTool(keys: string[], tool: Tool, on: boolean) {
   for (const key of keys) edit(key, (skill, draft) => {
     const managed = on ? true : skill.managed;
-    // On a harness's page, ticking its own box for an unmanaged item syncs it between the tools that have it and this one only.
-    const pairOnly = on && tool === focus && !skill.managed;
-    const off = pairOnly ? toolList().filter(entry => entry !== tool && skill.copies[entry] === undefined) : on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])];
+    // On a harness's page, ticking its own box for an unmanaged item adds it here without writing to tools that lack it.
+    const off = on && tool === focus && !skill.managed ? withHolders(skill, tool, toolList()).off : on ? skill.off.filter(entry => entry !== tool) : [...new Set([...skill.off, tool])];
     return { managed, off, ...keepChoice(keepResolve(managed, draft?.resolve), draft) };
   });
   rerender();
@@ -235,9 +239,11 @@ function changeBar(bulk = true) {
   const ready = manageable();
   // Unmanaged items whose copies differ need a choice first, so Manage leaves them out and says so.
   const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
-  const word = (n: number) => (kind === 'mcp' ? (n === 1 ? 'MCP server' : 'MCP servers') : n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
+  const word = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   // On a harness's page the count names what it covers: only what that harness has.
   const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
+  // Under the Copies differ filter a harness's page shows only items that need a copy choice, which Manage leaves out:
+  // the button would act on rows not shown, so it waits until the filter changes.
   const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
@@ -856,10 +862,13 @@ const shortNoun: Record<Kind, [string, string]> = { skills: ['skill', 'skills'],
 /** Whether the table draws a Managed section, so a move is told on it rather than on Unmanaged. */
 let managedDrawn = false;
 
-function section(label: string, list: SampleSkill[], after: number) {
+/** Rows grouped under one heading. `role`: managed or unmanaged (this harness has them, on its page), or away (only other tools have them). */
+function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], after: number) {
   if (!list.length) return null;
+  const label = role === 'managed' ? 'Managed' : role === 'unmanaged' ? 'Unmanaged' : `Not in ${names[focus!]}`;
   const sorted = [...list].sort((first, second) => first.key.replace(/^\./, '').localeCompare(second.key.replace(/^\./, '')));
-  const managing = label === 'Unmanaged';
+  const managing = role === 'unmanaged';
+  const becoming = role === 'away' ? list.filter(skill => skill.managed && !committedOf(skill.key).managed).length : 0;
   const target = managing ? sorted.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention') : sorted.filter(skill => skill.managed);
   return h('div', { role: 'rowgroup' },
     h('div.ov-section', { role: 'row' },
@@ -868,8 +877,7 @@ function section(label: string, list: SampleSkill[], after: number) {
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
           : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
         // Items only other tools have, turned on here: told on their own section, so the counts add up.
-        focus && label === `Not in ${names[focus]}` && list.some(skill => skill.managed && !committedOf(skill.key).managed)
-          ? h('span.ov-section-after', {}, (n => `· ${n} ${n === 1 ? 'becomes' : 'become'} Managed on Apply all`)(list.filter(skill => skill.managed && !committedOf(skill.key).managed).length)) : null,
+        becoming ? h('span.ov-section-after', {}, `· ${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
@@ -1206,6 +1214,14 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
     notice.history ? changePanel(notice.history) : null);
 }
 
+/** A kind with nothing in any tool, on a harness's page: the empty state under the same bands (problems, access, results) as its table. */
+export function emptyKind(which: Kind, harness: Tool, empty: HTMLElement) {
+  kind = which;
+  view = views[which];
+  focus = harness;
+  return h('div.page', {}, notices(), empty);
+}
+
 /** `harness`: the Harnesses page's view of one tool: its column first, and the rows split by whether it has a copy. */
 export function designOverview(which: Kind = 'skills', harness?: Tool) {
   kind = which;
@@ -1232,10 +1248,10 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
           h('div.ov-fill')),
-        section('Managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
-        section('Unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
+        section('managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
+        section('unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
         // Items only other tools have: their box in this tool's column adds them here (see setTool).
-        focus ? section(`Not in ${names[focus]}`, away, away.length) : null,
+        focus ? section('away', away, away.length) : null,
         ghostRows()), toolList().length),
       legend(all)));
 }

@@ -1348,8 +1348,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .harness-card { display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
 button.harness-card-main { cursor: pointer; }
-button.harness-card-main:hover { background: var(--hover); }
-button.harness-card-main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+button.harness-card-main:disabled { cursor: default; }
 .harness-card-links:not(:empty) { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0 10px 10px; margin-top: -4px; }
 .harness-card-missing { color: var(--ink-soft); }
 .harness-card-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1418,18 +1417,17 @@ button.harness-card-main:focus-visible { outline: 2px solid var(--focus); outlin
 .harness-page .ins-card { max-width: none; }
 /* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
 .harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
-.harness-page .toolbar-end { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+.harness-page .toolbar-end { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; border-left: 0; padding-left: 0; }
 /* Menus stay inside the window (fitOpenMenu sets these after each draw). */
 .tool-menu { translate: var(--menu-shift, 0) 0; max-height: min(72vh, 620px, var(--menu-room, 620px)); }
 /* Opened from the toolbar's Add from…: under that button, its right edge on the button's. */
 .add-from { position: relative; }
 .add-from > .tool-menu { left: auto; right: 0; transform: none; top: calc(100% + 6px); }
-.harness-page .toolbar-end { border-left: 0; padding-left: 0; }
 /* The whole card shows hover and focus, not just its upper part. */
 .harness-card { container-type: inline-size; }
 .harness-card:has(> .harness-card-main:hover) { background: var(--hover); }
-button.harness-card-main:hover { background: transparent; }
 .harness-card:has(> .harness-card-main:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 button.harness-card-main:focus-visible { outline: 0; }
+.harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
 /* A wide card lays its counts out in two columns of rows, so its width is used. */
 @container (min-width: 560px) { .harness-counts { grid-template-columns: repeat(2, max-content minmax(2ch, max-content) minmax(0, 1fr)); } }
