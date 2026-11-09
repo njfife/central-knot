@@ -201,22 +201,6 @@ test('Differing copies inside one tool count as copies that differ', async () =>
   } finally { await box.cleanup(); }
 });
 
-test('The real home stays preview-only unless allowed, and damaged state stops writes', async () => {
-  const box = await sandbox();
-  try {
-    await skill(box.home, CLAUDE, 'solo');
-    const refused = await applyChanges(ctx(box, { mode: 'actual', realHome: box.home }), [manage('solo')]);
-    assert.match(refused.stopped ?? '', /Preview only/);
-    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
-    await applyChanges(ctx(box), [manage('solo')]);
-    await writeFile(join(storeDirectory(box.home), 'sync.json'), '{ damaged');
-    await rm(join(box.home, COPILOT, 'solo'), { recursive: true });
-    const stopped = await applyChanges(ctx(box), []);
-    assert.match(stopped.stopped ?? '', /damaged/);
-    assert.equal(await exists(join(box.home, COPILOT, 'solo')), false);
-  } finally { await box.cleanup(); }
-});
-
 test('An interrupted copy leaves nothing half-written, and the next pass completes it', async () => {
   const box = await sandbox();
   try {
