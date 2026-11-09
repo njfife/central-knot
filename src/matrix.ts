@@ -111,6 +111,15 @@ const newView = () => ({
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /** Opens a page already narrowed, for links that point at a problem (the Overview's "has different copies"). */
 export const showFiltered = (which: Kind, filter: Filter) => { views[which].filter = filter; };
+/** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
+export function openItem(which: Kind, name: string) {
+  const facts = which === 'skills' ? state.home?.manage.skills : which === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers;
+  const key = facts?.find(item => item.key.toLowerCase() === name.toLowerCase() || item.name.toLowerCase() === name.toLowerCase())?.key;
+  views[which].filter = 'all';
+  views[which].comparing = key;
+  showPage(which);
+  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+}
 let view = views.skills;
 let draftHomes: Partial<Record<Kind, string>> = {};
 

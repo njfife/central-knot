@@ -101,14 +101,15 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const pluginColumns = view.tools.filter(tool => pluginTools.includes(tool));
   // Tools whose CLI is missing share one sentence; any other reason is said as it is.
   const noCli = pluginColumns.filter(tool => !view.clis[tool] && !view.desktopOnly?.includes(tool));
-  const reasons = [noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: their command-line tools weren’t found, so their plugin commands can’t run.` : '',
+  const reasons = [noCli.length > 1 ? `${andList(noCli.map(tool => names[tool]))}: command-line tools not found, so plugins can’t be installed there.` : '',
     ...pluginColumns.filter(tool => noCli.length < 2 || !noCli.includes(tool)).map(tool => blocked(view, entry, tool) ?? '')].filter(Boolean);
   const someCan = view.canWrite && (pluginColumns.some(tool => !blocked(view, entry, tool)) || view.tools.length > pluginColumns.length);
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   // Where a box offers a plugin's parts, the hint says so above the rows, where the choice is made.
   const offersParts = shown.some(plugin => view.tools.some(tool => partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin)) && !partsOf(entry, plugin.name, tool)));
-  const partsHint = offersParts ? 'A hatched box with a plus installs the plugin’s parts there instead: its skills, MCP servers and agents, as separate items.' : '';
+  const partsColumns = view.tools.filter(tool => shown.some(plugin => partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin)) && !partsOf(entry, plugin.name, tool)));
+  const partsHint = offersParts ? `A hatched box with a plus (${andList(partsColumns.map(tool => names[tool]))}) installs the plugin’s parts instead, as separate items.` : '';
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${[...reasons, partsHint].filter(Boolean).join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${marketIndex}`, onclick: () => showPage('tools') })))
@@ -169,9 +170,9 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     unknown ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     cannot ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
-    marks.has('parts-offer') ? item('The plugin can’t go there: click to install its parts instead', h('span.legend-cell.cell-parts-offer', {}, icon('plus', 9))) : null,
+    marks.has('parts-offer') ? item('Install its parts instead', h('span.legend-cell.cell-parts-offer', {}, icon('plus', 9))) : null,
     marks.has('parts') ? item('Parts installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('blocks', 10))) : null,
-    marks.has('parts-changed') ? item('Parts out of date', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
+    marks.has('parts-changed') ? item('Parts out of date: click to update', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
     chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
     chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
     chosen.has('parts') ? item('parts installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
@@ -196,10 +197,16 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  */
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
+  // Parts chosen where some are already there are an update; elsewhere an install.
+  const partsCounts = () => {
+    const ops = [...market.draft.values()].filter(op => op.action === 'parts');
+    const updates = ops.filter(op => { const entry = market.view?.marketplaces.find(candidate => candidate.source === op.source); return !!entry && !!partsOf(entry, op.plugin, op.tool); }).length;
+    return [ops.length - updates ? `install parts in ${plural(ops.length - updates, 'tool')}` : '', updates ? `update parts in ${plural(updates, 'tool')}` : ''];
+  };
   if (counts.plugins) {
     return h('div.apply', {},
       h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
-        counts.parts ? `parts for ${plural(counts.parts, 'tool')}` : '', counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
+        ...partsCounts(), counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }

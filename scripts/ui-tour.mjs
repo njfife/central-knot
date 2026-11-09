@@ -204,6 +204,9 @@ if (wanted('parts')) {
   await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Pi and Codex as ordinary items.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
   await a.click('#plugin-back'); await shot(a, 'list-installed', 'Back to the list: Pi and Codex show the parts mark.');
   await a.click('#nav-skills'); if (await a.has('#open-triage')) await a.click('#open-triage');
   await shot(a, 'skills-provenance', 'Skills page, triage opened: it says which plugin it came from, with a way to its page.');
