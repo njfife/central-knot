@@ -297,6 +297,8 @@ async function practiceFlow() {
   check('the replaced copy is kept in the store', readdirSync(join(practice, '.central-knot/items/review')).some(revision => readFileSync(join(practice, '.central-knot/items/review', revision, 'SKILL.md'), 'utf8') === reviewClaude));
   check('no longer flagged', !(await a.exists('#decide-review')));
   // The choice has its own Undo right there: Claude Code's copy back in Claude Code only, the skill unmanaged and differing again.
+  // Seconds later, after any background pass, the result and its Undo are still there.
+  await wait(3500);
   check('a copy choice offers an inline Undo', await a.exists('#outcome-undo-choice'), await a.text('.bands'));
   await a.click('#outcome-undo-choice');
   for (let tries = 0; tries < 30 && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') !== reviewClaude; tries++) await wait(100);
