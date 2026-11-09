@@ -87,6 +87,8 @@ const connect = () => busy('Connecting to the repo…', async () => {
   const waiting = view.connected ? waitingCounts(view).pull : 0;
   await settle(result, `Connected. Nothing changed in your tools${waiting ? `; Pull brings in ${plural(waiting, 'item')} from the repo` : ''}.`);
   if (!result.stopped) { repo.draftUrl = ''; repo.draftBranch = ''; }
+  // A failed Connect points at what to fix: the address, marked invalid until it is edited.
+  else requestAnimationFrame(() => document.getElementById('repo-url')?.focus());
 });
 
 const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard) keepFocus('repo-pull'); });
@@ -302,6 +304,7 @@ function connectForm(allowed: boolean) {
   const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: Node) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
     h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
+      'aria-invalid': id === 'repo-url' && repo.problem ? 'true' : undefined,
       // Typing a new address or branch answers the last failure: its band goes.
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); if (repo.problem) { repo.problem = undefined; rerender(); } refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
