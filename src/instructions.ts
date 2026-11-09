@@ -5,11 +5,12 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
-import { errorCode, plainError, recoverParked, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { baseWrite, sameBase, splitBase } from './basetext.ts';
+import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { blockText, fileWithBase, sameBase, splitBase } from './basetext.ts';
+import { andList, toolNames } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
-import type { BaseApply, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
+import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
@@ -19,6 +20,9 @@ const versionsFolder = (home: string, shelf: Shelf) => join(storeDirectory(home)
 /** The base instructions are one Markdown file in Central Knot's store; which tools get them is kept beside it. */
 const basePath = (home: string) => join(storeDirectory(home), 'instructions', 'base.md');
 const baseListPath = (home: string) => join(storeDirectory(home), 'instructions', 'base-tools.json');
+/** The hash of a base copy as a block holds it, so a copy and the base text it came from compare equal. */
+const copyHash = (copy: string) => sha(blockText(copy));
+/** A tool file's hash for checks: '' when there is no file (the base, kept in Central Knot's store, hashes a missing file as empty text). */
 const hashOf = (text: string | undefined) => (text === undefined ? '' : sha(text));
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
@@ -34,14 +38,16 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
     return { path: join(root, 'AGENTS.md'), readers: 'Codex reads this in every session, in the CLI and in ChatGPT desktop’s Codex, which share this folder.', notes: [] };
   }
   if (tool === 'pi-cli') {
-    // Pi documents AGENTS.override.md (untested): bound when present. A new AGENTS.md beside CLAUDE.md shadows it (tested).
+    // Pi documents AGENTS.override.md (untested): bound when present. With no AGENTS.md, Pi reads a CLAUDE.md in the same folder,
+    // so that is the file bound: creating AGENTS.md beside it would shadow it (tested).
     const override = join(root, 'AGENTS.override.md');
     const text = await readText(override);
     const notes: string[] = [];
-    if (text && text.trim()) notes.push('AGENTS.override.md is not empty, so it is the file bound here (documented for Pi, not yet tested).');
-    if (await readText(join(root, 'CLAUDE.md')) !== undefined && await readText(join(root, 'AGENTS.md')) === undefined) notes.push('This folder has a CLAUDE.md. Creating AGENTS.md here makes Pi read AGENTS.md instead of it.');
+    let path = join(root, 'AGENTS.md');
+    if (text && text.trim()) { path = override; notes.push('AGENTS.override.md is not empty, so it is the file bound here (documented for Pi, not yet tested).'); }
+    else if (await readText(path) === undefined && await readText(join(root, 'CLAUDE.md')) !== undefined) { path = join(root, 'CLAUDE.md'); notes.push('This folder has no AGENTS.md, so Pi reads its CLAUDE.md, and that is the file shown and changed here.'); }
     notes.push('SYSTEM.md and APPEND_SYSTEM.md, if present, replace or extend Pi’s built-in prompt; they are not shown or changed here.');
-    return { path: text && text.trim() ? override : join(root, 'AGENTS.md'), readers: 'Pi reads this in every session.', notes };
+    return { path, readers: 'Pi reads this in every session.', notes };
   }
   const notes: string[] = [];
   try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
@@ -63,18 +69,12 @@ const describe = (kept: { id: string; text: string }[], now: string) => kept.map
   return { id, at: new Date(Number(id.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0, differs: lineDiff(text, now).filter(line => line.kind !== 'same').length };
 });
 
-/**
- * What Central Knot keeps beside base.md: which tools get the base, and, for each tool taken off the list whose file then held
- * nothing but the base, the hash of the plain text left there. Only that exact text counts as the base's own when the tool is
- * added again (it moves back into the block); anything else in a file is the tool's own.
- */
-interface BaseList { tools: HarnessId[]; leftPlain: Partial<Record<HarnessId, string>> }
+const toolHashes = (value: unknown): Partial<Record<HarnessId, string>> => Object.fromEntries(Object.entries(value ?? {}).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string'));
 async function readBaseList(home: string): Promise<BaseList> {
   try {
     const list = JSON.parse(await readFile(baseListPath(home), 'utf8')) as Partial<BaseList>;
-    const plain = Object.entries(list.leftPlain ?? {}).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string');
-    return { tools: onlyAllowed(list.tools, harnessIds), leftPlain: Object.fromEntries(plain) };
-  } catch { return { tools: [], leftPlain: {} }; }
+    return { tools: onlyAllowed(list.tools, harnessIds), written: toolHashes(list.written), leftPlain: toolHashes(list.leftPlain) };
+  } catch { return { tools: [], written: {}, leftPlain: {} }; }
 }
 const writeBaseList = (home: string, list: BaseList) => writeDurably(baseListPath(home), `${JSON.stringify(list, null, 2)}\n`);
 
@@ -94,33 +94,41 @@ export async function baseView(context: ShareContext): Promise<BaseView> {
 }
 const viewOf = (home: string, base: StoredBase): BaseView => ({ path: basePath(home), text: base.text, hash: sha(base.text), tools: base.list.tools, versions: describe(base.earlier, base.text) });
 
-/** How a tool's file holds the base: the same, an older base, edited there, or not at all; and whether its whole text is the
- *  plain base text left there when the tool was taken off the list. */
-function baseState(text: string, tool: HarnessId, base: StoredBase): NonNullable<InstructionFile['base']> {
+/** How a tool's file holds the base: the same, the copy Central Knot last wrote there (an older base), edited there, or not at
+ *  all; and whether its whole text is the plain base text left there when the tool was taken off the list. */
+function baseState(text: string, tool: HarnessId, base: StoredBase): BaseHeld {
   const { own, copy } = splitBase(text);
-  const isABase = (part: string) => sameBase(part, base.text) || base.earlier.some(old => sameBase(part, old.text));
-  const state = copy === undefined ? 'missing' : sameBase(copy, base.text) ? 'same' : isABase(copy) ? 'older' : 'edited';
+  const state = copy === undefined ? 'missing' : sameBase(copy, base.text) ? 'same' : base.list.written[tool] === copyHash(copy) ? 'older' : 'edited';
   return { chosen: base.list.tools.includes(tool) && !!base.text.trim(), state, own, copy, leftPlain: copy === undefined && !!text && base.list.leftPlain[tool] === sha(text) };
 }
 
 /** A file's base part when the file is involved with the base: it gets it, holds a block (left by an Undo, or pasted in), or holds
  *  the plain base text left when its tool was taken off the list. Otherwise none. */
-function baseIfInvolved(state: NonNullable<InstructionFile['base']>) {
+function baseIfInvolved(state: BaseHeld) {
   return state.chosen || state.copy !== undefined || state.leftPlain ? state : undefined;
+}
+
+/** Tools found in this home: an absent tool has no file to edit, and a folder is never created for it here. */
+const present = (snapshots: Snapshot[]) => snapshots.filter(entry => entry.detection !== 'Not found' || entry.skills.length > 0);
+
+/** Each present tool's bound file and, for tools whose files are one physical file (linked dotfiles), the others reading it. */
+async function destinations(snapshots: Snapshot[]) {
+  const bound = await Promise.all(present(snapshots).map(async snapshot => ({ snapshot, ...await bind(snapshot.harness, snapshot.root) })));
+  const landings = await Promise.all(bound.map(entry => landingOf(entry.path)));
+  return bound.map((entry, index) => ({ ...entry, sameFile: bound.filter((other, at) => at !== index && landings[at] && landings[at] === landings[index]).map(other => other.snapshot.harness) }));
 }
 
 /** Every detected tool's instruction file, read as it is now. */
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
   const base = await readBase(context.home, (await writeAccess(context)).allowed);
-  // Only tools found in this home: an absent tool has no file to edit, and a folder is never created for it here.
-  for (const snapshot of snapshots.filter(entry => entry.detection !== 'Not found' || entry.skills.length > 0)) {
-    const { path, readers, notes } = await bind(snapshot.harness, snapshot.root);
+  for (const { snapshot, path, readers, notes, sameFile } of await destinations(snapshots)) {
+    if (sameFile.length) notes.push(`This is the same file as ${andList(sameFile.map(tool => toolNames[tool]))} reads (a link), so they get the same base instructions.`);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
     files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: hashOf(text), readers, notes, nextStep: 'Start a new session to use the change.',
-      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', snapshot.harness, base)) });
+      versions: describe(await shelf(context.home, snapshot.harness), text ?? ''), base: baseIfInvolved(baseState(text ?? '', snapshot.harness, base)), sameFile });
   }
   return files;
 }
@@ -147,7 +155,7 @@ async function keep(home: string, shelf: Shelf, current: string) {
   // Two writes in one millisecond (a base apply) still get their own names.
   for (let at = Date.now(); ; at++) {
     try { await writeFile(join(folder, `${at}-${sha(current).slice(0, 12)}.md`), current, { flag: 'wx' }); return; }
-    catch (error) { if ((error as { code?: string }).code !== 'EEXIST') throw error; }
+    catch (error) { if (errorCode(error) !== 'EEXIST') throw error; }
   }
 }
 /** Keeps the text a write replaces as an earlier version, then writes only if the file still holds it. */
@@ -173,8 +181,9 @@ const storeFailed = (error: unknown, changed: BaseResult): BaseResult => (['CK_C
  * Sets the base instructions and which tools get them, then updates exactly the files the review showed (`request.seen`), each
  * only if it still holds what the review saw: its block is added or replaced, or taken out for a tool taken off the list. Each
  * tool's own text stays as it is. A copy edited in a tool's file is left alone unless `overwrite` names that tool; `adopt` names
- * the tool whose own text became the base, so it moves into the block. `changed` on a stop: the base or a file changed since the
- * review, so the review should be shown again.
+ * the tool whose own text became the base, so it moves into the block. Tools reading one physical file (linked dotfiles) are one
+ * destination: chosen together and written once. `changed` on a stop: the base or a file changed since the review, so the review
+ * should be shown again.
  */
 export async function applyBase(context: ShareContext, snapshots: Snapshot[], request: BaseApply): Promise<BaseResult> {
   const access = await writeAccess(context);
@@ -182,38 +191,47 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
   const stored = await readBase(context.home, true);
   if (sha(stored.text) !== request.expected) return baseChanged;
-  const tools = request.text.trim() ? request.tools.filter(tool => snapshots.some(entry => entry.harness === tool)) : [];
-  const files: { tool: HarnessId; path: string; current: string | undefined }[] = [];
-  for (const snapshot of snapshots.filter(entry => entry.harness in request.seen)) {
-    const { path } = await bind(snapshot.harness, snapshot.root);
+  const bound = await destinations(snapshots);
+  // One physical file is chosen when any tool reading it is.
+  const chosen = new Set(request.text.trim() ? bound.filter(entry => request.tools.includes(entry.snapshot.harness)).flatMap(entry => [entry.snapshot.harness, ...entry.sameFile]) : []);
+  const tools = bound.map(entry => entry.snapshot.harness).filter(tool => chosen.has(tool));
+  const files: { tool: HarnessId; readers: HarnessId[]; path: string; current: string | undefined }[] = [];
+  for (const { snapshot, path, sameFile } of bound.filter(entry => entry.snapshot.harness in request.seen)) {
+    if (files.some(file => sameFile.includes(file.tool))) continue;
     const current = await readText(path);
     // The review named a file and what it held: a different file now bound (an override appeared) or new content stops the save.
     const reviewed = request.seen[snapshot.harness]!;
     if (path !== reviewed.path || hashOf(current) !== reviewed.hash) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
-    files.push({ tool: snapshot.harness, path, current });
+    files.push({ tool: snapshot.harness, readers: [snapshot.harness, ...sameFile], path, current });
   }
   try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailed(error, baseChanged); }
-  const leftPlain: BaseList['leftPlain'] = { ...stored.list.leftPlain };
-  const result: BaseResult = { written: [], left: [], undo: { text: stored.text, tools: stored.list.tools, leftPlain: stored.list.leftPlain, baseHash: sha(request.text), files: [] } };
-  for (const { tool, path, current } of files) {
+  const list: BaseList = { tools, written: { ...stored.list.written }, leftPlain: { ...stored.list.leftPlain } };
+  const result: BaseResult = { written: [], left: [], undo: { text: stored.text, list: stored.list, baseHash: sha(request.text), files: [] } };
+  for (const { tool, readers, path, current } of files) {
     const text = current ?? '';
-    const chosen = tools.includes(tool);
+    const isChosen = chosen.has(tool);
     const action = request.adopt === tool ? 'adopt' : request.overwrite?.includes(tool) ? 'putBack' : 'save';
-    const write = baseWrite(text, request.text, { chosen, held: baseState(text, tool, stored), action });
-    if (write.edited) { result.left.push({ tool, why: 'edited' }); continue; }
-    const { next } = write;
+    const planned = fileWithBase(text, request.text, { chosen: isChosen, held: baseState(text, tool, stored), action });
+    if (planned.edited) { result.left.push({ tool, why: 'edited' }); continue; }
+    const { next } = planned;
     // Nothing to change, and a missing file is never created empty.
-    if (current === undefined ? !next : next === current) { if (chosen) delete leftPlain[tool]; continue; }
-    // A failed write keeps the tool's plain-text record, so a retry still moves that text back into the block.
-    try { await keepAndWrite(context.home, tool, path, next, current); }
-    catch { result.left.push({ tool, why: 'failed' }); continue; }
-    result.written.push({ tool, path, before: current ?? null, after: sha(next) });
-    // Taken off with nothing of its own: the base stays as plain text, remembered so adding the tool again doesn't repeat it.
-    if (chosen) delete leftPlain[tool]; else if (!splitBase(text).own.trim()) leftPlain[tool] = sha(next);
+    const unchanged = current === undefined ? !next : next === current;
+    if (!unchanged) {
+      // A failed write keeps the tool's records, so a retry still knows what Central Knot wrote and left there.
+      try { await keepAndWrite(context.home, tool, path, next, current); }
+      catch { result.left.push({ tool, why: 'failed' }); continue; }
+      result.written.push({ tool, path, before: current ?? null, afterHash: sha(next) });
+    }
+    // What Central Knot now has in this file, for every tool reading it: the copy it wrote, or the plain text it left.
+    for (const reader of readers) {
+      if (isChosen) { list.written[reader] = copyHash(request.text); delete list.leftPlain[reader]; continue; }
+      delete list.written[reader];
+      if (!unchanged && !splitBase(text).own.trim()) list.leftPlain[reader] = sha(next);
+    }
   }
   result.undo!.files = result.written;
   // The files are written either way; a list that could not be saved is said, and Undo still puts the files back.
-  try { await writeBaseList(context.home, { tools, leftPlain }); }
+  try { await writeBaseList(context.home, list); }
   catch (error) { result.problem = `The list of tools that get the base could not be saved: ${plainError(error)} The files above were written.`; }
   return result;
 }
@@ -230,7 +248,7 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
   try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailed(error, baseChanged); }
   const result: BaseResult = { written: [], left: [] };
-  try { await writeBaseList(context.home, { tools: undo.tools, leftPlain: undo.leftPlain }); }
+  try { await writeBaseList(context.home, undo.list); }
   catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   for (const file of undo.files) {
     // The very file the save wrote, even if the tool now reads another (an override appeared since): that one is never touched.
@@ -238,13 +256,13 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
     const path = file.path;
     if (!snapshot || relative(snapshot.root, path).startsWith('..')) { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
     const current = await readText(path);
-    if (current === undefined || sha(current) !== file.after) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
+    if (current === undefined || sha(current) !== file.afterHash) { result.left.push({ tool: file.tool, why: 'edited' }); continue; }
     try {
       // A file this apply created goes again, exactly as it came: only while it still holds what was written.
       if (file.before === null) { await keep(context.home, file.tool, current); await removeFileChecked(path, current); }
       else await keepAndWrite(context.home, file.tool, path, file.before, current);
     } catch { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
-    result.written.push({ tool: file.tool, path, before: current, after: file.before === null ? '' : sha(file.before) });
+    result.written.push({ tool: file.tool, path, before: current, afterHash: file.before === null ? '' : sha(file.before) });
   }
   return result;
 }

@@ -571,7 +571,8 @@ async function practiceFlow() {
   await a.click('#base-edit');
   await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
   await a.click('#base-review'); await a.click('#base-save');
-  check('Taking every tool off leaves each file’s own text as it was', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude0 && readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8') === baseCodex0);
+  const codexAfter = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
+  check('Taking every tool off restores Claude Code’s own text and leaves Codex’s hand-edited copy where it is', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude0 && codexAfter.startsWith(baseCodex0) && codexAfter.includes('- Shared, edited in Codex.'), codexAfter);
   // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);

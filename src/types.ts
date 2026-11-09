@@ -375,6 +375,8 @@ export interface InstructionFile {
   nextStep: string;
   /** Earlier versions kept before each save, newest first. */
   versions: InstructionVersion[];
+  /** Other tools reading this same physical file (linked dotfiles): one destination for the base. */
+  sameFile: HarnessId[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares ('edited': it is neither the base nor an earlier base, so someone wrote in it). */
   base?: BaseHeld;
@@ -383,7 +385,7 @@ export interface InstructionFile {
 export interface BaseHeld {
   /** The tool is on the base list. */
   chosen: boolean;
-  /** Its copy: the same as the base, an older base, edited in the file ('edited': neither the base nor an earlier one), or none. */
+  /** Its copy: the same as the base, the older base Central Knot last wrote there, edited in the file (anything else), or none. */
   state: 'same' | 'older' | 'edited' | 'missing';
   own: string;
   copy?: string;
@@ -410,10 +412,17 @@ export interface BaseResult { stopped?: string; /** Stopped because the base or 
   left: { tool: HarnessId; why: 'edited' | 'failed' }[];
   /** Something after the files were written could not be finished, said with the result. */ problem?: string;
   undo?: BaseUndo }
-/** One file written: where, the text before (null: the write created it) and the hash after. */
-export interface BaseWritten { tool: HarnessId; path: string; before: string | null; after: string }
+/** One file written: where, the text before (null: the write created it) and the hash of the text after. */
+export interface BaseWritten { tool: HarnessId; path: string; before: string | null; afterHash: string }
+/**
+ * What Central Knot keeps beside base.md: which tools get the base; for each, the hash of the base copy it last wrote into that
+ * tool's file (a copy matching it but not the base is just older; anything else was edited there); and, for each tool taken off
+ * the list whose file then held nothing but the base, the hash of the plain text left there (only that exact text moves back
+ * into the block when the tool is added again).
+ */
+export interface BaseList { tools: HarnessId[]; written: Partial<Record<HarnessId, string>>; leftPlain: Partial<Record<HarnessId, string>> }
 /** Everything an apply changed, to put back: the base and its tools, and each file it wrote, by path. */
-export interface BaseUndo { text: string; tools: HarnessId[]; leftPlain: Partial<Record<HarnessId, string>>;
+export interface BaseUndo { text: string; list: BaseList;
   /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: BaseWritten[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */

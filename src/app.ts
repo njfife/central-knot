@@ -210,9 +210,8 @@ export function showPage(page: Page) {
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from. An editor with
   // nothing typed closes, so coming back shows the page from the top.
   if (state.page === 'instructions' && page !== 'instructions') {
-    const tool = state.instructionEdit, file = tool && state.instructions?.find(entry => entry.tool === tool.tool);
-    if (tool && file && (tool.restoring || tool.text === ownText(file))) state.instructionEdit = undefined;
-    if (state.baseEdit && state.baseEdit.source?.kind !== 'own' && !baseDraftChanged(state.baseEdit)) state.baseEdit = undefined;
+    if (!toolDraftTyped()) state.instructionEdit = undefined;
+    if (!baseDraftTyped()) state.baseEdit = undefined;
   }
   if (page === 'instructions') void loadInstructions();
   state.page = page;
@@ -326,7 +325,7 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -341,8 +340,22 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
   announce(state.outcome.text, true);
 });
 
-/** The base draft holds something the base doesn't: different text or a different choice of tools. */
-export const baseDraftChanged = (edit: BaseEdit) => edit.text !== (state.base?.text ?? '') || edit.tools.join() !== (state.base?.tools ?? []).join();
+/** Saving this base draft would change the base: other text or tools than saved. Blank text with no saved base is nothing yet. */
+const differsFromBase = (edit: BaseEdit) => {
+  const saved = state.base?.text ?? '';
+  if (!edit.text.trim() && !saved.trim()) return false;
+  return edit.text !== saved || edit.tools.join() !== (state.base?.tools ?? []).join();
+};
+/** Saving this base draft does something: it differs from the base, or it starts somewhere (a tool's text, a copy, a version). */
+export const baseSaveDoesSomething = (edit: BaseEdit) => differsFromBase(edit) || !!edit.source;
+/** The open base editor holds work someone typed or chose. A review that only shows something stored (an edited copy, an
+ *  earlier version, putting the base back, an update) holds none. */
+export const baseDraftTyped = () => { const edit = state.baseEdit; return !!edit && (!edit.source || edit.source.kind === 'own') && differsFromBase(edit); };
+/** The open tool editor holds typed changes to that tool's own text (a stored version under review holds none). */
+export const toolDraftTyped = () => {
+  const edit = state.instructionEdit, file = edit && state.instructions?.find(entry => entry.tool === edit.tool);
+  return !!edit && !!file && !edit.restoring && edit.text !== ownText(file);
+};
 
 /**
  * Whether the open editor (a tool's or the base's) holds typed changes. If so, it is asked about (Discard / Keep editing) and the
@@ -350,15 +363,15 @@ export const baseDraftChanged = (edit: BaseEdit) => edit.text !== (state.base?.t
  * holds nothing typed, so it gives way.
  */
 function askAboutOpenDraft(): boolean {
-  const tool = state.instructionEdit, file = tool && state.instructions?.find(entry => entry.tool === tool.tool);
-  if (tool && file && !tool.restoring && tool.text !== ownText(file)) {
+  const tool = state.instructionEdit;
+  if (tool && toolDraftTyped()) {
     Object.assign(tool, { confirmDiscard: true, stage: 'edit' });
-    rerender(); document.getElementById(`ins-discard-${tool.tool}`)?.focus(); return true;
+    rerender(); document.getElementById(`ins-keep-${tool.tool}`)?.focus(); return true;
   }
   const base = state.baseEdit;
-  if (base && (!base.source || base.source.kind === 'own') && baseDraftChanged(base)) {
+  if (base && baseDraftTyped()) {
     base.confirmDiscard = true;
-    rerender(); document.getElementById(base.stage === 'review' ? 'base-review-discard-yes' : 'base-discard')?.focus(); return true;
+    rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
   }
   return false;
 }
@@ -429,9 +442,14 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     // Changed since the review: the draft stays, now against the base and files as they are, and the review is shown again.
     if (state.baseEdit && result.changed) {
       Object.assign(state.baseEdit, { hash: state.base?.hash ?? '', stage: 'review', conflict: result.stopped });
-      // Putting the base back or updating files writes the base as it is: never an older text the base has since moved on from.
-      const kind = state.baseEdit.source?.kind;
+      // A draft that only carries something stored follows it: putting the base back or updating writes the base as it is now, and
+      // using an edited copy uses that copy as it is now (no longer edited there: nothing left to choose, so the review closes).
+      const { kind, tool } = state.baseEdit.source ?? {};
       if (state.base && (kind === 'putBack' || kind === 'update')) Object.assign(state.baseEdit, { text: state.base.text, tools: state.base.tools });
+      if (kind === 'copy') {
+        const held = tool && fileOf(tool)?.base;
+        if (held?.state === 'edited' && held.copy?.trim()) state.baseEdit.text = held.copy; else state.baseEdit = undefined;
+      }
     }
     return;
   }
@@ -449,11 +467,12 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
 
 const undoBaseChange = (undo: BaseUndo) => busy('Undoing…', async () => {
   // Said for what this undo puts back: the base only if the save changed it (Put back and Update change files alone).
-  const baseMoves = undo.text !== state.base?.text || undo.tools.join() !== state.base?.tools.join();
+  const baseMoves = undo.text !== state.base?.text || undo.list.tools.join() !== state.base?.tools.join();
   const result = await api().undoBase(undo, state.home!.home);
   await readInstructions();
   if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
   const back = result.written.map(entry => entry.tool);
+  if (!baseMoves && !back.length) { state.outcome = { page: 'instructions', text: `Nothing was undone.${leftText(result, true)}` }; announce(state.outcome.text, true); return; }
   const what = baseMoves ? `The base instructions are back as they were${back.length ? `, and so ${back.length === 1 ? 'is' : 'are'} ${fileNames(back)}` : ''}`
     : `${fileNames(back)} ${back.length === 1 ? 'is' : 'are'} back as ${back.length === 1 ? 'it was' : 'they were'}`;
   const shelves = [...(baseMoves ? ['the Base instructions card'] : []), ...back.map(tool => `${namedTools[tool]}’s card`)];

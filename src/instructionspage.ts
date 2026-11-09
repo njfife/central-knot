@@ -1,6 +1,6 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { baseDraftChanged, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { baseDraftTyped, loadInstructionVersion, ownText, toolDraftTyped, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { fileName, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -11,8 +11,6 @@ import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
-/** The base editor holds a change: tool editors wait until it is saved or dropped. */
-const baseDirty = () => !!state.baseEdit && baseDraftChanged(state.baseEdit);
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
 function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
@@ -174,9 +172,9 @@ function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
-  const otherDirty = (!!other && state.instructionEdit!.text !== ownText(other)) || baseDirty();
+  const otherDirty = (!!other && toolDraftTyped()) || baseDraftTyped();
   const readOnly = !!state.home && !state.home.manage.access.allowed;
-  const lockedWhy = readOnly ? 'Saving is off in this home.' : baseDirty() ? 'Finish or cancel the base instructions edit first.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
+  const lockedWhy = readOnly ? 'Saving is off in this home.' : baseDraftTyped() ? 'Finish or cancel the base instructions edit first.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const own = ownText(file);
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
@@ -195,7 +193,7 @@ function card(file: InstructionFile) {
         h('div.ins-actions', {},
           button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
-    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== own),
+    versionsList(file.versions, { id: version => `ins-load-${file.tool}-${version}`, disabled: !!state.busy || readOnly || otherDirty || (editing && toolDraftTyped()),
       why: editing ? 'Finish or cancel this edit first.' : lockedWhy, run: version => void loadInstructionVersion(file, version) }));
 }
 

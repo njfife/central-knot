@@ -405,6 +405,7 @@ const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
+const notOpenHome = 'The home on screen is not the one open. Nothing was saved. Read it again.';
 const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && ids(value).length === value.length;
 const isTool = (value: unknown): value is HarnessId => isTools([value]);
 /** An object keyed by tool ids whose every value passes `valid`. */
@@ -417,8 +418,9 @@ const isBaseApply = (value: unknown): value is BaseApply => {
 };
 const isBaseUndo = (value: unknown): value is BaseUndo => {
   const undo = value as BaseUndo;
-  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && isTools(undo.tools) && isToolMap(undo.leftPlain, (hash: unknown) => typeof hash === 'string') && Array.isArray(undo.files)
-    && undo.files.every(file => isTool(file?.tool) && typeof file.path === 'string' && typeof file.after === 'string' && (file.before === null || typeof file.before === 'string'));
+  const hashes = (value: unknown) => isToolMap(value, (hash: unknown) => typeof hash === 'string');
+  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && !!undo.list && isTools(undo.list.tools) && hashes(undo.list.written) && hashes(undo.list.leftPlain)
+    && Array.isArray(undo.files) && undo.files.every(file => isTool(file?.tool) && typeof file.path === 'string' && typeof file.afterHash === 'string' && (file.before === null || typeof file.before === 'string'));
 };
 
 function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
@@ -542,10 +544,10 @@ app.whenReady().then(async () => {
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool as HarnessId, text, expected)
-    : { stopped: 'The home on screen is not the one open. Nothing was saved. Read it again.' }));
+    : { stopped: notOpenHome }));
   handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId | 'base', id) : undefined));
   handle('instructions:base', async () => (current ? baseView(context()) : null));
-  const otherHome = { stopped: 'The home on screen is not the one open. Nothing was saved. Read it again.', written: [], left: [] };
+  const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'

@@ -9,8 +9,8 @@ const END = '<!-- Central Knot base instructions: end -->';
 const isMarker = (line: string, which: 'start' | 'end') => line.trimStart().startsWith(`<!-- Central Knot base instructions: ${which}`);
 
 /** Base text as a block holds it: ending in a line break. */
-const asLines = (text: string) => (text && !text.endsWith('\n') ? `${text}\n` : text);
-const markedBlock = (base: string) => `${START}\n${asLines(base)}${END}\n`;
+export const blockText = (text: string) => (text && !text.endsWith('\n') ? `${text}\n` : text);
+const markedBlock = (base: string) => `${START}\n${blockText(base)}${END}\n`;
 
 interface Located { before: string; copy: string; after: string }
 
@@ -36,38 +36,38 @@ export function splitBase(text: string): { own: string; copy?: string } {
 }
 
 /** Whether a file's copy says the same as this base (a missing final line break doesn't count). */
-export const sameBase = (copy: string | undefined, base: string) => copy !== undefined && asLines(copy) === asLines(base);
+export const sameBase = (copy: string | undefined, base: string) => copy !== undefined && blockText(copy) === blockText(base);
 
 /** The file with this base in it: an existing block is replaced where it stands; otherwise the block goes after the own text. */
 export function withBase(text: string, base: string): string {
   if (!base.trim()) return withoutBase(text);
   const found = locate(text);
   if (found) return found.before + markedBlock(base) + found.after;
-  return text.trim() ? `${asLines(text)}\n${markedBlock(base)}` : markedBlock(base);
+  return text.trim() ? `${blockText(text)}\n${markedBlock(base)}` : markedBlock(base);
 }
 
 /** The file with its own text replaced and its block (if any) kept as it is, after the own text. */
 export function withOwn(text: string, own: string): string {
   const found = locate(text);
   if (!found) return own;
-  return own.trim() ? `${asLines(own)}\n${markedBlock(found.copy)}` : markedBlock(found.copy);
+  return own.trim() ? `${blockText(own)}\n${markedBlock(found.copy)}` : markedBlock(found.copy);
 }
 
 /** The file without the block. If nothing of its own would be left, the base text stays as plain text, so the file is never emptied. */
 export function withoutBase(text: string): string {
   const { own, copy } = splitBase(text);
   if (copy === undefined) return text;
-  return own.trim() ? own : asLines(copy);
+  return own.trim() ? own : blockText(copy);
 }
 
 /**
- * What one tool's file becomes when `base` is saved: the block added or replaced (`chosen`), or taken out (not chosen). `held`
+ * What one tool's file becomes when `base` is saved (a plan, not a write): the block added or replaced (`chosen`), or taken out (not chosen). `held`
  * is how the file holds the base now. A copy edited in the file is left as it is (`edited`), chosen or not, unless the action is
  * 'putBack'. 'adopt': this file's own text became the base, so it moves into the block; plain base text Central Knot left in the
  * file (`held.leftPlain`) moves back the same way, so it is never repeated. The renderer previews with this and the main
  * process writes with it, so the review shows what is written.
  */
-export function baseWrite(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string; edited?: false } | { edited: true } {
+export function fileWithBase(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string; edited?: false } | { edited: true } {
   const { copy } = splitBase(text);
   if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { edited: true };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
