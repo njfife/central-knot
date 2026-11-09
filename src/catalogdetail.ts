@@ -136,12 +136,18 @@ async function section(root: string, folder: string, named: unknown, key: string
 /**
  * What one plugin holds, by name. Its marketplace entry and plugin.json may list component paths ("strict": false entries
  * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
+ * `manifest` is the plugin.json to read it by, when not Claude Code's own (Codex reads its .codex-plugin one instead).
  */
-export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginContents> {
-  const pluginJson = (await pluginManifest(folder, root)) ?? {};
-  // The marketplace entry wins over plugin.json, as the tools read it.
-  const declared = { ...pluginJson, ...entry };
-  const listed = (key: string) => strings(declared[key])?.map(path => resolve(folder, path));
+export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string,
+  manifest?: Record<string, unknown>): Promise<PluginContents> {
+  const own = manifest ?? (await pluginManifest(folder, root)) ?? {};
+  // As Claude Code reads them: the entry's fields fill in what plugin.json leaves out, but plugin.json's version wins, and
+  // the entry's skills, commands and agents are added to plugin.json's own lists (its default, "strict" mode).
+  const declared: Record<string, unknown> = { ...own, ...entry, version: own.version ?? entry.version };
+  const listed = (key: string) => {
+    const paths = [...(strings(own[key]) ?? []), ...(strings(entry[key]) ?? [])];
+    return own[key] === undefined && entry[key] === undefined ? undefined : paths.map(path => resolve(folder, path));
+  };
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');

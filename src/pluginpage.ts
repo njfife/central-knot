@@ -7,7 +7,7 @@ import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, installedVersion, limitNote, marketplaceHas, missingTools, offeredVersion, removableTools, unavailable } from './pluginstatus.ts';
+import { installed, installedVersion, limitNote, marketplaceHas, missingTools, offeredVersion, removableTools, sameText, unavailable } from './pluginstatus.ts';
 import { clearNotice, market, openLink, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -128,15 +128,13 @@ const holdersLine = (holders: FileCopy[]) => andList(holders.map(holder => (hold
 
 /**
  * The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's
- * isn't known). Line endings alone are no difference (see sameText).
+ * isn't known). Line endings alone are no difference (see sameText in pluginstatus.ts).
  */
 function differsIn(part: FilePart): FileCopy[] {
   const offered = part.copies.find(copy => copy.marketplace);
   return offered ? part.copies.filter(copy => !copy.marketplace && sameText(copy.text) !== sameText(offered.text)) : [];
 }
 
-/** Two copies of a file have the same text when they differ only in line endings (a Windows Git checkout writes CRLF). */
-const sameText = (text: string) => text.replace(/\r\n/g, '\n');
 
 /**
  * The line above one text of a part's file: the file, then who holds that text ("SKILL.md · Claude Code (1.1.0)"). When
@@ -145,10 +143,15 @@ const sameText = (text: string) => text.replace(/\r\n/g, '\n');
 const fileCaption = (kind: FileKind, holders: FileCopy[], distinct: number) =>
   `${fileKinds[kind].file} · ${distinct === 1 && holders.length > 1 ? 'the same in ' : ''}${holdersLine(holders)}`;
 
-/** Under a closed row's description: which tools' copies differ from the marketplace's, or nothing. */
-function differsNote(differs: FileCopy[]) {
-  if (!differs.length) return null;
-  return h('span.plugin-version-differs', {}, icon('circle-alert', 12), `${holdersLine(differs)} ${differs.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy`);
+/**
+ * Under a closed row's description: which tools' copies differ from the marketplace's; or, for a part the marketplace's
+ * copy doesn't have while its files were read (`offeredRead`), which tools have it ("Only in Claude Code (0.9.0)", as when
+ * a skill moved between releases). Nothing otherwise.
+ */
+function differsNote(part: FilePart, differs: FileCopy[], offeredRead: boolean) {
+  const note = (text: string) => h('span.plugin-version-differs', {}, icon('circle-alert', 12), text);
+  if (differs.length) return note(`${holdersLine(differs)} ${differs.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy`);
+  return offeredRead && !part.copies.some(copy => copy.marketplace) ? note(`Only in ${holdersLine(part.copies)}`) : null;
 }
 
 /**
@@ -170,12 +173,13 @@ function partIds(prefix: string) {
  * One group of skills, commands or agents. A row opens its file as written, in the view the Skills page gives a
  * standalone SKILL.md, each text named by who holds it, and a text that differs from the marketplace's in the warning
  * tone. A closed row says which tools' copies differ. A description stays at two lines, since the file holds it whole.
- * `owner` (the plugin's key) keeps what is opened its own; `idFor` gives each part its element id.
+ * `owner` (the plugin's key) keeps what is opened its own; `idFor` gives each part its element id; `offeredRead` says the
+ * marketplace's own copy was read (see differsNote).
  */
-function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind, parts: FilePart[]) {
+function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind, parts: FilePart[], offeredRead: boolean) {
   if (!parts.length) return null;
   return h('div.plugin-group', {}, h('h4', {}, `${fileKinds[kind].title} (${parts.length})`), h('ul.plugin-parts', {}, parts.map(part => {
-    const opened = `${owner}\u0000${part.key}`;
+    const opened = `${owner}\u0000${kind}\u0000${part.key}`;
     const open = market.opened.has(opened);
     const id = idFor(part.key);
     const differs = differsIn(part);
@@ -184,26 +188,29 @@ function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind
     return h(`li${open ? '.open' : ''}`, {},
       h('button.plugin-file-toggle', { type: 'button', id, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${label}`, onclick: () => toggleOpened(opened) },
         h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)),
-        h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(differs))),
+        h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(part, differs, offeredRead))),
       open ? h('div.plugin-file', {}, fileBlocks(`${id}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd, same: sameText })) : null);
   })));
 }
 
 /**
- * The plugin's parts by name, with what each says it does; skills, commands and agents open their files. `owner` (its
- * plugin key) keeps what is opened its own; `id` prefixes element ids.
+ * The plugin's parts by name, with what each says it does; skills, commands and agents open their files. What is opened
+ * is kept per plugin; element ids start with the marketplace's place in the list (`marketIndex`).
  */
-function contentsBlock(owner: string, id: string, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean, offered: string | undefined) {
+function contentsBlock(entry: MarketplaceView, marketIndex: number, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean, offered: string | undefined) {
+  const owner = pluginKey(entry.source, plugin.name);
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
   if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
   const files = (['skills', 'commands', 'agents'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
   const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
-  const idFor = partIds(id);
+  const idFor = partIds(`pfile-${marketIndex}`);
+  // A plugin whose files only a tool had (see marketplaces.ts) says so in `problem`; its marketplace copy wasn't read.
+  const offeredRead = !detail.problem;
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem) : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
-    ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts)),
+    ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, offeredRead)),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,
@@ -233,7 +240,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
     installPanel(view, entry, plugin, marketIndex, offered, components),
-    contentsBlock(pluginKey(entry.source, plugin.name), `pfile-${marketIndex}`, plugin, detail, reading, offered),
+    contentsBlock(entry, marketIndex, plugin, detail, reading, offered),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
     detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);
 }

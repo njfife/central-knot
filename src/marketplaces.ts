@@ -4,7 +4,7 @@
 import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { codexManifest, marketplacePage, pluginContents, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
+import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginManifest, readmeIn, sourceLabel } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
@@ -129,19 +129,20 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
-   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in. Its parts are found as its own
-   * plugin.json lists them (Codex's .codex-plugin one first, as Codex reads it), not as the marketplace's current entry
-   * does: that entry describes the release on offer, whose paths an older installed release may not have. Only an entry
-   * with "strict": false, whose parts the marketplace alone lists, is used. The detail request names just a source and a
-   * plugin, so the tools and their install states are read here again.
+   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in, as that tool reads it: Claude
+   * Code and Copilot CLI by the copy's own plugin.json with the marketplace entry's part lists added (paths a copy of
+   * another release doesn't have are simply not found); Codex by the one manifest it picks, its .codex-plugin one when the
+   * copy has it, without the entry. The detail request names just a source and a plugin, so the tools and their install
+   * states are read here again.
    */
   async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
     const tools = (await host.tools()).filter(tool => engine.pluginTools.includes(tool));
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const declared = item.entry?.strict === false ? item.entry : tool === 'codex-cli' ? (await codexManifest(state.path)) ?? {} : {};
-      const { skills, commands, agents } = await pluginContents(state.path, declared, state.path);
+      const codex = tool === 'codex-cli';
+      const manifest = codex ? (await codexManifest(state.path)) ?? (await pluginManifest(state.path)) ?? {} : undefined;
+      const { skills, commands, agents } = await pluginContents(state.path, codex ? {} : item.entry ?? {}, state.path, manifest);
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));

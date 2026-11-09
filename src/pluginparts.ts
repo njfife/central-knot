@@ -43,8 +43,7 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
-    const other = marketplaceHas(status.version, offered);
-    const version = status.version ? ` ${status.version}${other ? ` (${other.toLowerCase()})` : ''}` : '';
+    const version = status.version ? ` ${status.version}${marketplaceHas(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
     const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);

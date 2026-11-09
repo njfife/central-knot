@@ -21,11 +21,11 @@ test('Paths an entry or plugin.json lists are read instead of the default folder
     await put(join(root, 'config/hooks.json'), JSON.stringify({ hooks: { SessionStart: [], PreToolUse: [] } }));
     await put(join(root, 'config/servers.json'), JSON.stringify({ mcpServers: { files: { command: 'npx', args: ['-y', 'files-mcp'] } } }));
     const contents = await pluginContents(root, { source: './', strict: false, version: '1.0.0', skills: ['./skills/hello'], commands: ['./tools/notes.md'] }, root);
-    // Each part carries its whole file as written; the entry's version wins over plugin.json's, as the tools read it.
+    // Each part carries its whole file as written; plugin.json's version wins over the entry's, as Claude Code reads them.
     // Each part also says where it sits in the plugin, which is the same in every copy of it.
     assert.deepEqual(contents.skills, [{ name: 'hello', description: 'Says hello', text: '---\nname: hello\ndescription: Says hello\n---\n', path: join('skills', 'hello') }]);
     assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes', text: '---\ndescription: Takes notes\n---\n', path: join('tools', 'notes.md') }]);
-    assert.equal(contents.version, '1.0.0');
+    assert.equal(contents.version, '0.9.0');
     assert.deepEqual(contents.hooks, ['PreToolUse', 'SessionStart']);
     assert.deepEqual(contents.mcpServers, [{ name: 'files', runs: 'npx -y files-mcp' }]);
   } finally { await cleanup(); }

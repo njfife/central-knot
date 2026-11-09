@@ -225,10 +225,10 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // A path outside the marketplace, through a link or not, is not read.
     if (await inside(root, folder)) {
       plugin.folder = folder;
-      // The entry's version, else its plugin.json's: the counts' read gives it, or plugin.json alone is read.
+      // Its plugin.json's version, else the entry's, as Claude Code reads them; the counts' read gives it, else plugin.json is read.
       const contents = counts ? await pluginContents(folder, item, root) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
-      plugin.version ??= contents ? contents.version : text((await pluginManifest(folder, root))?.version) || undefined;
+      plugin.version = (contents ? contents.version : text((await pluginManifest(folder, root))?.version) || undefined) ?? plugin.version;
     }
   }
   return plugin;
@@ -339,9 +339,12 @@ async function copyVersion(recorded: unknown, path: string, codex = false): Prom
   return undefined;
 }
 
-/** A semantic version's parts ("1.2.0-rc.1" gives [1, 2, 0] and ["rc", "1"]), or undefined when it isn't one. */
+/**
+ * A semantic version's parts ("1.2.0-rc.1" gives [1, 2, 0] and ["rc", "1"]), or undefined when it isn't strictly one, as
+ * Codex parses it: no leading "v", no leading zeros. (Comparing for display is looser: see pluginstatus's releaseOf.)
+ */
 function semver(version: string): { core: number[]; pre: string[] } | undefined {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
   return match ? { core: [Number(match[1]), Number(match[2]), Number(match[3])], pre: match[4]?.split('.') ?? [] } : undefined;
 }
 

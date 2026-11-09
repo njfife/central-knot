@@ -140,10 +140,13 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./old'] }));
     await put(join(copy, 'old/SKILL.md'), '---\nname: pdf\ndescription: older\n---\n');
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'pdf@team': [{ scope: 'user', installPath: copy, version: '0.9.0' }] } }));
-    // Codex has it too, from a .codex-plugin/plugin.json that lists a folder of its own.
+    // Codex has it too. It reads only its own .codex-plugin/plugin.json, which lists no skills, so the default folder:
+    // not the folder Claude Code's plugin.json in the same copy lists.
     const codexCopy = join(box.home, '.codex/plugins/cache/team/pdf/1.0.0');
-    await put(join(codexCopy, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: './codex-skills' }));
-    await put(join(codexCopy, 'codex-skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for codex\n---\n');
+    await put(join(codexCopy, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'pdf' }));
+    await put(join(codexCopy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./claude-skills'] }));
+    await put(join(codexCopy, 'skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for codex\n---\n');
+    await put(join(codexCopy, 'claude-skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for claude\n---\n');
     await put(join(box.home, '.codex/config.toml'), '[plugins."pdf@team"]\nenabled = true\n');
     const installed = (await box.markets.detail(root, 'pdf'))?.installed;
     assert.deepEqual([installed?.['claude-cli']?.version, installed?.['claude-cli']?.skills.map(skill => skill.description), installed?.['codex-cli']?.skills.map(skill => skill.description)],
@@ -152,7 +155,12 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     const after = await box.markets.forget(root);
     assert.equal(after.marketplaces.length, 0);
     assert.ok(!box.calls.some(call => call.startsWith('uninstall')), 'nothing was uninstalled');
-    // A plugin the marketplace can't give files for (an npm package) is read from the tool that installed it.
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin the marketplace can’t give files for (an npm package) is read from the tool that installed it', async () => {
+  const box = await setup();
+  try {
     const external = join(box.base, 'external');
     await put(join(external, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ext', plugins: [{ name: 'tool', source: { source: 'npm', package: 'some-tool' } }] }));
     const npmCopy = join(box.home, '.claude/plugins/cache/ext/tool/1.0.0');

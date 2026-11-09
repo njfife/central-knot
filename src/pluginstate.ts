@@ -104,7 +104,8 @@ function readShown(): void {
 function showView(view: PluginsView | null | undefined, { replace = false } = {}): void {
   if (view || replace) market.view = view ?? undefined;
   // A new view carries new install states, and a plugin's contents include each tool's installed copy: read them again.
-  // (A read still on its way is dropped when it lands: its placeholder is gone.)
+  // (A read still on its way is dropped when it lands: its placeholder is gone.) Until the new read lands, a plugin's
+  // contents and a remote plugin's version are briefly blank; that is the price of never showing a copy a tool let go.
   if (view || replace) market.details.clear();
   prune(market.draft, market.view);
   settleNav();
