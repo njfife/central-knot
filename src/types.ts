@@ -75,6 +75,12 @@ export interface DesktopApi {
   setSync(on: boolean): Promise<HomeView | null>;
   syncNow(home: string): Promise<HomeView | null>;
   onSyncChanged(callback: () => void): void;
+  /** Central Knot's own settings (how the app looks), as stored by the main process. */
+  getSettings(): Promise<AppPreferences>;
+  /** Sets the appearance; the window follows at once. Returns the settings as saved. */
+  setAppearance(appearance: Appearance): Promise<AppPreferences>;
+  /** The main process asks for a page (the Settings… menu item). */
+  onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
@@ -368,3 +374,9 @@ export interface InstructionFile {
 }
 
 export interface InstructionSave { stopped?: string; saved?: boolean }
+
+/** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
+export type Appearance = 'system' | 'light' | 'dark';
+/** Central Knot's own settings, shown on its Settings page. */
+export interface AppPreferences { appearance: Appearance }
+

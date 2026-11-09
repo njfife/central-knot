@@ -15,7 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { ApplyResult, Change, HarnessId, HomeMode, HomeView, Snapshot, ClaudeWrite } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
@@ -89,7 +89,7 @@ async function saveSyncSetting(on: boolean) {
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 async function loadAppSettings() { try { appSettings = JSON.parse(await readFile(appSettingsPath(), 'utf8')) ?? {}; } catch { appSettings = {}; } }
@@ -99,6 +99,22 @@ async function saveAppSettings(change: Partial<AppSettings>) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(appSettingsPath(), `${JSON.stringify(appSettings, null, 2)}\n`);
 }
+const appearances: Appearance[] = ['system', 'light', 'dark'];
+const preferences = (): AppPreferences => ({ appearance: appSettings.appearance ?? 'system' });
+/**
+ * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
+ * light and dark styles follow it; the window's own background (seen while it draws) follows too.
+ */
+function applyAppearance() {
+  nativeTheme.themeSource = preferences().appearance;
+  if (window && !window.isDestroyed()) window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc');
+}
+/** Shows the window on one of its pages (the Settings… menu item). */
+function showPage(page: string) {
+  showWindow();
+  if (window && !window.isDestroyed()) window.webContents.send('navigate', page);
+}
+
 /** A login item is registered only for an installed app, so a test or dev build never adds itself to sign-in. */
 const canStartAtSignIn = () => app.isPackaged && !smoke && (process.platform !== 'darwin' || app.getPath('exe').startsWith('/Applications/'));
 function applySignIn() {
@@ -136,6 +152,7 @@ function statusLine() {
 function trayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open Central Knot', click: showWindow },
+    { label: 'Settings…', click: () => showPage('settings') },
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen, click: showWindow },
@@ -173,6 +190,7 @@ function appMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: app.name, submenu: [
       { role: 'about' },
+      { label: 'Settings…', accelerator: 'Command+,', click: () => showPage('settings') },
       // The same status line as the menu bar menu: where, and any news.
       { label: statusLine(), enabled: unseen, click: showWindow },
       { type: 'separator' },
@@ -456,9 +474,17 @@ app.whenReady().then(async () => {
   if (!primary) return;
   await loadSyncSetting();
   await loadAppSettings();
+  applyAppearance();
   await firstSignIn();
   makeTray();
   createWindow(!smoke && !startedHidden());
+  handle('settings:get', async () => preferences());
+  handle('settings:appearance', async appearance => {
+    if (!appearances.includes(appearance as Appearance)) throw new Error('Invalid appearance.');
+    await saveAppSettings({ appearance: appearance as Appearance });
+    applyAppearance();
+    return preferences();
+  });
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');

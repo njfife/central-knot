@@ -1,5 +1,6 @@
 import { packager } from '@electron/packager';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 
 if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the selected Mac, not a cross-platform stand-in.');
@@ -20,10 +21,13 @@ const notarize = !!identity && process.env.CK_NOTARIZE !== '0';
 if (release && !identity) throw new Error('No “Developer ID Application” certificate in this Mac’s keychain, so a release can’t be signed.');
 if (release && !notarize) throw new Error('A release must be notarized; CK_NOTARIZE=0 is only for local tries.');
 
+// The version is package.json's: a release bumps it there and nowhere else.
+const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+
 await mkdir('release', { recursive: true });
 const packages = await packager({
   dir: '.', out: 'release', name: 'Central Knot', executableName: 'Central Knot',
-  appBundleId: 'com.centralknot.firstlook', appVersion: '0.3.0', platform: 'darwin', arch: 'arm64',
+  appBundleId: 'com.centralknot.firstlook', appVersion: version, platform: 'darwin', arch: 'arm64',
   asar: true, overwrite: true, prune: true,
   // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
   ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
@@ -41,6 +45,6 @@ if (notarize) {
   execFileSync('/usr/bin/xcrun', ['stapler', 'validate', bundle], { stdio: 'inherit' });
   execFileSync('/usr/sbin/spctl', ['--assess', '--type', 'execute', '--verbose', bundle], { stdio: 'inherit' });
 }
-const archive = 'release/Central-Knot-0.3.0-mac-arm64.zip';
+const archive = `release/Central-Knot-${version}-mac-arm64.zip`;
 execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, archive]);
 console.log(`Package: ${archive} (${identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc'})`);

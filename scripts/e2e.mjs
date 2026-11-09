@@ -540,6 +540,20 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
+  await a.click('#nav-settings');
+  const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);
+  check('Settings shows the three appearances, System chosen', await a.exists('#appearance-system[aria-checked="true"]') && await a.exists('#appearance-light') && await a.exists('#appearance-dark'));
+  await a.click('#appearance-dark');
+  await wait(200);
+  check('Dark makes the page dark', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]'));
+  await a.shot('settings-dark');
+  await a.click('#appearance-light');
+  await wait(200);
+  check('Light makes the page light', await dark() === false);
+  await a.shot('settings-light');
+  await a.click('#appearance-system');
+  check('System can be chosen again', await a.exists('#appearance-system[aria-checked="true"]'));
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
