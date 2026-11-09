@@ -23,6 +23,8 @@ export interface SwitchItem {
   tools: Partial<Record<HarnessId, 'on' | 'off'>>;
   /** Tools whose switch can't be used (its settings file can't be read), with why. Their copy counts as on. */
   blocked: Partial<Record<HarnessId, string>>;
+  /** For those tools, the settings file that can't be used. */
+  blockedFile: Partial<Record<HarnessId, string>>;
 }
 
 function toItem(kind: ItemKind, facts: SkillFacts): SwitchItem {
@@ -33,7 +35,7 @@ function toItem(kind: ItemKind, facts: SkillFacts): SwitchItem {
     if (problem) blocked[tool] = problem;
     tools[tool] = !problem && facts.disabled?.includes(tool) ? 'off' : 'on';
   }
-  return { id: itemId(kind, facts.key), kind, key: facts.key, name: facts.name, description: facts.description, tools, blocked };
+  return { id: itemId(kind, facts.key), kind, key: facts.key, name: facts.name, description: facts.description, tools, blocked, blockedFile: facts.switchFile ?? {} };
 }
 
 /** Every standalone skill and MCP server the home has. A server that belongs to an app (ChatGPT desktop's own) is left out. */

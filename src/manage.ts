@@ -8,7 +8,7 @@ import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import { isDisabled, readSwitchFile, setDisabled, type SwitchTarget } from './skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled, targetOf, type SwitchTarget } from './skillswitch.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
@@ -78,7 +78,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
   for (const entry of map.values()) {
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) {
       const file = switches.get(tool)!;
-      if (file.problem) (entry.facts.switchProblem ??= {})[tool] = file.problem;
+      if (file.problem) { (entry.facts.switchProblem ??= {})[tool] = file.problem; (entry.facts.switchFile ??= {})[tool] = file.path; }
       else if (isDisabled(context, tool, file, switchTarget(context, entry, tool)!)) (entry.facts.disabled ??= []).push(tool);
     }
   }
@@ -116,7 +116,7 @@ const skillAt = (entry: Gathered, tool: HarnessId) => entry.skills[tool]?.find(s
  */
 function switchTarget(context: ShareContext, entry: Gathered, tool: HarnessId, placed = false): SwitchTarget | undefined {
   const copy = entry.facts.copies[tool];
-  if (copy) return { folder: copy.folder, name: skillAt(entry, tool)?.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
+  if (copy) return targetOf(copy, skillAt(entry, tool)?.name ?? copy.folder);
   if (!placed) return undefined;
   return { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(rootOf(context, tool), entry.facts.name, 'SKILL.md') };
 }

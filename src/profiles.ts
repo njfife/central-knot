@@ -11,7 +11,7 @@ import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { driftOf, itemId, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { switchPath, switchState, withSwitch, type SwitchTarget } from './skillswitch.ts';
+import { switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
 import { strings } from './values.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileFlip, ProfileSwitchResult, ProfilesView, Snapshot } from './types.ts';
 
@@ -51,8 +51,10 @@ async function writable(context: ShareContext): Promise<string | undefined> {
   return gate.state === 'stopped' ? gate.reason : undefined;
 }
 
-/** Adds a profile, or changes one's name or items. Names are unique, ignoring case. */
-/** `restore`: `id` is a deleted profile's, made again as it was (Undo of Delete), so History's switches still name it. */
+/**
+ * Adds a profile, or changes one's name or items. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
+ * made again with that id (Undo of Delete), so History's switches still name it.
+ */
 export async function saveProfile(context: ShareContext, input: { id?: string; name: string; items: string[]; restore?: boolean }): Promise<{ problem?: string; id?: string }> {
   const stop = await writable(context);
   if (stop) return { problem: stop };
@@ -65,7 +67,7 @@ export async function saveProfile(context: ShareContext, input: { id?: string; n
   const items = [...new Set(input.items.filter(item => /^(skill|mcp):./.test(item)))];
   const existing = input.id ? view.profiles.find(profile => profile.id === input.id) : undefined;
   if (input.id && !existing && !input.restore) return { problem: 'That profile is gone. Nothing was saved.' };
-  const id = existing?.id ?? randomUUID();
+  const id = existing?.id ?? (input.restore ? input.id : undefined) ?? randomUUID();
   view.profiles = existing ? view.profiles.map(profile => (profile.id === id ? { id, name, items } : profile)) : [...view.profiles, { id, name, items }];
   await saveProfiles(context.home, view);
   return { id };
@@ -108,7 +110,7 @@ function skillTarget(snapshots: Snapshot[], manage: Awaited<ReturnType<typeof ma
   const copy = manage.skills.find(skill => skill.key === key)?.copies[tool];
   if (!copy) return undefined;
   const skill = snapshots.find(snapshot => snapshot.harness === tool)?.skills.find(entry => entry.directory === copy.directory);
-  return { folder: copy.folder, name: skill?.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
+  return targetOf(copy, skill?.name ?? copy.folder);
 }
 
 /** What a switch reads once: each tool's skills (to name a copy for its switch), and every item with its switches now. */
@@ -205,6 +207,14 @@ function heldAfterFlips(held: Record<string, HarnessId[]>, done: ProfileFlip[]):
   return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.size).map(([id, tools]) => [id, [...tools]]));
 }
 
+/**
+ * The plan's holds, which assume every flip was made, corrected for the flips that failed and left their switch as it was: a
+ * failed turn-off isn't held, and a failed turn-on is still held.
+ */
+export function heldAfterFailures(planned: Record<string, HarnessId[]>, failed: ProfileFlip[]): Record<string, HarnessId[]> {
+  return heldAfterFlips(planned, failed.map(flip => ({ ...flip, disabled: !flip.disabled })));
+}
+
 /** History keys every profile switch with this; Undo finds switches by their kind, 'profile'. */
 const SWITCH_KEY = 'profiles:switch';
 
@@ -224,10 +234,7 @@ export async function switchProfile(context: ShareContext, id: string | null): P
   results.push(...plan.blocked.map(entry => ({ item: entry.name, harness: entry.tool, outcome: 'held' as const, message: entry.reason })));
   const before = profiles.active;
   profiles.active = target?.id;
-  // The plan's holds assume every flip was made. One that failed left its switch as it was: a failed turn-off isn't held, and a
-  // failed turn-on is still held, which is the plan's holds with that flip turned around.
-  const failed = plan.flips.filter(flip => !done.includes(flip));
-  profiles.held = heldAfterFlips(plan.held, failed.map(flip => ({ ...flip, disabled: !flip.disabled })));
+  profiles.held = heldAfterFailures(plan.held, plan.flips.filter(flip => !done.includes(flip)));
   await saveProfiles(context.home, profiles);
   if (!done.length && before === profiles.active) return { results, flips: done };
   const fromName = profiles.profiles.find(profile => profile.id === before)?.name;
@@ -255,7 +262,9 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   const results: DestinationResult[] = [];
   const back: ProfileFlip[] = [];
   for (const flip of past.profile.flips) {
-    const now = home.items.find(item => item.id === flip.item)?.tools[flip.tool];
+    const item = home.items.find(entry => entry.id === flip.item);
+    if (item?.blocked[flip.tool]) { results.push({ item: flip.name, harness: flip.tool, outcome: 'held', message: item.blocked[flip.tool]! }); continue; }
+    const now = item?.tools[flip.tool];
     // Changed since (turned back by hand, or the copy is gone): left as it is now.
     if (now !== (flip.disabled ? 'off' : 'on')) { results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: now ? `Already ${now} in ${harnesses[flip.tool].name}.` : `${harnesses[flip.tool].name} has no copy of it now.` }); continue; }
     back.push({ ...flip, disabled: !flip.disabled });

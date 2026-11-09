@@ -243,7 +243,10 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
   if (past?.kind === 'profile') {
-    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${past.profile?.fromName ?? 'No profile'} is the profile again${result.harnessWrites ? `; ${plural(result.harnessWrites, 'switch', 'switches')} put back` : ''}. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
+    // Said from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch chose.
+    const inUse = state.home?.profiles.profiles.find(profile => profile.id === state.home?.profiles.active)?.name ?? 'No profile';
+    const put = result.harnessWrites ? `${plural(result.harnessWrites, 'switch', 'switches')} put back` : 'no switch needed putting back';
+    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${put}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
     return;
   }

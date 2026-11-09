@@ -168,7 +168,9 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     const result = await switchProfile(context(), id);
     if (!result.stopped && window && !window.isDestroyed()) window.webContents.send('profile:switched', id === null ? 'No profile' : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
     // What could not be switched is told on the page, like a background pass's failures.
-    for (const entry of [...result.results.filter(item => item.outcome === 'failed'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
+    // The page shows the switch's result (failures included) when the window is there; otherwise they wait with sync's.
+    const page = window && !window.isDestroyed();
+    for (const entry of [...(page ? [] : result.results.filter(item => item.outcome === 'failed')), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
     lastProfiles = await readProfiles(current.home);
     // Whatever could not be switched still differs: the menu keeps saying so until it is applied.
     lastDrift = await driftNow(context());

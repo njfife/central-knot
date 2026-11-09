@@ -5,11 +5,10 @@
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)
 //   Pi           mcp.json       "mcpServers": { "<name>": { "enabled": false } }    (1.5.0: `pi mcp list` shows it disabled)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
-import { errorCode, type ShareContext } from './share.ts';
-import { list, parseJson, switchPath } from './skillswitch.ts';
+import type { ShareContext } from './share.ts';
+import { list, parseJson, readSettingsFile, switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 
@@ -22,14 +21,8 @@ export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
 }
 
 /** Each tool's MCP switch file as read ('' when there is none yet), or why it can't be used. */
-export async function readMcpSwitches(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, { text: string; problem?: string }>> {
-  return new Map(await Promise.all(tools.map(async tool => {
-    const path = mcpSwitchPath(context, tool);
-    let text = '';
-    try { text = await readFile(path, 'utf8'); } catch (error) { if (errorCode(error) !== 'ENOENT') return [tool, { text, problem: `${path} could not be read, so servers can’t be turned off in ${harnesses[tool].name}.` }] as const; }
-    try { mcpDisabled(tool, text, ''); } catch { return [tool, { text, problem: `${path} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so servers can’t be turned off in ${harnesses[tool].name}.` }] as const; }
-    return [tool, { text }] as const;
-  })));
+export async function readMcpSwitches(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, SwitchFile>> {
+  return new Map(await Promise.all(tools.map(async tool => [tool, await readSettingsFile(mcpSwitchPath(context, tool), text => mcpDisabled(tool, text, ''), `servers can’t be turned off in ${harnesses[tool].name}`)] as const)));
 }
 
 const deniesByName = (entry: unknown, name: string) => !!entry && typeof entry === 'object' && (entry as Record<string, unknown>).serverName === name;

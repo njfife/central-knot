@@ -162,7 +162,7 @@ function notes(list: SwitchItem[], view: TableView) {
   for (const tool of tools()) {
     const blocked = list.filter(item => item.blocked[tool]);
     if (!blocked.length) continue;
-    const files = [...new Set(blocked.flatMap(item => item.blocked[tool]!.match(/\S+\.(?:json|toml)\b/g) ?? []))];
+    const files = [...new Set(blocked.flatMap(item => item.blockedFile[tool] ?? []))];
     const kinds = [...new Set(blocked.map(item => (item.kind === 'mcp' ? 'MCP servers' : 'skills')))].join(' and ');
     lines.push(h('li', {}, icon('circle-alert', 14, 'tone-warning'), h('span', {}, h('strong', {}, `${named(tool)}: `), `its settings can’t be read right now, so its ${kinds} can’t be switched. Central Knot doesn’t change ${files.length === 1 ? 'that file' : 'those files'}.`,
       files.map(file => h('span.pf-note-path', { title: file }, shownPath(file))))));

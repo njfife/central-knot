@@ -8,7 +8,7 @@ import { applyChanges, readHistory } from '../src/manage.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { planSwitch, type SwitchItem } from '../src/profileplan.ts';
-import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
+import { deleteProfile, heldAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -37,7 +37,7 @@ test('Each tool’s MCP switch: off writes its own form, on takes it out, and ev
   }
 });
 
-const item = (id: string, tools: SwitchItem['tools'], blocked: SwitchItem['blocked'] = {}): SwitchItem => ({ id, kind: id.startsWith('mcp:') ? 'mcp' : 'skill', key: id.slice(id.indexOf(':') + 1), name: id, description: '', tools, blocked });
+const item = (id: string, tools: SwitchItem['tools'], blocked: SwitchItem['blocked'] = {}): SwitchItem => ({ id, kind: id.startsWith('mcp:') ? 'mcp' : 'skill', key: id.slice(id.indexOf(':') + 1), name: id, description: '', tools, blocked, blockedFile: {} });
 
 test('A switch turns off what the profile leaves out, and back on only what a profile turned off', () => {
   const items = [
@@ -55,6 +55,8 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
   assert.deepEqual(none.held, {});
+  // A flip that failed leaves its switch as it was: a failed turn-off isn't held, a failed turn-on still is.
+  assert.deepEqual(heldAfterFailures({ 'skill:a': ['claude-cli'], 'mcp:b': [] }, [{ item: 'skill:a', name: 'a', tool: 'claude-cli', disabled: true }, { item: 'mcp:b', name: 'b', tool: 'codex-cli', disabled: false }]), { 'mcp:b': ['codex-cli'] });
   // A hold whose tool can't be read, or has no copy right now, is kept: once it reads again it is still the profile's.
   const unreadable = [item('skill:pager', { 'claude-cli': 'on' }, { 'claude-cli': 'unreadable' })];
   assert.deepEqual(planSwitch(unreadable, undefined, { 'skill:pager': ['claude-cli', 'codex-cli'] }).held, { 'skill:pager': ['claude-cli', 'codex-cli'] });
@@ -129,6 +131,10 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
     const after = await readProfiles(box.home);
     assert.equal(after.active, pager);
     assert.deepEqual(after.held, { 'skill:dev': ['claude-cli', 'codex-cli'] });
+    // Undo of Delete makes Development again with its own id, so History's switches still name it.
+    await deleteProfile(box.context, dev);
+    await saveProfile(box.context, { id: dev, name: 'Development', items: ['skill:dev'], restore: true });
+    assert.equal((await readProfiles(box.home)).profiles.find(profile => profile.name === 'Development')?.id, dev);
   } finally { await box.cleanup(); }
 });
 

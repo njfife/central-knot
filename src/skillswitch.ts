@@ -15,6 +15,9 @@ import type { HarnessId } from './types.ts';
 /** One tool's copy of a skill, as its switch names it. */
 export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
+/** How a tool's switch names its copy of a skill: the copy's folder, the skill's name as the tool reads it, and its SKILL.md. */
+export const targetOf = (copy: { folder: string; directory: string }, name: string): SwitchTarget => ({ folder: copy.folder, name, skillFile: join(copy.directory, 'SKILL.md') });
+
 /** One tool's switch file as read: its text ('' when there is none yet), or why it can't be used. */
 export interface SwitchFile { path: string; text: string; exists: boolean; problem?: string }
 
@@ -25,15 +28,22 @@ export const switchPath = (context: ShareContext, tool: HarnessId) => join(rootO
 
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
-  const path = switchPath(context, tool);
+  return readSettingsFile(switchPath(context, tool), text => switchState(context, tool, text, { folder: '', name: '', skillFile: '' }), `Disable can’t be used in ${harnesses[tool].name}`);
+}
+
+/**
+ * Reads a settings file a switch lives in (skills' here, MCP servers' in mcpswitch.ts): '' when there is none yet. A file that
+ * can't be read, or that `check` throws on (not the tool's format), comes with a problem ending in `consequence`, and is never written.
+ */
+export async function readSettingsFile(path: string, check: (text: string) => void, consequence: string): Promise<SwitchFile> {
   let text: string;
   try { text = await readFile(path, 'utf8'); } catch (error) {
-    return errorCode(error) === 'ENOENT' ? { path, text: '', exists: false } : { path, text: '', exists: true, problem: `${path} could not be read, so Disable can’t be used in ${harnesses[tool].name}.` };
+    return errorCode(error) === 'ENOENT' ? { path, text: '', exists: false } : { path, text: '', exists: true, problem: `${path} could not be read, so ${consequence}.` };
   }
-  try { switchState(context, tool, text, { folder: '', name: '', skillFile: '' }); }
+  try { check(text); }
   catch (error) {
-    const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}`;
-    return { path, text, exists: true, problem: `${path} ${why}, so Disable can’t be used in ${harnesses[tool].name}.` };
+    const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `could not be read as ${path.endsWith('.toml') ? 'TOML' : 'JSON'}`;
+    return { path, text, exists: true, problem: `${path} ${why}, so ${consequence}.` };
   }
   return { path, text, exists: true };
 }

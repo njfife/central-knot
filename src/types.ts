@@ -171,6 +171,8 @@ export interface SkillFacts {
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used (its settings file can't be read or is in a form Central Knot doesn't edit). */
   switchProblem?: Partial<Record<HarnessId, string>>;
+  /** Skills and MCP servers: the settings file each of those tools' switch is in. */
+  switchFile?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ManageView {

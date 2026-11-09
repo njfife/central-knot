@@ -297,9 +297,11 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     const disabled = entries.filter(entry => { const file = switches.get(entry.tool); return !!file && !file.problem && mcpDisabled(entry.tool, file.text, name); }).map(entry => entry.tool);
-    const switchProblem = Object.fromEntries(entries.flatMap(entry => { const problem = switches.get(entry.tool)?.problem; return problem ? [[entry.tool, problem]] : []; }));
+    const unusable = entries.filter(entry => switches.get(entry.tool)?.problem);
+    const switchProblem = Object.fromEntries(unusable.map(entry => [entry.tool, switches.get(entry.tool)!.problem!]));
+    const switchFile = Object.fromEntries(unusable.map(entry => [entry.tool, switches.get(entry.tool)!.path]));
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
-      ...(disabled.length ? { disabled } : {}), ...(Object.keys(switchProblem).length ? { switchProblem } : {}) });
+      ...(disabled.length ? { disabled } : {}), ...(unusable.length ? { switchProblem, switchFile } : {}) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
 }
