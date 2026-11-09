@@ -564,7 +564,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           const id = event({ key, item: name, kind: 'deleted', winner: { tool: deletions[0].tool, hash: baseline }, losers: lost, orderProved: true, previous: baseline });
           notices.push({ key, item: name, kind: 'deleted', winner: deletions[0].tool, losers: removed, orderProved: true, history: id });
-          item.copies = leftover;
+          item.copies = [...leftover, ...item.copies.filter(copy => copy.status === 'written' && !entry.locations.some(location => location.copy.directory === copy.directory) && !deletions.some(gone => gone.directory === copy.directory)).map(copy => ({ ...copy, status: 'removing' as const }))];
           item.state = 'dont-share';
           item.deleted = { at: new Date(now).toISOString(), tool: deletions[0].tool, hash: baseline };
           deletedNow.add(key);
@@ -654,7 +654,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', caughtUp: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
         }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
@@ -750,14 +750,15 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // A folder made again since (a reset or reinstall) holds a new install: the old deletion has no say over it.
       // A skill put back by hand in another tool since is wanted again: the old deletion stops.
       if (deletedNow.has(key)) continue;
-      const readded = gathered.get(key)?.locations.some(location => !item.copies.some(copy => sameDir(copy.directory, location.copy.directory)));
+      const readded = gathered.get(key)?.locations.some(location => !item.off?.includes(location.tool) && !item.copies.some(copy => sameDir(copy.directory, location.copy.directory)));
       for (const copy of item.copies.filter(entry => entry.status === 'removing')) {
-        if (resetRoots.has(dirname(copy.directory)) || readded) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
+        const elsewhere = !ownRoots(context, copy.harness).some(root => sameDir(dirname(copy.directory), root));
+        if (resetRoots.has(dirname(copy.directory)) || readded || elsewhere) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
         try {
           if ((await readTree(copy.directory)).hash === copy.hash) { await removeChecked(context, copy.directory, copy.hash); writes++; results.push({ item: item.name, harness: copy.harness, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' }); }
           item.copies = item.copies.filter(entry => entry !== copy);
         } catch (error) {
-          if (errorCode(error) === 'ENOENT') item.copies = item.copies.filter(entry => entry !== copy);
+          if (errorCode(error) === 'ENOENT' && await folderExists(dirname(copy.directory))) item.copies = item.copies.filter(entry => entry !== copy);
         }
       }
       // A managed skill gone from every tool at once (an uninstaller, or while the app was closed) is a deletion once settled,
@@ -1103,7 +1104,7 @@ export async function deleteEverywhere(context: ShareContext, key: string, resum
       results.push({ item: item.name, harness: location.tool, outcome: 'removed', message: 'Deleted. Restore it from History.' });
     }
     const hash = item.hash || lost[0]?.hash || '';
-    item.copies = leftover;
+    item.copies = [...leftover, ...item.copies.filter(copy => copy.status === 'written' && !entry.locations.some(location => location.copy.directory === copy.directory)).map(copy => ({ ...copy, status: 'removing' as const }))];
     item.state = 'dont-share';
     item.deleted = { at: new Date(clock(context)).toISOString(), tool: lost[0]?.tool ?? 'claude-cli', hash };
     await saveRecord(context.home, record);

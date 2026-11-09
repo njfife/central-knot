@@ -118,15 +118,17 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   if (!result.stopped) { onDone(); retireTip('skills'); }
   const managed = changes.filter(change => change.managed).length;
   // History holds what Apply all replaced; new copies are undone by turning Managed off, which leaves them in place.
-  const replacedSome = result.results.some(entry => entry.replaced);
+  const names = new Set(changes.map(change => state.home?.manage.skills.find(skill => skill.key === change.key)?.name ?? change.key));
+  const ours = result.results.filter(entry => names.has(entry.item));
+  const replacedSome = ours.some(entry => entry.replaced);
   // Say what was added and what was replaced, apart: only a replacement is kept in History.
   const order = Object.values(namedTools);
-  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && !!entry.replaced === replaced).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const writtenTo = (replaced: boolean) => [...new Set(ours.filter(entry => entry.outcome === 'written' && !entry.caughtUp && !!entry.replaced === replaced).map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean).sort((a, b) => order.indexOf(a) - order.indexOf(b));
   const added = writtenTo(false), replacedIn = writtenTo(true);
   const single = managed === 1 ? changes.find(change => change.managed)?.key : undefined;
   const singleName = single ? state.home?.manage.skills.find(skill => skill.key === single)?.name ?? single : undefined;
   // The result matches the bar before it: how many new copies, and of which skills.
-  const newCopies = result.results.filter(entry => entry.outcome === 'written' && !entry.replaced);
+  const newCopies = ours.filter(entry => entry.outcome === 'written' && !entry.replaced && !entry.caughtUp);
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.

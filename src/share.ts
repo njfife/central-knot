@@ -222,38 +222,36 @@ export async function writeFileChecked(path: string, text: string, expected: str
   try { mode = (await stat(path)).mode & 0o777; } catch { /* new file */ }
   const temporary = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.tmp`);
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
-  let parkedThere = false;
+  let replaced = false;
   await writeFile(temporary, text, { mode });
   try {
     if (expected !== undefined) {
-      try { await rename(path, parked); parkedThere = true; } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
+      try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
       let held: string | undefined;
       try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
-      if (held !== expected) { if (await putBack(parked, path)) parkedThere = false; throw changedWhileSyncing(); }
+      if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
     }
-    try { await link(temporary, path); }
+    try { await link(temporary, path); replaced = true; }
     catch (error) {
       // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
-      if (errorCode(error) === 'EEXIST') {
-        // Even if no backup can be placed, the original is never deleted here: it stays moved aside for the next pass to find.
-        if (parkedThere) { await keepAsBackup(parked, path); parkedThere = false; }
-        throw expected === undefined ? occupiedError() : changedWhileSyncing();
-      }
+      if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
       // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
-      if (parkedThere && await putBack(parked, path)) parkedThere = false;
+      if (expected !== undefined) await putBack(parked, path);
       if (errorCode(error) === 'EPERM' || errorCode(error) === 'ENOTSUP' || errorCode(error) === 'EXDEV') {
         if (expected === undefined) { try { await lstat(path); throw occupiedError(); } catch (missing) { if (errorCode(missing) !== 'ENOENT') throw missing; } }
         else if ((await readFile(path, 'utf8').catch(() => undefined)) !== expected) throw changedWhileSyncing();
         await rename(temporary, path);
+        replaced = true;
         return;
       }
       throw error;
     }
   } finally {
     await unlink(temporary).catch(() => undefined);
-    // Moved aside and not put back: its replacement is in place (or a newer save is), and its content was kept before the write.
-    if (parkedThere) await unlink(parked).catch(() => undefined);
+    // Once its replacement is in place, the moved-aside original goes: its content was kept before the write. Otherwise, if it could
+    // not go back, it is kept beside it as a backup, never deleted; even if no backup can be placed, it stays for the next pass to find.
+    if (expected !== undefined) await (replaced ? unlink(parked).catch(() => undefined) : keepAsBackup(parked, path));
   }
 }
 
