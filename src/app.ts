@@ -155,7 +155,7 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined }; announce(readSummary(view) + leftText, true); } else announce('');
 }));
 
-/** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
+/** At launch: the home last opened (so sync resumes where it was), else this computer's home (dev builds: the practice copy). */
 export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
