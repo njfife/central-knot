@@ -15,7 +15,8 @@
     "package:mac": "npm run build && node scripts/package-mac.mjs",
     "smoke:mac": "npm run build && electron . --smoke-test",
     "e2e": "node scripts/e2e.mjs",
-    "test:harness": "node --test tests/harness/*.harness.ts"
+    "test:harness": "node --test tests/harness/*.harness.ts",
+    "package:mac:release": "npm run build && node scripts/package-mac.mjs --release"
   },
   "dependencies": {
     "yaml": "2.9.1"
