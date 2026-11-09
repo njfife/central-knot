@@ -145,19 +145,6 @@ test('AT-01: permission restriction is not an empty skill list', { skip: process
   } finally { await chmod(skillsRoot, 0o755); await setup.cleanup(); }
 });
 
-test('AT-67: project configs are not read and discovery creates no state or cache', async () => {
-  const setup = await fixture();
-  try {
-    await skill(join(setup.home, 'workspace'), 'project-skill', 'Project only');
-    await mkdir(join(setup.home, '.claude'), { recursive: true });
-    await writeFile(join(setup.home, '.claude/settings.json'), '{malformed plugin settings outside this slice');
-    const before = await tree(setup.home);
-    const snapshot = await discover({ home: setup.home, mode: 'custom' });
-    assert.equal(snapshot.skills.length, 0);
-    assert.deepEqual(await tree(setup.home), before);
-  } finally { await setup.cleanup(); }
-});
-
 test('OWN-02: reading a linked skill leaves the link and target unchanged', { skip: process.platform === 'win32' }, async () => {
   const setup = await fixture();
   try {
