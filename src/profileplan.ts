@@ -7,6 +7,7 @@
 // - An item in the profile is turned back on only where a profile turned it off. A switch turned off by hand stays off.
 // - No profile turns back on everything profiles turned off, and holds nothing.
 import { plural } from './model.ts';
+import { andList, toolName } from './words.ts';
 import type { HarnessId, HistoryEvent, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
 
 /** What every screen calls having no profile in use. */
@@ -19,11 +20,25 @@ export const activeProfile = (view: Pick<ProfilesView, 'profiles' | 'active'>) =
 export const profilesInUse = (view: Pick<ProfilesView, 'profiles' | 'held'>) => view.profiles.length > 0 || Object.keys(view.held).length > 0;
 
 /**
+ * History as it still stands: a change and the undo that reversed it cancel out, so neither counts any more. A redo (an undo of
+ * that undo) reverses something already cancelled, so it stands on its own. `undoing`, the event being undone now, always stands:
+ * it is in effect until this undo is done.
+ */
+export function standing(history: HistoryEvent[], undoing?: HistoryEvent): HistoryEvent[] {
+  const kept: HistoryEvent[] = [];
+  for (const entry of history) {
+    const reversed = entry === undoing ? -1 : kept.findIndex(earlier => earlier.undoneBy === entry.id);
+    if (reversed >= 0) kept.splice(reversed, 1); else kept.push(entry);
+  }
+  return kept;
+}
+
+/**
  * The switches changed again after `past` (`item|tool`), by hand (a Disable or Enable on the Skills page) or by a later profile
- * switch: those belong to the later change, so an Undo of `past` leaves them.
+ * switch that still stands: those belong to the later change, so an Undo of `past` leaves them.
  */
 export function changedSince(history: HistoryEvent[], past: HistoryEvent): Set<string> {
-  const later = history.slice(history.indexOf(past) + 1);
+  const later = standing(history.slice(history.indexOf(past) + 1));
   return new Set([
     ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => `${itemId('skill', entry.key)}|${tool}`)),
     ...later.filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => `${flip.item}|${flip.tool}`) ?? []),
@@ -31,11 +46,11 @@ export function changedSince(history: HistoryEvent[], past: HistoryEvent): Set<s
 }
 
 /**
- * Whether `past` chose the profile in use: it is the latest switch that changed which profile is in use. An Apply, or an undo of
- * an older switch, changes switches but not the profile, so it chooses nothing.
+ * Whether `past` chose the profile in use: it is the latest switch still standing that changed which profile is in use. An Apply,
+ * or an undo of an older switch, changes switches but not the profile, so it chooses nothing; a switch and its undo cancel out.
  */
 export const choseProfileInUse = (history: HistoryEvent[], past: HistoryEvent) =>
-  [...history].reverse().find(entry => entry.kind === 'profile' && entry.profile && (entry.profile.from ?? '') !== (entry.profile.to ?? ''))?.id === past.id;
+  [...standing(history, past)].reverse().find(entry => entry.kind === 'profile' && entry.profile && (entry.profile.from ?? '') !== (entry.profile.to ?? ''))?.id === past.id;
 
 export type ItemKind = 'skill' | 'mcp';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
@@ -138,6 +153,12 @@ export function flipCounts(flips: ProfileFlip[]): { off: number; on: number } {
 export function flipWords({ off, on }: { off: number; on: number }, tense: 'will' | 'did'): string {
   const said = (count: number, what: string) => (tense === 'will' ? `turns ${plural(count, 'item')} ${what}` : `${plural(count, 'item')} turned ${what}`);
   return [off && said(off, 'off'), on && said(on, 'back on')].filter(Boolean).join(' and ');
+}
+
+/** What a switch did, in one phrase the result band and History share: '4 items turned off in Claude Code and Codex'; '' for nothing. */
+export function flipSummary(flips: ProfileFlip[]): string {
+  const did = flipWords(flipCounts(flips), 'did');
+  return did && `${did} in ${andList([...new Set(flips.map(flip => toolName(flip.tool)))])}`;
 }
 
 /** How many items the tools no longer match the profile in use on (or No profile, on what profiles still hold off): 0 when they match. */

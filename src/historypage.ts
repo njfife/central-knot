@@ -2,7 +2,7 @@
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { andList, toolNames } from './words.ts';
-import { flipCounts, flipWords, NO_PROFILE } from './profileplan.ts';
+import { flipSummary, NO_PROFILE } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -52,14 +52,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 /** A profile switch: what it switched to, and how many items it turned off and on, where. An undo says what it undid. */
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action: string } {
   const switched = event.profile!;
-  const { off, on } = flipCounts(switched.flips);
-  const counts = flipWords({ off, on }, 'did') || 'no switch needed changing';
-  // The tools by name, as the result of the switch said them.
-  const where = switched.flips.length ? ` in ${andList([...new Set(switched.flips.map(flip => who(flip.tool)))])}` : '';
+  // Said as the result of the switch said it.
+  const counts = flipSummary(switched.flips) || 'no switch needed changing';
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? NO_PROFILE;
-  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}${where}.`, action: 'Redo' };
-  return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}${where}.`, action: 'Undo' };
+  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}.`, action: 'Redo' };
+  return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}.`, action: 'Undo' };
 }
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */

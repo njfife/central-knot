@@ -145,6 +145,20 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
   } finally { await box.cleanup(); }
 });
 
+test('A switch and its own Undo cancel out: undoing the switch before them goes all the way back', async () => {
+  const box = await sandbox();
+  try {
+    const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
+    const pager = (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!;
+    await switchProfile(box.context, dev);
+    const second = (await switchProfile(box.context, pager)).event!;
+    await undoProfileSwitch(box.context, second);
+    const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    await undoProfileSwitch(box.context, first.id);
+    assert.deepEqual(await readProfiles(box.home), { profiles: [{ id: dev, name: 'Development', items: ['skill:dev'] }, { id: pager, name: 'Pager', items: ['skill:pager'] }], held: {} });
+  } finally { await box.cleanup(); }
+});
+
 test('Profiles save only the fields given, Undo of Delete keeps the id History names, and an unreadable file is never overwritten', async () => {
   const box = await sandbox();
   try {

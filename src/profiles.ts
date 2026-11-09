@@ -142,17 +142,24 @@ export async function driftNow(context: ShareContext): Promise<number> {
 }
 
 
-/** The file that holds this flip's switch. */
-const fileOf = (context: ShareContext, flip: ProfileFlip) => (itemKind(flip.item) === 'mcp' ? mcpSwitchPath(context, flip.tool) : switchPath(context, flip.tool));
+/**
+ * One flip's switch: the file it lives in, how to read whether the item is off there, and how to set it in that file's text.
+ * Skills use the tool's skill switch (named by the copy: folder, name, path), MCP servers the tool's MCP switch (by name).
+ */
+interface Switch { file: string; isOff(text: string): boolean; set(text: string): string }
+function switchOf(context: ShareContext, home: HomeRead, flip: ProfileFlip): Switch {
+  const key = itemKeyOf(flip.item);
+  if (itemKind(flip.item) === 'mcp') return { file: mcpSwitchPath(context, flip.tool), isOff: text => mcpDisabled(flip.tool, text, key), set: text => withMcpSwitch(flip.tool, text, key, flip.disabled) };
+  const target = skillTarget(home.manage, key, flip.tool);
+  const missing = () => { throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); };
+  return { file: switchPath(context, flip.tool), isOff: text => (target ? switchState(context, flip.tool, text, target) : missing()), set: text => (target ? withSwitch(context, flip.tool, text, target, flip.disabled) : missing()) };
+}
 
 /** One file's text with every flip of `group` made in it; a flip that can't be made there is in `failed` with why. */
-function editText(context: ShareContext, text: string, group: ProfileFlip[], targets: Map<ProfileFlip, SwitchTarget | undefined>) {
+function editText(text: string, group: [ProfileFlip, Switch][]) {
   const failed = new Map<ProfileFlip, string>();
-  for (const flip of group) {
-    try {
-      if (itemKind(flip.item) === 'mcp') text = withMcpSwitch(flip.tool, text, itemKeyOf(flip.item), flip.disabled);
-      else { const target = targets.get(flip); if (!target) throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); text = withSwitch(context, flip.tool, text, target, flip.disabled); }
-    } catch (error) { failed.set(flip, error instanceof Error ? error.message : String(error)); }
+  for (const [flip, at] of group) {
+    try { text = at.set(text); } catch (error) { failed.set(flip, error instanceof Error ? error.message : String(error)); }
   }
   return { text, failed };
 }
@@ -161,20 +168,27 @@ function editText(context: ShareContext, text: string, group: ProfileFlip[], tar
  * Writes one file's flips with a single checked write: only over the text read, so a save made meanwhile is never lost. A file
  * the tool saved just then is read again once and the flips are redone on what it holds. Returns the flips that couldn't be made.
  */
-async function writeFlips(context: ShareContext, file: string, group: ProfileFlip[], targets: Map<ProfileFlip, SwitchTarget | undefined>): Promise<Map<ProfileFlip, string>> {
+async function writeFlips(file: string, group: [ProfileFlip, Switch][]): Promise<Map<ProfileFlip, string>> {
   for (let attempt = 0; ; attempt++) {
     let original: string | undefined;
-    try { original = await readFile(file, 'utf8'); } catch (error) { if (errorCode(error) !== 'ENOENT') return new Map(group.map(flip => [flip, `${file} could not be read.`])); }
-    const { text, failed } = editText(context, original ?? '', group, targets);
+    try { original = await readFile(file, 'utf8'); } catch (error) { if (errorCode(error) !== 'ENOENT') return new Map(group.map(([flip]) => [flip, `${file} could not be read.`])); }
+    const { text, failed } = editText(original ?? '', group);
     if (text === (original ?? '')) return failed;
     try { await writeFileChecked(file, text, original); return failed; }
     catch (error) {
       if ((errorCode(error) === 'CK_CHANGED' || errorCode(error) === 'CK_OCCUPIED') && attempt === 0) continue;
       const why = errorCode(error) === 'CK_CHANGED' ? `${file} kept changing, so it was left as it is.` : `Could not write ${file}: ${error instanceof Error ? error.message : String(error)}`;
-      for (const flip of group) if (!failed.has(flip)) failed.set(flip, why);
+      for (const [flip] of group) if (!failed.has(flip)) failed.set(flip, why);
       return failed;
     }
   }
+}
+
+/** Why a flip didn't take, read back from its file as the tool will see it; undefined when it did. */
+function notTaken(flip: ProfileFlip, at: Switch, after: string | undefined): string | undefined {
+  if (after === undefined) return `${at.file} could not be read back.`;
+  try { return at.isOff(after) === flip.disabled ? undefined : `${harnesses[flip.tool].name}’s settings did not take the change.`; }
+  catch { return `${at.file} could not be read back.`; }
 }
 
 /**
@@ -184,19 +198,14 @@ async function writeFlips(context: ShareContext, file: string, group: ProfileFli
 async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip[]): Promise<{ done: ProfileFlip[]; results: DestinationResult[] }> {
   const results: DestinationResult[] = [];
   const done: ProfileFlip[] = [];
-  const groups = new Map<string, ProfileFlip[]>();
-  for (const flip of flips) groups.set(fileOf(context, flip), [...(groups.get(fileOf(context, flip)) ?? []), flip]);
+  const groups = new Map<string, [ProfileFlip, Switch][]>();
+  for (const flip of flips) { const at = switchOf(context, home, flip); groups.set(at.file, [...(groups.get(at.file) ?? []), [flip, at]]); }
   for (const [file, group] of groups) {
-    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.manage, itemKeyOf(flip.item), flip.tool) : undefined]));
-    const failed = await writeFlips(context, file, group, targets);
+    const failed = await writeFlips(file, group);
     let after: string | undefined;
     try { after = await readFile(file, 'utf8'); } catch { /* every flip below fails: what the tool sees can't be confirmed */ }
-    for (const flip of group) {
-      let reason = failed.get(flip) ?? (after === undefined ? `${file} could not be read back.` : undefined);
-      if (!reason) {
-        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after!, itemKeyOf(flip.item)) : switchState(context, flip.tool, after!, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
-        catch { reason = `${file} could not be read back.`; }
-      }
+    for (const [flip, at] of group) {
+      const reason = failed.get(flip) ?? notTaken(flip, at, after);
       if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${harnesses[flip.tool].name}: ${reason}` }); continue; }
       done.push(flip);
       results.push({ item: flip.name, harness: flip.tool, outcome: 'switched', message: `${flip.disabled ? 'Off' : 'On'} in ${harnesses[flip.tool].name} from its next session.` });

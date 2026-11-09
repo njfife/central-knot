@@ -3,7 +3,7 @@ import type { ApplyResult, Change, DesktopApi, ProfileEdit, ProfileSwitchResult,
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { activeProfile, flipCounts, flipWords, NO_PROFILE } from './profileplan.ts';
+import { activeProfile, flipSummary, NO_PROFILE } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -556,10 +556,8 @@ export const profileState = { open: undefined as string | undefined, confirmDele
 
 /** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
 function switchOutcome(name: string, result: ProfileSwitchResult) {
-  const { off, on } = flipCounts(result.flips);
-  const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
-  const what = flipWords({ off, on }, 'did');
-  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
+  const what = flipSummary(result.flips);
+  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
   announce(state.outcome.text, true);
 }

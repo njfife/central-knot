@@ -330,6 +330,8 @@ async function view(explicit = false): Promise<HomeView> {
   };
   const drift = driftOf(switchItems(made.manage, made.mcp), made.profiles);
   if (JSON.stringify(made.profiles) !== JSON.stringify(lastProfiles) || drift !== lastDrift) { lastProfiles = made.profiles; lastDrift = drift; refreshTray(); }
+  // The first read starts the background's look at switch files from what is there now.
+  if (!lastStamp && profilesInUse(made.profiles)) lastStamp = await switchFilesStamp(shared).catch(() => '');
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;
@@ -352,8 +354,9 @@ function background() {
     const result = await pass();
     // A switch turned back in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: drift is
     // looked at on its own while a profile holds anything, and the menus and the page follow it.
-    // Looked at only when a switch file changed since the last look, or the pass wrote something (an item may have come or gone).
-    // A switch file that changed always reads the page again (its marks show each switch), and the menus follow the drift.
+    // Looked at when a file a switch lives in changed since the last look (Codex's config.toml and Pi's mcp.json hold MCP entries
+    // too, so an MCP edit there counts), or the pass wrote something (an item may have come or gone). Central Knot's own switches
+    // note the new times themselves. Such a change reads the page again (its marks show each switch); the menus follow the drift.
     const stamp = profilesInUse(lastProfiles) ? await switchFilesStamp(context()).catch(() => '') : lastStamp;
     if (profilesInUse(lastProfiles) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
       const switched = stamp !== lastStamp;
