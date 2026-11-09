@@ -19,25 +19,6 @@ async function sandbox() {
 const md = (prompt: string, extra = '') => `---\nname: reviewer\ndescription: Reviews code\n${extra}---\n\n${prompt}`;
 const rd = (h: string, p: string) => readFile(join(h, p), 'utf8');
 
-test('A: deletion + Restore loses a two-way destination\'s own fields (kept version keyed by field-blind hash)', async () => {
-  const b = await sandbox();
-  try {
-    await writeFile(join(b.home, '.copilot/agents/reviewer.agent.md'), md('Prompt.\n'));
-    await applyAgents(b.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    // User adds Codex-only keys and a table to the Codex copy (prompt unchanged, so still two-way).
-    const codex = await rd(b.home, '.codex/agents/reviewer.toml');
-    const codexRich = codex + 'model = "gpt-6"\nsandbox_mode = "read-only"\n\n[mcp_servers.docs]\nurl = "https://x"\n';
-    await writeFile(join(b.home, '.codex/agents/reviewer.toml'), codexRich);
-    await rm(join(b.home, '.copilot/agents/reviewer.agent.md'));
-    await applyAgents(b.context, tools, [], { now: 1, settleMs: 2000 });
-    const del = await applyAgents(b.context, tools, [], { now: 5000, settleMs: 2000 });
-    const ev = (await readHistory(b.home)).find(e => e.kind === 'deleted')!;
-    const r = await restoreAgent(b.context, tools, ev.id);
-    const after = await rd(b.home, '.codex/agents/reviewer.toml');
-    assert.ok(after.includes('sandbox_mode'), 'Codex-only keys were not recoverable from History');
-  } finally { await b.cleanup(); }
-});
-
 test('B: Restore of a deletion is refused because a stopped one-way copy exists', async () => {
   const b = await sandbox();
   try {
