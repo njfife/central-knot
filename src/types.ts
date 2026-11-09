@@ -162,11 +162,14 @@ export interface SkillFacts {
   stopped?: HarnessId[];
   /** Skills: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
-  /** Skills: why a tool's switch can't be used at all: its settings file (`file`) can't be read or is in a form Central Knot doesn't edit. */
-  switchProblem?: Partial<Record<HarnessId, { file?: string; reason: string }>>;
+  /** Skills: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
+  switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** Skills: why a new Disable isn't offered in a tool (a build older than the one verified). Enable stays available. */
   disableUnverified?: Partial<Record<HarnessId, string>>;
 }
+
+/** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */
+export interface SwitchProblem { file: string; reason: string }
 
 export interface ManageView {
   tools: HarnessId[];
@@ -227,7 +230,9 @@ export interface HistoryEvent {
    * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
   kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
-  switched?: { tool: HarnessId; disabled: boolean; before?: string }[];
+  switched?: { tool: HarnessId; disabled: boolean; before?: string; /** The copy as the switch named it, so Undo reverses that entry even if the copy is gone. */ target?: { folder: string; name: string; skillFile: string } }[];
+  /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. */
+  restoredTools?: HarnessId[];
   /** 'removed': tools a managed skill stopped syncing to because its copy there was removed; Restore turns syncing back on. */
   stoppedSync?: HarnessId[];
   winner?: { tool: HarnessId; hash: string };

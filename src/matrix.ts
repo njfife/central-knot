@@ -2,7 +2,7 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
-import { andList, toolNames } from './words.ts';
+import { andList, problemText, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -162,13 +162,11 @@ function switchChanges(draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
   return { ...(disable.length ? { disable } : {}), ...(enable.length ? { enable } : {}) };
 }
 
-/** Skills: remove these tools' copies on Apply all, or keep them again. A managed skill also stops syncing there, or it would come back. */
+/** Skills: remove these tools' copies on Apply all, or keep them again. (For a managed skill, Apply all also stops syncing there.) */
 function setRemoved(key: string, tools: Tool[], remove: boolean) {
   edit(key, (skill, draft) => {
-    const wasOff = committedOf(key).off;
-    const off = !skill.managed ? skill.off : remove ? [...new Set([...skill.off, ...tools])] : skill.off.filter(tool => !tools.includes(tool) || wasOff.includes(tool));
     const removing = remove ? [...new Set([...(draft?.remove ?? []), ...tools])] : (draft?.remove ?? []).filter(tool => !tools.includes(tool));
-    return { managed: skill.managed, off, ...keepChoice(keepResolve(skill.managed, draft?.resolve), draft), remove: removing };
+    return { managed: skill.managed, off: skill.off, ...keepChoice(keepResolve(skill.managed, draft?.resolve), draft), remove: removing };
   });
   rerender();
 }
@@ -415,7 +413,7 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
 function switchLine(skill: SampleSkill, tool: Tool): string {
   if (skill.removing?.includes(tool)) return committedOf(skill.key).managed ? 'Removed on Apply all; syncing stops here.' : 'Removed on Apply all.';
   const problem = skill.switchProblem?.[tool];
-  if (problem) return `${problem.file ? `${shownPath(problem.file)} ${problem.reason}` : problem.reason} Fix it, then Refresh.`;
+  if (problem) return `${problemText(problem, shownPath)} Fix it, then Refresh.`;
   const disabled = !!skill.disabled?.includes(tool);
   const was = !!committedOf(skill.key).disabled?.includes(tool);
   // An older build: no new Disable, but a copy disabled there can still be enabled.
@@ -507,7 +505,6 @@ function convertBlock(skill: SampleSkill) {
 
 /** Tool rows, with tools that say exactly the same thing (an agent's receiving copies) folded into one row naming them all. */
 function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
-  // Not map(toolRow): map's index would land in toolRow's `quiet`.
   if (kind !== 'agents') return toolList().map(tool => toolRow(tool));
   const byLine = new Map<string, Tool[]>();
   for (const tool of toolList()) { const line = toolLine(skill, tool); byLine.set(line, [...(byLine.get(line) ?? []), tool]); }
@@ -606,7 +603,8 @@ function oneWayStatus(skill: SampleSkill): string {
 function details(skill: SampleSkill, closable = true) {
   const draft = view.draft.get(skill.key);
   const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
-  const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool]).map(tool => names[tool]);
+  // A tool whose copy is queued for removal stops syncing on Apply all, so it isn't counted.
+  const syncingTo = toolList().filter(tool => !skill.off.includes(tool) && !skill.cannot?.[tool] && !skill.removing?.includes(tool)).map(tool => names[tool]);
   const status = skill.held ? `Can’t be managed: ${skill.held}` : skill.separate ? 'Unmanaged. Each tool keeps its own copy.' : skill.managed
     ? (kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) ? `Managed · ${names[oneWaySource(skill)!]} is the source${oneWayStatus(skill)}`
       : kind === 'mcp' && skill.waits?.includes('claude-cli') && !draft ? `Waits for Write to Claude Code · synced in ${andList(toolList().filter(tool => tool !== 'claude-cli' && cellOf(skill, tool) === 'synced').map(tool => names[tool]))}`
@@ -624,7 +622,7 @@ function details(skill: SampleSkill, closable = true) {
   const disabledNote = disabledIn.length ? ` · disabled in ${andList(disabledIn.map(tool => names[tool]))}` : '';
   const paused = '';
   // `quiet`: the status above already says how the copies stand, so a row says only what Disable or Remove does there.
-  const toolRow = (tool: Tool, quiet = false) => h('div.details-tool', {},
+  const toolRow = (tool: Tool, { quiet = false } = {}) => h('div.details-tool', {},
     h('div.details-tool-head', {}, h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
       h('span.details-tool-line', {}, rowLine(skill, tool, quiet),
         // MCP: the settings file sits on the same line as the status, and Claude Code's row can finish the Write step itself.
@@ -656,7 +654,7 @@ function details(skill: SampleSkill, closable = true) {
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     // Skills always list each tool, so Disable and Remove are there for every copy, managed or not.
-    allSame || (differs && !draft) ? kind === 'skills' && !designMode ? [h('div.details-tools', {}, toolList().map(tool => toolRow(tool, true))), switchNote] : null : null,
+    allSame || (differs && !draft) ? kind === 'skills' && !designMode ? [h('div.details-tools', {}, toolList().map(tool => toolRow(tool, { quiet: true }))), switchNote] : null : null,
     allSame
       ? (!closable ? h('div.details-where-row', {}, wherePaths(skill), deleteAction(skill)) : wherePaths(skill))
       : differs && !draft ? wherePaths(skill) : [h('div.details-tools', {}, groupedRows(skill, toolRow)), switchNote, kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : wherePaths(skill)],

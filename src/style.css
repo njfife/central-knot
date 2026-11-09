@@ -1384,7 +1384,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
 .tool-remove-slot { display: inline-block; }
 /* Differing copies hide an empty foot, but not one holding Delete everywhere. */
-.details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action) { display: flex; }
+.details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }
 /* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
 .ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
 /* Keyboard focus on a queued switch shows as focus, not as the dashed queued mark. */

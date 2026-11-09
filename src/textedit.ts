@@ -322,9 +322,12 @@ export function tableEnd(text: string, table: TomlTable): number {
   return table.start + lines.slice(0, cut).join('').length;
 }
 
+/** A file's line end: Windows' when it has any, else a plain newline. */
+export const eolOf = (text: string) => (text.includes('\r\n') ? '\r\n' : '\n');
+
 /** The text with `body` added as a new table at the end, after one blank line, in the file's own line ends. */
 export function appendTomlTable(text: string, body: string): string {
-  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const eol = eolOf(text);
   return `${text}${text && !text.endsWith('\n') ? eol : ''}${text.trim() ? eol : ''}${body.replace(/\r?\n/g, eol)}`;
 }
 

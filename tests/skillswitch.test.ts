@@ -111,28 +111,30 @@ test('Codex: a name rule is overruled by a path rule, the person’s own rule ke
   } finally { await box.cleanup(); }
 });
 
-test('Managed and disabled in one tool: the copy arrives there switched off, keeps receiving edits, and Undo enables it', async () => {
-  const box = await sandbox(['claude-cli', 'codex-cli']);
+test('Managed and disabled in two tools: each copy arrives switched off (Codex by path, Copilot by its name), keeps receiving edits, and Undo enables them', async () => {
+  const box = await sandbox(['claude-cli', 'codex-cli', 'copilot-cli']);
   try {
-    await skill(box.home, 'claude-cli', 'notes');
+    // Copilot names a skill by its frontmatter name, which here differs from the folder.
+    await skill(box.home, 'claude-cli', 'notes', text('Notes Helper'));
     // A Disable that can't happen (Codex's skill rules in a form not edited here) changes nothing at all, so no copy arrives enabled.
     await writeFile(join(box.home, '.codex/config.toml'), 'skills = { config = [] }\n');
     const held = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
     assert.ok(held.results.some(entry => entry.outcome === 'held' && /Nothing was changed/.test(entry.message)), JSON.stringify(held));
     assert.deepEqual([(await manageView(box.context)).skills.find(item => item.key === 'notes')!.managed, held.harnessWrites], [false, 0]);
     await rm(join(box.home, '.codex/config.toml'));
-    const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
-    assert.ok(result.results.some(entry => entry.outcome === 'switched' && entry.harness === 'codex-cli'), JSON.stringify(result));
+    const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli', 'copilot-cli'] }]);
+    assert.equal(result.results.filter(entry => entry.outcome === 'switched').length, 2, JSON.stringify(result));
     const copy = join(box.home, '.codex/skills/notes/SKILL.md');
-    assert.equal(await readFile(copy, 'utf8'), text('notes'));
+    assert.equal(await readFile(copy, 'utf8'), text('Notes Helper'));
     assert.ok((await readFile(join(box.home, '.codex/config.toml'), 'utf8')).includes(`path = ${JSON.stringify(copy)}\nenabled = false`));
+    assert.deepEqual(JSON.parse(await readFile(join(box.home, '.copilot/settings.json'), 'utf8')).disabledSkills, ['Notes Helper']);
     let notes = (await manageView(box.context)).skills.find(item => item.key === 'notes')!;
-    assert.deepEqual([notes.managed, notes.disabled], [true, ['codex-cli']]);
+    assert.deepEqual([notes.managed, notes.disabled], [true, ['codex-cli', 'copilot-cli']]);
     // Disable is not exclusion: an edit still reaches the disabled copy.
-    await writeFile(join(box.home, '.claude/skills/notes/SKILL.md'), text('notes', 'Edited.'));
+    await writeFile(join(box.home, '.claude/skills/notes/SKILL.md'), text('Notes Helper', 'Edited.'));
     await applyChanges(box.context, []);
     await applyChanges(box.context, []);
-    assert.equal(await readFile(copy, 'utf8'), text('notes', 'Edited.'));
+    assert.equal(await readFile(copy, 'utf8'), text('Notes Helper', 'Edited.'));
     const switched = (await readHistory(box.home)).find(event => event.kind === 'switched')!;
     assert.equal((await restoreFromHistory(box.context, switched.id)).stopped, undefined);
     notes = (await manageView(box.context)).skills.find(item => item.key === 'notes')!;
@@ -167,6 +169,17 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     const kept = (await manageView(box.context)).skills.find(item => item.key === 'kept')!;
     assert.deepEqual([kept.managed, kept.off, !!kept.copies['copilot-cli']], [true, [], true]);
     await applyChanges(box.context, []);
+    // A Restore that can't finish everywhere (a different copy took one tool's place) puts back the rest, and a retry finishes.
+    await skill(box.home, 'claude-cli', 'pair'); await skill(box.home, 'copilot-cli', 'pair');
+    await applyChanges(box.context, [{ key: 'pair', managed: false, off: [], remove: ['claude-cli', 'copilot-cli'] }]);
+    const pair = (await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'pair')!;
+    await skill(box.home, 'claude-cli', 'pair', text('pair', 'Someone else’s.'));
+    await restoreFromHistory(box.context, pair.id);
+    assert.equal(await readFile(join(box.home, '.copilot/skills/pair/SKILL.md'), 'utf8'), text('pair'));
+    await rm(join(box.home, '.claude/skills/pair'), { recursive: true });
+    assert.equal((await restoreFromHistory(box.context, pair.id)).stopped, undefined);
+    assert.equal(await readFile(join(box.home, '.claude/skills/pair/SKILL.md'), 'utf8'), text('pair'));
+    assert.ok((await readHistory(box.home)).find(event => event.id === pair.id)!.undoneBy, 'done once every copy is back');
     // A removal that doesn't happen (the copy was edited just then) keeps the copy, and it keeps syncing.
     const copilotKept = join(box.home, '.copilot/skills/kept/SKILL.md');
     const editing = { ...box.context, fault: (step: string) => { if (step === 'before-remove') writeFileSync(copilotKept, text('kept', 'Edited just now.')); } };
