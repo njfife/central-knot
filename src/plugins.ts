@@ -162,6 +162,13 @@ const count = async (folder: string, test: (name: string, isDirectory: boolean) 
   } catch { return 0; }
 };
 const exists = (path: string) => stat(path).then(() => true, () => false);
+const skillFolders = async (folder: string) => {
+  try {
+    const found: string[] = [];
+    for (const entry of await readdir(folder, { withFileTypes: true })) if (entry.isDirectory() && await exists(join(folder, entry.name, 'SKILL.md'))) found.push(entry.name);
+    return found.sort();
+  } catch { return []; }
+};
 
 /** What a plugin folder holds, read from its files. Nothing in it is run. */
 export async function componentsOf(folder: string): Promise<Components> {
@@ -179,6 +186,7 @@ export async function componentsOf(folder: string): Promise<Components> {
     mcp: Object.keys(servers).length,
     mcpRootVariable: serverText.includes('${CLAUDE_PLUGIN_ROOT}'),
     bin: await exists(join(folder, 'bin')),
+    skillNames: await skillFolders(join(folder, 'skills')),
   };
 }
 
@@ -187,13 +195,13 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string) => { if (present) list.push({ component, result, text }); };
   if (tool === 'claude-cli') {
-    add(components.skills, 'Skills', 'works', 'work as they are');
+    add(components.skills, 'Skills', 'works', 'work under their own names');
     add(components.commands, 'Commands', 'works', 'work as they are');
     add(components.agents, 'Agents', 'works', 'work as they are');
     add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else if (tool === 'copilot-cli') {
-    add(components.skills, 'Skills', 'works', 'work as they are');
+    add(components.skills, 'Skills', 'works', 'work under their own names');
     add(components.commands, 'Commands', 'limited', 'become skills');
     add(components.agents, 'Agents', 'works', 'work, named plugin:agent');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others are not tested yet');

@@ -27,12 +27,16 @@ export const state = {
   /** The installed cell waiting for its confirming click to uninstall, and what that click will do. */
   pluginConfirm: undefined as string | undefined,
   pluginConfirmText: undefined as string | undefined,
+  /** The plugin the last install or uninstall was for, so its report can offer the reverse. */
+  pluginLast: undefined as { source: string; market: string; plugin: string } | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; history?: boolean } | undefined,
+  outcome: undefined as { page: Page; text: string; history?: boolean; undo?: { id: string; label: string } } | undefined,
+  /** Sync notices the person has dismissed, by History event or item. */
+  dismissed: new Set<string>(),
   /** The window chooses the sidebar shape until the person uses the toggle. */
   sidebar: undefined as 'open' | 'rail' | undefined,
 };
@@ -46,9 +50,16 @@ export const rerender = () => {
   if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus();
 };
 
-export function announce(text: string) { document.getElementById('announcement')!.textContent = text; }
+export function announce(text: string, quiet = false) {
+  const region = document.getElementById('announcement')!;
+  region.textContent = text;
+  // A quiet announcement is for screen readers only: the page already shows the same thing.
+  region.dataset.quiet = quiet ? 'true' : '';
+}
 
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
+
+const andText = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));
 
 /** One piece of work at a time: every mutating control is disabled while it runs. */
 async function busy(message: string, work: () => Promise<void>) {
@@ -94,15 +105,21 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
 });
 
+/** After a read: what was found and where, so a home switch or Refresh says what it did. */
+const readSummary = (view: HomeView) => {
+  const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
+  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. Nothing changed.`;
+};
+
 export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {
   const view = await api().selectHome(mode);
-  if (view) { accept(view); announce('Read complete. Nothing changed.'); } else announce('');
+  if (view) { accept(view); announce(readSummary(view)); } else announce('');
 });
 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
 export const startHome = () => busy('Reading user-wide skills…', async () => {
   const view = await api().startHome();
-  if (view) { accept(view); announce('Read complete.'); } else announce('');
+  if (view) { accept(view); announce(readSummary(view)); } else announce('');
 });
 
 export const readAgain = () => busy('Reading user-wide skills…', async () => {
@@ -110,7 +127,7 @@ export const readAgain = () => busy('Reading user-wide skills…', async () => {
   if (!view) return;
   state.home = view;
   state.applied = undefined;
-  announce('Read complete. Nothing changed.');
+  announce(readSummary(view));
 });
 
 export function showPage(page: Page) {
@@ -148,7 +165,9 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   const result = await api().addMarketplace(source);
   if (result.view) state.plugins = result.view;
   state.pluginResult = result.problem ? { reports: [], problem: result.problem } : undefined;
-  if (!result.problem) state.outcome = { page: 'plugins', text: 'Marketplace added. Nothing was installed: click a tool’s box to install a plugin there.' };
+  // The click hint only when some tool can take an install here.
+  const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
+  if (!result.problem) state.outcome = { page: 'plugins', text: canInstall ? 'Marketplace added. Nothing was installed: click a tool’s box to install a plugin there.' : 'Marketplace added. Nothing was installed.' };
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
@@ -171,16 +190,20 @@ export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
 
 export const installPlugin = (source: string, plugin: string, tools: HarnessId[]) => busy(`Installing ${plugin}…`, async () => {
+  const market = state.plugins?.marketplaces.find(entry => entry.source === source)?.name ?? '';
   const result = await api().installPlugin(source, plugin, tools, state.home!.home);
   if (result.view) state.plugins = result.view;
   state.pluginResult = result;
+  state.pluginLast = { source, market, plugin };
   announce(result.stopped ?? result.reports.map(report => `${names[report.tool]}: ${report.message}`).join(' '));
 });
 
 export const uninstallPlugin = (marketplace: string, plugin: string, tool: HarnessId) => busy(`Uninstalling ${plugin} from ${names[tool]}…`, async () => {
+  const source = state.plugins?.marketplaces.find(entry => entry.name === marketplace)?.source ?? '';
   const result = await api().uninstallPlugin(marketplace, plugin, tool, state.home!.home);
   if (result.view) state.plugins = result.view;
   state.pluginResult = result;
+  state.pluginLast = { source, market: marketplace, plugin };
   announce(result.stopped ?? result.reports.map(report => report.message).join(' '));
 });
 
@@ -202,7 +225,9 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
   const where = [...new Set(restored.map(entry => toolNames[entry.harness ?? ''] ?? entry.harness ?? ''))].filter(Boolean);
-  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: true, text: `${restored[0].item} restored${where.length ? ` in ${where.length > 2 ? `${where.slice(0, -1).join(', ')} and ${where.at(-1)}` : where.join(' and ')}` : ''}.` };
+  // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
+  const undoneBy = state.history?.find(event => event.id === eventId)?.undoneBy;
+  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label: 'Redo' } : undefined, text: `${restored[0].item} restored${where.length ? ` in ${where.length > 2 ? `${where.slice(0, -1).join(', ')} and ${where.at(-1)}` : where.join(' and ')}` : ''}.` };
   announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
 
@@ -221,7 +246,7 @@ export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…
 export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turning Sync off…', async () => {
   const view = await api().setSync(on);
   if (view) state.home = view;
-  announce(on ? 'Sync is on. Changes spread on their own.' : 'Sync is off. Changes are noted and spread when you turn it back on.');
+  announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
 export const syncNow = () => busy('Syncing…', async () => {
@@ -259,7 +284,16 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   if (view) state.home = view;
   state.agentsResult = result;
   if (!result.stopped) onDone();
-  if (!result.stopped) state.outcome = { page: state.page, text: `${plural(changes.filter(change => change.managed).length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written` : 'nothing needed writing'}. From now on, an edit in one tool spreads to the others.` };
+  if (!result.stopped) {
+    // One-way agents are said apart: an edit spreads from their source only.
+    const managed = changes.filter(change => change.managed).map(change => state.home?.agents?.servers.find(server => server.key === change.key)).filter(server => !!server);
+    const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
+    const twoWay = managed.filter(server => !Object.keys(server.limits ?? {}).length);
+    const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
+    const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
+    const how = [twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : '', ...oneWay.map(server => `${nameOf(server)} syncs one-way from ${source(server)}`)].filter(Boolean).join('; ');
+    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}` };
+  }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
 

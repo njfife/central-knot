@@ -172,7 +172,7 @@ async function practiceFlow() {
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + group.querySelector('strong').textContent)`);
-  same('Add all groups for Claude Code', groups, ['new: copied:1', 'already the same: start syncing:1', 'different:1']);
+  same('Add all groups for Claude Code', groups, ['new: will be copied:1', 'identical: starts syncing:1', 'different:1']);
   same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2', false]);
   await a.click('#menu-conflicts-copilot-cli-claude-cli');
   const note = await a.text('#menu-conflicts-note-copilot-cli-claude-cli') ?? '';
@@ -207,7 +207,7 @@ async function practiceFlow() {
   writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited in Claude Code.\n'));
   await a.click('#header-refresh');
   same('an edit spreads to every tool on the next read', [readFileSync(standupPath('copilot'), 'utf8'), readFileSync(standupPath('codex'), 'utf8')].map(text => text.includes('Edited in Claude Code.')), [true, true]);
-  check('and says so, with Undo', (await a.text('.sync-notices') ?? '').includes("standup: Claude Code's edit now in"), await a.text('.bands'));
+  check('and says so, with Undo', (await a.text('.sync-notices') ?? '').includes("standup was edited in Claude Code and copied to"), await a.text('.bands'));
   check('without also calling it a catch-up', !(await a.text('.bands') ?? '').includes('Caught up'), await a.text('.bands'));
   await a.shot('practice-edit-spread');
   await a.run(`document.querySelector('.sync-notice[data-kind="edit"] button').click()`);
@@ -234,7 +234,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 40 && !watched; tries++) { await wait(250); watched = readFileSync(standupPath('claude'), 'utf8').includes('watched'); }
   check('a change on disk spreads on its own', watched);
   await wait(800);
-  check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup: Copilot CLI's edit"), await a.text('.bands'));
+  check('and the page hears about it without a click', (await a.text('.sync-notices') ?? '').includes("standup was edited in Copilot CLI"), await a.text('.bands'));
   // Sync off: edits are noted, not spread; the page shows them pending; Sync now spreads once; Apply all still works.
   await a.click('#sync-switch');
   same('Sync turns off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
@@ -424,7 +424,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', (await a.text('.details') ?? '').includes('One-way from Claude Code. Copilot CLI has no setting for Claude Code’s “tools” or “model”'.replace('’', "'")), await a.text('.details'));
+  check('the details name the limits', (await a.text('.details') ?? '').includes('Edit this agent in Claude Code. Copilot CLI and Codex have no setting for its “tools” or “model”'), await a.text('.details'));
   await a.shot('practice-agents');
   await a.click('#nav-skills');
 
@@ -440,7 +440,7 @@ async function practiceFlow() {
   check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added in Central Knot'), await a.text('#plugins-scroll'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#popen-0-ck-marker');
-  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Skills work, named ck-marker:skill-name'), await a.text('.plugin-details'));
+  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Skills work, named ck-marker:ck-marker-skill'), await a.text('.plugin-details'));
   await a.click('#pinstall-0-ck-marker');
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
   await a.shot('practice-plugins');

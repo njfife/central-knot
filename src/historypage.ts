@@ -6,7 +6,7 @@ import type { HistoryEvent } from './types.ts';
 
 const names: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
 const who = (tool?: string) => (tool ? names[tool] ?? tool : 'Central Knot');
-const list = (tools: string[]) => [...new Set(tools)].map(who).join(' and ');
+const list = (tools: string[]) => { const all = [...new Set(tools)].map(who); return all.length > 2 ? `${all.slice(0, -1).join(', ')} and ${all.at(-1)}` : all.join(' and '); };
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
@@ -16,7 +16,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'deleted': return { glyph: 'trash-2', text: `Deleted${event.winner ? ` in ${who(event.winner.tool)}` : ''}, then removed from the other tools it synced to.`, action: 'Restore' };
     case 'kept-edit': return { glyph: 'diff', text: `${who(event.winner?.tool)}'s edit was kept over a deletion in ${list(event.losers.map(loser => loser.tool))}.${order}` };
     case 'chosen': return { glyph: 'check', text: `You chose ${who(event.winner?.tool)}'s copy; it replaced ${list(event.losers.map(loser => loser.tool))}'s.`, action: 'Undo' };
-    case 'restored': return { glyph: 'undo-2', text: `You undid a change: the earlier version is back${event.losers.length ? ` in ${list(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Redo' };
+    case 'restored': {
+      // Name the change this undid, so Redo says what comes back.
+      const undone = state.history?.find(other => other.undoneBy === event.id);
+      const what = undone ? ({ edit: `the edit made in ${who(undone.winner?.tool)}`, conflict: `${who(undone.winner?.tool)}'s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(undone.winner?.tool)}'s copy`, restored: 'an undo' } as const)[undone.kind] : 'a change';
+      return { glyph: 'undo-2', text: `You undid ${what}; the earlier version is back${event.losers.length ? ` in ${list(event.losers.map(loser => loser.tool))}` : ''}.`, action: undone?.kind === 'deleted' ? 'Delete again' : 'Redo edit' };
+    }
   }
 }
 
@@ -39,7 +44,7 @@ const day = (iso: string) => {
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
 const actionHelp = (event: HistoryEvent, action: string) => (action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
-  : action === 'Redo' ? 'Undo the undo: put back the version that was replaced'
+  : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
 /** Undo or Restore; with several overwritten edits, one button per edit, so each can be put back. */
@@ -59,7 +64,8 @@ export function historyPage() {
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
   if (!events.length) return h('div.page', {}, emptyState('history', 'Nothing yet', 'When sync spreads an edit, settles competing edits or spreads a deletion on its own, it shows here, with Undo or Restore.'));
   const ordered = [...events].reverse();
-  const done = state.outcome?.page === 'history' ? h('div.bands', {}, h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, state.outcome.text))) : null;
+  const done = state.outcome?.page === 'history' ? h('div.bands', {}, h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, state.outcome.text),
+    state.outcome.undo ? button({ variant: 'outline', size: 'small', label: state.outcome.undo.label, id: 'outcome-undo', disabled: !!state.busy, onclick: () => void restoreEvent(state.outcome!.undo!.id) }) : null)) : null;
   return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;

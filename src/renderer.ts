@@ -52,7 +52,7 @@ function renderSidebar() {
   region('nav').replaceChildren(
     navRow('overview', 'Overview', 'layout-grid'),
     navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
-    navRow('mcp', 'MCP', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
+    navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
     navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
     navRow('plugins', 'Plugins', 'puzzle'),
     navRow('history', 'History', 'history'),
@@ -73,7 +73,7 @@ function renderHeader(rail: boolean) {
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
     h('h1.page-title', {}, titles[state.page]),
-    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(); }) })),
   );
 }
@@ -97,13 +97,15 @@ function renderStatus() {
       ? h('span.status-item.status-home', { title: state.home.home }, icon('eye', 14), h('span', {}, 'Home: ', h('span', { id: 'home-label' }, state.home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
+    state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-state', {}, 'Paused (preview only)'))
+    : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
       title: state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now. Click to turn it on.',
       onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
   // The result band already says what just happened; the status bar does not say it twice.
-  document.getElementById('announcement')?.classList.toggle('visually-hidden', !!state.outcome && state.outcome.page === state.page);
+  const said = document.getElementById('announcement');
+  said?.classList.toggle('visually-hidden', (!!state.outcome && state.outcome.page === state.page) || said.dataset.quiet === 'true');
 }
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);

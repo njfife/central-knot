@@ -3,7 +3,7 @@
 import { addMarketplace, forgetMarketplace, installPlugin, pickMarketplaceFolder, refreshMarketplace, rerender, shownPath, showPage, state, uninstallPlugin } from './app.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import { brandMark } from './matrix.ts';
-import type { HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
+import type { ActionReport, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
 
 const names: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
 const originText = (origin: MarketplaceView['origins'][number]) => (origin === 'central-knot' ? 'Added in Central Knot' : `Added in ${names[origin]}`);
@@ -30,7 +30,7 @@ function cell(view: PluginsView, market: MarketplaceView, plugin: PluginView, to
     // Uninstalling takes a second click on the same cell; the band above says what it will do.
     const confirming = state.pluginConfirm === id;
     return h('div.ov-cell', { role: 'cell' }, h(`button.cell-button.${confirming ? 'cell-confirm' : 'cell-synced'}.cell-on`, { type: 'button', id, title: confirming ? `Click again to uninstall ${plugin.name} from ${names[tool]}.` : `${text}. Click to uninstall.`, 'aria-label': confirming ? `Confirm: uninstall ${plugin.name} from ${names[tool]}` : `${text}. Uninstall`, disabled: busy || !view.clis[tool], 'data-state': 'installed',
-      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Click the cell again to uninstall ${plugin.name} from ${names[tool]}. Its files are kept by Central Knot first.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)));
+      onclick: (event: Event) => { event.stopPropagation(); if (confirming) { state.pluginConfirm = undefined; void uninstallPlugin(market.name, plugin.name, tool); } else { state.pluginConfirm = id; state.pluginConfirmText = `Click again to uninstall ${plugin.name} from ${names[tool]}. Central Knot saves a copy of the files it changes first.`; rerender(); } } }, icon(confirming ? 'x' : 'check', 16)));
   }
   if (why) return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-cannot', { type: 'button', id, title: why, 'aria-label': `${names[tool]}: ${why}`, disabled: true, 'data-state': 'cannot' }));
   if (status.state === 'not-known') return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-differs', { type: 'button', id, title: `${status.reason} Click to install again.`, 'aria-label': `${names[tool]}: not known yet. ${status.reason} Install again`, disabled: busy, 'data-state': 'not-known',
@@ -47,12 +47,16 @@ function details(view: PluginsView, plugin: PluginView) {
   const summary = parts
     ? [parts.skills && `${parts.skills} skill${parts.skills === 1 ? '' : 's'}`, parts.commands && `${parts.commands} command${parts.commands === 1 ? '' : 's'}`, parts.agents && `${parts.agents} agent${parts.agents === 1 ? '' : 's'}`, parts.hooks && 'hooks', parts.mcp && `${parts.mcp} MCP server${parts.mcp === 1 ? '' : 's'}`, parts.bin && 'a top-level bin/'].filter(Boolean).join(', ') || 'Nothing Central Knot recognises'
     : 'Its files live outside the marketplace, so what it holds is known only after install.';
+  const skillNames = parts?.skillNames ?? [];
+  const firstSkill = skillNames[0];
+  // Skills are named when only skills are listed, so the line reads "Contains 2 skills: a, b".
+  const skillList = skillNames.length && !parts?.commands && !parts?.agents && !parts?.mcp && !parts?.hooks ? `${skillNames.slice(0, 2).join(', ')}${skillNames.length > 2 ? ` +${skillNames.length - 2} more` : ''}` : '';
   return h('div.compare.details.plugin-details', { role: 'region', 'aria-label': `Details for ${plugin.name}` },
-    h('div.details-head', {}, h('p.details-status', {}, `Contains ${summary}`), h('p.details-description', {}, plugin.description || 'No description.')),
+    h('div.details-head', {}, h('p.details-status', {}, plugin.description || 'No description.'), h('p.details-description', {}, `Contains ${summary}${skillList ? `: ${skillList}` : ''}`)),
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, `When installed in ${names[tool]}`)),
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, `${outcome.component} ${outcome.text.replace(/plugin:(skill|agent)/, `${plugin.name}:${'$1'}-name`)}`)))))))) : null);
+        h('span', {}, `${outcome.component} ${outcome.text.replace('plugin:skill', firstSkill ? `${plugin.name}:${firstSkill}` : `${plugin.name}:skill-name`).replace('plugin:agent', `${plugin.name}:agent-name`)}`)))))))) : null);
 }
 
 function market(view: PluginsView, entry: MarketplaceView, index: number) {
@@ -71,7 +75,7 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
           plugin.version ? h('span.plugin-version', {}, plugin.version) : null),
         view.tools.map(tool => cell(view, entry, plugin, tool, index)),
         h('div.plugin-actions', { role: 'cell' }, missing.length && view.canWrite
-          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : missing.length === 1 ? `Install in ${names[missing[0]]}` : `Install in ${missing.length} more`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
+          ? button({ variant: 'outline', size: 'small', label: missing.length === view.tools.length && missing.length > 1 ? `Install in all ${missing.length}` : `Install in ${missing.map(tool => names[tool]).join(' + ')}`, name: `Install ${plugin.name} in ${missing.map(tool => names[tool]).join(', ')}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!state.busy, onclick: () => void installPlugin(entry.source, plugin.name, missing) })
           : null),
         h('div.ov-fill')),
       open ? details(view, plugin) : null,
@@ -83,15 +87,19 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       h('span.market-source', { title: entry.source }, entry.kind === 'folder' ? shownPath(entry.source) : entry.source),
       h('div.market-actions', {},
         entry.fetchedAt ? h('span.market-when', {}, `${entry.kind === 'folder' ? 'Read' : 'Fetched'} ${when(entry.fetchedAt)}`) : null,
-        button({ variant: 'ghost', size: 'small', icon: 'refresh-cw', label: 'Refresh', id: `refresh-${index}`, disabled: !!state.busy, onclick: () => void refreshMarketplace(entry.source) }),
+        button({ variant: 'ghost', size: 'small', icon: 'refresh-cw', label: entry.kind === 'folder' ? 'Read again' : 'Fetch again', id: `refresh-${index}`, disabled: !!state.busy, onclick: () => void refreshMarketplace(entry.source) }),
         entry.origins.includes('central-knot') ? (() => { const remove = button({ variant: 'ghost', size: 'small', label: 'Remove from list', name: `Remove ${title} from Central Knot’s list. Installed plugins stay installed.`, id: `forget-${index}`, disabled: !!state.busy, onclick: () => void forgetMarketplace(entry.source) }); remove.title = 'Removes it from this list only. Installed plugins stay installed.'; return remove; })() : null)),
     entry.problem ? h('div.band', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, entry.problem, entry.stale ? ` Showing the copy fetched ${when(entry.fetchedAt)}; installing waits until it can be reached.` : '')) : null,
     (() => {
       const cannot = view.tools.filter(tool => !view.clis[tool]);
-      if (!cannot.length || !entry.plugins.length) return entry.plugins.length ? h('p.market-hint', {}, 'Click a tool’s box to install the plugin there; click a check to uninstall it. Plugin actions run at once through that tool’s own command; there is no Apply all here.') : null;
-      return h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
-        `Can’t install in ${cannot.map(tool => names[tool]).join(cannot.length > 2 ? ', ' : ' or ')} here: ${cannot.length === 1 ? 'its' : 'their'} command-line tool${cannot.length === 1 ? ' was' : 's were'} not found${state.home?.mode === 'actual' ? '' : ' (this is not This Mac’s home)'}. Those boxes are striped. `,
-        button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${index}`, onclick: () => showPage('tools') }));
+      if (!entry.plugins.length) return null;
+      // How plugin actions work is always said; which tools can't take them is said apart.
+      const how = h('p.market-hint', {}, icon('info', 13, 'tone-muted'), 'Installing runs at once, through that tool’s own command; there is no Apply all here. Click a check to start uninstalling.');
+      if (!cannot.length) return how;
+      const orList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(' or '));
+      return h('div.market-hints', {}, how, h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
+        `Can’t install in ${orList(cannot.map(tool => names[tool]))} here: ${cannot.length === 1 ? 'its' : 'their'} command-line tool${cannot.length === 1 ? ' wasn’t' : 's weren’t'} found${state.home?.mode === 'actual' ? '' : ` for ${state.home?.label ?? 'this home'}`}. Striped boxes can’t be clicked. `,
+        button({ variant: 'link', size: 'micro', label: 'See Tools', id: `market-tools-${index}`, onclick: () => showPage('tools') })));
     })(),
     entry.plugins.length
       ? withTools(view, h('div.ov.plugin-table', { role: 'table', 'aria-label': `Plugins in ${title}` },
@@ -106,6 +114,15 @@ function withTools(view: PluginsView, table: HTMLElement) {
   return table;
 }
 
+/** The way back from a finished install or uninstall, on its report line. */
+function reverse(report: ActionReport) {
+  const last = state.pluginLast;
+  if (!last) return null;
+  if (report.outcome === 'installed') return button({ variant: 'link', size: 'micro', label: `Uninstall from ${names[report.tool]}`, id: `report-uninstall-${report.tool}`, disabled: !!state.busy, onclick: () => void uninstallPlugin(last.market, last.plugin, report.tool) });
+  if (report.outcome === 'uninstalled' && last.source) return button({ variant: 'link', size: 'micro', label: `Reinstall in ${names[report.tool]}`, id: `report-reinstall-${report.tool}`, disabled: !!state.busy, onclick: () => void installPlugin(last.source, last.plugin, [report.tool]) });
+  return null;
+}
+
 function reports() {
   const result = state.pluginResult;
   if (!result) return null;
@@ -115,7 +132,7 @@ function reports() {
   return h('div.band.plugin-report', { role: 'status' },
     h('div.plugin-report-lines', {}, result.reports.map(report => h('p', {},
       icon(report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'check' : report.outcome === 'not-known' ? 'circle-question-mark' : 'triangle-alert', 14, report.outcome === 'installed' || report.outcome === 'uninstalled' ? 'tone-success' : 'tone-warning'),
-      h('strong', {}, `${names[report.tool]}: `), report.message))),
+      h('strong', {}, `${names[report.tool]}: `), report.message, reverse(report)))),
     changed.length ? h('p.plugin-report-files', {}, `Changed by the tools’ own commands: ${[...new Set(changed)].map(path => shownPath(path)).join(', ')}. Central Knot kept a copy of each before it changed.`) : null);
 }
 

@@ -47,7 +47,8 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
     const catalog = await parseCatalog(root, root, 'folder');
     assert.equal(catalog.name, 'ck-test-market');
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
-    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false });
+    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, skillNames: catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames });
+    assert.equal(catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames!.length, 2);
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'escape')!.components, undefined, 'a path outside is not read');
     assert.equal(catalog.plugins.some(plugin => plugin.copilotRefuses), false);
   } finally { await box.cleanup(); }

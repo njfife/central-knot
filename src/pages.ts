@@ -1,4 +1,4 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state } from './app.ts';
+import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -41,7 +41,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
   const edits = facts.filter(fact => fact.managed && fact.edited?.length).length;
-  const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'needs' : 'need'} a copy choice` }
+  const attention = differs ? { tone: 'tone-warning', glyph: 'diff' as const, text: `${differs} ${differs === 1 ? 'has' : 'have'} different copies` }
     : edits ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${edits} ${edits === 1 ? 'edit waits' : 'edits wait'} to spread` }
       : waitsForClaude ? { tone: 'tone-warning', glyph: 'clock' as const, text: `${waitsForClaude} ${waitsForClaude === 1 ? 'waits' : 'wait'} for Claude Code` }
         : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All managed ones in sync' }
@@ -63,14 +63,15 @@ export function overviewPage() {
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       h('p.overview-lead', {}, 'Central Knot keeps the skills, MCP servers and agents you choose the same in Claude Code, Copilot CLI and Codex.',
-        nothingManaged ? ' Start by opening one below and choosing what to manage.' : ''),
+        nothingManaged ? ' Open one below, turn on Managed for what you want kept the same, then click Apply all.' : ''),
       h('div.kind-cards', {},
         kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills)),
         kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.claudePending.length),
         kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []))),
       h('div.overview-more', {},
         h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
-          home.syncOn ? 'Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.' : 'Automatic sync is off: edits wait until you turn it on or use Sync now (status bar, bottom left).'),
+          ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
+            : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), 'Closing this window keeps Central Knot syncing. Quit from the Central Knot menu.'),
         h('p.overview-line', {}, icon('puzzle', 14, 'tone-muted'), 'Plugins are installed through each tool’s own CLI on the ', button({ variant: 'link', size: 'micro', label: 'Plugins page', id: 'overview-plugins', onclick: () => showPage('plugins') }), '.'),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Everything sync does on its own is listed in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo or Restore.'))));
@@ -145,9 +146,9 @@ export function skillsPage() {
   }, selectItem);
 }
 
-export function copyButton(text: string, what: string, id: string) {
+export function copyButton(text: string, what: string, id: string, label?: string) {
   const glyphButton = button({
-    variant: 'ghost', size: 'micro', icon: 'copy', name: `Copy ${what}`, id,
+    variant: 'ghost', size: 'micro', icon: 'copy', name: `Copy ${what}`, id, label,
     onclick: () => void navigator.clipboard.writeText(text).then(() => {
       glyphButton.firstElementChild!.replaceWith(icon('copy-check', 14));
       announce(`Copied ${what}.`);
@@ -183,13 +184,13 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
       brandMark(snapshot.harness, 18),
       h('h2.tool-title', {}, toolName(snapshot.harness) ?? fullToolName(snapshot)),
       pathText(shownPath(snapshot.root), snapshot.root),
-      copyButton(snapshot.root, `folder for ${fullToolName(snapshot)}`, `copy-root-${snapshot.harness}`)),
+      copyButton(snapshot.root, `folder for ${fullToolName(snapshot)}`, `copy-root-${snapshot.harness}`, 'Copy path')),
     h('div.tool-body', {},
       h('div.tool-column', {},
         section('Detection', h('dl.facts', {},
           // The practice copy and another folder are folders, not this Mac: no app is looked for there, and that is no fault.
-          ...fact('Status', home.mode === 'actual' ? snapshot.detection : home.mode === 'fixture' ? 'Sample folder (apps are checked only on This Mac’s home)' : 'Folder only (apps are checked only on This Mac’s home)'),
-          ...fact('Version', home.mode === 'actual' ? snapshot.probe.version ?? snapshot.probe.detail : '—'),
+          ...fact('Status', home.mode === 'actual' ? snapshot.detection : home.mode === 'fixture' ? 'Sample folder' : 'Folder only'),
+          ...(home.mode === 'actual' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
           ...(snapshot.probe.detail.startsWith('ChatGPT desktop') ? fact('Found as', 'ChatGPT desktop’s own Codex; no Codex CLI found') : []))),
         section('Folders', h('dl.facts', {},
           ...fact('Config folder', path(snapshot.root)),
@@ -198,7 +199,8 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
       h('div.tool-column', {},
         section('What it has',
           h('div.link-row', {},
-            snapshot.skills.length ? button({ variant: 'link', size: 'micro', label: plural(skillCount(snapshot), 'skill'), id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('skills') }) : h('span', {}, discoveryLine(snapshot)),
+            snapshot.skills.length ? button({ variant: 'link', size: 'micro', label: plural(skillCount(snapshot), 'skill'), id: `tool-overview-${snapshot.harness}`, onclick: () => showPage('skills') })
+              : snapshot.discovery === 'empty' || snapshot.discovery === 'missing' ? h('span', { title: discoveryLine(snapshot) }, '0 skills') : h('span', {}, discoveryLine(snapshot)),
             h('span.tone-faint', {}, ' · '),
             button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }),
             h('span.tone-faint', {}, ' · '),
