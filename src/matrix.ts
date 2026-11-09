@@ -338,6 +338,8 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
     const tells = version && others.some(other => other && (other.lines !== version.lines || other.changed !== version.changed));
     return `Has a different copy${tells ? ` (${version!.lines}, ${version!.changed})` : ''}.`;
   }
+  // A copy that stops syncing on Apply all is said as what will happen; it still syncs until then.
+  if (cellState === 'present' && stopsOnApply(skill, tool)) return 'Keeps its copy, which stops updating on Apply all.';
   if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : `Has its own copy. Central Knot is not managing this ${shortNoun[kind][0]}.`;
   return skill.managed ? 'No copy, and syncing here is turned off.' : 'No copy.';
 };
@@ -1269,7 +1271,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         list)),
     h('section.detail-column', { 'aria-label': 'Skill details' },
       h('div.pane-header.fit-bar', {},
-        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p.pane-pending', {}, 'Changes on Apply all')
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Waits for Apply all')
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}` : skill.managed ? 'Managed' : 'Unmanaged')),
         // The skill's own controls sit beside its name; the changes waiting for Apply all keep the bar's far end.
         h('div.detail-actions', {},

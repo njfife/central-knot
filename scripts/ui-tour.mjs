@@ -351,6 +351,7 @@ if (wanted('missing')) {
   await a.click('#nav-plugins'); await waitFor(a, `!!document.querySelector('.empty')`);
   await shot(a, 'pi-only-plugins', 'A folder whose only tool is Pi: Plugins says no tool here can install plugins.');
   await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'The same folder\'s Overview: the sidebar dims Agents and Plugins, which Pi can\'t hold; they still open.');
 }
 
 a.quit();

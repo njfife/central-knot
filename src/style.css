@@ -375,10 +375,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-row { position: relative; display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); scroll-margin-top: 128px; }
 .ov-row:not(.ov-head) { cursor: pointer; }
 .ov-row:not(.ov-head):hover, .ov-row:not(.ov-head):has(:focus-visible), .history-row:hover { background: var(--row-hover); }
-/* A wide table stripes every other row, so the eye can follow a row from its name across to its tools; the plugin table too. */
+/*
+ * A wide table stripes every other row, so the eye can follow a row from its name across to its tools. The plugin table
+ * stripes sooner: its taller rows sit further apart, and beside the list of marketplaces it is narrower at the same window.
+ */
 .plugin-table { container: table / inline-size; }
 @container table (width >= 1000px) {
-  :is([role="rowgroup"], .plugin-table) > .ov-row:not(.ov-head):nth-child(even of .ov-row:not(.ov-head)):not(:hover):not(.open):not(:has(:focus-visible)) { background: var(--row-stripe); }
+  [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open):not(:has(:focus-visible)) { background: var(--row-stripe); }
+}
+@container table (width >= 700px) {
+  .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .ov-row.open { background: var(--chrome); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
@@ -614,8 +620,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pane-header { flex: none; min-height: 61px; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .pane-title { flex: 0 1 auto; min-width: 0; }
 .pane-title h2 { font-size: 14px; line-height: 20px; font-weight: 600; }
-.pane-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.detail-actions { display: flex; align-items: center; gap: 12px; margin-left: 16px; }
+.pane-title p { font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.detail-actions { display: flex; align-items: center; gap: 12px; margin-left: 16px; white-space: nowrap; }
 .detail-pending { margin-left: auto; }
 .detail-switch-label { margin-right: -4px; font-size: 13px; color: var(--ink-soft); }
 .detail-scroll { display: flex; flex-direction: column; gap: 24px; padding: 12px var(--pad-end) 12px 16px; user-select: text; }
@@ -904,13 +910,16 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .market-add-head { display: none; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
-  /* Less height around the table, and two-line rows (what it holds beside its name), so several plugins show. */
+  /* Less height around the table, and two-line rows (the name, then what it holds and what it does), so several show. */
   .market-main { padding-top: 12px; }
   .market-tabs { margin: 8px 0 6px; }
   .market-tab { padding: 5px 10px; }
   .plugin-table .ov-head .ov-tool-head { flex-direction: row; gap: 6px; }
-  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 10px; padding: 7px 12px 7px 0; }
-  .plugin-row-about { order: 1; flex-basis: 100%; }
+  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 0; padding: 7px 12px 7px 0; }
+  .plugin-row-open { flex-basis: 100%; }
+  .plugin-row-holds { order: 1; flex: none; }
+  .plugin-row-about ~ .plugin-row-holds::after { content: "·"; margin: 0 6px; }
+  .plugin-row-about { order: 2; flex: 1 1 0; min-width: 0; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
