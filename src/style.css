@@ -1279,3 +1279,4 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .notice-quit { margin-left: 4px; }
 .details-mcp .details-tool-head { grid-template-columns: 150px minmax(0, 1fr); }
 .sync-notice.notice-stacked > .notice-dismiss { right: 4px; }
+.details-definition { grid-template-columns: 72px minmax(0, 1fr); }

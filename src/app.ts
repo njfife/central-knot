@@ -596,7 +596,7 @@ export const writeClaudeNow = (names: string[]) => { const earlier = state.outco
   const written = result.claudeWritten ?? [];
   if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
     // The result this replaces offered its own Undo: say where it went, so the way back from the bigger step is not lost.
-    note: earlier && earlier !== 'Undo write' ? `The ${earlier.replace(/^Undo\s*/, 'Undo for ')} moved to History.` : undefined,
+    note: earlier && earlier !== 'Undo write' ? `${earlier} is in History.` : undefined,
     act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 }); };
