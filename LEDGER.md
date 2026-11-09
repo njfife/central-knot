@@ -478,3 +478,22 @@ Agents passed in the real window: steps 1–5 (Manage all, files and limits, the
 - **The menu bar icon was not found:** a crowded menu bar (and the MacBook notch) hides status items. The app menu now carries Sync, Sync now, Start at sign-in and Quit too, so they are always reachable. The Dock icon also reopens the window.
 
 Closing the window kept the app running, and a background edit reached Codex (step 6, first half).
+
+## Fifth check, Astra (on 51a5d32), November 9, 2026
+
+"Not yet", with 11 confirmed cases, mostly in MCP sync, which had not had the skills engine's safety pass. All 11 are fixed. The reproductions are kept in `tests/fifth-check-astra.test.ts` (13 tests; the two race tests inject the save at the new write step).
+
+- **Checked writes** (`writeFileChecked`, `removeFileChecked` in `share.ts`, used by MCP and agents). The current file is moved aside and checked, then the new one is linked into place exclusively. A save landing in that moment is never overwritten, whether it is an agent prompt or an unrelated Codex setting (N1, N10).
+- **MCP deletions:**
+  - only recorded copies are removed; a never-synced entry with the same name stays (N4);
+  - a missing settings file (moved config root) makes that tool away, not deleted (N3);
+  - a copy recorded in an old file is let go;
+  - Claude Code's removal waits as `removing` until Write now (N7).
+- **MCP kept versions per tool.** Each tool's own settings (Codex `enabled`, timeouts) are kept and put back by Restore (N8).
+- **MCP Restore** refuses to overwrite a server managed again with other settings (N5).
+- **Write now** is offered for Claude Code entries that are behind or still to be removed, not only missing ones (N6, N7).
+- **History:** MCP "Use this copy" and an edit kept over a deletion are History events (N9).
+- **Displaced records** in MCP and agents: content about to be overwritten goes on record first, and an interrupted pass names it in History next time (N11).
+- **Agents folder identity.** A folder made again between two passes is a reset: copies are put back, never deleted (N2).
+
+**Validation.** 192 unit tests. Linux e2e 121/121.

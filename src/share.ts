@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { access, chmod, constants, copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises';
+import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { harnesses, writeRoot } from './harnesses.ts';
 import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
@@ -199,6 +199,51 @@ export async function writeDurably(path: string, text: string) {
   try { await handle.writeFile(text); await handle.sync(); } finally { await handle.close(); }
   await rename(temporary, path);
 }
+/** A file changed between being read and being written: nothing is written, and the next pass reads it again. */
+export const changedWhileSyncing = () => Object.assign(new Error('It changed while syncing, so it was left as it is. The next pass looks at it again.'), { code: 'CK_CHANGED' });
+const occupiedError = () => Object.assign(new Error('Something that is not readable here is already at that path, so it was left alone.'), { code: 'CK_OCCUPIED' });
+
+/**
+ * Writes a tool's file only if it still holds `expected` (undefined: only if nothing is there), keeping its mode. The current file is
+ * moved aside and checked there, then the new one is put in place exclusively: a save that lands meanwhile is never overwritten.
+ */
+export async function writeFileChecked(path: string, text: string, expected: string | undefined) {
+  await mkdir(dirname(path), { recursive: true });
+  let mode = 0o600;
+  try { mode = (await stat(path)).mode & 0o777; } catch { /* new file */ }
+  const temporary = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.tmp`);
+  const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
+  await writeFile(temporary, text, { mode });
+  try {
+    if (expected !== undefined) {
+      try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
+      let held: string | undefined;
+      try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
+      if (held !== expected) { await link(parked, path).catch(() => undefined); throw changedWhileSyncing(); }
+    }
+    try { await link(temporary, path); }
+    catch (error) {
+      // Something was saved there after the old file was moved aside: that save stays; the old file (as read) is not needed.
+      if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
+      if (expected !== undefined) await link(parked, path).catch(() => undefined);
+      throw error;
+    }
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+    await unlink(parked).catch(() => undefined);
+  }
+}
+
+/** Removes a tool's file only if it still holds `expected`: moved aside and checked there, so an edit saved meanwhile is put back. */
+export async function removeFileChecked(path: string, expected: string) {
+  const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
+  await rename(path, parked);
+  let held: string | undefined;
+  try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
+  if (held !== expected) { await link(parked, path).catch(() => undefined); await unlink(parked).catch(() => undefined); throw changedWhileSyncing(); }
+  await unlink(parked);
+}
+
 export const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
 type Settings = { homes?: Record<string, { generation: string }> };
