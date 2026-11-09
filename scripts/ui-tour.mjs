@@ -217,7 +217,7 @@ if (wanted('base')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#base-restore-codex-cli')`);
   await shot(a, 'base-edited-there', 'Outside the app, edited both Codex’s own text and its copy of the base in AGENTS.md, then clicked Refresh.');
   await a.click('#base-diff-codex-cli'); await shot(a, 'base-edited-diff', 'Clicked "See the difference".');
-  await a.click('#base-adopt-codex-cli'); await shot(a, 'base-adopt-review', 'Clicked "Use it as the base…".');
+  await a.click('#base-adopt-codex-cli'); await shot(a, 'base-adopt-review', 'Clicked "Use AGENTS.md’s copy as the base…".');
   await a.click('#base-back');
   await a.click('#base-restore-codex-cli'); await shot(a, 'base-put-back-review', 'Cancelled, then clicked "Put the base back in AGENTS.md…" instead.');
   await a.click('#base-save'); await shot(a, 'base-put-back', 'Clicked "Put the base back in AGENTS.md".');
@@ -234,6 +234,9 @@ if (wanted('base')) {
     await shot(a, `base-${width}`, `The window at ${width}×${height}.`);
   }
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.run(`document.querySelector('#base-restore-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-conflict', 'At 860×560: the edited copy in AGENTS.md with its difference and both choices.');
   await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
   await a.click('#base-edit');
   await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- One more shared line.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);

@@ -66,6 +66,9 @@ document.addEventListener('keydown', event => {
   leaveReview(edit.tool);
 });
 
+/** Says which side of a difference is which, above it. */
+export const legend = (removed: string | undefined, added: string) => h('p.base-legend', {}, removed ? h('span.base-legend-removed', {}, `− ${removed}`) : null, h('span.base-legend-added', {}, `+ ${added}`));
+
 /** A line diff with changed words tinted, long unchanged runs folded until `showAll`. */
 export function diffView(diff: { kind: 'same' | 'added' | 'removed'; text: string }[], full: boolean, showAll: () => void, label = 'Changes') {
   return h('pre.ins-diff', { tabindex: '0', 'aria-label': label }, folded(diff, full).map(line => line.kind === 'fold'
@@ -107,8 +110,10 @@ function editor(file: InstructionFile) {
     const empties = changed && original.trim() && !edit.text.trim() && !file.base?.copy?.trim();
     return h('div.ins-editor', {},
       h('p.ins-review-title', {}, title),
+      edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
       empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${names[file.tool]} will start sessions with no instructions from it.`)) : null,
       edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
+      legend(`${name} now`, edit.restoring ? 'the earlier version' : 'after saving'),
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
         button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
@@ -116,7 +121,7 @@ function editor(file: InstructionFile) {
         edit.restoring ? null : edit.confirmDiscard
           ? discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
             { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` })
-          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-discard-yes-${file.tool}`)?.focus(); } })));
+          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
@@ -184,7 +189,7 @@ function card(file: InstructionFile) {
     editing ? [editor(file), baseStrip(file)]
       : h('div.ins-body', {},
         file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
-          : file.base?.copy !== undefined ? h('p.ins-empty', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
+          : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         baseStrip(file),
         h('div.ins-actions', {},

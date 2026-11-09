@@ -420,6 +420,7 @@ export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?
  * Undo puts the base, its tools and every file it wrote back as they were.
  */
 export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (written: string) => string) => busy('Saving the base instructions…', async () => {
+  focusAfterBusy = 'outcome-undo-base';
   const result = await api().applyBase({ ...request, expected: state.baseEdit?.hash ?? state.base?.hash ?? '' }, state.home!.home);
   await readInstructions();
   if (result.stopped) {
@@ -435,6 +436,8 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
     return;
   }
   state.baseEdit = undefined;
+  // Back to the card's rows, which now show each file's state; focus goes to the result's Undo.
+  document.getElementById('instructions-scroll')?.scrollTo({ top: 0 });
   const written = result.written.map(entry => entry.tool);
   const sessions = written.length ? ` Start a new ${written.length === 1 ? `${toolNamesOf(written)} session` : 'session in each'} to use ${written.length === 1 ? 'it' : 'them'}.` : '';
   const created = result.written.filter(entry => entry.before === null).map(entry => entry.tool);
