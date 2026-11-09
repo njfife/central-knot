@@ -221,7 +221,6 @@ function makeTray() {
 let pendingResults: DestinationResult[] = [], pendingNotices: SyncNotice[] = [];
 let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = [];
 let lastStopped: string | undefined;
-let lastMcpAndAgents: McpAndAgentsResult | undefined;
 
 interface McpAndAgentsResult { failures: DestinationResult[]; stopped?: DestinationResult; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
 interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
@@ -250,7 +249,6 @@ async function pass(explicit = false): Promise<PassResult> {
 /** A failed MCP or agents pass, or a copy it could not write, is told on the page, never dropped. */
 function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
   if (!outcome) return;
-  lastMcpAndAgents = outcome;
   for (const failure of outcome.failures) if (!pendingResults.some(known => known.item === failure.item && known.harness === failure.harness && known.message === failure.message)) pendingResults.push(failure);
   if (outcome.stopped && !pendingResults.some(known => known.message === outcome.stopped!.message)) pendingResults.push(outcome.stopped);
   pendingMcpNotices.push(...outcome.mcpNotices);
@@ -302,13 +300,13 @@ async function backgroundPass() {
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
   if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
-  if (skills?.settling || lastMcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
+  if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
     if (!window.isDestroyed()) window.webContents.send('sync:changed');
   }
   lastStopped = skills?.stopped;
-  if (!skills || (!skills.harnessWrites && !skills.notices?.length && !lastMcpAndAgents?.changed)) return;
+  if (!skills || (!skills.harnessWrites && !skills.notices?.length && !mcpAndAgents?.changed)) return;
   pendingResults.push(...skills.results);
   pendingNotices.push(...(skills.notices ?? []));
   if (!window.isDestroyed()) window.webContents.send('sync:changed');
