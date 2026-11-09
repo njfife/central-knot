@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, mainProcess } from './cdp.mjs';
+import { connect, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -241,53 +241,43 @@ if (wanted('settings')) {
   if (railed) await a.click('#sidebar-toggle');
   await size(860, 560);
   // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,
-  // so main is given a stand-in system (its platform, an installed path, and the system's login-item answer) through the
-  // inspector, and the window is refocused so the page reads it again, as it does when someone comes back from System Settings.
+  // so main stands in as an installed app with the system's login-item answer (see standIn), and the window is refocused so the
+  // page reads it again, as it does when someone comes back from System Settings.
   if (a.main) {
     // Opened afresh, so the earlier rows' notes are gone.
     await a.click('#nav-skills'); await a.click('#nav-settings');
     const main = await a.main();
-    await main.run(`globalThis.real = { platform: process.platform, getPath: electron.app.getPath, getLogin: electron.app.getLoginItemSettings, setLogin: electron.app.setLoginItemSettings, setMenu: electron.Menu.setApplicationMenu }`);
-    const refocus = async () => { await main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`); await a.settle(); };
-    const system = async (platform, answer) => {
-      await main.run(`(() => {
-        const exe = ${JSON.stringify(platform === 'darwin' ? '/Applications/Central Knot.app/Contents/MacOS/Central Knot' : 'C:\\Program Files\\Central Knot\\Central Knot.exe')};
-        electron.app.getPath = name => name === 'exe' ? exe : real.getPath.call(electron.app, name);
-        electron.app.getLoginItemSettings = () => ({ ...${JSON.stringify(answer)}, launchItems: (${JSON.stringify(answer.launchItems ?? [])}).map(item => ({ ...item, path: exe })) });
-        electron.app.setLoginItemSettings = () => {};
-        electron.Menu.setApplicationMenu = () => {};
-        Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)}, configurable: true });
-        Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true });
-      })()`);
-      await refocus();
-    };
+    await standIn(main, 'win32');
+    const system = async (platform, login) => { await main.run(`(ck.as(${JSON.stringify(platform)}), ck.login = ${JSON.stringify(login)})`); await refocus(main); await a.settle(); };
     const both = async (name, caption) => { await shot(a, `${name}-dark`, caption); await a.theme('light'); await shot(a, `${name}-light`, 'The same, light.'); await a.theme('dark'); };
-    await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: true }] });
+    const press = async (key, code, keyCode, modifiers = 0) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, modifiers }); await a.settle(); };
+    await system('win32', { on: true, enabled: true });
     await shot(a, 'settings-sign-in-on', 'Stand-in system: an installed app on Windows, starting at sign-in. The switch is on and the hint says what it does.');
     // Keyboard focus: from the Appearance cards, Shift+Tab goes back to the switch.
     await a.run(`document.querySelector('#appearance-system').focus()`);
-    for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9, modifiers: 8 });
-    await a.settle();
+    await press('Tab', 'Tab', 9, 8);
     await both('settings-sign-in-focused', `Focused the Appearance cards and pressed Shift+Tab: the switch has the focus ring, outside its track (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
     await a.run(`document.activeElement?.blur()`);
-    await system('win32', { openAtLogin: true, launchItems: [{ args: ['--hidden'], enabled: false }] });
-    await both('settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Startup apps. Off; the hint still says what it does, and beneath it the row says where it was turned off, with Open Startup apps.');
-    await system('win32', { openAtLogin: false, launchItems: [] });
+    await system('win32', { on: true, enabled: false });
+    await both('settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Startup apps (perhaps on purpose). Off; the hint still says what it does, and beneath it a calm grey line says where it was turned off, with Open Startup apps right after the text.');
+    // Keyboard focus on the line's action: Tab from the switch goes to it.
+    await a.run(`document.querySelector('#start-at-sign-in').focus()`);
+    await press('Tab', 'Tab', 9);
+    await a.theme('light');
+    await shot(a, 'settings-sign-in-action-focused-light', `Light. Focused the switch and pressed Tab: Open Startup apps has the focus ring (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.theme('dark');
+    await a.run(`document.activeElement?.blur()`);
+    await system('win32', { on: false, enabled: true, ignore: true });
     await a.click('#start-at-sign-in');
-    await both('settings-sign-in-unchanged', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says the system didn’t change it, where to look, and Open Startup apps.');
-    // macOS: the page names macOS's places once it knows it runs on a Mac, so it is reloaded as one.
+    await both('settings-sign-in-unchanged', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says in amber that the system didn’t change it, with Open Startup apps.');
+    // macOS: the hint names the menu bar once the page knows it runs on a Mac, so it is reloaded as one (main names the Login Items).
     const agent = await a.run('navigator.userAgent');
     const reloadAs = async userAgent => { await a.send('Emulation.setUserAgentOverride', { userAgent }); await a.send('Page.reload'); await wait(1500); await a.settle(); await a.click('#nav-settings'); };
-    await system('darwin', { openAtLogin: true, status: 'requires-approval' });
+    await system('darwin', { on: true, status: 'requires-approval' });
     await reloadAs(agent.replace(/\(X11;[^)]*\)/, '(Macintosh; Intel Mac OS X 10_15_7)'));
-    await both('settings-sign-in-approval', 'Stand-in system: an installed app on macOS that turned it on, with macOS waiting for approval (as it also reports one turned off in Login Items). The switch shows Off, the system’s answer; the hint stays, and beneath it how to finish, with Open Login Items. (With main standing in as an installed app, the sidebar leaves out the Practice copy, as a released app does.)');
+    await both('settings-sign-in-approval', 'Stand-in system: an installed app on macOS whose login item is off in Login Items (waiting for approval, or turned off there on purpose: macOS reports both alike). The switch shows Off, the system’s answer; the hint stays, and beneath it a calm grey line, true either way, with Open Login Items. (With main standing in as an installed app, the sidebar leaves out the Practice copy, as a released app does.)');
     // Back to this Linux dev run: the row is off and disabled again, with its reason.
-    await main.run(`(() => {
-      Object.defineProperty(process, 'platform', { value: real.platform, configurable: true });
-      delete electron.app.isPackaged;
-      Object.assign(electron.app, { getPath: real.getPath, getLoginItemSettings: real.getLogin, setLoginItemSettings: real.setLogin });
-      electron.Menu.setApplicationMenu = real.setMenu;
-    })()`);
+    await main.run(`ck.restore()`);
     await reloadAs(agent);
     main.close();
   }

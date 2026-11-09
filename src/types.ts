@@ -389,7 +389,15 @@ export type Appearance = 'system' | 'light' | 'dark';
  * Whether Central Knot starts at sign-in, as the system has it now. `reason` says why it can't be changed here (`available`
  * false) or, where it can, why the system has it off (waiting for approval, turned off in the system's settings).
  */
-export interface SignIn { on: boolean; available: boolean; reason?: string }
+/** Why starting at sign-in can't be changed here, or why the system has it off (see signin.ts for each one's words). */
+export type SignInReason = 'testing' | 'dev' | 'linux' | 'applications' | 'approval' | 'startupApps';
+/** The system's own place for start at sign-in, in its words: the action that opens it, and what the page says around it. */
+export interface SignInPlace { open: string; unopened: string; unchanged: string }
+/**
+ * Whether Central Knot starts at sign-in, as the system has it. `reason`: why it can't be changed here (`available` false) or,
+ * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
+ */
+export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn }
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */

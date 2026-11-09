@@ -1344,14 +1344,19 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* As on the app's list rows: pointing anywhere on a wide row lights it all, tying its text to a control far to the right. */
 .setting-row:hover { background: var(--hover); }
 .setting-title { font-weight: 500; }
-.setting-hint, .setting-message { max-width: 72ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.setting-hint, .setting-message { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+/* Only the prose keeps the reading measure: a message's action sits right after its text, on the same line where there's room. */
+.setting-hint, .setting-message-text { max-width: 72ch; }
 .setting-message { grid-column: 1 / -1; display: flex; align-items: flex-start; gap: 6px; margin: -8px 0 0; }
 .setting-message .icon { flex: none; margin-top: 1px; }
+.setting-message-body { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; min-width: 0; }
 .setting-failure { color: var(--danger); }
-/* The system has the setting other than chosen and needs the person: it reads apart from the hints, without alarm. */
+/* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
-.setting-message .text-action { margin: -2px 0 -2px 4px; padding: 2px 4px; line-height: 16px; }
+/* How the system has it now (a choice the person may have made there): calm, like the Skills page's info lines. */
+.setting-system .icon { color: var(--ink-soft); }
+.setting-message .text-action { flex: none; margin: -2px 0; padding: 2px 4px; line-height: 16px; }
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
    still reads as an Off switch; the row says why in the hint's place. */
 .setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }

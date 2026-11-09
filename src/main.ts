@@ -268,8 +268,8 @@ function makeTray() {
   image.setTemplateImage(true);
   tray = new Tray(image);
   tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
-  // The menu is rebuilt as the pointer reaches the icon, so it shows a change made in System Settings while no window was open.
-  tray.on('mouse-enter', refreshTray);
+  // Its menu is rebuilt as the pointer reaches the icon, so it shows a change made in System Settings while no window was open.
+  tray.on('mouse-enter', () => tray?.setContextMenu(trayMenu()));
   refreshTray();
 }
 
@@ -560,7 +560,7 @@ app.whenReady().then(async () => {
   handleNow('settings:sign-in', async on => {
     if (typeof on !== 'boolean') throw new Error('Invalid start at sign-in.');
     const why = whyNoSignIn(signInFacts());
-    if (why) throw new Error(why);
+    if (why) throw new Error(why.text);
     await setStartAtSignIn(on);
     return preferences();
   });

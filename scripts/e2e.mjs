@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, mainProcess } from './cdp.mjs';
+import { connect, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -596,25 +596,15 @@ async function practiceFlow() {
   // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
   // stood-in packaged app could reach the real system's login items.
   if (a.main && process.platform === 'linux') {
-    // Main keeps every menu it builds from here on, the first-close dialog answers OK without showing, and the system's
-    // settings pages and login items are stand-ins: the login items keep what they are asked for, unless told to ignore it.
+    // Main stands in as an installed app on Windows (see standIn): its login items keep what they are asked for unless told to
+    // ignore it, it keeps every menu it builds from here on, and the system's settings pages and the first-close dialog are stand-ins.
     const main = await a.main();
-    await main.run(`(globalThis.ck = { menus: [], dialogs: [], opened: [], asked: [], on: false, ignore: false }, ((build, get, set) => {
-      ck.restore = () => Object.assign(electron.app, { getLoginItemSettings: get, setLoginItemSettings: set });
-      electron.Menu.buildFromTemplate = template => (ck.menus.push(template), build.call(electron.Menu, template));
-      electron.dialog.showMessageBox = options => (ck.dialogs.push(options), Promise.resolve({ response: 0, checkboxChecked: true }));
-      electron.shell.openExternal = url => (ck.opened.push(url), Promise.resolve());
-      const exe = electron.app.getPath('exe');
-      electron.app.getLoginItemSettings = () => ({ openAtLogin: ck.on, launchItems: ck.on ? [{ path: exe, args: ['--hidden'], enabled: true }] : [] });
-      electron.app.setLoginItemSettings = ({ openAtLogin }) => { ck.asked.push(openAtLogin); if (!ck.ignore) ck.on = openAtLogin; };
-    })(electron.Menu.buildFromTemplate, electron.app.getLoginItemSettings, electron.app.setLoginItemSettings))`);
-    const refocus = () => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+    await standIn(main, 'win32');
     const until = async (expected, read) => { let seen; for (let tries = 0; tries < 30; tries++) { seen = await read(); if (JSON.stringify(seen) === JSON.stringify(expected)) break; await wait(100); } return seen; };
     // The switch, the row's message and its action.
-    const row = () => a.run(`(message => [document.querySelector('#start-at-sign-in').getAttribute('aria-checked'), message?.querySelector('span').firstChild.textContent ?? null, message?.querySelector('.text-action')?.textContent ?? null])(document.querySelector('#setting-sign-in .setting-message'))`);
-    // As an installed app on Windows, coming back to the window: the row can be changed now.
-    await main.run(`(Object.defineProperty(process, 'platform', { value: 'win32', configurable: true }), Object.defineProperty(electron.app, 'isPackaged', { get: () => true, configurable: true }))`);
-    await refocus();
+    const row = () => a.run(`(message => [document.querySelector('#start-at-sign-in').getAttribute('aria-checked'), message?.querySelector('.setting-message-text').textContent ?? null, message?.querySelector('.text-action')?.textContent ?? null])(document.querySelector('#setting-sign-in .setting-message'))`);
+    // Coming back to the window: the row can be changed now.
+    await refocus(main);
     await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
     await a.click('#start-at-sign-in');
     const fromSettings = await until(['true', null, null], row);
@@ -622,28 +612,36 @@ async function practiceFlow() {
     await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
     const fromMenu = await until(['false', null, null], row);
     // A system that ignores the change: the row says so, with the way to its settings; once it is put right there, coming back clears it.
-    const unchanged = ['false', 'Your system didn’t change this. Check Startup apps in Settings.', 'Open Startup apps'];
-    await main.run(`ck.ignore = true`);
+    const unchanged = ['false', 'Your system didn’t change this.', 'Open Startup apps'];
+    await main.run(`ck.login.ignore = true`);
     await a.click('#start-at-sign-in');
     const ignored = await until(unchanged, row);
-    await a.click('#setting-sign-in .setting-message .text-action');
-    await main.run(`Object.assign(ck, { ignore: false, on: true })`);
-    await refocus();
+    // The action keeps the keyboard focus while the page redraws for something else (the appearance changed from elsewhere).
+    const action = '#setting-sign-in .setting-message .text-action';
+    await a.run(`document.querySelector('${action}').focus()`);
+    await a.run(`window.centralKnot.setAppearance('dark')`);
+    const redrawn = await until(true, () => a.exists('#appearance-dark[aria-checked="true"]'));
+    const focused = await a.run(`document.activeElement.matches('${action}')`);
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await a.click(action);
+    await main.run(`Object.assign(ck.login, { ignore: false, on: true })`);
+    await refocus(main);
     const putRight = await until(['true', null, null], row);
-    same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, opens Startup apps, and clears once put right',
-      [fromSettings, fromMenu, ignored, putRight, await main.run(`[ck.asked, ck.opened]`)],
-      [['true', null, null], ['false', null, null], unchanged, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
+    same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, its action keeps focus through a redraw, opens Startup apps, and the line clears once put right',
+      [fromSettings, fromMenu, ignored, redrawn && focused, putRight, await main.run(`[ck.asked, ck.opened]`)],
+      [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
     // As an installed app on Linux: coming back to the window reads it again.
-    await main.run(`(Object.defineProperty(process, 'platform', { value: 'linux', configurable: true }), ck.asked = [])`);
+    await main.run(`(ck.as('linux'), ck.asked = [])`);
     const saved = savedSettings().startAtSignIn;
-    await refocus();
+    await refocus(main);
     const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
     const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
     // The first close explains where the app went; on Linux it offers no start at sign-in.
     await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
     for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
     const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
-    await main.run(`(delete electron.app.isPackaged, ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
+    await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
     same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
       [reread, menuItem, dialogs, await main.run(`ck.asked`), savedSettings().startAtSignIn === saved],
       ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);

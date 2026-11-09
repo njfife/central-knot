@@ -35,3 +35,49 @@ export async function mainProcess(port) {
   const main = await connect(target.webSocketDebuggerUrl);
   return { run: expression => main.run(`(async electron => (${expression}))(process.mainModule.require('electron'))`), close: main.close };
 }
+
+/**
+ * Makes a Linux dev run's main process act as an installed copy on `platform` (darwin, win32 or linux), for the checks that need
+ * one, such as start at sign-in. Only safe on Linux, where the login-item calls stood in are Linux's own: elsewhere a stood-in
+ * installed app could reach the real system's. Everything lives in `ck` in main:
+ * - `ck.login` is the system's login item: `on`, `enabled` (false: turned off in Windows' Startup apps), `status` (macOS's,
+ *   when not the plain enabled/not-registered), `ignore` (the system ignores changes);
+ * - `ck.asked`, `ck.menus`, `ck.dialogs`, `ck.opened` record what main asked for, built, showed and opened (the first-close
+ *   dialog answers OK at once; nothing really opens);
+ * - `ck.as(platform)` switches system, and `ck.restore()` puts back every stand-in, so the rest of a run is unaffected (the
+ *   records stay readable).
+ */
+export const standIn = (main, platform) => main.run(`(() => {
+  const { app, dialog, shell, Menu } = electron;
+  const real = { platform: Object.getOwnPropertyDescriptor(process, 'platform'), packaged: Object.getOwnPropertyDescriptor(app, 'isPackaged'), getPath: app.getPath, get: app.getLoginItemSettings, set: app.setLoginItemSettings, build: Menu.buildFromTemplate, setMenu: Menu.setApplicationMenu, dialog: dialog.showMessageBox, open: shell.openExternal };
+  const exes = { darwin: '/Applications/Central Knot.app/Contents/MacOS/Central Knot', win32: 'C:\\\\Program Files\\\\Central Knot\\\\Central Knot.exe', linux: '/opt/Central Knot/central-knot' };
+  const ck = globalThis.ck = { login: { on: false, enabled: true }, asked: [], menus: [], dialogs: [], opened: [] };
+  ck.as = platform => {
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    Object.defineProperty(app, 'isPackaged', { get: () => true, configurable: true });
+    app.getPath = name => name === 'exe' ? exes[platform] : real.getPath.call(app, name);
+  };
+  app.getLoginItemSettings = () => {
+    const { on, enabled, status } = ck.login;
+    return process.platform === 'darwin' ? { openAtLogin: on, status: status ?? (on ? 'enabled' : 'not-registered') }
+      : { openAtLogin: on, launchItems: on ? [{ path: exes[process.platform], args: ['--hidden'], enabled }] : [] };
+  };
+  app.setLoginItemSettings = ({ openAtLogin }) => { ck.asked.push(openAtLogin); if (!ck.login.ignore) ck.login.on = openAtLogin; };
+  Menu.buildFromTemplate = template => (ck.menus.push(template), real.build.call(Menu, template));
+  // The macOS app menu's roles (Hide, Services) aren't Linux's: it is built, and kept, but never set.
+  Menu.setApplicationMenu = menu => process.platform === 'darwin' ? undefined : real.setMenu.call(Menu, menu);
+  dialog.showMessageBox = options => (ck.dialogs.push(options), Promise.resolve({ response: 0, checkboxChecked: true }));
+  shell.openExternal = url => (ck.opened.push(url), Promise.resolve());
+  ck.restore = () => {
+    Object.assign(app, { getPath: real.getPath, getLoginItemSettings: real.get, setLoginItemSettings: real.set });
+    Object.assign(Menu, { buildFromTemplate: real.build, setApplicationMenu: real.setMenu });
+    Object.assign(dialog, { showMessageBox: real.dialog });
+    Object.assign(shell, { openExternal: real.open });
+    Object.defineProperty(process, 'platform', real.platform);
+    if (real.packaged) Object.defineProperty(app, 'isPackaged', real.packaged); else delete app.isPackaged;
+  };
+  ck.as(${JSON.stringify(platform)});
+})()`);
+
+/** Blurs and focuses the window, as coming back to it from the system's settings does: the page and menus read again. */
+export const refocus = main => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);

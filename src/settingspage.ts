@@ -1,18 +1,18 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
 import { announce, rerender } from './app.ts';
-import { button, h, icon, onMac, toggle, trayName } from './dom.ts';
+import { button, h, icon, toggle, trayName } from './dom.ts';
 import type { IconName } from './icons.ts';
-import type { AppPreferences, Appearance } from './types.ts';
+import type { AppPreferences, Appearance, SignInPlace } from './types.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
 
 /**
- * A line beneath a row: a note on what its last action did, why it failed, or (attention) that the system has the setting
- * other than chosen, with an `action` that takes the person to fix it. `about` is the row's value it describes, as `shownIn`.
+ * A line beneath a row: a note on what its last action did, why it failed, that the system ignored it (attention), or how the
+ * system has the setting now (system), with an `action` that takes the person there. `about` is the row's value it describes, as `shownIn`.
  */
-interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention'; action?: { label: string; run: () => void }; about?: string }
+interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 'system'; action?: { label: string; run: () => void }; about?: string }
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
@@ -89,28 +89,27 @@ function saveFailure(error: string, kept: string): string {
   return [why ? `Couldn’t save: ${why}` : 'Couldn’t save this change.', kept, next].filter(Boolean).join(' ');
 }
 
-/** Saves one setting. Nothing changes on screen until main has saved it, so a failed save leaves the saved value showing. */
-const save = (row: string, change: () => Promise<AppPreferences>, kept: string) =>
-  act(row, async () => { await showNewest(change()); return undefined; }, error => saveFailure(error, kept));
+/**
+ * Saves one setting. Nothing changes on screen until main has saved it, so a failed save leaves the saved value showing.
+ * `afterwards` says anything the saved settings need said in the row.
+ */
+const save = (row: string, change: () => Promise<AppPreferences>, kept: string, afterwards = (_saved: AppPreferences): RowMessage | undefined => undefined) =>
+  act(row, async () => afterwards(await showNewest(change())), error => saveFailure(error, kept));
 
 /** What starting at sign-in does. A reason it can't be changed here takes this line's place. */
 const signInHint = `Opens hidden in the ${trayName} when you sign in, so sync keeps running without the window.`;
-/** The system's own place for it, by the name its settings use; the reasons from main name the same place. */
-const signInPlace = onMac ? 'Login Items in System Settings' : 'Startup apps in Settings';
-const openSignInPlace = {
-  label: onMac ? 'Open Login Items' : 'Open Startup apps',
-  run: () => void window.centralKnot.openSignInSettings().catch(() => announce(`Couldn’t open ${signInPlace}. Open it from there.`)),
-};
+/** Opens the system's own place for it (main says which, in the system's words); where that fails, says the way there. */
+const openSignInPlace = ({ open, unopened }: SignInPlace) => ({ label: open, run: () => void window.centralKnot.openSignInSettings().catch(() => announce(unopened)) });
 
 /** Turns starting at sign-in on or off. The row then shows the system's answer, which has the last word. */
 async function chooseSignIn(on: boolean): Promise<void> {
   const kept = current ? `Start at sign-in is still ${current.signIn.on ? 'on' : 'off'}.` : '';
-  await act('sign-in', async () => {
-    const saved = await showNewest(window.centralKnot.setStartAtSignIn(on));
-    // A reason the system gives (waiting for approval, say) already shows in the row; a change it ignored without one is said here.
-    if (saved.signIn.on === on || saved.signIn.reason) return undefined;
-    return { text: `Your system didn’t change this. Check ${signInPlace}.`, tone: 'attention', action: openSignInPlace, about: shownIn('sign-in', saved) };
-  }, error => saveFailure(error, kept));
+  // A reason the system gives (off in Login Items, say) already shows in the row; a change it ignored without one is said here.
+  await save('sign-in', () => window.centralKnot.setStartAtSignIn(on), kept, saved => {
+    const { signIn } = saved;
+    if (signIn.on === on || signIn.reason || !signIn.place) return undefined;
+    return { text: signIn.place.unchanged, tone: 'attention', action: openSignInPlace(signIn.place), about: shownIn('sign-in', saved) };
+  });
 }
 
 const appearances: { value: Appearance; label: string; glyph: IconName }[] = [
@@ -145,11 +144,19 @@ const showLog = () => act('log', async () => {
   return { text: shown.logged ? 'Opened the log’s folder. The file is central-knot.log.' : 'Opened the log’s folder. Nothing has been logged yet.', tone: 'note' };
 }, () => 'Couldn’t open the log’s folder. Try again.');
 
-const messageLook = { note: ['folder-open', 'status'], failure: ['circle-alert', 'alert'], attention: ['info', 'status'] } as const;
-/** One line beneath a row. `role` is left off for a line that describes the row's state rather than news to announce. */
-function messageLine({ text, tone, action }: RowMessage, attrs: Record<string, unknown> = { role: messageLook[tone][1] }): HTMLElement {
-  return h(`p.setting-message.setting-${tone}`, attrs, icon(messageLook[tone][0], 14),
-    h('span', {}, text, action && h('button.text-action', { type: 'button', onclick: action.run }, action.label)));
+const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' | 'alert' }> = {
+  note: { glyph: 'folder-open', role: 'status' }, failure: { glyph: 'circle-alert', role: 'alert' },
+  attention: { glyph: 'info', role: 'status' }, system: { glyph: 'info', role: 'status' },
+};
+/**
+ * One line beneath a row, its action after the text. `id` (from the row) also names the action, so focus on it survives a
+ * redraw. `announce` false for a line that describes the row's state rather than news to announce.
+ */
+function messageLine({ text, tone, action }: RowMessage, { id, announce = true }: { id: string; announce?: boolean }): HTMLElement {
+  const { glyph, role } = messageLook[tone];
+  return h(`p.setting-message.setting-${tone}`, { id, role: announce ? role : undefined }, icon(glyph, 14),
+    h('span.setting-message-body', {}, h('span.setting-message-text', {}, text),
+      action && h('button.text-action', { type: 'button', id: `${id}-action`, onclick: action.run }, action.label)));
 }
 
 /**
@@ -164,8 +171,8 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
       h('div.setting-title', { id: `setting-${id}-title` }, title),
       h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
     h('div.setting-control', {}, control),
-    message && messageLine(message),
-    notice && messageLine(notice, { id: `setting-${id}-notice` }));
+    message && messageLine(message, { id: `setting-${id}-message` }),
+    notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }));
 }
 
 const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
@@ -175,8 +182,8 @@ export function settingsPage(): HTMLElement {
   const chosen = current?.appearance;
   const signIn = current?.signIn;
   // Why it can't be changed here replaces the hint; why the system has it off (it can be changed) shows beneath, with the way to fix it.
-  const cannot = signIn?.available ? undefined : signIn?.reason;
-  const systemSays: RowMessage | undefined = signIn?.available && signIn.reason ? { text: signIn.reason, tone: 'attention', action: openSignInPlace } : undefined;
+  const cannot = signIn?.available ? undefined : signIn?.reason?.text;
+  const systemSays: RowMessage | undefined = signIn?.reason && signIn.place ? { text: signIn.reason.text, tone: 'system', action: openSignInPlace(signIn.place) } : undefined;
   return h('div.page', {}, h('div.scroll.settings-scroll', {},
     settingsSection('general', 'General',
       settingRow('sign-in', 'Start at sign-in', cannot ?? signInHint,
