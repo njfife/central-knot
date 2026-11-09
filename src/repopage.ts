@@ -86,12 +86,11 @@ const pull = () => busy('Pulling from the repo…', async () => {
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
   const waiting = result.waitsForClaude ?? [];
-  // Undo is the promise, said first: linked from the note when nothing else follows, in the sentence when a chore does.
-  const text = !count ? 'Pulled. Nothing in your tools needed to change.'
-    : waiting.length || missed.length ? `Pulled ${plural(count, 'change')} into your tools, ${count === 1 ? 'with' : 'each with'} Undo in History.` : `Pulled ${plural(count, 'change')} into your tools.`;
+  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.';
   const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
-    waiting.length ? `${andList(waiting)} ${waiting.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
-  await settle(result, [text, ...rest].join(' '), count && !rest.length ? `${count === 1 ? 'It is' : 'Each is'} in History.` : undefined);
+    waiting.length ? `Claude Code doesn’t have ${andList(waiting)} yet: close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
+  // One wording for the promise, always with History one click away.
+  await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : 'any of them'} in History.` : undefined);
   if (waiting.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
@@ -153,8 +152,9 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
   // The button carries the count of what moves; items that can't move are counted beside the title.
   const stuck = changes.filter(change => change.held && !change.retry).length;
   return h('section.repo-side', { 'aria-labelledby': id },
-    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title, stuck ? h('span.repo-stuck-count', {}, `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null), action),
-    blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('info', 12), blocked) : null,
+    // Title, its button, then what can't move: the button stays put whatever is held.
+    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck ? h('span.repo-stuck-count', {}, `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null),
+    blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('triangle-alert', 12, 'tone-warning'), blocked) : null,
     changes.length ? h('ul.repo-list', {}, changes.map(change => changeRow(change, side))) : h('p.repo-empty-side', {}, empty));
 }
 
@@ -220,7 +220,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
-      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}. Pull and Push wait until it can be reached again: Try again above.`) : null,
+      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}; Pull and Push wait until it can be reached again.`) : null,
       inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushButton)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')

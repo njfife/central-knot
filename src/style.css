@@ -1387,11 +1387,11 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
 .repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
-.repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--line); }
+.repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-side-note > svg { flex: none; align-self: center; }
 .repo-activity { color: var(--ink); }
 .repo-activity-part { white-space: nowrap; }
-.repo-stuck-count { margin-left: 8px; font-weight: 500; color: var(--warning); text-transform: none; letter-spacing: 0; }
+.repo-stuck-count { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--warning); text-transform: none; letter-spacing: 0; }
 .repo-stale { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-stale > svg { flex: none; align-self: center; }
 .repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
@@ -1407,6 +1407,10 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-aside > svg { flex: none; align-self: center; }
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
 #repo-disconnect-confirm { border-color: currentColor; }
+/* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
+.repo-page .band-done .tone-faint { color: inherit; }
+/* Wide windows: the intro lines up with the form and "What goes where" below it. */
+@container (min-width: 960px) { .repo-page > .scroll > .empty { align-items: flex-start; text-align: left; } .repo-page > .scroll > .empty .empty-body { max-width: 72ch; } }
 /* The question and its buttons sit together at the right, under Disconnect…. */
 .band.repo-confirm { justify-content: flex-end; }
 .band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
