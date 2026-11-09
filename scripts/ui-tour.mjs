@@ -1,0 +1,164 @@
+// A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
+// Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
+// Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
+import { spawn } from 'node:child_process';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { setTimeout as wait } from 'node:timers/promises';
+
+const args = process.argv.slice(2);
+const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
+const flag = name => args.includes(name);
+const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',') : undefined;
+const root = resolve(import.meta.dirname, '..');
+const command = flag('--electron') ? join(root, 'node_modules/electron/dist', readFileSync(join(root, 'node_modules/electron/path.txt'), 'utf8').trim()) : join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
+const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
+const HOME = join(scratch, 'home');
+mkdirSync(HOME, { recursive: true });
+
+async function launch() {
+  const port = 9300 + Math.floor(Math.random() * 400);
+  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  mkdirSync(env.TMPDIR, { recursive: true });
+  for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
+  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  let target;
+  for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise(done => { socket.onopen = done; });
+  const pending = new Map();
+  let id = 0;
+  socket.onmessage = message => { const data = JSON.parse(message.data); if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); } };
+  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
+  const run = async expression => { const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text); return reply.result.result.value; };
+  const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+  await settle();
+  return {
+    run, send, settle,
+    click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
+    has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
+    theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
+    quit: () => { socket.close(); child.kill('SIGKILL'); },
+  };
+}
+
+let feature = '';
+let step = 0;
+const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
+const wanted = name => !only || only.includes(name);
+async function shot(a, name, caption) {
+  step++;
+  const base = `${String(step).padStart(2, '0')}-${name}`;
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 798 });
+  await wait(120);
+  const reply = await a.send('Page.captureScreenshot', { format: 'png' });
+  writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
+  writeFileSync(join(out, feature, `${base}.txt`), await a.run('document.body.innerText'));
+  appendFileSync(join(out, feature, 'tour.md'), `${step}. **${base}**: ${caption}\n`);
+}
+const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
+const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
+
+const a = await launch();
+const practice = await a.run(`document.querySelector('.status-home').title`);
+
+// ---------- First run, homes and navigation ----------
+if (wanted('shell')) {
+  begin('shell');
+  await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance). It opens on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
+  await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the list of skills with one skill\'s details.');
+  await a.click('#nav-tools'); await shot(a, 'tools-page', 'Clicked "Tools": which tools were found and where their files are.');
+  await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
+  await a.click('#nav-overview');
+  if (await a.has('#sidebar-toggle')) { await a.click('#sidebar-toggle'); await shot(a, 'sidebar-collapsed', 'Clicked the sidebar toggle (top left) to collapse the sidebar.'); await a.click('#sidebar-toggle'); }
+  await a.click('#home-actual'); await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" at the bottom left. (In this tour the "real home" is an empty throwaway folder on Linux, where real writes are not allowed: it shows the preview-only state.)');
+  await a.click('#home-fixture'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back.');
+}
+
+// ---------- Skills: manage, apply, differing copies, tool menus ----------
+if (wanted('skills')) {
+  begin('skills');
+  await a.click('#nav-overview');
+  await shot(a, 'overview-start', 'The Overview before anything is managed. Rows are skills, columns are tools.');
+  await a.click('#tool-copilot-cli'); await shot(a, 'tool-menu', 'Clicked the "Copilot CLI" column header: its tool menu (Add all to another tool, Stop all).');
+  await a.press?.('Escape'); await a.click('#tool-copilot-cli');
+  await a.click('#manage-all'); await shot(a, 'manage-all-pending', 'Clicked "Manage all": changes are queued, not applied yet.');
+  await a.click('#apply'); await shot(a, 'applied', 'Clicked "Apply all": the copies were written.');
+  await a.click('#open-review'); await shot(a, 'review-copies-differ', 'Opened the "review" row, whose copies differ between tools: the choice of which copy to use.');
+  if (await a.has('#use-review-claude-cli')) { await a.click('#use-review-claude-cli'); await shot(a, 'review-chosen-pending', 'Chose "Use Claude Code\'s copy": queued.'); await a.click('#apply'); await shot(a, 'review-applied', 'Clicked "Apply all".'); }
+  await a.click('#nav-skills'); await shot(a, 'skills-page-managed', 'The Skills page after managing.');
+  await a.click('#nav-overview');
+}
+
+// ---------- Sync, notices and History ----------
+if (wanted('sync')) {
+  begin('sync');
+  await a.click('#nav-overview');
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  edit(join(practice, '.codex/skills/standup/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex.\n'));
+  await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
+  await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
+  await a.click('#nav-history'); await shot(a, 'history-with-edit', 'Clicked "History".');
+  const undo = await a.run(`document.querySelector('.history-row button')?.id ?? ''`);
+  if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo" on that edit.'); }
+  await a.click('#nav-overview');
+  await a.click('#sync-switch'); await shot(a, 'sync-off', 'Turned the Sync switch (status bar, bottom) off.');
+  edit(join(practice, '.claude/skills/notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited with Sync off.\n'));
+  await wait(4000); await a.settle(); await shot(a, 'sync-off-pending', 'With Sync off, a line was added to notes in Claude Code. A few seconds later.');
+  if (await a.has('#sync-now')) { await a.click('#sync-now'); await shot(a, 'sync-now', 'Clicked "Sync now".'); }
+  await a.click('#sync-switch');
+  rmSync(join(practice, '.copilot/skills/standup'), { recursive: true, force: true });
+  await waitFor(a, `[...document.querySelectorAll('.sync-notice')].some(e => /deleted/.test(e.textContent))`, 10000);
+  await shot(a, 'deletion-notice', 'Sync back on. Outside the app, the standup folder was deleted in Copilot. A few seconds later.');
+  const restore = await a.run(`document.querySelector('[id^="notice-restore-"]')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'restored', 'Clicked "Restore" in the notice.'); }
+}
+
+// ---------- MCP servers ----------
+if (wanted('mcp')) {
+  begin('mcp');
+  await a.click('#nav-mcp'); await shot(a, 'mcp-start', 'Clicked "MCP": each tool\'s user-wide MCP servers.');
+  await a.click('#manage-all'); await shot(a, 'mcp-manage-all', 'Clicked "Manage all".');
+  await a.click('#apply'); await shot(a, 'mcp-applied', 'Clicked "Apply all". Claude Code\'s settings file is written only by "Write now", with Claude Code quit.');
+  if (await a.has('#mcp-write-claude')) { await a.click('#mcp-write-claude'); await shot(a, 'mcp-write-now', 'Clicked "Write now".'); }
+  edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
+  await waitFor(a, `!!document.querySelector('.sync-notice')`);
+  await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
+  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
+}
+
+// ---------- Agents ----------
+if (wanted('agents')) {
+  begin('agents');
+  await a.click('#nav-agents'); await shot(a, 'agents-start', 'Clicked "Agents".');
+  await a.click('#manage-all'); await a.click('#apply'); await shot(a, 'agents-applied', 'Clicked "Manage all", then "Apply all".');
+  await a.click('#open-code-reviewer'); await shot(a, 'agents-limits', 'Opened code-reviewer, a Claude Code agent with fields other tools can\'t hold.');
+  edit(join(practice, '.codex/agents/release-notes.toml'), text => text.replace('one line each.', 'one line each. Edited in Codex.'));
+  await waitFor(a, `!!document.querySelector('.sync-notice')`);
+  await shot(a, 'agents-edit-notice', 'Outside the app, release-notes was edited in Codex. A few seconds later.');
+}
+
+// ---------- Plugins ----------
+if (wanted('plugins')) {
+  begin('plugins');
+  const market = join(scratch, 'market');
+  mkdirSync(join(market, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team-tools', owner: { name: 'Team' }, plugins: [{ name: 'code-helpers', source: './plugins/code-helpers', version: '1.2.0', description: 'Review and release helpers' }] }));
+  mkdirSync(join(market, 'plugins/code-helpers/skills/release-check'), { recursive: true });
+  writeFileSync(join(market, 'plugins/code-helpers/skills/release-check/SKILL.md'), '---\nname: release-check\ndescription: Checks a release.\n---\n\nCheck it.\n');
+  await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace. (No tool CLIs are installed in this tour, so installs are not possible here.)');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder and clicked Add.');
+    if (await a.has('#popen-0-code-helpers')) { await a.click('#popen-0-code-helpers'); await shot(a, 'plugin-details', 'Opened the plugin\'s details.'); }
+  }
+}
+
+a.quit();
+rmSync(scratch, { recursive: true, force: true });
+console.log(`tour in ${out}`);
