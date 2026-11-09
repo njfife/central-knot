@@ -243,7 +243,7 @@ if (wanted('settings')) {
   // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,
   // so main stands in as an installed app with the system's login-item answer (see standIn), and the window is refocused so the
   // page reads it again, as it does when someone comes back from System Settings.
-  if (a.main) {
+  if (a.main && process.platform === 'linux') {
     // Opened afresh, so the earlier rows' notes are gone.
     await a.click('#nav-skills'); await a.click('#nav-settings');
     const main = await a.main();

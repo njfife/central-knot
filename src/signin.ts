@@ -25,14 +25,15 @@ const reasons: Record<SignInReason, [full: string, short: string]> = {
   applications: ['Move Central Knot to the Applications folder first.', 'move to Applications first'],
   // True whether macOS is waiting for the person to allow it or they turned it off there on purpose: it reports both the same way.
   approval: ['Off in Login Items in System Settings. Allow Central Knot there to start at sign-in.', 'off in Login Items'],
-  startupApps: ['Turned off in Startup apps in Settings. Turn it on here to start again.', 'turned off in Startup apps'],
+  startupApps: ['Turned off in Windows Startup apps. Turn it on here to start again.', 'turned off in Startup apps'],
 };
 const because = (key: SignInReason) => ({ key, text: reasons[key][0] });
 
 /** Each system's own place for it, named as its settings name it, with the way there for when it can't be opened for them. */
+const unchanged = 'Your system didn’t change this.';
 const places: Record<'darwin' | 'win32', SignInPlace> = {
-  darwin: { open: 'Open Login Items', unopened: 'Couldn’t open Login Items. Open System Settings, then General › Login Items.', unchanged: 'Your system didn’t change this.' },
-  win32: { open: 'Open Startup apps', unopened: 'Couldn’t open Startup apps. Open Settings, then Apps › Startup.', unchanged: 'Your system didn’t change this.' },
+  darwin: { open: 'Open Login Items', unopened: 'Couldn’t open Login Items. Open System Settings, then General › Login Items.', unchanged },
+  win32: { open: 'Open Startup apps', unopened: 'Couldn’t open Startup apps. Open Settings, then Apps › Startup.', unchanged },
 };
 
 /**

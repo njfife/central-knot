@@ -1354,8 +1354,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
-/* How the system has it now (a choice the person may have made there): calm, like the Skills page's info lines. */
-.setting-system .icon { color: var(--ink-soft); }
 .setting-message .text-action { flex: none; margin: -2px 0; padding: 2px 4px; line-height: 16px; }
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
    still reads as an Off switch; the row says why in the hint's place. */
