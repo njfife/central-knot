@@ -34,7 +34,9 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; history?: boolean; undo?: { id: string; label: string } } | undefined,
+  outcome: undefined as { page: Page; text: string; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
+  /** What is typed in the marketplace box, kept through loading and errors. */
+  marketDraft: '',
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   /** The window chooses the sidebar shape until the person uses the toggle. */
@@ -172,7 +174,9 @@ export const addMarketplace = (source: string) => busy('Reading the marketplace�
   state.pluginResult = result.problem ? { reports: [], problem: result.problem } : undefined;
   // The click hint only when some tool can take an install here.
   const canInstall = !!result.view && result.view.canWrite && result.view.tools.some(tool => result.view!.clis[tool]);
-  if (!result.problem) state.outcome = { page: 'plugins', text: canInstall ? 'Marketplace added. Nothing was installed: click a tool’s box to install a plugin there.' : 'Marketplace added. Nothing was installed.' };
+  const added = result.view?.marketplaces.find(entry => entry.source === source || entry.source.endsWith(source)) ?? result.view?.marketplaces.at(-1);
+  const named = added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}.` : 'Marketplace added.';
+  if (!result.problem) { state.marketDraft = ''; state.outcome = { page: 'plugins', text: canInstall ? `${named} Nothing was installed: click a tool’s box to install a plugin there.` : `${named} Nothing was installed.` }; }
   announce(result.problem ?? 'Marketplace added. Nothing was installed.');
 });
 
@@ -184,9 +188,11 @@ export const refreshMarketplace = (source: string) => busy('Refreshing the marke
 });
 
 export const forgetMarketplace = (source: string) => busy('Removing from the list…', async () => {
+  const before = state.plugins?.marketplaces.find(entry => entry.source === source)?.name;
   state.plugins = (await api().forgetMarketplace(source)) ?? state.plugins;
   state.pluginResult = undefined;
-  state.outcome = { page: 'plugins', text: 'Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.' };
+  const name = before;
+  state.outcome = { page: 'plugins', text: `${name ? `${name} removed` : 'Removed'} from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.`, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } };
   announce('Removed from Central Knot’s list. Tools that added it keep it, and nothing was uninstalled.');
 });
 
@@ -238,7 +244,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
-  const label = past?.kind === 'deleted' ? 'Delete again' : past?.kind === 'restored' ? 'Undo again' : 'Redo edit';
+  const label = past?.kind === 'deleted' ? 'Delete again in all tools' : past?.kind === 'restored' ? 'Undo again' : 'Redo edit';
   if (!result.stopped && restored.length) state.outcome = { page: state.page, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
@@ -288,7 +294,8 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
     const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
     const managed = changes.filter(change => change.managed).length;
-    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop, turn Managed off: copies stay where they are.` };
+    const waiting = view?.mcp.claudePending ?? [];
+    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}.${waiting.length ? ` ${andText(waiting)} ${waiting.length === 1 ? 'waits' : 'wait'} for Write to Claude Code.` : ''} To stop, turn Managed off: copies stay where they are.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });

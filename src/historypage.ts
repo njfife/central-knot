@@ -59,7 +59,8 @@ function actions(event: HistoryEvent, action?: string) {
     return h('span.history-actions', {}, options.map(option => button({ variant: 'outline', size: 'small', label: `Use ${who(option.tool)}'s`, name: `Use ${who(option.tool)}'s edit of ${event.item}`, id: `history-${event.id}-${option.tool}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id, option.hash) })));
   }
   if (!action) return h('span');
-  const control = button({ variant: 'outline', size: 'small', label: action, name: `${action} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
+  const label = action === 'Undo' || action === 'Restore' ? `${action} in all tools` : action === 'Delete again' ? 'Delete again in all tools' : action;
+  const control = button({ variant: 'outline', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;
 }

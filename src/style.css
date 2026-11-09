@@ -802,3 +802,10 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .kind-card > .kind-card-state { padding: 4px 16px 14px; }
 .kind-card-link { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; width: 100%; }
 .kind-card-link:hover { text-decoration: underline; }
+.plugins-page .market { max-width: 980px; }
+.plugin-table-noactions .ov-row { grid-template-columns: minmax(200px, 360px) repeat(var(--tool-count, 2), 120px) 1fr; }
+.plugin-table-noactions .plugin-actions { display: none; }
+.cell-confirm-label { margin-left: 6px; font-size: 11.5px; font-weight: 600; color: var(--danger, #dc2626); white-space: nowrap; }
+.plugin-name { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: inline-block; vertical-align: bottom; }
+.plugin-legend { padding: 10px 16px 0; }
+.page-title .title-tag { vertical-align: 2px; font-weight: 400; }

@@ -75,7 +75,8 @@ export function overviewPage() {
         kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.claudePending.length),
         kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []))),
       h('div.overview-more', {},
-        h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
+        !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused: preview only. ${home.manage.access.reason ?? 'Nothing is written in this home.'}`)
+        : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
           ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         h('p.overview-line', {}, icon('laptop', 14, 'tone-muted'), 'Closing this window keeps Central Knot syncing. Sync now, Start at sign-in and Quit are in the menu bar icon and the Central Knot menu.'),
@@ -202,7 +203,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
         section('Folders', h('dl.facts', {},
           ...(home.mode === 'actual' ? fact('Config folder', path(snapshot.root)) : []),
           ...[...roots].flatMap(([root, label]) => fact(label, path(root))),
-          ...(disclosed ? fact('New copies go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
+          ...(disclosed ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : [])))),
       h('div.tool-column', {},
         section('What it has',
           h('div.link-row', {},
@@ -212,7 +213,7 @@ function toolCard(snapshot: Snapshot, home: HomeView) {
             button({ variant: 'link', size: 'micro', label: plural(count(home.mcp.servers, snapshot.harness), 'MCP server'), id: `tool-mcp-${snapshot.harness}`, onclick: () => showPage('mcp') }),
             h('span.tone-faint', {}, ' · '),
             button({ variant: 'link', size: 'micro', label: plural(count(home.agents?.servers, snapshot.harness), 'agent'), id: `tool-agents-${snapshot.harness}`, onclick: () => showPage('agents') }))),
-        disclosed && disclosed.alsoReadBy.length > 0 && section('Others that read its folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
+        disclosed && disclosed.alsoReadBy.length > 0 && section('Others that read its skills folder', h('p', {}, disclosed.alsoReadBy.join(', '))),
         issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue)))))));
 }
 

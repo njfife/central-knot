@@ -303,6 +303,14 @@ function replacedOnApply(skill: SampleSkill, tool: Tool) {
   return base.copies[tool] !== undefined && base.copies[tool] !== base.copies[chosen];
 }
 
+/** Where each copy lives, folded away: paths matter less than what each tool has. */
+function wherePaths(skill: SampleSkill) {
+  const shown = toolList().filter(tool => skill.paths?.[tool]);
+  if (!shown.length) return null;
+  return h('details.details-paths', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), kind === 'mcp' ? 'Configuration file locations' : 'Where each copy is'),
+    shown.map(tool => h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path', { title: skill.paths![tool]! }, shownPath(skill.paths![tool]!)))));
+}
+
 /** Agents: the tool whose copy the one-way copies come from, read from the limits text. */
 const oneWaySource = (skill: SampleSkill): Tool | undefined => {
   const match = /^One-way from ([^.]+)\./.exec(Object.values(skill.limits ?? {})[0] ?? '');
@@ -333,8 +341,7 @@ function details(skill: SampleSkill, closable = true) {
   const paused = state.home && !state.home.syncOn ? ' · automatic sync paused' : '';
   const toolRow = (tool: Tool) => h('div.details-tool', {},
     h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-      h('span.details-tool-line', {}, toolLine(skill, tool)),
-      h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : designMode ? `~/.${tool === 'claude-cli' ? 'claude' : 'copilot'}/skills/${skill.key}` : '')),
+      h('span.details-tool-line', {}, toolLine(skill, tool))),
     // One-way limits are said once, under the rows (oneWayNote); other kinds keep a per-tool line.
     kind !== 'agents' && skill.limits?.[tool] && !skill.stopped?.includes(tool) ? h('p.details-limits', {}, icon('arrow-up-right', 12, 'tone-warning'), skill.limits[tool]!) : null);
   const waitsHere = kind === 'mcp' && skill.managed && !draft && !!skill.waits?.includes('claude-cli');
@@ -354,13 +361,13 @@ function details(skill: SampleSkill, closable = true) {
       `${names[extra.tool]} also reads ${extra.same ? 'the same copy' : 'a different copy'} at `, h('span.details-path', { title: extra.directory }, shownPath(extra.directory)),
       extra.writable ? '' : '. Central Knot does not change it: it is a link or a folder other tools share.'))) : null,
     allSame
-      ? h('details.details-paths', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), 'Where each copy is'), toolList().map(tool => h('p.details-path-line', {}, brandMark(tool, 12), h('span.details-path', { title: skill.paths?.[tool] ?? '' }, skill.paths?.[tool] ? shownPath(skill.paths[tool]!) : ''))))
-      : h('div.details-tools', {}, toolList().map(toolRow)),
+      ? wherePaths(skill)
+      : [h('div.details-tools', {}, toolList().map(toolRow)), wherePaths(skill)],
     kind === 'agents' ? oneWayNote(skill) : null,
     h('div.compare-foot', {},
       h('span.compare-foot-start', {},
         // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
-        !designMode && kind === 'skills' && closable ? smallAction(differs ? 'Show the differences' : 'Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
+        !designMode && kind === 'skills' && closable ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
       !designMode && kind === 'skills' && committedOf(skill.key).managed
         ? view.confirmDelete === skill.key
@@ -396,7 +403,9 @@ function compareChoices(skill: SampleSkill) {
       h('span.version-cta', { 'aria-hidden': 'true' }, 'Use this copy'));
   };
   return h('div.compare-block', {},
-    h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The copies differ. Which copy should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`),
+    h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), `The copies differ. Which copy should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`,
+      // Comparing comes before choosing: the full files side by side, next to the question.
+      !designMode && kind === 'skills' ? smallAction('Show the differences', `diff-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
     h('div.compare-choices', {}, compared.map(choice),
       h('button.version.version-quiet', { type: 'button', id: `separate-${skill.key}`, onclick: () => resolve(skill.key, 'separate') },
         h('span.version-head', {}, h('strong', {}, 'Keep each copy as it is')),
@@ -535,7 +544,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
       unavailable.length > 20 ? h('li', {}, `and ${unavailable.length - 20} more`) : null) : null,
     plan.differ.length ? h('div.add-conflict', {},
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}'s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
-        swatch('differs', true), h('strong', {}, String(plan.differ.length)), h('span', {}, `differs: gets ${names[from]}'s copy if included`)),
+        swatch('differs', true), h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.every(entry => !entry.here) ? `${plan.differ.length === 1 ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ` : ''}other tools have different copies; uses ${names[from]}'s if included` : `differs: gets ${names[from]}'s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
       toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}'s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
@@ -614,7 +623,8 @@ export function outcomeBand(): HTMLElement | null {
   const matrixPage = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents';
   if (!outcome || outcome.page !== state.page || (matrixPage && view.draft.size) || state.skillsView === 'files') return null;
   return h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, outcome.text),
-    outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id))
+    outcome.act ? smallAction(outcome.act.label, outcome.act.id, outcome.act.run)
+      : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id))
       : outcome.history ? smallAction('Undo from History', 'outcome-history', () => showPage('history')) : null,
     h('button.band-dismiss', { type: 'button', id: 'outcome-dismiss', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { state.outcome = undefined; rerender(); } }, icon('x', 12)));
 }
@@ -638,7 +648,7 @@ function helpBand(): HTMLElement | null {
   if (designMode || !list.length || readFlag(key)) return null;
   const one = kind === 'mcp' ? 'an MCP server' : kind === 'agents' ? 'an agent' : 'a skill';
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
-    h('span.band-text', {}, `Managed keeps ${one} the same in every tool. Click a tool's box to leave that tool out. Nothing is written until Apply all; turning Managed off later keeps every copy.`),
+    h('span.band-text', {}, `Managed keeps ${one} the same in every tool. Click a tool's box to leave that tool out. Nothing is written until Apply all; turning Managed off later keeps every copy.${kind === 'mcp' ? ' Changes for Claude Code always take one more step: Write to Claude Code.' : kind === 'agents' ? ' Agents marked ↗ get updates only from their source.' : ''}`),
     h('button.band-dismiss', { type: 'button', id: 'help-dismiss', 'aria-label': 'Hide this tip', title: 'Hide this tip', onclick: () => { writeFlag(key); rerender(); } }, icon('x', 12)));
 }
 
@@ -806,7 +816,6 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
     'aria-label': `${skill.name ?? skill.key}, ${skill.managed ? 'managed' : 'unmanaged'}${view.draft.has(skill.key) ? ', changed, not applied yet' : ''}`,
     onclick: () => select(skill.key),
   },
-    h(`span.list-managed${skill.managed ? '.on' : ''}`, { 'aria-hidden': 'true', title: skill.managed ? 'Managed' : 'Unmanaged' }),
     middle(skill.name ?? skill.key, 12, 'list-name'),
     h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
   const find = h('input.find-input', { id: 'skills-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
@@ -819,13 +828,14 @@ export function skillsBrowser(more: (key: string) => (Node | null | false)[], se
   return h('div.page.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', onclick: () => { state.skillsView = 'table'; state.item = undefined; rerender(); } }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
+      h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
       h('div.scroll.list-scroll', { id: 'skills-list' }, list)),
     h('section.detail-column', { 'aria-label': 'Skill details' },
       h('div.pane-header', {},
         h('div.crumb', {},
           button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Skills', id: 'detail-back', onclick: () => select(undefined) }),
           h('span.crumb-sep', { 'aria-hidden': 'true' }, '/')),
-        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', {}, `${skill.managed ? 'Managed' : 'Unmanaged'}${draft ? ' · not applied yet' : ''}`)),
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Not applied yet') : null),
         h('div.detail-actions', {},
           h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
           toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`),
