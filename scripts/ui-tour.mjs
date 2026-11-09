@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -239,16 +239,26 @@ if (wanted('settings')) {
   await a.click('#nav-settings');
   await a.run(`document.querySelector('#history-days').focus()`);
   await shot(a, 'settings-history-select', 'The Keep history for select, focused (7, 30 or 90 days; 30 by default). Its menu is the system’s own, which a screenshot can’t catch.');
-  const keepFor = async days => { await a.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`); await a.settle(); };
-  await keepFor(7);
+  await keepFor(a, 7);
   await shot(a, 'settings-history-confirm-dark', 'Chose 7 days: a shorter window removes History, so the row asks first, naming the local date and time it will cut from. The select still shows the saved 30 days.');
   await a.theme('light'); await shot(a, 'settings-history-confirm-light', 'The same, light.'); await a.theme('dark');
-  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question spans the row, its buttons at the row’s end under the select.'); await size(860, 560);
+  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question spans the row, its buttons right after its words.');
+  await size(2560, 1440); await shot(a, 'settings-history-confirm-2560', 'The same at 2560×1440: the buttons still follow the words, not the row’s far end.'); await size(860, 560);
   await a.click('#history-shorten-cancel'); await shot(a, 'settings-history-cancelled', 'Clicked Cancel: the question goes, nothing is saved (still 30 days), and the focus is back on the select.');
-  await keepFor(7); await a.click('#history-shorten'); await wait(300); await a.settle();
-  await shot(a, 'settings-history-shortened', 'Chose 7 days again and clicked "Shorten to 7 days": saved, and the select shows it.');
-  await a.click('#nav-history'); await shot(a, 'history-after-shorten', 'History after shortening to 7 days: only the change from 3 days ago is left.');
-  await a.click('#nav-settings'); await keepFor(30); await a.run(`document.activeElement?.blur()`);
+  await keepFor(a, 7);
+  // Main carries out the change in its turn, after any sync pass: held here so the row's waiting state can be seen.
+  const main = a.main && await a.main();
+  const held = main && await holdQueue(main, a);
+  await a.click('#history-shorten');
+  if (held) {
+    await shot(a, 'settings-history-updating', 'Clicked "Shorten to 7 days" while main is busy (held, as a long sync pass would): the row says History is updating, and its select takes no other change until main is done.');
+    await held.release(); main.close();
+  }
+  await wait(300); await a.settle();
+  await shot(a, 'settings-history-shortened', 'Shortened to 7 days: saved, the select shows it, and the row says from when History was removed.');
+  await a.theme('light'); await shot(a, 'settings-history-shortened-light', 'The same, light.'); await a.theme('dark');
+  await a.click('#nav-history'); await shot(a, 'history-after-shorten', 'History after shortening to 7 days: only the change from 3 days ago is left, and the intro says how long History keeps changes.');
+  await a.click('#nav-settings'); await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
   // A wide row's hover: pointing at the hint lights the whole row, out to its button.
   await size(1728, 1117);
   const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
@@ -260,6 +270,9 @@ if (wanted('settings')) {
   const railed = await a.has('.rail');
   if (railed) await a.click('#sidebar-toggle');
   await shot(a, 'settings-narrow-stacked', 'Emulated: a 573×373 page (860×560 at 150% zoom, which the app does not offer) with the sidebar open, so each row is under 512px: the controls sit under their text, left-aligned.');
+  await keepFor(a, 7); await a.run(`document.querySelector('#setting-history').scrollIntoView({ block: 'start' })`);
+  await shot(a, 'settings-narrow-question', 'The same stacked layout with the shorten question open: its buttons wrap under the words and start at the left, like the select above them.');
+  await a.click('#history-shorten-cancel'); await a.run(`document.activeElement?.blur()`);
   if (railed) await a.click('#sidebar-toggle');
   await size(860, 560);
   // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,

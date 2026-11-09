@@ -1,8 +1,9 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
-import { announce, rereadHistory, rerender } from './app.ts';
+import { announce, rerender } from './app.ts';
 import { button, h, icon, toggle, trayName } from './dom.ts';
 import type { IconName } from './icons.ts';
+import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, SignInPlace } from './types.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
@@ -10,9 +11,10 @@ let current: AppPreferences | undefined;
 
 /**
  * A line beneath a row: a note on what its last action did, why it failed, that the system ignored it (attention), or how the
- * system has the setting now (system), with an `action` that takes the person there. `about` is the row's value it describes, as `shownIn`.
+ * system has the setting now (system), with an `action` that takes the person there; or that the row's change is still under way
+ * (progress). `about` is the row's value it describes, as `shownIn`.
  */
-interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 'system'; action?: { label: string; run: () => void }; about?: string }
+interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 'system' | 'progress'; action?: { label: string; run: () => void }; about?: string }
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
@@ -25,6 +27,8 @@ const attempts = new Map<string, number>();
 let attempted = 0;
 /** A shorter History window waiting for its confirming click; the select keeps showing the saved one until then. */
 let shortening: HistoryDays | undefined;
+/** A window change main is still carrying out (it may wait for a sync pass): until it's done the row can't start another. */
+let updatingHistory = false;
 
 /** Answers from main can cross (a save, then a re-read on focus): only the newest request's answer is shown. */
 let latest = 0;
@@ -44,8 +48,16 @@ async function showNewest(answer: Promise<AppPreferences>): Promise<AppPreferenc
   return settings;
 }
 
-/** Reads the settings for the page: when it opens, and when main says they changed or the window comes back. */
-export const loadSettings = () => showNewest(window.centralKnot.getSettings());
+/**
+ * Reads the settings for the page: when it opens, and when main says they changed or the window comes back. An open shorten
+ * question keeps its moment current, changed in place: a redraw here could swallow the click that focused the window.
+ */
+export async function loadSettings() {
+  const settings = await showNewest(window.centralKnot.getSettings());
+  const question = document.getElementById('history-shorten-text');
+  if (shortening && question) question.textContent = shortenQuestion(shortening);
+  return settings;
+}
 
 /** Opens the page fresh: what the rows said last time (a failure since put right elsewhere, say) belongs to that visit. */
 export function openSettings() {
@@ -140,37 +152,61 @@ function moveAppearance(event: KeyboardEvent) {
   void chooseAppearance(next);
 }
 
-const historyChoices: HistoryDays[] = [7, 30, 90];
-
-/** A longer window saves at once. A shorter one removes History for good, so the row asks first. (The select works only once `current` is known.) */
+/** A longer window saves at once. A shorter one removes History for good, so the row asks first, and says so once. (The select works only once `current` is known.) */
 function chooseHistoryDays(days: HistoryDays) {
   if (days >= current!.historyDays) { void keepHistoryFor(days); return; }
   shortening = days;
   // What the row said last was about an earlier choice; the question replaces it.
   messages.delete('history');
   rerender();
+  announce(shortenQuestion(days), true);
 }
 
-/** Saves the window. A shorter one has main take the open home's History down to it, so History is read again after. */
+/** Where a window of `days` starts, as of now, in the person's own date and time format. */
+const removedBefore = (days: HistoryDays) => new Date(Date.now() - days * DAY_MS).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const shortenQuestion = (days: HistoryDays) =>
+  `History from before ${removedBefore(days)} will be removed and can’t be restored. Your other homes remove it too, the next time they record a change.`;
+
+/**
+ * Saves the window. Main may first wait for a sync pass, so meanwhile the row says it is updating and can't start another
+ * change (the other rows still can). After a shorter window it says from when History was removed.
+ */
 async function keepHistoryFor(days: HistoryDays) {
   const kept = current ? `History is still kept for ${current.historyDays} days.` : '';
-  closeShortening();
-  if (await save('history', () => window.centralKnot.setHistoryDays(days), kept)) await rereadHistory();
+  const shorter = !!current && days < current.historyDays;
+  const before = removedBefore(days);
+  shortening = undefined;
+  updatingHistory = true;
+  rerender();
+  announce('Updating history…', true);
+  try {
+    // Only when main saved this very window: a newer request that overtook it in main's queue removed nothing on its behalf.
+    await save('history', () => window.centralKnot.setHistoryDays(days), kept, saved => {
+      if (!shorter || saved.historyDays !== days) return undefined;
+      announce(`History before ${before} was removed.`, true);
+      return { text: `History before ${before} was removed.`, tone: 'note', about: shownIn('history', saved) };
+    });
+  } finally {
+    updatingHistory = false;
+    rerender();
+    // The select was disabled under the focus; it takes it back unless the person has moved on to another row.
+    if (document.activeElement === document.body) document.getElementById('history-days')?.focus();
+  }
 }
 
-/** Closes the row's question; the select, where it started, takes the focus back. */
+/** Closes the row's question, writing nothing; the select, where it started, takes the focus back. */
 function closeShortening() {
   shortening = undefined;
   rerender();
   document.getElementById('history-days')?.focus();
 }
+const cancelOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && shortening) { event.preventDefault(); closeShortening(); } };
 
 /** The row's question before a shorter window removes anything: from when, that it can't be undone, and that other homes follow later. */
 function shortenConfirmation(days: HistoryDays): HTMLElement {
-  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  return h('div.notice.notice-danger.setting-confirm', { id: 'setting-history-notice', role: 'group', 'aria-labelledby': 'history-shorten-text' },
+  return h('div.notice.notice-danger.setting-confirm', { id: 'setting-history-question', role: 'group', 'aria-labelledby': 'history-shorten-text', onkeydown: cancelOnEscape },
     icon('circle-alert', 16, 'tone-danger'),
-    h('p.setting-confirm-text', { id: 'history-shorten-text', role: 'alert' }, `History from before ${from} will be removed and can’t be restored. Other homes apply this the next time they write History.`),
+    h('p.setting-confirm-text', { id: 'history-shorten-text' }, shortenQuestion(days)),
     h('div.setting-confirm-actions', {},
       button({ variant: 'danger', size: 'small', label: `Shorten to ${days} days`, id: 'history-shorten', onclick: () => void keepHistoryFor(days) }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'history-shorten-cancel', onclick: closeShortening })));
@@ -185,7 +221,7 @@ const showLog = () => act('log', async () => {
 
 const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' | 'alert' }> = {
   note: { glyph: 'folder-open', role: 'status' }, failure: { glyph: 'circle-alert', role: 'alert' },
-  attention: { glyph: 'info', role: 'status' }, system: { glyph: 'info', role: 'status' },
+  attention: { glyph: 'info', role: 'status' }, system: { glyph: 'info', role: 'status' }, progress: { glyph: 'clock', role: 'status' },
 };
 /**
  * One line beneath a row, its action after the text. `id` (from the row) also names the action, so focus on it survives a
@@ -200,10 +236,10 @@ function messageLine({ text, tone, action }: RowMessage, { id, announce = true }
 
 /**
  * One setting: its name and hint at the left, its control at the right (under them on a narrow page), and beneath both, on
- * lines of their own so the control never moves when they come or go: what its last action said, and `notice`, what needs
- * the person about its current state, or a question the row is asking.
+ * lines of their own so the control never moves when they come or go: what its last action said, `notice`, what needs the
+ * person about its current state, and `question`, one the row is asking before it acts.
  */
-function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage | HTMLElement): HTMLElement {
+function settingRow(id: string, title: string, hint: string, control: HTMLElement, notice?: RowMessage, question?: HTMLElement): HTMLElement {
   const message = messages.get(id);
   return h('div.setting-row', { id: `setting-${id}` },
     h('div.setting-text', {},
@@ -211,7 +247,8 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
       h('p.setting-hint', { id: `setting-${id}-hint` }, hint)),
     h('div.setting-control', {}, control),
     message && messageLine(message, { id: `setting-${id}-message` }),
-    notice instanceof HTMLElement ? notice : notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }));
+    notice && messageLine(notice, { id: `setting-${id}-notice`, announce: false }),
+    question);
 }
 
 const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
@@ -239,12 +276,13 @@ export function settingsPage(): HTMLElement {
           }, icon(choice.glyph, 20), h('span', {}, choice.label)))))),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
-        // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one.
+        // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.
         h('span.select', {},
-          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current,
-            onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays) },
-          historyChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? 30) }, `${days} days`))),
+          h('select', { id: 'history-days', 'aria-labelledby': 'setting-history-title', 'aria-describedby': 'setting-history-hint', disabled: !current || updatingHistory,
+            onchange: (event: Event) => chooseHistoryDays(Number((event.target as HTMLSelectElement).value) as HistoryDays), onkeydown: cancelOnEscape },
+          historyDayChoices.map(days => h('option', { value: String(days), selected: days === (current?.historyDays ?? defaultHistoryDays) }, `${days} days`))),
           icon('chevrons-up-down', 14)),
+        updatingHistory ? { text: 'Updating history…', tone: 'progress' } : undefined,
         shortening ? shortenConfirmation(shortening) : undefined)),
     settingsSection('help', 'Help',
       settingRow('log', 'Log file', 'Central Knot’s own log, for reporting a problem. Your tools’ files aren’t here.',

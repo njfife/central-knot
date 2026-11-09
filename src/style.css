@@ -1344,8 +1344,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .settings-section { container-type: inline-size; }
 .settings-section > .eyebrow { padding: 0 8px 4px; border-bottom: 1px solid var(--line); }
 .setting-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 24px; padding: 12px 8px; border-bottom: 1px solid var(--line); }
-/* As on the app's list rows: pointing anywhere on a wide row lights it all, tying its text to a control far to the right. */
-.setting-row:hover { background: var(--hover); }
+/* As on the app's list rows: pointing anywhere on a wide row, or focus inside it, lights it all, tying its text to a control far to the right. */
+.setting-row:hover, .setting-row:focus-within { background: var(--hover); }
 .setting-title { font-weight: 500; }
 .setting-hint, .setting-message { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 /* Only the prose keeps the reading measure: a message's action sits right after its text, on the same line where there's room. */
@@ -1360,11 +1360,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .select select:hover:not(:disabled) { background: var(--hover); }
 .select select:disabled { opacity: 0.5; cursor: default; }
 .select .icon { position: absolute; right: 8px; color: var(--ink-soft); pointer-events: none; }
-/* A row's question (shortening History): a danger notice across the row, under its text and control, buttons after the words. */
+/* A row's question (shortening History): a danger notice across the row, under its text and control. Its buttons follow the
+   words, never the row's far end; where they don't fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
 .setting-confirm { grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
 .setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
 .setting-confirm-text { flex: 1 1 320px; min-width: 0; max-width: 72ch; }
-.setting-confirm-actions { display: flex; gap: 8px; margin-left: auto; }
+.setting-confirm-actions { display: flex; gap: 8px; }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }

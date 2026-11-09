@@ -569,7 +569,7 @@ test('A skill in the shared .agents folder counts for both Copilot and Codex and
 
 // ---------- Two-way sync (8b) ----------
 
-import { deleteEverywhere, pruneHistory, readHistory, restoreFromHistory } from '../src/manage.ts';
+import { appendHistory, deleteEverywhere, pruneHistory, readHistory, restoreFromHistory } from '../src/manage.ts';
 
 const fast = (box: Box, extra: Partial<ShareContext> = {}) => ctx(box, { settleMs: 0, ...extra });
 async function managedPair(box: Box, name = 'pair', body = 'Original.') {
@@ -990,7 +990,7 @@ test('R11: a linked skill folder is followed when its source is edited', { skip:
   } finally { await box.cleanup(); }
 });
 
-test('R12: a History file of the wrong shape is moved aside; R13: History keeps the chosen days with no event cap, and an expired deletion frees its content but still stops its stale replica', async () => {
+test('R12: a History file of the wrong shape is moved aside; R13: History keeps the chosen days with no event cap, and any History write frees an expired deletion’s content, which still stops its stale replica', async () => {
   const box = await sandbox();
   try {
     const DAY = 24 * 60 * 60 * 1000;
@@ -1004,7 +1004,9 @@ test('R12: a History file of the wrong shape is moved aside; R13: History keeps 
     await applyChanges(timed(), []);
     assert.ok((await readdir(storeDirectory(box.home))).some(entry => entry.startsWith('history.unreadable-')), 'a History file of the wrong shape is moved aside');
     // Deleted everywhere today while Copilot's copy can't be removed: that copy is the stale replica the deletion still owes.
-    await chmod(join(box.home, COPILOT), 0o555);
+    // (Only where a read-only folder stops its owner: not on Windows, nor as root.)
+    const canBlock = !noPosix && process.getuid?.() !== 0;
+    if (canBlock) await chmod(join(box.home, COPILOT), 0o555);
     await deleteEverywhere(timed(), 'gone');
     // Forty days on: events 5, 20 and 60 days old, and more than the old cap of 1,000 from yesterday.
     now = later;
@@ -1021,7 +1023,8 @@ test('R12: a History file of the wrong shape is moved aside; R13: History keeps 
     assert.ok((await readHistory(timed(90))).length > 1001, 'no event cap');
     assert.notDeepEqual(await storeOf('gone'), [], 'a deletion inside the window keeps its content');
 
-    await pruneHistory(timed(30));
+    // A home shortened elsewhere follows at its next History write of any kind: here an MCP server's change, with no skill event.
+    await appendHistory(timed(30), [{ id: 'mcp-now', at: new Date(later).toISOString(), key: 'mcp:server', item: 'server', kind: 'edit', losers: [], orderProved: true }]);
     assert.deepEqual(await kept(30), ['twenty', 'five']);
     assert.deepEqual(await storeOf('gone'), [], 'the expired deletion’s content is freed');
     const { record } = await readRecord(box.home);
@@ -1032,9 +1035,11 @@ test('R12: a History file of the wrong shape is moved aside; R13: History keeps 
     assert.deepEqual(await kept(7), ['five']);
     assert.ok(JSON.parse(await readFile(file, 'utf8')).events.every((entry: { key: string }) => !['sixty', 'twenty'].includes(entry.key)), 'History’s file was rewritten, not just read shorter');
 
-    await chmod(join(box.home, COPILOT), 0o755);
-    await applyChanges(timed(7), []);
-    assert.deepEqual([await exists(join(box.home, COPILOT, 'gone')), await exists(join(box.home, CLAUDE, 'gone'))], [false, false], 'the stale replica is removed, never spread back');
+    if (canBlock) {
+      await chmod(join(box.home, COPILOT), 0o755);
+      await applyChanges(timed(7), []);
+      assert.deepEqual([await exists(join(box.home, COPILOT, 'gone')), await exists(join(box.home, CLAUDE, 'gone'))], [false, false], 'the stale replica is removed, never spread back');
+    }
   } finally { await box.cleanup(); }
 });
 

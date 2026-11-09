@@ -15,6 +15,7 @@ import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent 
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
+import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
@@ -70,7 +71,8 @@ function context(): ShareContext {
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
-    historyDays: historyDays(),
+    // Read when History is written or pruned, not when the pass began: a pass under way follows a window changed meanwhile.
+    get historyDays() { return historyDays(); },
   };
 }
 
@@ -127,8 +129,10 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
 const appearances: Appearance[] = ['system', 'light', 'dark'];
 /** The settings as the page shows them; a stored value this version doesn't offer counts as the default. */
 const appearance = (): Appearance => appSettings.appearance && appearances.includes(appSettings.appearance) ? appSettings.appearance : 'system';
-const historyChoices: HistoryDays[] = [7, 30, 90];
-const historyDays = (): HistoryDays => appSettings.historyDays && historyChoices.includes(appSettings.historyDays) ? appSettings.historyDays : 30;
+const isHistoryDays = (value: unknown): value is HistoryDays => historyDayChoices.includes(value as HistoryDays);
+const historyDays = (): HistoryDays => isHistoryDays(appSettings.historyDays) ? appSettings.historyDays : defaultHistoryDays;
+/** The newest History window asked for, so one overtaken while it waited in the queue knows it. */
+let historyAsked = 0;
 const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
@@ -464,6 +468,7 @@ const logFailure = (channel: string, error: unknown) => log(`request ${channel} 
 
 /** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
+/** Runs `work` after everything queued before it; its failure reaches the caller but never stalls the queue. */
 function queued<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work);
   queue = next.catch(() => undefined);
@@ -565,15 +570,18 @@ app.whenReady().then(async () => {
     return preferences();
   });
   handleNow('settings:open-sign-in', openSignInSettings);
-  // A longer window only saves. A shorter one takes its turn in the queue, so it never runs beside a sync pass, and takes the
-  // open home's History down to it. History reads the new window either way, so a prune that can't finish is only logged.
-  handleNow('settings:history-days', async value => {
-    if (!historyChoices.includes(value as HistoryDays)) throw new Error('Invalid history days.');
-    const days = value as HistoryDays;
-    if (days >= historyDays()) await saveAppSettings({ historyDays: days });
-    else await queued(async () => {
+  // Every window change takes its turn in the queue, in the order asked, so none runs beside a sync pass or another change.
+  // Whether it is shorter (and so prunes) is decided against the saved window when its turn comes, and one a newer request
+  // overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads
+  // the saved window either way, so a prune that can't finish is only logged.
+  handleNow('settings:history-days', async days => {
+    if (!isHistoryDays(days)) throw new Error('Invalid history days.');
+    const asked = ++historyAsked;
+    await queued(async () => {
+      if (asked !== historyAsked) return;
+      const shorter = days < historyDays();
       await saveAppSettings({ historyDays: days });
-      if (current) await pruneHistory(context()).catch(error => logFailure('history prune', error));
+      if (shorter && current) await pruneHistory(context()).catch(error => logFailure('history prune', error));
     });
     return preferences();
   });

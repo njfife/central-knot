@@ -1,3 +1,6 @@
+import type { HistoryDays } from './model.ts';
+export type { HistoryDays };
+
 export type HomeMode = 'fixture' | 'custom' | 'actual';
 export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
@@ -396,8 +399,6 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
-/** How many days History keeps changes and deleted items. */
-export type HistoryDays = 7 | 30 | 90;
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */

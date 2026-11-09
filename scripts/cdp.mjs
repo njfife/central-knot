@@ -81,3 +81,26 @@ export const standIn = (main, platform) => main.run(`(() => {
 
 /** Blurs and focuses the window, as coming back to it from the system's settings does: the page and menus read again. */
 export const refocus = main => main.run(`(window => { window.blur(); window.focus(); })(electron.BrowserWindow.getAllWindows()[0])`);
+
+/** Chooses `days` in Settings' Keep history for select, as picking it from the system's own menu (which can't be driven) would. */
+export async function keepFor(page, days) {
+  await page.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`);
+  await page.settle();
+}
+
+/**
+ * Holds main's queue, where sync passes and the page's requests take turns, as a long sync pass would, until `release()`. The
+ * page asks to open a folder as its home; main's folder dialog for it answers only on release, cancelled, so nothing changes.
+ */
+export async function holdQueue(main, page) {
+  await main.run(`(() => {
+    const { dialog } = electron, real = dialog.showOpenDialog;
+    globalThis.ckHeld = new Promise(held => { dialog.showOpenDialog = () => new Promise(answer => {
+      globalThis.ckRelease = () => { dialog.showOpenDialog = real; answer({ canceled: true, filePaths: [] }); };
+      held();
+    }); });
+  })()`);
+  await page.run(`void window.centralKnot.selectHome('custom')`);
+  await main.run('ckHeld');
+  return { release: async () => { await main.run('ckRelease()'); await page.settle(); } };
+}

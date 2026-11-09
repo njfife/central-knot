@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
-import { connect, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -594,28 +594,55 @@ async function practiceFlow() {
   const agedIn = events => events.map(event => event.key).filter(key => key.startsWith('aged-'));
   const agedOnFile = () => agedIn(JSON.parse(readFileSync(historyFile, 'utf8')).events);
   const agedShown = async () => agedIn(await a.run('window.centralKnot.history()'));
-  const keepFor = async days => { await a.run(`(select => { select.value = '${days}'; select.dispatchEvent(new Event('change', { bubbles: true })); })(document.querySelector('#history-days'))`); await a.settle(); };
   same('History is kept for 30 days at first: it shows what that covers, and reading alone removes nothing',
     [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
-  await keepFor(90);
+  await keepFor(a, 90);
   same('a longer window saves at once, with no question, and History shows what it now covers',
     [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
-  await keepFor(7);
+  await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
   same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed',
-    [/^History from before .+ will be removed and can’t be restored\. Other homes apply this the next time they write History\.$/.test(question), await a.text('#history-shorten'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [/^History from before .+ will be removed and can’t be restored\. Your other homes remove it too, the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
     [true, 'Shorten to 7 days', '90', 90]);
   await a.shot('settings-history-confirm');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  const escaped = await a.exists('#history-shorten');
+  await keepFor(a, 7);
   await a.click('#history-shorten-cancel');
-  same('Cancel writes nothing', [await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
-  await keepFor(7);
+  same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  // A window change waits its turn behind whatever main is doing (here a held queue standing in for a long sync pass). Meanwhile
+  // the row says so and takes no other change, and other rows still work. A newer request that arrives meanwhile wins: the
+  // confirmed shorter window it overtook neither saves nor removes anything.
+  if (a.main) {
+    const main = await a.main();
+    const held = await holdQueue(main, a);
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    await a.run(`void (window.ckLonger = window.centralKnot.setHistoryDays(90).then(saved => (window.ckLongerDone = true, saved)))`);
+    await a.click('#appearance-light');
+    const during = [await a.run(`document.querySelector('#history-days').disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten'),
+      await a.run(`window.ckLongerDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+    await held.release();
+    await a.run('window.ckLonger');
+    await a.settle();
+    same('while main is busy the row says it is updating and takes no other change; the newest request wins and the overtaken shorter one removes nothing',
+      [during, savedSettings().historyDays, agedOnFile(), await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`), await a.exists('#setting-history-message')],
+      [[true, 'Updating history…', false, false, 90, true], 90, ['aged-60', 'aged-20', 'aged-5'], '90', false, false]);
+    await a.click('#appearance-system');
+    main.close();
+  }
+  await keepFor(a, 7);
   await a.click('#history-shorten');
   for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
   for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
+  const removedNote = await a.text('#setting-history-message') ?? '';
   await a.click('#nav-history');
   const listed = await a.text('#history-scroll') ?? '';
-  same('Shorten saves, removes the older History from this home’s file, and History shows only what is left',
-    [savedSettings().historyDays, agedOnFile(), listed.includes('aged-5-days'), listed.includes('aged-20-days')], [7, ['aged-5'], true, false]);
+  same('Shorten saves, removes the older History from this home’s file, says from when, and History shows only what is left and how long it keeps it',
+    [savedSettings().historyDays, agedOnFile(), /^History before .+ was removed\.$/.test(removedNote), listed.includes('aged-5-days'), listed.includes('aged-20-days'), await a.text('.history-intro')],
+    [7, ['aged-5'], true, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days (Settings).']);
   await a.click('#nav-settings');
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.

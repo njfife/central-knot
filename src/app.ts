@@ -1,5 +1,5 @@
 import { loadSettings, openSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -23,6 +23,7 @@ export const state = {
   agentsResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
+  historyDays: undefined as HistoryDays | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
@@ -208,13 +209,13 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
+/** History, and how long it is kept (said in its intro; unsaid if the settings can't be read). */
 export const loadHistory = () => busy('Reading History…', async () => {
-  state.history = await api().history();
+  const [history, settings] = await Promise.all([api().history(), api().getSettings().catch(() => undefined)]);
+  state.history = history;
+  state.historyDays = settings?.historyDays;
   announce('');
 });
-
-/** History as main has it now, read without a busy state (Settings changed its window; History reads it fresh again when opened). */
-export const rereadHistory = async () => { state.history = await api().history(); };
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {

@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
@@ -177,13 +178,13 @@ export async function appendHistory(context: ShareContext, events: HistoryEvent[
   if (events.length) await saveHistory(context, [...await readHistory(context), ...events]);
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-/** The oldest moment History keeps (STO-04): the days chosen in Settings (30 unless chosen otherwise) back from now. */
-const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? 30) * DAY_MS;
+/** The oldest moment History keeps (STO-04): the days chosen in Settings back from now. */
+const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
 
 /**
- * History, newest last, without what is older than the window: it is the only rule, so History never offers what it can
- * no longer restore, in any home, the moment the window shortens. Unreadable history reads as empty; sync never depends on it.
+ * History, newest last, without events older than the window. The day window is the only retention rule (there is no event
+ * cap), and applying it on every read means that once the window shortens, no home's History offers what it can no longer
+ * restore. Unreadable history reads as empty; sync never depends on it.
  */
 export async function readHistory(context: ShareContext): Promise<HistoryEvent[]> {
   let events: HistoryEvent[];
@@ -194,8 +195,9 @@ export async function readHistory(context: ShareContext): Promise<HistoryEvent[]
 
 /**
  * Store revisions no record, copy or retained History event points at any more are removed (STO-04). Never a current revision.
- * A deletion older than the window has left History, so its content goes too; the deletion record itself stays in sync.json,
- * so a stale replica still can't bring the item back. A copy the deletion has yet to remove is that replica, not an install.
+ * A deletion older than the window has left History, so its content goes too. The deletion record itself stays in sync.json,
+ * so a stale replica still can't bring the item back. A copy still marked 'removing' is that stale replica: removing it needs
+ * only its hash, not the stored content.
  */
 async function pruneStore(context: ShareContext, record: SyncRecord, events: HistoryEvent[]) {
   const keep = new Map<string, Set<string>>();
@@ -224,7 +226,11 @@ async function pruneStore(context: ShareContext, record: SyncRecord, events: His
   }
 }
 
-/** `events` come from readHistory, so they are already inside the window. */
+/**
+ * Every History write (skills, MCP servers, agents, deletes and restores) goes through here. `events` come from readHistory, so
+ * they are already inside the window. After writing, the store frees what only expired History and deletions kept, so any
+ * home's next History write applies a window shortened elsewhere. That cleanup runs only in a home this build syncs and may write.
+ */
 async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
   const home = context.home;
   // History that cannot be read, or is not History, is moved aside, never overwritten: it may be recoverable by hand.
@@ -232,6 +238,9 @@ async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
   try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
   if (!sound) await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined);
   await writeDurably(historyPath(home), `${JSON.stringify({ events }, null, 2)}\n`);
+  if (!(await writeAccess(context)).allowed || (await syncGate(context)).state !== 'ready') return;
+  const { record } = await readRecord(home);
+  if (record) await pruneStore(context, record, events);
 }
 
 /**
@@ -239,11 +248,7 @@ async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
  * that kept. Only a home this build syncs and may write; a preview-only home, or another home, follows at its next History write.
  */
 export async function pruneHistory(context: ShareContext) {
-  if (!(await writeAccess(context)).allowed || (await syncGate(context)).state !== 'ready') return;
-  const { record } = await readRecord(context.home);
-  const events = await readHistory(context);
-  await saveHistory(context, events);
-  if (record) await pruneStore(context, record, events);
+  if ((await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready') await saveHistory(context, await readHistory(context));
 }
 
 const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
@@ -861,10 +866,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       : { key: left.key, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
   }
   await save();
-  if (events.length) {
-    await saveHistory(context, [...await readHistory(context), ...events]);
-    await pruneStore(context, record, await readHistory(context));
-  }
+  if (events.length) await saveHistory(context, [...await readHistory(context), ...events]);
   // Now that History names it, displaced content needs no other hold. Content displaced this pass that no event names stays on record.
   let cleared = false;
   for (const [key, item] of Object.entries(record.items)) {
