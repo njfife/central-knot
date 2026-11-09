@@ -33,6 +33,14 @@ const ago = (at: string) => {
 /** The editors' keyboard hint, once there is something to review. */
 export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
 
+/** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control. */
+export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }) {
+  const then = (step: { run: () => void; focus: string }) => () => { step.run(); rerender(); document.getElementById(step.focus)?.focus(); };
+  return h('span.ins-confirm', { role: 'group', 'aria-label': 'Discard changes?' }, h('span.ins-confirm-text', {}, `Discard your changes to ${what}?`),
+    button({ variant: 'outline', size: 'small', label: 'Discard', id: ids.discard, onclick: then(discard) }),
+    button({ variant: 'ghost', size: 'small', label: keepLabel, id: ids.keep, onclick: then(keep) }));
+}
+
 /** An "Earlier versions (N)" list: each version's date, age and how far it is from now, with Restore… (which opens a review). */
 export function versionsList(versions: InstructionFile['versions'], restore: { id: (version: string) => string; disabled: boolean; why?: string; run: (version: string) => void }) {
   return versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${versions.length})`),
@@ -106,10 +114,9 @@ function editor(file: InstructionFile) {
         button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
         button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
         edit.restoring ? null : edit.confirmDiscard
-          ? h('span.ins-confirm', {}, h('span.ins-confirm-text', {}, `Discard your changes to ${name}?`),
-            button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-review-discard-yes-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
-            button({ variant: 'ghost', size: 'small', label: 'Keep reviewing', id: `ins-review-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); } }))
-          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); } })));
+          ? discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
+            { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` })
+          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-discard-yes-${file.tool}`)?.focus(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
@@ -132,10 +139,8 @@ function editor(file: InstructionFile) {
   if (!original) area.classList.add('ins-text-new');
   const dirty = () => edit.text !== original;
   const actions = edit.confirmDiscard
-    ? h('div.ins-actions.ins-confirm', { id: `ins-actions-${file.tool}`, role: 'group', 'aria-label': 'Discard changes?' },
-      h('span.ins-confirm-text', {}, `Discard your changes to ${name}?`),
-      button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-discard-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); document.getElementById(`ins-edit-${file.tool}`)?.focus(); } }),
-      button({ variant: 'ghost', size: 'small', label: 'Keep editing', id: `ins-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById(`ins-text-${file.tool}`)?.focus(); } }))
+    ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-discard-${file.tool}`, keep: `ins-keep-${file.tool}` }, 'Keep editing',
+      { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-text-${file.tool}` }))
     : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
       button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = dirty(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),

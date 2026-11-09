@@ -104,5 +104,10 @@ test('Starting from one tool’s instructions shares them with the others; an ed
     await set('Shared.\n', ['claude-cli', 'copilot-cli']);
     await set('Shared, now.\n', ['claude-cli', 'copilot-cli']);
     assert.deepEqual(splitBase(await readFile(copilot, 'utf8')), { own: '', copy: 'Shared, now.\n' });
+
+    // Text that merely matches an earlier base (here, after the adopt above was undone) is the tool's own: a new base goes after it.
+    await writeFile(claude, 'Be brief.\n');
+    await set('Use tabs.\n', ['claude-cli', 'copilot-cli']);
+    assert.ok((await readFile(claude, 'utf8')).startsWith('Be brief.\n\n<!--'));
   } finally { await box.cleanup(); }
 });

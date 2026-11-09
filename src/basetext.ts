@@ -1,6 +1,8 @@
 // Base instructions inside a tool's own instruction file: one marked block, after that tool's own text.
 // Everything outside the block is the tool's own text and is never rewritten here; only the block is added, replaced or taken out.
-// (Adding a block after own text that has no final line break gives it one, so the block starts on its own line.)
+// (Adding a block after own text that has no final line break gives it one, so the block starts on its own line; and when a tool's
+// own text is saved from its editor, own text someone put after the block moves before it.)
+import type { BaseHeld } from './types.ts';
 
 const START = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->';
 const END = '<!-- Central Knot base instructions: end -->';
@@ -59,15 +61,16 @@ export function withoutBase(text: string): string {
 }
 
 /**
- * What one tool's file becomes when the base is saved: the block added or replaced (`chosen`), or taken out (not chosen).
- * A copy edited in the file is left as it is (`edited`), whether chosen or not, unless `overwrite`. `copyIsABase`: the file's copy is the current or an
- * earlier base text, so replacing it loses nothing someone wrote. `adopt`: this file's own text became the base, so it moves
- * into the block; `ownIsABase` (no block, and all its text is a base) does the same, so base text left in the file when its tool
- * was taken off the list is never repeated. The renderer previews with this and the main process writes with it, so the review shows what is written.
+ * What one tool's file becomes when `base` is saved: the block added or replaced (`chosen`), or taken out (not chosen). `held`
+ * is how the file holds the base now. A copy edited in the file is left as it is (`edited`), chosen or not, unless the action is
+ * 'putBack'. 'adopt': this file's own text became the base, so it moves into the block; plain base text Central Knot left in the
+ * file (`held.leftPlain`) moves back the same way, so it is never repeated. The renderer previews with this and the main
+ * process writes with it, so the review shows what is written.
  */
-export function baseWrite(text: string, { base, chosen, copyIsABase, ownIsABase = false, adopt = false, overwrite = false }: { base: string; chosen: boolean; copyIsABase: boolean; ownIsABase?: boolean; adopt?: boolean; overwrite?: boolean }): { next: string; edited?: false } | { edited: true } {
+export function baseWrite(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string; edited?: false } | { edited: true } {
   const { copy } = splitBase(text);
-  if (copy !== undefined && !sameBase(copy, base) && !copyIsABase && !overwrite) return { edited: true };
+  if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { edited: true };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
-  return { next: withBase(adopt || (copy === undefined && ownIsABase) ? withOwn(text, '') : text, base) };
+  const moveIn = action === 'adopt' || (copy === undefined && held?.leftPlain);
+  return { next: withBase(moveIn ? withOwn(text, '') : text, base) };
 }

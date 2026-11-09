@@ -1387,3 +1387,4 @@ body.page-wide .page > .bands > .band { padding-right: 16px; }
 .base-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px 24px; align-items: start; }
 .base-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 @media (min-width: 1500px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.ins-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }

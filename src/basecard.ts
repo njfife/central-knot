@@ -5,7 +5,7 @@ import { applyBaseChange, baseDraftChanged, loadBaseVersion, ownText, rerender, 
 import { baseWrite, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, pathText } from './dom.ts';
-import { changeCounts, diffView, keys, versionsList } from './instructionspage.ts';
+import { changeCounts, diffView, discardConfirm, keys, versionsList } from './instructionspage.ts';
 import { brandMark } from './matrix.ts';
 import { andList, fileName, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -43,18 +43,17 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   const name = fileName(file.path);
   const { own, copy } = splitBase(file.text);
   const ours = edit.source?.tool === file.tool;
-  const putBack = edit.source?.kind === 'putBack' && ours;
-  const adopt = edit.source?.kind === 'own' && ours;
-  const write = baseWrite(file.text, { base: edit.text, chosen, copyIsABase: file.base?.state !== 'edited', ownIsABase: file.base?.ownIsABase, adopt, overwrite: putBack });
+  const action = ours && edit.source?.kind === 'putBack' ? 'putBack' : ours && edit.source?.kind === 'own' ? 'adopt' : 'save';
+  const write = baseWrite(file.text, edit.text, { chosen, held: file.base, action });
   if (write.edited) return { next: file.text, says: chosen ? `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` : `Left as it is, block included: its copy of the base was edited in ${name}, so Central Knot doesn’t take it out.` };
   const { next } = write;
   const says = (text: string) => ({ next, says: text });
   if (!chosen) return says(own.trim() ? 'The base instructions come out. Its own instructions stay.' : `The base instructions come out of their block and stay as plain text, so ${name} is not left empty.`);
-  if (putBack) return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`);
+  if (action === 'putBack') return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${names[file.tool]}’s Earlier versions.`);
   if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
   if (next === file.text) return says('No change: it already has these base instructions.');
-  if (copy === undefined && file.base?.ownIsABase) return says('Its plain copy of the base goes back into the base block, so it isn’t there twice.');
-  if (adopt) return says(`Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`);
+  if (copy === undefined && file.base?.leftPlain) return says('Its plain copy of the base goes back into the base block, so it isn’t there twice.');
+  if (action === 'adopt') return says(`Its ${plural(lineCount(own), 'line')} move into the base block${sameBase(own, edit.text) ? `, so ${names[file.tool]} reads the same as now` : ', as edited here'}. Nothing is lost: the file as it was stays under Earlier versions.`);
   if (copy === undefined) return says(own.trim() ? `Added after its own ${plural(lineCount(own), 'line')}.` : 'The base instructions are added.');
   return says('Its copy of the base is updated. Its own instructions stay.');
 }
@@ -93,9 +92,8 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
         edit.confirmDiscard = false; rerender();
       } }, brandMark(file.tool, 14), h('span', {}, names[file.tool]), h('span.base-file', {}, fileName(file.path), file.exists ? '' : ' (new file)')))),
     edit.confirmDiscard
-      ? h('div.ins-actions.ins-confirm', { role: 'group', 'aria-label': 'Discard changes?' }, h('span.ins-confirm-text', {}, 'Discard your changes to the base instructions?'),
-        button({ variant: 'outline', size: 'small', label: 'Discard', id: 'base-discard', onclick: () => { state.baseEdit = undefined; rerender(); document.getElementById(state.base?.text.trim() ? 'base-edit' : 'base-write')?.focus(); } }),
-        button({ variant: 'ghost', size: 'small', label: 'Keep editing', id: 'base-keep', onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById('base-text')?.focus(); } }))
+      ? h('div.ins-actions', {}, discardConfirm('the base instructions', { discard: 'base-discard', keep: 'base-keep' }, 'Keep editing',
+        { run: () => { state.baseEdit = undefined; }, focus: state.base?.text.trim() ? 'base-edit' : 'base-write' }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-text' }))
       : h('div.ins-actions', {},
         button({ variant: 'primary', size: 'small', label: 'Review changes', id: 'base-review', disabled: !reviewable(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById('base-save')?.focus(); } }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-cancel', onclick: () => {
@@ -109,6 +107,23 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
           onclick: () => { Object.assign(edit, { tools: [], stage: 'review', confirmDiscard: false }); rerender(); document.getElementById('base-save')?.focus(); } }) : null));
 }
 
+/** A review's headline, its Save label, and the result sentence once saved (given the files written), for where the draft came from. */
+function reviewWords(edit: BaseEdit, { counts, writesText, writes, putBackFile, from }: { counts: string; writesText: string; writes: number; putBackFile: string; from: string }) {
+  const before = state.base?.text ?? '';
+  const saved = (lead: string) => (written: string) => `${lead}${written ? ` in ${written}` : ''}.`;
+  const kind = edit.source?.kind;
+  if (kind === 'putBack') return { title: `Put the base instructions back in ${putBackFile}.`, save: `Put the base back in ${putBackFile}`, done: () => `The base instructions are back in ${putBackFile}. The edited copy is under ${from}’s Earlier versions.` };
+  if (kind === 'update') return { title: `Write the base instructions into ${writesText}.`, save: `Update ${writesText}`, done: (written: string) => `Updated ${written || 'nothing'} with the base instructions.` };
+  const save = writes ? `Save and update ${writesText}` : 'Save';
+  if (kind === 'version') return { title: `Going back to earlier base instructions: ${counts || 'the same text'}.`, save, done: saved('The earlier base instructions are back') };
+  if (kind === 'copy') return { title: `Using ${from}’s edited copy as the base instructions: ${counts}.`, save, done: saved('Base instructions saved') };
+  const title = !before.trim() ? `Review the base instructions: ${plural(lineCount(edit.text), 'line')}.`
+    : !edit.tools.length && state.base?.tools.length ? 'Take the base instructions out of every file. Each tool’s own instructions stay, and the base is kept here for later.'
+    : edit.text === before ? 'Review: the base instructions stay the same; the tools that get them change.'
+    : `Review the base instructions: ${counts}.`;
+  return { title, save, done: saved('Base instructions saved') };
+}
+
 function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const before = state.base?.text ?? '';
   const diff = lineDiff(before, edit.text);
@@ -120,16 +135,8 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const plans = kind === 'update' ? writes : all;
   const writesText = writes.length === 1 ? fileName(writes[0].file.path) : `${writes.length} files`;
   const from = edit.source?.tool ? names[edit.source.tool] : '';
-  const putBack = edit.source?.kind === 'putBack' ? fileName(plans[0]?.file.path ?? '') : '';
-  const title = putBack ? `Put the base instructions back in ${putBack}.`
-    : kind === 'update' ? `Write the base instructions into ${writesText}.`
-    : edit.source?.kind === 'version' ? `Going back to earlier base instructions: ${counts || 'the same text'}.`
-    : edit.source?.kind === 'copy' ? `Using ${from}’s edited copy as the base instructions: ${counts}.`
-    : !before.trim() ? `Review the base instructions: ${plural(lineCount(edit.text), 'line')}.`
-    : !edit.tools.length && state.base?.tools.length ? 'Take the base instructions out of every file. Each tool’s own instructions stay, and the base is kept here for later.'
-    : edit.text === before ? 'Review: the base instructions stay the same; the tools that get them change.'
-    : `Review the base instructions: ${counts}.`;
-  const save = putBack ? `Put the base back in ${putBack}` : kind === 'update' ? `Update ${writesText}` : writes.length ? `Save and update ${writesText}` : 'Save';
+  const putBackFile = kind === 'putBack' ? fileName(plans[0]?.file.path ?? '') : '';
+  const { title, save, done } = reviewWords(edit, { counts, writesText, writes: writes.length, putBackFile, from });
   const startedInReview = kind && kind !== 'own';
   return h('div.ins-editor', {},
     h('p.ins-review-title', {}, title),
@@ -149,17 +156,13 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
     h('div.ins-actions', {},
       button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy, onclick: () => void applyBaseChange(
         { text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen: Object.fromEntries(plans.map(({ file }) => [file.tool, file.hash])),
-          adopt: edit.source?.kind === 'own' ? edit.source.tool : undefined, overwrite: putBack ? [edit.source!.tool!] : undefined },
-        written => putBack ? `The base instructions are back in ${putBack}. The edited copy is under ${from}’s Earlier versions.`
-          : kind === 'update' ? `Updated ${written || 'nothing'} with the base instructions.`
-          : (edit.source?.kind === 'version' ? 'The earlier base instructions are back' : 'Base instructions saved') + (written ? ` in ${written}.` : '.')) }),
+          adopt: kind === 'own' ? edit.source!.tool : undefined, overwrite: putBackFile ? [edit.source!.tool!] : undefined }, done) }),
       startedInReview
         ? button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-back', onclick: () => closeOrBack(edit) })
         : [button({ variant: 'ghost', size: 'small', label: 'Back to editing', id: 'base-back', onclick: () => closeOrBack(edit) }),
           edit.confirmDiscard
-            ? h('span.ins-confirm', {}, h('span.ins-confirm-text', {}, 'Discard your changes to the base instructions?'),
-              button({ variant: 'outline', size: 'small', label: 'Discard', id: 'base-review-discard-yes', onclick: () => { state.baseEdit = undefined; rerender(); document.getElementById('base-edit')?.focus(); } }),
-              button({ variant: 'ghost', size: 'small', label: 'Keep reviewing', id: 'base-review-keep', onclick: () => { edit.confirmDiscard = false; rerender(); document.getElementById('base-save')?.focus(); } }))
+            ? discardConfirm('the base instructions', { discard: 'base-review-discard-yes', keep: 'base-review-keep' }, 'Keep reviewing',
+              { run: () => { state.baseEdit = undefined; }, focus: state.base?.text.trim() ? 'base-edit' : 'base-write' }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-save' })
             : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: 'base-review-discard', onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById('base-review-discard-yes')?.focus(); } })]));
 }
 

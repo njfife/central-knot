@@ -377,10 +377,19 @@ export interface InstructionFile {
   versions: InstructionVersion[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
    *  and how that copy compares ('edited': it is neither the base nor an earlier base, so someone wrote in it). */
-  base?: { chosen: boolean; state: 'same' | 'older' | 'edited' | 'missing'; own: string; copy?: string;
-    /** No block, and all its text is a base text: left as plain text when the tool was taken off the list. Adding the base
-     *  again moves it back into the block instead of repeating it. */
-    ownIsABase?: boolean };
+  base?: BaseHeld;
+}
+/** How a tool's file holds the base. */
+export interface BaseHeld {
+  /** The tool is on the base list. */
+  chosen: boolean;
+  /** Its copy: the same as the base, an older base, edited in the file ('edited': neither the base nor an earlier one), or none. */
+  state: 'same' | 'older' | 'edited' | 'missing';
+  own: string;
+  copy?: string;
+  /** Its whole text is exactly the base text Central Knot left as plain text when the tool was taken off the list. Adding the
+   *  tool again moves that text back into the block instead of repeating it. */
+  leftPlain?: boolean;
 }
 export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 
@@ -397,7 +406,8 @@ export interface BaseApply { text: string; expected: string; tools: HarnessId[];
 /** What an apply or undo did per tool; `left` were not written: their copy was edited there, or the write failed. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean; written: { tool: HarnessId; before: string | null; after: string }[]; left: { tool: HarnessId; why: 'edited' | 'failed' }[]; undo?: BaseUndo }
 /** Everything an apply changed, to put back: the base and its tools, and each file's text before (null: the apply created it). */
-export interface BaseUndo { text: string; tools: HarnessId[]; /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: { tool: HarnessId; before: string | null; after: string }[] }
+export interface BaseUndo { text: string; tools: HarnessId[]; leftPlain: Partial<Record<HarnessId, string>>;
+  /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: { tool: HarnessId; before: string | null; after: string }[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
