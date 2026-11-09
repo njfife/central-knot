@@ -730,7 +730,7 @@ export function outcomeBand(withAction = true): HTMLElement | null {
   const outcome = state.outcome;
   // A result stands until something new is queued, the page changes, or it is dismissed.
   const matrixPage = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents';
-  if (!outcome || outcome.page !== state.page || (matrixPage && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention')))) || state.skillsView === 'files') return null;
+  if (!outcome || outcome.page !== state.page || (matrixPage && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention'))))) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];

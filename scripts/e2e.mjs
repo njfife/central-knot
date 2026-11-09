@@ -304,10 +304,14 @@ async function practiceFlow() {
   for (let tries = 0; tries < 30 && readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') !== reviewClaude; tries++) await wait(100);
   check('Undo puts the replaced copy back in its own tool only', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude && readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8') === reviewCopilot);
   check('and review is flagged again', await a.exists('#decide-review'));
+  // Choosing again from the Files view ("Read both copies"): the result and its Undo show there too.
   await a.click('#decide-review');
+  await a.click('#diff-review');
   await a.click('#use-review-copilot-cli');
   await applyAll(a);
   same('choosing again works', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8'), reviewCopilot);
+  check('a choice applied from the Files view shows its result and Undo', await a.exists('#outcome-undo-choice'), await a.text('.detail-column'));
+  if (await a.exists('#skills-table')) await a.click('#skills-table');
 
   // Stop all for Copilot: copies stay, syncing stops.
   await a.click('#tool-copilot-cli');
