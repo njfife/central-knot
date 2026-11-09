@@ -144,7 +144,7 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
   return h('div.plugin-group.plugin-skills', {},
     h('h4', {}, `Skills (${skills.length})`),
-    switchable.length ? line(`Turn a skill off in ${andList(switchable.map(tool => names[tool]))} without uninstalling the plugin; nothing changes until Apply all.`) : null,
+    switchable.length ? line(`Turn a skill off, or back on, in ${andList(switchable.map(tool => names[tool]))} without uninstalling the plugin; nothing changes until Apply all.`) : null,
     tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
     [...columnWide].map(why => line(why)),
     switchable.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, switchable.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), names[tool])))) : null,
