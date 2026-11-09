@@ -24,6 +24,8 @@ if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smok
 const BUILD = 'com.centralknot.firstlook';
 let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
+/** Whether the open home can be written; read with each view, so the menus can say "preview only" like the window. */
+let homeWritable = true;
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -125,9 +127,9 @@ function trayMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open Central Knot', click: showWindow },
     { type: 'separator' },
-    { label: `${unseen ? 'Sync made changes: open to see them' : syncOn ? 'Automatic sync is on' : 'Automatic sync is off'} · ${where}`, enabled: false },
+    { label: `${!homeWritable && current ? 'Preview only: nothing is written' : unseen ? 'Sync made changes: open to see them' : syncOn ? 'Automatic sync is on' : 'Automatic sync is off'} · ${where}`, enabled: false },
     { label: 'Sync automatically', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync now (apply waiting changes once)', enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+    { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
     { type: 'separator' },
     { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
       click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
@@ -161,7 +163,7 @@ function appMenu() {
       { role: 'about' },
       { type: 'separator' },
       { label: 'Sync automatically', type: 'checkbox', checked: syncOn, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync now (apply waiting changes once)', enabled: !!current, click: () => void fromTray(async () => { await pass(true); }) },
+      { label: 'Sync now (apply waiting changes once)', enabled: !!current && homeWritable, click: () => void fromTray(async () => { await pass(true); }) },
       { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
         click: item => void saveAppSettings({ startAtSignIn: item.checked }).then(() => { applySignIn(); refreshTray(); }) },
       { type: 'separator' },
@@ -227,6 +229,8 @@ async function view(explicit = false): Promise<HomeView> {
   pendingResults = [];
   pendingNotices = [];
   const snapshots = await read();
+  const writable = (await writeAccess(shared)).allowed;
+  if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   return {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn,
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),

@@ -99,7 +99,12 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const managed = changes.filter(change => change.managed).length;
   // History holds what Apply all replaced (a chosen copy); new copies are undone by turning Managed off, which leaves them in place.
   const replacedSome = result.results.some(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message));
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: [managed ? `${plural(managed, 'skill')} managed` : '', result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written` : 'nothing needed copying'].filter(Boolean).join(' · ') + (managed ? '. From now on, an edit in one tool spreads to the others.' : '.') + (replacedSome ? '' : ' To stop, turn Managed off: copies stay where they are.') };
+  // Say what was added and what was replaced, apart: only a replacement is kept in History.
+  const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+  const writtenTo = (replaced: boolean) => [...new Set(result.results.filter(entry => entry.outcome === 'written' && /^Now uses/.test(entry.message) === replaced).map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
+  const added = writtenTo(false), replacedIn = writtenTo(true);
+  const what = [managed ? `${plural(managed, 'skill')} managed` : '', added.length ? `copied to ${andText(added)}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To stop, turn Managed off: copies stay where they are.') };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -113,7 +118,7 @@ const readSummary = (view: HomeView) => {
 
 export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', async () => {
   const view = await api().selectHome(mode);
-  if (view) { accept(view); announce(readSummary(view)); } else announce('');
+  if (view) { accept(view); state.outcome = { page: state.page, text: `Opened ${view.label}. ${readSummary(view).replace(/^Read /, 'Read ').replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
 /** At launch: the home last opened (so sync resumes where it was), else the practice copy. */
@@ -226,8 +231,15 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
   const where = [...new Set(restored.map(entry => toolNames[entry.harness ?? ''] ?? entry.harness ?? ''))].filter(Boolean);
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
-  const undoneBy = state.history?.find(event => event.id === eventId)?.undoneBy;
-  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label: 'Redo' } : undefined, text: `${restored[0].item} restored${where.length ? ` in ${where.length > 2 ? `${where.slice(0, -1).join(', ')} and ${where.at(-1)}` : where.join(' and ')}` : ''}.` };
+  const past = state.history?.find(event => event.id === eventId);
+  const undoneBy = past?.undoneBy;
+  const everywhere = where.length >= (state.home?.snapshots.length ?? 3) ? `all ${where.length} tools` : andText(where);
+  const item = restored[0]?.item ?? past?.item ?? '';
+  const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
+    : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
+      : `Undid ${past?.winner ? `${toolNames[past.winner.tool] ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
+  const label = past?.kind === 'deleted' ? 'Delete again' : past?.kind === 'restored' ? 'Undo again' : 'Redo edit';
+  if (!result.stopped && restored.length) state.outcome = { page: state.page, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
   announce(result.stopped ?? `Restored in ${plural(restored.length, 'tool')}.`);
 });
 
@@ -252,7 +264,7 @@ export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turnin
 export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
   if (view) state.home = view;
-  announce('Synced once. Sync stays off.');
+  announce('Synced once. Automatic sync stays off.', true);
 });
 
 /** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
@@ -272,8 +284,13 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
   if (view) state.home = view;
   state.mcpResult = result;
   if (!result.stopped) onDone();
-  if (!result.stopped) state.outcome = { page: state.page, text: `${plural(changes.filter(change => change.managed).length, 'server')} managed · ${result.writes ? `${plural(result.writes, 'entry', 'entries')} written` : 'nothing needed writing'}.` };
-  announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'entry', 'entries')} written.` : 'Applied. Nothing needed writing.'));
+  if (!result.stopped) {
+    const toolNames: Record<string, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex' };
+    const to = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => toolNames[entry.harness ?? ''] ?? ''))].filter(Boolean);
+    const managed = changes.filter(change => change.managed).length;
+    state.outcome = { page: state.page, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'} · ${to.length ? `copied to ${andText(to)}` : 'nothing needed writing'}. To stop, turn Managed off: copies stay where they are.` };
+  }
+  announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
 
 // ---------- Agents ----------

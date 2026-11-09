@@ -766,3 +766,39 @@ button.apply-state.text-action:hover { text-decoration-color: currentColor; }
 #announcement[data-quiet="true"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .market > .market-hint, .market-hints { padding-left: 16px; padding-right: 16px; }
 .market-hints .market-hint { margin: 2px 0; }
+
+/* UI round 3 */
+.glyph-fill { fill: currentColor; stroke: none; }
+.details { position: relative; }
+.details-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-faint); cursor: pointer; }
+.details-close:hover { background: var(--hover); color: var(--ink); }
+.details-head { padding-right: 28px; }
+.details-paths { margin-left: 0; }
+.details-paths summary { list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.details-paths summary::-webkit-details-marker { display: none; }
+.details-paths[open] summary svg { transform: rotate(90deg); }
+.details-path-line { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 16px; }
+.details-waits { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 8px 10px; border-radius: 8px; background: var(--cell-warn); }
+.details-waits > span { flex: 1; }
+.details-tool-head .details-path { max-width: 32%; }
+.cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
+.legend-cell { position: relative; }
+.decided-undo { width: auto; padding: 0 6px; gap: 3px; display: inline-flex; align-items: center; font-size: 11.5px; }
+.ov-head { height: 60px; }
+.ov-section { top: 60px; }
+.item-name { font-weight: 600; color: var(--ink); }
+.ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; opacity: 0.7; }
+button.apply-state.text-action { text-decoration: underline dotted; text-underline-offset: 3px; }
+/* Controls and bands line up with the table instead of running to the window edge. */
+.ov-page > .toolbar, .ov-page .bands > .band { padding-right: max(16px, calc(100% - 760px)); }
+.history-kind { border: 0; padding: 0; text-transform: none; color: var(--ink-faint); }
+.link-quiet { color: var(--ink-soft); padding: 0 8px; font-size: 12px; }
+.title-tag { display: inline-flex; align-items: center; gap: 4px; margin-left: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); font: inherit; font-size: 11.5px; cursor: pointer; }
+.title-tag:hover { color: var(--ink); border-color: var(--control-line); }
+.kind-card { cursor: default; padding: 0; gap: 0; }
+.kind-card:hover { background: var(--surface); }
+.kind-card-main { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 14px 16px 6px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.kind-card-main:hover, .kind-card-main:focus-visible { background: var(--selected-row); }
+.kind-card > .kind-card-state { padding: 4px 16px 14px; }
+.kind-card-link { border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; width: 100%; }
+.kind-card-link:hover { text-decoration: underline; }

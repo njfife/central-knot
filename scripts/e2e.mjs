@@ -274,7 +274,7 @@ async function practiceFlow() {
 
   // Details open under a row.
   await a.click('#open-release-notes');
-  check('details say every tool has the same copy', (await a.text('.details')).includes('Same copy in all 3 tools'), await a.text('.details'));
+  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in Claude Code, Copilot CLI and Codex'), await a.text('.details'));
   await a.click('#close-release-notes');
 
   // Choose which copy to use.
@@ -402,7 +402,7 @@ async function practiceFlow() {
   const tomlAfter = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
   check('docs reached Codex, and config.toml kept its comment and the files table byte for byte', tomlAfter.startsWith(tomlBefore) && tomlAfter.includes('[mcp_servers.docs]') && tomlAfter.includes('url = "https://docs.example.test/mcp"'), tomlAfter);
   const claudeBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
-  check('Claude Code waits for Write now', (await a.text('.bands') ?? '').includes('Claude Code doesn’t have files yet'.replace('’', "'")) && !JSON.parse(claudeBefore).mcpServers.files, await a.text('.bands'));
+  check('Claude Code waits for Write now', (await a.text('.bands') ?? '').includes('Claude Code doesn’t have the files server yet') && !JSON.parse(claudeBefore).mcpServers.files, await a.text('.bands'));
   await a.shot('practice-mcp');
   await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
@@ -424,7 +424,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', (await a.text('.details') ?? '').includes('Edit this agent in Claude Code. Copilot CLI and Codex have no setting for its “tools” or “model”'), await a.text('.details'));
+  check('the details name the limits', (await a.text('.details') ?? '').includes('Copilot CLI and Codex have no “tools” or “model” setting'), await a.text('.details'));
   await a.shot('practice-agents');
   await a.click('#nav-skills');
 
