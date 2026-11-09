@@ -289,7 +289,12 @@ async function everyPage(tag) {
     await a.click('[id^="popen-0-"]'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted')`);
     await shot(a, `${tag}-plugin-page`, `A plugin's page ${at}.`); await a.click('#plugin-back');
   }
-  await a.click('#nav-history'); await shot(a, `${tag}-history`, `History ${at}.`);
+  await a.click('#nav-history');
+  // The pointer over the second row, so its full-width hover shows.
+  const hovered = await a.run(`(() => { const row = document.querySelectorAll('.history-row')[1]?.getBoundingClientRect(); return row ? [row.left + row.width / 2, row.top + row.height / 2] : null; })()`);
+  if (hovered) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hovered[0], y: hovered[1] });
+  await shot(a, `${tag}-history`, `History ${at}${hovered ? ', the pointer over the second row' : ''}.`);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
   await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
@@ -321,7 +326,12 @@ if (wanted('sizes')) {
       // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
       await a.click('#nav-skills');
       const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
-      if (box) { await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560.'); }
+      if (box) {
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
+        await a.click('#sidebar-toggle');
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-sidebar-open-status-message', 'The same with the sidebar open: with too little room for the message, a mark stands in, the message its tooltip.');
+        await a.click('#sidebar-toggle');
+      }
     }
   }
   await a.theme('light');

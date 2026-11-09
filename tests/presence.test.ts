@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { harnessIds } from '../src/harnesses.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { absentTools, presentTools } from '../src/presence.ts';
+import { absentKinds, absentTools, presentTools } from '../src/presence.ts';
 import type { ShareContext } from '../src/share.ts';
 
 const text = (name: string) => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\nBody.\n`;
@@ -77,4 +77,11 @@ test('a tool that appears gets the managed copies; when it disappears again, not
     assert.ok(await exists(join(box.path, '.claude/skills/brief/SKILL.md')), 'Claude Code keeps its copy');
     assert.equal((await manageView(box.context)).skills.find(skill => skill.key === 'brief')?.managed, true);
   } finally { await box.cleanup(); }
+});
+
+test('a kind no tool in the home can hold is absent; a home with no tools keeps every kind', () => {
+  assert.deepEqual(absentKinds(['pi-cli'], ['pi-cli'], []), ['agents', 'plugins']);
+  assert.deepEqual(absentKinds(['pi-cli', 'claude-cli'], ['pi-cli', 'claude-cli'], ['claude-cli']), []);
+  assert.deepEqual(absentKinds(['codex-cli'], [], ['codex-cli']), ['mcp']);
+  assert.deepEqual(absentKinds([], [], []), []);
 });

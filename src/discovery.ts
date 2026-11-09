@@ -125,8 +125,8 @@ export async function discover(options: {
   const root = configRoot(definition, home, options.configOverride);
   const snapshot: Snapshot = {
     harness: definition.id, harnessName: definition.name, surface: definition.surface,
-    mode: options.mode, label: options.mode === 'actual' ? machineNames(process.platform === 'darwin').home : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
-    root, detection: 'Not found', probe: { state: 'not-run', detail: `System probes run only when you select ${machineNames(process.platform === 'darwin').home}.` },
+    mode: options.mode, label: options.mode === 'actual' ? machineNames(process.platform).home : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
+    root, detection: 'Not found', probe: { state: 'not-run', detail: `System probes run only when you select ${machineNames(process.platform).home}.` },
     discovery: 'missing', skills: [], issues: [],
   };
   if (!isAbsolute(root)) {

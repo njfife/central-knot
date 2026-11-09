@@ -1,7 +1,7 @@
 // One plugin's page: what it is, where to install it, what it holds (read from its files), what each tool does with it,
 // and its README.
 import { rerender, state as app } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { button, h, icon, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
@@ -65,12 +65,13 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
-    // The tools in a row from the left, a steady gap apart; the button for all of them at the row's right edge.
-    h('div.plugin-tool-rows', {}, view.tools.map(tool => {
+    // The tools in a row from the left, a steady gap apart, the button for all of them after them; a wide page gives each
+    // tool an equal column across the box, the button at its right end (style.css).
+    withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
-    }), allButton));
+    }), allButton), view.tools.length));
 }
 
 /**

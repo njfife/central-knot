@@ -119,7 +119,7 @@ const appearances: Appearance[] = ['system', 'light', 'dark'];
 /** The settings the Settings page shows: the appearance, and Start at sign-in as the menus show it. */
 const preferences = (): AppPreferences => ({
   appearance: appSettings.appearance ?? 'system',
-  signIn: { offered: process.platform !== 'linux', available: canStartAtSignIn(), on: startsAtSignIn() },
+  signIn: { offered: machineNames(process.platform).signIn, available: canStartAtSignIn(), on: startsAtSignIn() },
 });
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
@@ -297,12 +297,12 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // The home is read again only when the pass wrote skills to it; otherwise the first read is still what is there.
   const snapshots = skills?.harnessWrites ? await read() : before;
   latestSnapshots = snapshots;
-  lastPresent = presentTools(snapshots).join();
+  notePresent(snapshots);
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots),
+    manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
@@ -321,8 +321,20 @@ let followUp: NodeJS.Timeout | undefined;
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
 
-/** The tools the page was last told of (presence.ts), so a background pass tells it of a change once. */
+/** The tools in the home as last noted (presence.ts), so a change is acted on once. */
 let lastPresent = '';
+
+/**
+ * Notes which tools are in the home, from either a page's read or a background pass. When the set changed, the folders
+ * are watched again, so a tool that appeared is watched like the rest. Returns whether it changed.
+ */
+function notePresent(snapshots: Snapshot[]): boolean {
+  const present = presentTools(snapshots).join();
+  if (present === lastPresent) return false;
+  lastPresent = present;
+  void startWatching();
+  return true;
+}
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
@@ -333,15 +345,9 @@ async function backgroundPass() {
   const fromEvent = touched;
   touched = false;
   // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
-  // A tool installed or removed changes every page's columns: the page is told once, and its folders are watched from
-  // then on, as a home's are when it opens.
+  // A tool installed or removed changes every page's columns: the page is told (it keeps the news until it can read).
   const snapshots = await read();
-  const present = presentTools(snapshots).join();
-  if (present !== lastPresent) {
-    lastPresent = present;
-    tell('sync:changed');
-    void startWatching();
-  }
+  if (notePresent(snapshots)) tell('sync:changed');
   const { skills, mcpAndAgents } = await pass(snapshots);
   keepMcpAndAgents(mcpAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
@@ -412,7 +418,7 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     }
     // A chosen folder is called by its own name everywhere: status bar, results and sidebar.
     next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
-  } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform === 'darwin').home };
+  } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform).home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;

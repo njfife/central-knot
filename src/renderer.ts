@@ -1,14 +1,14 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, loadHome, saidInStatusBar, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import type { HomeMode, ManageView } from './types.ts';
+import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
@@ -108,35 +108,48 @@ function renderPage() {
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 
-function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
+/** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
+function writeFact(manage: ManageView): { glyph: IconName; text: string; short?: string; tone: string } {
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', tone: '' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes stay here' : 'Changes write only inside this folder', tone: '' };
+  if (state.home?.mode === 'fixture') return { glyph: 'pencil-line', text: 'Changes stay here', tone: '' };
+  return { glyph: 'pencil-line', text: 'Changes write only inside this folder', short: 'Writes here only', tone: '' };
+}
+
+/**
+ * The Automatic sync switch, the same one the menus carry. A preview-only home keeps it, disabled and grey, so it is
+ * recognisably the same setting. With sync on and nothing managed yet it reads "On · nothing managed"; its tooltip says
+ * sync starts once something is.
+ */
+function syncSwitch(home: HomeView) {
+  const label = h('span.sync-label', {}, 'Automatic sync');
+  if (!home.manage.access.allowed) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.manage.access.reason ?? 'Preview only: nothing is written here' },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
+  }
+  const idle = home.syncOn && !anyManaged();
+  const title = idle ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.'
+    : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
+    : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
+  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy, title, onclick: () => void setSync(!home.syncOn) },
+    label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing managed' : 'On'));
 }
 
 function renderStatus() {
-  const write = state.home && writeFact(state.home.manage);
+  const home = state.home;
+  const write = home && writeFact(home.manage);
   region('status-facts').replaceChildren(
-    state.home
-      ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, state.home.label)))
+    home
+      ? h('span.status-item.status-home', { title: home.home }, icon(home.mode === 'fixture' ? 'flask-conical' : home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
-    write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one. With sync on
-    // and nothing managed yet, the grey switch says "On · nothing managed"; its tooltip says sync starts once something is.
-    state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))
-    : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
-      title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'On · nothing managed') : 'Off')) : '',
+    write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14),
+      h('span.status-clip.fact-long', {}, write.text), write.short ? h('span.status-clip.fact-short', {}, write.short) : null) : '',
+    home ? syncSwitch(home) : '',
   );
   region('status-version').textContent = packageInfo.version;
-  // The result band already says what just happened; the status bar does not say it twice.
-  // A result with something to offer has a band on the page, and the status bar doesn't say it twice. One that only tells
-  // (a home opened, say) is said here instead.
-  const said = document.getElementById('announcement')!;
-  const outcome = state.outcome?.page === state.page ? state.outcome : undefined;
-  if (outcome && saidInStatusBar(outcome) && said.textContent !== outcome.text) { said.textContent = said.title = outcome.text; said.dataset.quiet = ''; }
-  said.classList.toggle('visually-hidden', (!!outcome && !saidInStatusBar(outcome)) || said.dataset.quiet === 'true');
+  region('message-mark').replaceChildren(icon('info', 14));
+  paintStatusMessage();
 }
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
@@ -145,8 +158,6 @@ function render() {
   const focused = document.activeElement?.id;
   const scrolled = remembered();
   const { rail } = applyLayout();
-  // The open page's kind is no longer in this home (its last tool went): the Overview instead.
-  if ((absentKinds() as Page[]).includes(state.page)) state.page = 'overview';
   renderSidebar();
   renderHeader(rail);
   renderPage();

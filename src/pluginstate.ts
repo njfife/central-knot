@@ -128,15 +128,18 @@ export function browse(patch: Partial<typeof market.nav>): void {
 }
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
-export const loadPlugins = (fresh = false) => act('reading', async () => {
-  const view = await api().plugins(fresh);
-  market.problem = undefined;
-  // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
-  if (fresh) { market.readmes.clear(); market.details.clear(); }
-  else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
-  showView(view, { replace: true });
-  announce('');
-});
+export const loadPlugins = (fresh = false, quiet = false): Promise<void> => {
+  const read = async () => {
+    const view = await api().plugins(fresh);
+    market.problem = undefined;
+    // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
+    if (fresh) { market.readmes.clear(); market.details.clear(); }
+    else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
+    showView(view, { replace: true });
+  };
+  // In the background (a tool appeared or went away), without the busy state, so the page's result stays.
+  return quiet ? read().then(rerender, () => undefined) : act('reading', read);
+};
 
 /** Runs an action with the page saying what it is doing. */
 function act(activity: MarketActivity, work: () => Promise<void>) {
@@ -197,7 +200,8 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
   }
-  announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);
+  // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
+  announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
 /**

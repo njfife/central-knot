@@ -248,11 +248,12 @@ async function writable(context: ShareContext, tool: HarnessId, directory: strin
 }
 
 /**
- * The page's view of a home. Reads only; writes nothing. `read` is the discovery the rest of the page was built from, so
- * every page shows the same tools; without it the home is read now.
+ * The page's view of a home. Reads only; writes nothing. `caughtUp` and `notices` are what passes did since the page last
+ * read. `snapshots` is the read of the home the rest of the page was built from, so every page shows the same tools;
+ * without it the home is read now.
  */
-export async function manageView(context: ShareContext, caughtUp: DestinationResult[] = [], notices: SyncNotice[] = [], read?: Snapshot[]): Promise<ManageView> {
-  const snapshots = read ?? await context.read();
+export async function manageView(context: ShareContext, { caughtUp = [], notices = [], snapshots: given }: { caughtUp?: DestinationResult[]; notices?: SyncNotice[]; snapshots?: Snapshot[] } = {}): Promise<ManageView> {
+  const snapshots = given ?? await context.read();
   const { record } = await readRecord(context.home);
   const gathered = await gather(context, snapshots, record);
   // Edits waiting to spread (Sync off, or a pass still settling): the page shows them as pending, not as a choice to make.

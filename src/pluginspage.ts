@@ -191,9 +191,12 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
       button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, attrs: { title: `${pending}. Nothing runs until Apply all.` }, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
+  // A result is said here only while it offers something to do (Undo, or its own button); one that only tells is in the
+  // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
+  const back = undoButton();
   const parts = last ? resultParts(lines, last.undo, { short: true }) : [];
-  if (last && parts.length) {
+  if (last && parts.length && back) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
@@ -204,14 +207,13 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
       ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)])]
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'),
-      h('span.toolbar-result-text', { title: resultSentence(lines, last.undo) }, sentence), undoButton(), dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
+      h('span.toolbar-result-text', { title: resultSentence(lines, last.undo) }, sentence), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
   }
   // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
-  const back = undoButton();
   if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
-  const outcome = app.outcome?.page === 'plugins' ? app.outcome : undefined;
-  if (!outcome) return null;
-  const action = outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() }) : null;
+  const outcome = app.outcome?.page === 'plugins' && app.outcome.act ? app.outcome : undefined;
+  if (!outcome?.act) return null;
+  const action = button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() });
   return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 

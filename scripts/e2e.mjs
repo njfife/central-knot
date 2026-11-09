@@ -183,6 +183,10 @@ async function mainProcess(port) {
     },
     /** Makes one request from the page fail until `restore` runs; the real handler stays aside meanwhile. */
     failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the failed-Refresh test needs another way to make a request fail.'); globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
+    /** Makes one request from the page take `ms` longer until `restore` runs. */
+    slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
+    /** Sends the page a message, as the main process does after a background pass. */
+    tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
     close: () => socket.close(),
   };
@@ -704,6 +708,23 @@ async function practiceFlow() {
   console.log(`(the poll found Codex after ${Math.round((Date.now() - polled) / 1000)} s)`);
   rmSync(join(practice, '.codex-away'), { recursive: true, force: true });
   await a.click('#sync-switch');
+  // A tool change told while the page is busy (here, reading marketplaces slowly after a Refresh) is kept, and read once
+  // the work is done, with no second Refresh.
+  if (main) {
+    const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
+    check('the marketplace request is slowed', await main.slowRequest('plugins:view', 3000));
+    await a.run(`(document.querySelector('#header-refresh').click(), true)`);
+    await wait(1000);
+    const busyThen = await a.run(`document.body.dataset.busy`);
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 80 && (await columns()) !== 2; tries++) await wait(100);
+    same('a tool change told while the page is busy is read once the work is done', [busyThen, await columns()], ['true', 2]);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 30 && (await columns()) !== 3; tries++) await wait(100);
+  }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
     check('the refresh request is made to fail', await main.failRequest('discovery:refresh'));
@@ -847,6 +868,15 @@ async function practiceFlow() {
     same('and its own switch then turns it back', [await settingsSync(), await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`)], [before, before]);
   }
   await a.click('#nav-skills');
+  // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
+  await sizeTo(a, 2560, 1440);
+  for (const page of ['overview', 'history', 'plugins']) {
+    await a.click(`#nav-${page}`);
+    await wait(300);
+    same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
+  }
+  await fullSize(a);
+  await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
   // destroys the window outright (a real close only hides it), which is the stronger case: background work needs no window.
@@ -883,7 +913,8 @@ async function fewToolsFlow() {
   const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
   const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
   same('a home with no tools keeps every page', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
-  check('its Overview says no tools were found', (await a.text('.overview-lead') ?? '').includes('No tools were found in this home'), await a.text('.overview-lead'));
+  same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
+  check('its status bar says no tools were found', /No tools were found/.test(await a.run(`document.querySelector('#announcement').textContent`) ?? ''));
   await fitsAtMinimum(a, 'a home with no tools');
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
@@ -893,6 +924,11 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.claude'), { recursive: true });
   await a.click('#header-refresh');
   same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
+  await a.click('#nav-agents');
+  rmSync(join(home, '.claude'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']]);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
 }

@@ -119,7 +119,7 @@ function editor(file: InstructionFile) {
 const open = new Set<string>();
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
+const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && state.outcome.kind === 'saved';
 
 function card(file: InstructionFile) {
   const editing = draftFile() === file;
@@ -175,7 +175,7 @@ function orphanDraft() {
 export function instructionsPage() {
   const files = state.instructions;
   if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading instruction files…' : 'Instruction files could not be read.')));
-  const done = state.outcome && /^Saved /.test(state.outcome.text) ? null : outcomeBand();
+  const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   const orphan = orphanDraft();

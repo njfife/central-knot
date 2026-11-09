@@ -2,18 +2,19 @@ import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
-import { machineNames } from './machine.ts';
+import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
-import { takesPlugins } from './presence.ts';
+import { absentKinds as absentKindsOf, type OptionalKind } from './presence.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
 
-/** This computer's home ("This Mac’s home") and the machine in a sentence ("this Mac"), named as the main process names them. */
-export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machineNames(navigator.userAgent.includes('Mac'));
+/** This computer's names, and what its platform offers (machine.ts). */
+export const machine = machineNames(pagePlatform(navigator.userAgent));
+export const { home: realHomeName, machine: thisMachine, tray: trayPlace } = machine;
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -33,6 +34,8 @@ export const state = {
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
+  /** What the status bar says (announce): the last message, and whether it is for screen readers only. */
+  said: { text: '', quiet: false } as { text: string; quiet: boolean },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
@@ -65,21 +68,43 @@ const PRACTICE_NOTE = 'ck-practice-banner-dismissed';
 export const practiceNoteOpen = (): boolean => { try { return localStorage.getItem(PRACTICE_NOTE) !== '1'; } catch { return true; } };
 export const setPracticeNote = (open: boolean): void => { try { if (open) localStorage.removeItem(PRACTICE_NOTE); else localStorage.setItem(PRACTICE_NOTE, '1'); } catch { /* shown again next time */ } };
 
+/**
+ * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. A quiet announcement is
+ * for screen readers only: the page already shows the same thing.
+ */
 export function announce(text: string, quiet = false) {
+  state.said = { text, quiet };
+  paintStatusMessage();
+}
+
+/**
+ * Paints the status bar's message from state: a result that only tells (saidInStatusBar), else the last announcement.
+ * A result with a band of its own isn't said twice. The message keeps its whole text as its tooltip.
+ */
+export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
-  region.textContent = text;
-  // The status bar may cut a long message; its tooltip has it whole.
-  region.title = text;
-  // A quiet announcement is for screen readers only: the page already shows the same thing.
-  region.dataset.quiet = quiet ? 'true' : '';
+  const outcome = state.outcome?.page === state.page ? state.outcome : undefined;
+  const told = outcome && saidInStatusBar(outcome) ? { text: outcome.text, quiet: false } : state.said;
+  if (region.textContent !== told.text) region.textContent = told.text;
+  region.title = told.text;
+  region.dataset.quiet = told.quiet ? 'true' : '';
+  region.classList.toggle('visually-hidden', (!!outcome && !saidInStatusBar(outcome)) || told.quiet);
+  // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
+  const mark = document.getElementById('message-mark');
+  if (mark) { mark.title = told.text; mark.hidden = !told.text || told.quiet || region.classList.contains('visually-hidden'); }
 }
 
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
 
 
-/** One piece of work at a time: every mutating control is disabled while it runs. */
+/**
+ * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
+ * the work said nothing of its own, to what the status bar said before. A background refresh that arrived meanwhile runs
+ * once it is done.
+ */
 export async function busy(message: string, work: () => Promise<void>) {
   const focused = document.activeElement?.id;
+  const before = state.said;
   state.outcome = undefined;
   state.undoMoved = undefined;
   state.busy = message;
@@ -90,10 +115,12 @@ export async function busy(message: string, work: () => Promise<void>) {
   catch {
     announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
   }
+  if (state.said.text === message) announce(before.text, before.quiet);
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
   focusById(focused);
+  if (refreshOwed) { refreshOwed = false; void backgroundRefresh(); }
 }
 
 function accept(view: HomeView) {
@@ -104,7 +131,8 @@ function accept(view: HomeView) {
   if (!draftUnsaved()) state.instructionEdit = undefined;
   resetMarket();
   // The page's own data (Plugins, Instructions, History, Settings) belonged to the home before: read it for this one.
-  void loadPageData(state.page);
+  leaveAbsentPage();
+  void loadPageData(state.page, { quiet: true });
 }
 
 /** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
@@ -156,12 +184,20 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
 });
 
 /** After a read: what was found and where, so a home switch or Refresh says what it did. */
-const readSummary = (view: HomeView) => {
-  const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
-  // "Nothing changed" means nothing was written; a copy that stopped updating is still news, so it is said.
-  const stopped = (view.agents?.servers ?? []).filter(server => server.managed && server.stopped?.length).map(server => `${server.name}’s ${server.stopped!.length === 1 ? 'copy in one tool' : 'copies in some tools'}`);
-  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? '' : 'Nothing changed.'}`;
-};
+/**
+ * What a read found, naming only the kinds a tool in that home can hold ("Read 1 skill and 0 MCP servers"), or that it
+ * found no tools at all. "Nothing changed" means nothing was written; a copy that stopped updating is still news.
+ */
+function readFound(view: HomeView): string {
+  if (!view.manage.tools.length) return 'No tools were found in this home.';
+  const absent = absentKindsOf(view.manage.tools, view.mcp.tools, view.agents.tools);
+  const parts = [plural(view.manage.skills.length, 'skill'), absent.includes('mcp') ? '' : plural(view.mcp.servers.length, 'MCP server'), absent.includes('agents') ? '' : plural(view.agents.servers.length, 'agent')].filter(Boolean);
+  const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
+  return `Read ${andList(parts)}.${stopped ? '' : ' Nothing changed.'}`;
+}
+
+/** A read said in the status bar: what it found, and in which home. */
+const readSummary = (view: HomeView) => (view.manage.tools.length ? readFound(view).replace(/^Read (.*?)\./, `Read $1 from ${view.label}.`) : `No tools were found in ${view.label}.`);
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
@@ -170,7 +206,7 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
-  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}`) + leftText,
+  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: (nothing && view.manage.tools.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`) + leftText,
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined }; announce(readSummary(view) + leftText, true); } else announce('');
 }));
 
@@ -179,7 +215,7 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
   const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
-  if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
+  if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readFound(view)}` }; announce(readSummary(view), true); } else announce('');
 });
 
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
@@ -194,38 +230,32 @@ export async function readAgain() {
     read = true;
   });
   // Only a new read goes on to the page's own data: after a failure its message stays, and the page keeps what it showed.
-  if (read) await loadPageData(state.page, true);
+  if (read) { leaveAbsentPage(); await loadPageData(state.page, { fresh: true }); }
 }
 
 /**
  * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins. An unsaved Instructions
- * draft stays, still checked against the file it was opened from. `fresh` reads each marketplace anew.
+ * draft stays, still checked against the file it was opened from. `fresh` reads each marketplace anew; `quiet` reads in
+ * the background, without the busy state, so the page's result (and its Undo) stays.
  */
-async function loadPageData(page: Page, fresh = false): Promise<void> {
-  // The status bar's message (a Refresh's summary, say) outlasts this read: once its "Reading…" is cleared, it comes back.
-  const region = document.getElementById('announcement')!;
-  const said = { text: region.textContent ?? '', quiet: region.dataset.quiet === 'true' };
-  if (page === 'history') await loadHistory();
-  else if (page === 'settings') await loadSettings();
-  else if (page === 'instructions') await loadInstructions();
-  else if (page === 'plugins') await loadPlugins(fresh);
-  else return;
-  if (!region.textContent && said.text) announce(said.text, said.quiet);
+function loadPageData(page: Page, { fresh = false, quiet = false } = {}): Promise<void> {
+  if (page === 'history') return loadHistory(quiet);
+  if (page === 'settings') return loadSettings();
+  if (page === 'instructions') return loadInstructions(quiet);
+  if (page === 'plugins') return loadPlugins(fresh, quiet);
+  return Promise.resolve();
+}
+
+/** When the open page's kind is no longer in this home (its last tool went), the Overview opens instead. */
+function leaveAbsentPage() {
+  if ((absentKinds() as Page[]).includes(state.page)) showPage('overview');
 }
 
 /** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
 export const homeTools = (): HarnessId[] => state.home?.manage.tools ?? [];
 
-/**
- * The pages for kinds no tool in this home can hold (presence.ts): the sidebar and the Overview leave them out, since what
- * doesn't exist here shouldn't show as an option. A home with no tools at all keeps every page, each saying so.
- */
-export function absentKinds(): ('mcp' | 'agents' | 'plugins')[] {
-  const home = state.home, tools = homeTools();
-  if (!home || !tools.length) return [];
-  return [!home.mcp.tools.length && 'mcp' as const, !home.agents.tools.length && 'agents' as const, !tools.some(takesPlugins) && 'plugins' as const]
-    .filter((kind): kind is 'mcp' | 'agents' | 'plugins' => !!kind);
-}
+/** The kinds no tool in the open home can hold (presence.ts absentKinds); none before a home is read. */
+export const absentKinds = (): OptionalKind[] => (state.home ? absentKindsOf(homeTools(), state.home.mcp.tools, state.home.agents.tools) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -275,10 +305,11 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
-export const loadHistory = () => busy('Reading History…', async () => {
-  state.history = await api().history();
-  announce('');
-});
+/** Reads History; `quiet` in the background, without the busy state. */
+export const loadHistory = (quiet = false): Promise<void> => {
+  const read = async () => { state.history = await api().history(); };
+  return quiet ? read().then(rerender, () => undefined) : busy('Reading History…', read);
+};
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
@@ -341,6 +372,8 @@ export interface Outcome {
   items?: string[];
   /** Said again on the next page opened (a home just opened). */
   carry?: boolean;
+  /** An instruction file saved: its card says so, with its Undo (instructionspage.ts). */
+  kind?: 'saved';
   history?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
@@ -348,9 +381,9 @@ export interface Outcome {
 
 /**
  * Whether a result is said in the status bar rather than as a band: it offers nothing to do (no button, Undo or History
- * link), so it needs no room of its own. Plugins says every result in its toolbar instead.
+ * link), so it needs no room of its own.
  */
-export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note) && outcome.page !== 'plugins';
+export const saidInStatusBar = (outcome: Outcome): boolean => !(outcome.act || outcome.undo || outcome.history || outcome.note);
 
 // ---------- Instructions ----------
 
@@ -371,12 +404,15 @@ function openDraft(file: InstructionFile, text: string, stage: InstructionDraft[
   return !next.refused;
 }
 
-export const loadInstructions = () => busy('Reading instruction files…', async () => {
-  state.instructions = (await api().instructions()) ?? undefined;
-  // A draft whose file is gone (its tool left the home) is dropped only when it holds nothing unsaved.
-  if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined;
-  announce('', true);
-});
+/** Reads each tool's instruction file; `quiet` in the background, without the busy state. */
+export const loadInstructions = (quiet = false): Promise<void> => {
+  const read = async () => {
+    state.instructions = (await api().instructions()) ?? undefined;
+    // A draft whose file is gone (its tool left the home) is dropped only when it holds nothing unsaved.
+    if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined;
+  };
+  return quiet ? read().then(rerender, () => undefined) : busy('Reading instruction files…', read);
+};
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
 export const saveInstructionText = (file: InstructionFile, text: string) => busy('Saving…', async () => {
@@ -394,7 +430,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', item: name, kind: file.exists && result.saved ? 'saved' : undefined, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -412,7 +448,7 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
 export function startInstructionEdit(file: InstructionFile) {
   // A save on another card keeps its Undo there; any other result belongs to the last task.
-  if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
+  if (!(state.outcome?.kind === 'saved' && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
   if (!openDraft(file, file.text, 'edit')) { rerender(); return; }
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
@@ -503,14 +539,22 @@ export const syncNow = () => busy('Syncing…', async () => {
   announce('Synced once. Automatic sync stays off.', true);
 });
 
-/** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
+/** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
 let refreshing = false;
+let refreshOwed = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
-api().onSyncChanged(async () => {
-  if (state.busy || refreshing || !state.home) return;
+api().onSyncChanged(() => void backgroundRefresh());
+
+/**
+ * A background pass changed something: read again quietly, keeping drafts. In the middle of an action it waits, and runs
+ * when the action is done, so a change (a tool appearing, say) is never lost.
+ */
+async function backgroundRefresh() {
+  if (!state.home) return;
+  if (state.busy || refreshing) { refreshOwed = true; return; }
   refreshing = true;
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
   // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
@@ -529,11 +573,12 @@ api().onSyncChanged(async () => {
         state.outcome = undefined;
       }
       rerender();
-      // A tool appeared or went away: a page with its own data (Plugins' columns) reads it again for the new set.
-      if (homeTools().join() !== toolsBefore) void loadPageData(state.page);
+      // A tool appeared or went away: the page leaves a kind no longer here, and a page with its own data (Plugins'
+      // columns) reads it again, in the background, for the new set.
+      if (homeTools().join() !== toolsBefore) { leaveAbsentPage(); void loadPageData(state.page, { quiet: true }); }
     }
   } finally { refreshing = false; }
-});
+}
 
 // ---------- MCP servers ----------
 

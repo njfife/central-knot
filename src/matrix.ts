@@ -759,7 +759,10 @@ function row(skill: SampleSkill) {
 }
 
 /** A cell's look, small, for keys and counts. */
-const swatch = (state: Cell, on: boolean) => h(`span.legend-cell.${cellLook[state].tone}${on ? '.cell-on' : ''}`, { 'aria-hidden': 'true' }, cellLook[state].glyph ? icon(cellLook[state].glyph!, state === 'present' ? 10 : 12, state === 'present' ? 'glyph-fill' : '') : null);
+const swatch = (cell: Cell, on: boolean) => {
+  const look = cellLook[cell];
+  return h(`span.legend-cell.${look.tone}${on ? '.cell-on' : ''}`, { 'aria-hidden': 'true' }, look.glyph ? icon(look.glyph, cell === 'present' ? 10 : 12, cell === 'present' ? 'glyph-fill' : '') : null);
+};
 
 /** A key swatch: a box with its own copy, dashed blue because what happens to it waits for Apply all. */
 const pendingOwnCopy = () => { const mark = swatch('present', false); mark.classList.add('cell-pending-edit'); return mark; };
@@ -768,8 +771,8 @@ function legend(list: SampleSkill[]) {
   const entry = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   // What is drawn: a pending synced cell is drawn as Starts syncing, a replaced one with its own mark.
   const seen = new Set(list.flatMap(skill => toolList().map(tool => {
-    const state = cellOf(skill, tool);
-    return state === 'synced' && view.draft.has(skill.key) && cellOf(committedOf(skill.key), tool) !== 'synced' ? 'will-sync' as Cell : state;
+    const cell = cellOf(skill, tool);
+    return cell === 'synced' && view.draft.has(skill.key) && cellOf(committedOf(skill.key), tool) !== 'synced' ? 'will-sync' as Cell : cell;
   })));
   const replaced = list.some(skill => toolList().some(tool => replacedOnApply(skill, tool)));
   // A tool switched off for a managed item, waiting for Apply all: drawn with the same blue dashed edge as any change.
@@ -1465,7 +1468,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
           toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`)),
         h('div.detail-pending', {}, changeBar(false))),
       notices(),
-      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, 'files', where), ...contents)));
+      // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
+      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, 'files', where), h('div.detail-files', {}, ...contents))));
 }
 
 // Escape in a find box clears it.
