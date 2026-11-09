@@ -23,7 +23,7 @@ Mac packaging runs on the selected Apple Silicon Mac and produces `release/Centr
 
 - **Practice copy** (opens first): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Apply all really writes here.
 - **Another folder…**: a simulated home. Apply all writes only inside it. A folder that is, contains or links into your real home's harness folders is read-only.
-- **This Mac’s home**: your real skills and a bounded `--version` probe of each CLI. Only choosing this writes real folders, and only on macOS; each launch opens on the practice copy again.
+- **This Mac’s home**: your real skills and a bounded `--version` probe of each CLI. Only choosing this writes real folders, and only on macOS. The app reopens on the home you last used, so a start at sign-in keeps syncing it.
 
 ## The Overview
 
@@ -41,8 +41,27 @@ State lives in one folder with no second copy, `.central-knot/` inside the selec
 
 `--design-preview` (or `=b`, `=b3`) opens the Overview on sample data, without touching any files.
 
+## Two-way sync, History and the background
+
+- **Sync (status bar switch, on by default).** A managed skill, MCP server or agent edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing edits are decided by the newest action, or the fixed tool order (Copilot, Claude Code, Codex) when the order can't be proved. Each outcome shows a notice with Undo or Restore.
+- **With Sync off,** edits and deletions are noted as waiting, and **Sync now** spreads them once. **Apply all** writes only what it shows.
+- **History** lists what sync did on its own, with Undo or Restore. Every replaced or removed version is kept first in `.central-knot/` (skills, agent files, and each tool's own MCP settings).
+- **Safety.** A folder or file that can't be read, is half-written, or was reset is held, never read as a deletion. Every write checks the file first and never overwrites a save made meanwhile.
+- **Agents** (Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`) sync name, description and prompt. A tool that lacks the origin's other fields gets the agent **With limits**, one-way: changes there stay there.
+- **MCP:** Claude Code's `~/.claude.json` is written only by **Write now**, with Claude Code quit (Write now refuses while it runs). Codex servers written inline or with dotted keys are left alone.
+- **Background:** closing the window keeps Central Knot syncing. The app menu (and the menu bar icon, when the menu bar has room) has Sync, Sync now, Start at sign-in and Quit. Start at sign-in is on by default once the app is in `/Applications`.
+
+## Trying v1 on your Mac
+
+1. Open the build (the newest under `~/agent-builds/central-knot/`, or `release/` after `npm run package:mac`). It opens on the **Practice copy**; try things there first.
+2. Choose **This Mac’s home** to use your real setup. Nothing is managed until you choose it: **Manage all** or single switches, then **Apply all**.
+3. Optional first: back up `~/.claude ~/.copilot ~/.codex ~/.agents ~/.claude.json` with `tar`. Central Knot keeps its own History, but a backup costs nothing.
+4. For MCP into Claude Code, quit Claude Code, then **Write now**.
+5. To make it start at sign-in, copy it to `/Applications`. An ad-hoc build may need right-click → **Open** the first time.
+6. If something looks wrong, `~/Library/Application Support/central-knot/central-knot.log` records window events and failed requests.
+
 ## Not here yet
 
-History and Restore, background sync while the app is open, two-way edits (an edit in one tool shows as copies differ), spreading deletions (catch-up brings a deleted copy back while the tool stays on), the Skills and Tools pages in the new design, and other kinds and tools. Nothing here claims a skill has loaded in a session: Written means the bytes are on disk.
+Convert to skill, instructions, Disable, plugin updates, Cowork, the bundled build, Windows and Linux. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
-The product boundary is in `AGENTS.md`. Planning inputs are under `docs/`. `LEDGER.md` records what was run.
+The product boundary is in `AGENTS.md`. Planning inputs are under `docs/`. `LEDGER.md` records what was run and every check round.
