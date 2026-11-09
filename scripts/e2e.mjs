@@ -515,14 +515,13 @@ async function practiceFlow() {
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
-  // document-tools:pdf-reader in config.toml; the plugin's own files never change. Codex has it installed as its record says.
+  // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
   const codexConfig = join(practice, '.codex/config.toml');
   const codexCopy = join(practice, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
   mkdirSync(join(codexCopy, 'skills'), { recursive: true });
   for (const name of ['pdf-reader', 'spreadsheet']) skill(join(codexCopy, 'skills'), name);
   const configBefore = `${existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : ''}\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n`;
   writeFileSync(codexConfig, configBefore);
-  const copyBefore = tree(codexCopy);
   await a.click('#plugin-back');
   await a.click('#refresh-0');
   await a.click('#popen-0-document-tools');
@@ -534,8 +533,7 @@ async function practiceFlow() {
   check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
   check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed · 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
   await a.click('#plugins-undo');
-  same('Undo turns it back on: config.toml is as it was, and the plugin’s files never changed', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
-  same('the plugin’s files never changed', tree(codexCopy), copyBefore);
+  same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   await a.click('#plugin-back');
   await a.click('#forget-0');

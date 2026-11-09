@@ -331,8 +331,8 @@ test('Codex turns one skill of a plugin off by name in config.toml and back on t
     const on = await setSkill(box.context, 'ck-test-market', 'full', 'one', 'codex-cli', true, '/m');
     assert.deepEqual([on.outcome, on.changed], ['skill-on', true], on.message);
     assert.equal(await readFile(config, 'utf8'), original);
-    // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes it.
-    await writeFile(config, `${original}\n[[skills.config]]\npath = "${join(copy, 'skills/two/SKILL.md')}"\nenabled = false\n`);
+    // Codex's own /skills toggle writes the SKILL.md path of one version's copy; it counts, and turning on removes every block that picks the skill.
+    await writeFile(config, `${original}\n[[skills.config]]\npath = "${join(copy, 'skills/two/SKILL.md')}"\nenabled = false\n\n[[skills.config]]\nname = "full:second"\nenabled = false\n`);
     assert.deepEqual(await installState(box.context, 'codex-cli', 'ck-test-market', 'full'), { state: 'installed', path: copy, skillsOff: [{ skill: 'second' }] });
     assert.equal((await setSkill(box.context, 'ck-test-market', 'full', 'second', 'codex-cli', true, '/m')).outcome, 'skill-on');
     assert.equal(await readFile(config, 'utf8'), original);
