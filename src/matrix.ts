@@ -7,11 +7,43 @@ import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpC
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
+import type { Change, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
+import { market } from './pluginstate.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
+
+/**
+ * The plugins this item came from as a part (parts.ts): each plugin once, with the tools it went into as a separate item
+ * because they can't take the plugin. Empty for an ordinary item.
+ */
+function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: HarnessId[] }[] {
+  const partKind = kind === 'skills' ? 'skill' : kind === 'mcp' ? 'mcp' : 'agent';
+  const named = [skill.key, skill.name].filter(Boolean).map(name => name!.toLowerCase());
+  const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
+  for (const install of state.home?.parts ?? []) {
+    if (!install.items.some(item => item.kind === partKind && named.includes(item.name.toLowerCase()))) continue;
+    const key = `${install.source}\u0000${install.plugin}`;
+    const entry = found.get(key) ?? { install, tools: [] };
+    entry.tools.push(install.tool);
+    found.set(key, entry);
+  }
+  return [...found.values()];
+}
+
+/** Opens a plugin's page on Plugins, where its parts are updated or removed together. */
+function openPlugin(install: PartsInstall) {
+  market.nav = { source: install.source, plugin: install.plugin, tab: 'plugins', find: '', category: undefined };
+  showPage('plugins');
+}
+
+/** The note in an item's details: which plugin it is a part of, where, and where its parts are managed together. */
+function partNote(skill: SampleSkill) {
+  return fromPlugins(skill).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('boxes', 12, 'tone-muted'),
+    h('span', {}, `Part of the plugin ${install.plugin}${install.version ? ` (version ${install.version})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item because ${tools.length > 1 ? 'they' : 'it'} can’t take the plugin here. Its parts are updated and removed together on `,
+      h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.')));
+}
 const ago = (iso: string) => {
   const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
   return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
@@ -503,7 +535,8 @@ function details(skill: SampleSkill, closable = true) {
     h('div.details-head', {},
       (!closable && allSame) || (differs && !skill.managed && !draft) ? null : h('p.details-status', {}, allSame ? (kind === 'mcp' ? `Synced in ${andList(toolList().map(tool => names[tool]))}` : `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}`) : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
       kind !== 'mcp' && skill.description && !(differs && !draft) && closable ? h('p.details-description', {}, skill.description) : null,
-      kind === 'mcp' && skill.description ? definition(skill.description) : null),
+      kind === 'mcp' && skill.description ? definition(skill.description) : null,
+      partNote(skill)),
     differs ? compareChoices(skill) : null,
     waitsHere ? h('div.details-waits', {}, icon('clock', 14, 'tone-warning'),
       h('span', {}, `${skill.copies['claude-cli'] === undefined ? 'Claude Code doesn’t have it yet.' : 'Claude Code has an older copy.'}${state.home?.mode === 'fixture' ? '' : ' Quit Claude Code first.'}`),
@@ -596,6 +629,7 @@ function row(skill: SampleSkill) {
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.name ?? skill.key),
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
+        fromPlugins(skill).map(({ install, tools }) => h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (version ${install.version})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('boxes', 12, 'tone-faint'), `from ${install.plugin}`)),
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping separate copies, on Apply all' : `Every tool will use ${names[decided]}’s copy, on Apply all` },

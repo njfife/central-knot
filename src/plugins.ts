@@ -9,7 +9,7 @@ import { configRoot, harnesses } from './harnesses.ts';
 import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
-import { heldReason, noCli } from './pluginstatus.ts';
+import { heldReason, noCli, pluginTools } from './pluginstatus.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
@@ -35,7 +35,7 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
   return context.reads.get(key) as Promise<T>;
 }
 
-export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+export { pluginTools } from './pluginstatus.ts';
 
 // ---------- Sources and access ----------
 

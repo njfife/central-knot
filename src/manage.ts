@@ -274,7 +274,7 @@ const changedWhileSyncing = () => Object.assign(new Error('It changed while sync
  * Moves a different copy aside and puts the chosen one in its place. The replaced bytes are kept in the store first. `expected` is the
  * content the pass decided to replace: a copy holding anything else (an edit made meanwhile) is never replaced.
  */
-async function replaceCopy(context: ShareContext, key: string, source: string, target: string, expected?: string): Promise<string> {
+export async function replaceCopy(context: ShareContext, key: string, source: string, target: string, expected?: string): Promise<string> {
   if ((await lstat(target)).isSymbolicLink()) throw Object.assign(new Error('That copy is a link.'), { code: 'CK_LINK' });
   const old = await readTree(target);
   if (expected !== undefined && old.hash !== expected) throw changedWhileSyncing();
@@ -308,7 +308,7 @@ async function replaceCopy(context: ShareContext, key: string, source: string, t
  * Removes a copy only if it still holds `expected`: it is moved aside first and checked there, so an edit saved meanwhile is put
  * back untouched instead of removed.
  */
-async function removeChecked(context: ShareContext, directory: string, expected: string) {
+export async function removeChecked(context: ShareContext, directory: string, expected: string) {
   context.fault?.('before-remove');
   if ((await readTree(directory)).hash !== expected) throw changedWhileSyncing();
   const parked = join(await stagingFolder(context, dirname(directory)), `.ck-stage-${randomUUID()}`);

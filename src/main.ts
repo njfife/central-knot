@@ -14,6 +14,7 @@ import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } fro
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
+import { readParts } from './parts.ts';
 import { trayIconPng } from './trayicon.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, Snapshot } from './types.ts';
 
@@ -265,7 +266,7 @@ async function view(explicit = false): Promise<HomeView> {
   const writable = (await writeAccess(shared)).allowed;
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), parts: await readParts(current!.home),
     manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || (result.outcome === 'held' && /choose again/.test(result.message))), notices),
     ...(await (async () => {
       const notices = pendingMcpNotices.splice(0);
@@ -514,6 +515,7 @@ app.whenReady().then(async () => {
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
+    share: () => context(),
   });
   handle('history:list', async () => (current ? readHistory(current.home) : []));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.

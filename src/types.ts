@@ -58,7 +58,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -109,6 +109,10 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
+  partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
+  /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses. */
+  pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -276,7 +280,20 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+  /** It was about the plugin's parts (parts.ts), not the plugin itself. */ parts?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
+  /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
+
+// ---------- A plugin's parts in a tool without plugins (parts.ts) ----------
+export type PartKind = 'skill' | 'mcp' | 'agent';
+/** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
+export interface PartItem { kind: PartKind; name: string; hash: string }
+/** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
+export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
+/** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. */
+export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string }
+/** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
+export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
@@ -302,6 +319,8 @@ export interface MarketplaceView {
   sourceLabel: string;
   /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
   copilotRefuses?: string;
+  /** Plugins whose parts are in tools that can't take the plugin itself, by plugin and tool. */
+  parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
 }
 
 /** One named part of a plugin (a skill, command or agent) with what it says it does. */

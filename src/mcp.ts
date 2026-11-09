@@ -67,7 +67,7 @@ function hostBound(name: string, server: NeutralServer): string | undefined {
   return undefined;
 }
 
-function fromJson(name: string, tool: HarnessId, file: string, raw: Record<string, unknown>): McpEntry {
+export function fromJson(name: string, tool: HarnessId, file: string, raw: Record<string, unknown>): McpEntry {
   const type = String(raw.type ?? (raw.url ? 'http' : 'stdio'));
   const server: NeutralServer = {
     transport: type === 'sse' ? 'sse' : type === 'http' || type === 'streamable-http' ? 'http' : 'stdio',
@@ -175,7 +175,7 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
  * Rereads the file, checks the entry is still what was decided on, then edits only that entry (FIL-02). The write itself refuses
  * if the file changed after this read, so a setting saved meanwhile (even an unrelated one) is never lost.
  */
-async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>): Promise<string | undefined> {
+export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>): Promise<string | undefined> {
   const file = mcpFile(context, tool);
   const now = await readTool(context, tool);
   if (now.problem) return now.problem;
@@ -234,7 +234,7 @@ async function kept(context: ShareContext, name: string, hash: string): Promise<
 // ---------- Record ----------
 
 const recordPath = (home: string) => join(storeDirectory(home), 'mcp.json');
-async function readMcpRecord(home: string): Promise<McpRecord> {
+export async function readMcpRecord(home: string): Promise<McpRecord> {
   try { const parsed = JSON.parse(await readFile(recordPath(home), 'utf8')); if (parsed && typeof parsed.items === 'object') return parsed; } catch { /* first time */ }
   return { formatVersion: 1, items: {} };
 }

@@ -35,5 +35,7 @@ const api: DesktopApi = {
   pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),
   installPlugin: (source, marketName, plugin, tools, home) => ipcRenderer.invoke('plugins:install', source, marketName, plugin, tools, home),
   uninstallPlugin: (source, marketName, plugin, tool, home) => ipcRenderer.invoke('plugins:uninstall', source, marketName, plugin, tool, home),
+  partsPlan: (source, plugin) => ipcRenderer.invoke('plugins:parts-plan', source, plugin),
+  pluginParts: (source, marketName, plugin, tool, mode, run, home) => ipcRenderer.invoke('plugins:parts', source, marketName, plugin, tool, mode, run ?? null, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

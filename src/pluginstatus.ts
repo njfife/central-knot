@@ -1,8 +1,16 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartsState, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
 import { toolNames as names } from './words.ts';
+
+/** Tools that take Claude plugins through their own CLI (capability data, Appendix C). */
+export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+/**
+ * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
+ * Copilot CLI when their plugin route is blocked here. Claude Code always takes the plugin itself.
+ */
+export const partsTools: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -15,6 +23,7 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
+  if (!pluginTools.includes(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
@@ -43,6 +52,41 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
+
+/** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
+export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
+
+/**
+ * Whether this plugin's parts can go into this tool as separate items: a tool that takes parts, where the plugin itself
+ * is not installed and can't be installed here (Pi always; Codex or Copilot CLI with their plugin route blocked), and
+ * not a tool holding another marketplace of this name. `components`, when known, must hold a skill, MCP server or (not
+ * for Pi) an agent. Parts already there always count, so they can be updated or removed.
+ */
+export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
+  if (!partsTools.includes(tool) || installed(entry, plugin, tool)) return false;
+  if (partsOf(entry, plugin, tool)) return true;
+  if (!unavailable(view, entry, plugin, tool) || stateOf(entry, plugin, tool).state !== 'not-installed') return false;
+  return !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+}
+
+/**
+ * Why a tool takes this plugin's parts rather than the plugin, short, for one sentence about several tools: [one tool,
+ * several tools]. "Pi takes no plugins", "Copilot CLI and Codex have no command-line tool here".
+ */
+export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
+  if (!pluginTools.includes(tool)) return ['takes no plugins', 'take no plugins'];
+  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['has no command-line tool here', 'have no command-line tools here'];
+  return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['can’t install it here', 'can’t install it here'];
+}
+
+/** "2 skills · 1 MCP server", from parts as recorded. */
+export function partsSummary(items: PartsState['items']): string {
+  const by = (kind: string, word: string) => { const n = items.filter(item => item.kind === kind).length; return n ? plural(n, word) : ''; };
+  return [by('skill', 'skill'), by('mcp', 'MCP server'), by('agent', 'agent')].filter(Boolean).join(' · ');
+}
+
+/** "version 1.2", or nothing when the catalog gave none. */
+export const versionWord = (version?: string) => (version ? `version ${version}` : '');
 
 /** Tools this plugin can be uninstalled from here: installed there, nothing in the way. */
 export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>

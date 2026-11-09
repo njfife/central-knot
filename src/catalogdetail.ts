@@ -62,35 +62,35 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
-/** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
-async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
-  const found: NamedPart[] = [];
+/** Skill folders (each with a SKILL.md) at the given paths: each path a skill folder or a folder of skill folders. */
+async function skillFolders(root: string, paths: string[]): Promise<{ part: NamedPart; dir: string }[]> {
+  const found: { part: NamedPart; dir: string }[] = [];
   const add = async (dir: string) => {
     const body = await textInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
     const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
+    found.push({ part: { name: meta.name || basename(dir), description: meta.description ?? '' }, dir });
     return true;
   };
   for (const path of paths) if (!(await add(path))) for (const name of await listInside(root, path)) await add(join(path, name));
-  return found.sort((first, second) => first.name.localeCompare(second.name));
+  return found.sort((first, second) => first.part.name.localeCompare(second.part.name));
 }
 
 /** Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down. */
-async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
-  const found: NamedPart[] = [];
+async function markdownFiles(root: string, paths: string[]): Promise<{ part: NamedPart; file: string; text: string; whole: boolean }[]> {
+  const found: { part: NamedPart; file: string; text: string; whole: boolean }[] = [];
   const filesIn = async (folder: string) => (await listInside(root, folder)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path]
       : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
-      const body = await textInside(root, file);
-      if (body === undefined) continue;
-      const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '' });
+      const read = await readInside(root, file);
+      if (!read) continue;
+      const meta = nameAndDescription(read.text);
+      found.push({ part: { name: meta.name || basename(file, '.md'), description: meta.description ?? '' }, file, text: read.text, whole: read.whole });
     }
   }
-  return found.sort((first, second) => first.name.localeCompare(second.name));
+  return found.sort((first, second) => first.part.name.localeCompare(second.part.name));
 }
 
 /** What an MCP server runs: its command and arguments, or the URL it connects to. */
@@ -114,27 +114,43 @@ async function section(root: string, folder: string, named: unknown, key: string
   return Object.assign({}, ...parts);
 }
 
+/** A plugin's declared component paths: its marketplace entry wins over plugin.json, as the tools read it. */
+async function declaredOf(folder: string, entry: Record<string, unknown>, root: string) {
+  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
+  const declared = { ...pluginJson, ...entry };
+  const listed = (key: string, fallback: string) => strings(declared[key])?.map(path => resolve(folder, path)) ?? [join(folder, fallback)];
+  return { declared, listed };
+}
+
 /**
  * What one plugin holds, by name. Its marketplace entry and plugin.json may list component paths ("strict": false entries
  * do); otherwise the default folders are read. `root` bounds every read: the marketplace, or the plugin's own repository.
  */
 export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginContents> {
-  const pluginJson = (await jsonInside(root, join(folder, '.claude-plugin/plugin.json'))) ?? {};
-  // The marketplace entry wins over plugin.json, as the tools read it.
-  const declared = { ...pluginJson, ...entry };
-  const listed = (key: string) => strings(declared[key])?.map(path => resolve(folder, path));
+  const { declared, listed } = await declaredOf(folder, entry, root);
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills: await skillsIn(root, listed('skills') ?? [join(folder, 'skills')]),
-    commands: await markdownIn(root, listed('commands') ?? [join(folder, 'commands')]),
-    agents: await markdownIn(root, listed('agents') ?? [join(folder, 'agents')]),
+    skills: (await skillFolders(root, listed('skills', 'skills'))).map(found => found.part),
+    commands: (await markdownFiles(root, listed('commands', 'commands'))).map(found => found.part),
+    agents: (await markdownFiles(root, listed('agents', 'agents'))).map(found => found.part),
     hooks: Object.keys(hooks).sort(),
     mcpServers: Object.entries(servers).map(([name, server]) => ({ name, runs: serverRuns(server) })).sort((first, second) => first.name.localeCompare(second.name)),
     mcpUsesPluginRoot: JSON.stringify(servers).includes('${CLAUDE_PLUGIN_ROOT}'),
     lspServers: Object.keys(lsp).sort(),
     bin: (await listInside(root, folder)).includes('bin'),
+  };
+}
+
+/** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
+export interface PluginFiles { skills: { name: string; dir: string }[]; agents: { name: string; file: string; text: string; whole: boolean }[]; servers: Record<string, unknown> }
+export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
+  const { declared, listed } = await declaredOf(folder, entry, root);
+  return {
+    skills: (await skillFolders(root, listed('skills', 'skills'))).map(found => ({ name: basename(found.dir), dir: found.dir })),
+    agents: (await markdownFiles(root, listed('agents', 'agents'))).map(found => ({ name: basename(found.file, '.md'), file: found.file, text: found.text, whole: found.whole })),
+    servers: await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json'),
   };
 }
 

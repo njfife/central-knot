@@ -6,9 +6,9 @@ import { button, closeButton, emptyState, h, icon, withToolCount } from './dom.t
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
+import { componentsOf, dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, partsOf, partsOffer, pluginTools, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -41,7 +41,7 @@ function addBox(first: boolean) {
 function marketList(view: PluginsView, shown: MarketplaceView) {
   const item = (entry: MarketplaceView) => {
     const count = (test: (plugin: PluginView) => boolean) => entry.plugins.filter(test).length;
-    const installedCount = count(plugin => view.tools.some(tool => installed(entry, plugin.name, tool)));
+    const installedCount = count(plugin => view.tools.some(tool => installed(entry, plugin.name, tool) || !!partsOf(entry, plugin.name, tool)));
     const chosen = count(plugin => view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool)));
     const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : '', chosen ? `${chosen} chosen` : ''].filter(Boolean).join(' · ');
     return h('li', {}, h(`button.market-item${entry === shown ? '.selected' : ''}`, { type: 'button', 'aria-current': entry === shown ? 'true' : undefined, onclick: () => browse({ source: entry.source, plugin: undefined, tab: 'plugins', find: '', category: undefined }) },
@@ -96,8 +96,10 @@ function filters(entry: MarketplaceView): HTMLElement | null {
 function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
   const shown = shownPlugins(entry);
   // One hint line per tool that can't take this marketplace, in the words its boxes use (pluginstatus.blocked).
-  const reasons = view.tools.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
-  const someCan = view.canWrite && reasons.length < view.tools.length;
+  // A tool that takes no plugins at all (Pi) explains itself in its own boxes and the key: it is no hint here.
+  const pluginColumns = view.tools.filter(tool => pluginTools.includes(tool));
+  const reasons = pluginColumns.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
+  const someCan = view.canWrite && (reasons.length < pluginColumns.length || view.tools.length > pluginColumns.length);
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
@@ -145,18 +147,28 @@ function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: numb
  * only "unknown", "not available" and what Apply all will do.
  */
 function legend(view: PluginsView, entry: MarketplaceView) {
-  const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => (unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state))));
+  const markOf = (plugin: PluginView, tool: Parameters<typeof unavailable>[3]) => {
+    if (partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin))) { const parts = partsOf(entry, plugin.name, tool); return parts?.changed ? 'parts-changed' : parts ? 'parts' : 'parts-offer'; }
+    return unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state;
+  };
+  const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(plugin, tool))));
   const chosen = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => queued(market.draft, entry.source, plugin.name, tool))).filter(Boolean));
   const unknown = marks.has('not-known');
   const cannot = marks.has('cannot');
-  if (!unknown && !cannot && !chosen.size) return null;
+  const parts = (['parts-offer', 'parts', 'parts-changed'] as const).filter(mark => marks.has(mark));
+  if (!unknown && !cannot && !parts.length && !chosen.size) return null;
   const item = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     unknown ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     cannot ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
+    marks.has('parts-offer') ? item('No plugins there: click to install its parts instead', h('span.legend-cell.cell-parts-offer', {}, icon('plus', 9))) : null,
+    marks.has('parts') ? item('Its parts, as separate items', h('span.legend-cell.cell-synced.cell-on', {}, icon('boxes', 10))) : null,
+    marks.has('parts-changed') ? item('Parts out of date', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
     chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
     chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
-    chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
+    chosen.has('parts') ? item('parts installed or updated', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('boxes', 10))) : null,
+    chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null,
+    chosen.has('remove-parts') ? item('parts removed', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
 }
 
 /** The way back from the last run, as a button: "Undo", or "Undo the rest" after an Undo that didn't finish. */

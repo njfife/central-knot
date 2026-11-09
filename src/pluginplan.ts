@@ -1,10 +1,18 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
-import { cantUninstall, installed, unavailable } from './pluginstatus.ts';
+import { cantUninstall, installed, partsOf, partsOffer, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, PluginActionResult, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
-export type PluginAction = 'install' | 'remove';
+/**
+ * install, remove: the plugin itself, through the tool's own command. parts: its parts as separate items in a tool that
+ * can't take the plugin (installed, or brought up to date); remove-parts: those parts out again; undo-parts: an Undo of a
+ * parts run (`run`), which only Undo makes.
+ */
+export type PluginAction = 'install' | 'remove' | 'parts' | 'remove-parts' | 'undo-parts';
+const PARTS: PluginAction[] = ['parts', 'remove-parts', 'undo-parts'];
+export const isParts = (action: PluginAction) => PARTS.includes(action);
+const adds = (action: PluginAction) => action === 'install' || action === 'parts';
 /** One tool's change for one plugin from one marketplace. */
 export interface PluginOp {
   /** The marketplace as added (its address). */
@@ -14,6 +22,8 @@ export interface PluginOp {
   plugin: string;
   tool: HarnessId;
   action: PluginAction;
+  /** For undo-parts: the parts run it reverses. */
+  run?: string;
 }
 /** One line of a run's result: a plugin and what happened to it ("installed in Codex"), or one tool's failure. */
 export interface ResultLine {
@@ -70,9 +80,12 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
     const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
     // A marketplace whose catalog now gives another name is another plugin@name to the tools: the choice no longer means it.
+    const parts = entry && partsOf(entry, op.plugin, op.tool);
     const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
-      : !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool));
+      : op.action === 'remove' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool)
+      : op.action === 'parts' ? !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
+      : op.action === 'remove-parts' ? !parts || !view.canWrite : true);
     if (stale) draft.delete(key);
   }
 }
@@ -80,26 +93,26 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
 /** Counts for the change bar. */
 export function summary(draft: PluginDraft) {
   const ops = [...draft.values()];
-  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: ops.filter(op => op.action === 'install').length, removals: ops.filter(op => op.action === 'remove').length };
+  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: ops.filter(op => adds(op.action)).length, removals: ops.filter(op => !adds(op.action)).length };
 }
 
-/** Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then removals tool by tool. */
-export function batches(ops: PluginOp[]): { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[] }[] {
+/** Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then removals and parts tool by tool. */
+export function batches(ops: PluginOp[]): { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; run?: string }[] {
   const out: ReturnType<typeof batches> = [];
   const plugins = [...new Map(ops.map(op => [pluginKey(op.source, op.plugin), op])).values()];
   for (const first of plugins) {
     const mine = ops.filter(op => op.source === first.source && op.plugin === first.plugin);
     const installs = mine.filter(op => op.action === 'install').map(op => op.tool);
     if (installs.length) out.push({ source: first.source, marketName: first.marketName, plugin: first.plugin, action: 'install', tools: installs });
-    for (const op of mine.filter(candidate => candidate.action === 'remove')) out.push({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: 'remove', tools: [op.tool] });
+    for (const op of mine.filter(candidate => candidate.action !== 'install')) out.push({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.run ? { run: op.run } : {}) });
   }
   return out;
 }
 
 /** The way back: only what this run really changed, reversed. "Already installed", failures and unknowns are left alone. */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
-  .filter(entry => entry.report.changed)
-  .map(({ report: _report, ...op }) => ({ ...op, action: op.action === 'install' ? 'remove' : 'install' }));
+  .filter(entry => entry.report.changed && (!isParts(entry.action) || entry.report.partsRun))
+  .map(({ report, ...op }) => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: op.action === 'install' ? 'remove' : 'install' }));
 
 /** A tool did what was asked (installed or uninstalled), whether this run changed it or it already was. */
 export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'uninstalled';
@@ -115,12 +128,18 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const { plugin, source } = mine[0]!;
-    const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
-    const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in']];
+    const tools = (outcome: ActionReport['outcome'], changed: boolean, parts = false) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts).map(entry => names[entry.tool]);
+    const groups: [string[], string][] = [[tools('installed', true), verbs.installed], [tools('uninstalled', true), verbs.uninstalled], [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'],
+      [tools('installed', true, true), undo ? 'parts put back in' : 'parts installed in'], [tools('uninstalled', true, true), 'parts removed from'], [tools('installed', false, true), 'parts already up to date in'], [tools('uninstalled', false, true), 'had no parts in']];
     const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
       const text = `${names[entry.tool]}: ${entry.report.message}`;
+      lines.push({ source, plugin, ok: false, text, short: text });
+    }
+    // A part left alone (edited since, or a same-named item already there) needs reading, like a failure.
+    for (const entry of mine.filter(candidate => succeeded(candidate.report) && candidate.report.notes?.length)) {
+      const text = `${names[entry.tool]}: ${entry.report.notes!.join(' ')}`;
       lines.push({ source, plugin, ok: false, text, short: text });
     }
   }
@@ -160,6 +179,7 @@ export function recordRun(draft: PluginDraft, ops: PluginOp[], done: PluginDone[
 export interface PlanApi {
   install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstall(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string): Promise<PluginActionResult>;
 }
 
 /**
@@ -173,12 +193,13 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
     onStep(step);
     let result: PluginActionResult;
     try {
-      result = step.action === 'install'
-        ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
-        : await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home);
+      const mode = ({ parts: 'install', 'remove-parts': 'remove', 'undo-parts': 'undo' } as const)[step.action as 'parts'];
+      result = step.action === 'install' ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
+        : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
+        : api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, mode, step.run, home) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') };
     } catch { result = { reports: failedFor(step.tools, 'It stopped unexpectedly. Refresh to see where it stands.') }; }
     if (result.stopped) return { done, stopped: result.stopped };
-    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, report });
+    for (const report of result.reports) done.push({ source: step.source, marketName: step.marketName, plugin: step.plugin, tool: report.tool, action: step.action, ...(step.run ? { run: step.run } : {}), report });
   }
   return { done };
 }

@@ -2,10 +2,10 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
+import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
 
 const api = () => window.centralKnot;
 
@@ -42,6 +42,8 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
+  /** For each plugin, what each tool without it would get as parts (parts.ts), read when its page opens. */
+  partsPlans: new Map<string, Read<Partial<Record<HarnessId, PartPlan[]>> | null>>(),
   /** Part descriptions opened with "Show more", by plugin key and part, so a redraw keeps them open. */
   opened: new Set<string>(),
   /** What is typed in the add box, kept through loading and errors. */
@@ -53,7 +55,7 @@ export const market = {
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
   market.view = undefined; market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); market.details.clear(); market.opened.clear(); market.nav = startNav();
+  market.readmes.clear(); market.details.clear(); market.partsPlans.clear(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -84,6 +86,7 @@ function readShown(): void {
     const last = market.details.get(key);
     if (last && !last.reading && (!last.value || last.value.problem)) market.details.delete(key);
     readPlugin(market.nav.plugin);
+    if (market.view?.tools.some(tool => partsTools.includes(tool))) readInto(market.partsPlans, key, () => api().partsPlan(source, market.nav.plugin!).catch(() => null), rerender);
   }
   else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
   // Plugins kept in other repositories say what they hold once read; the first few rows on screen are read ahead.
@@ -133,7 +136,7 @@ export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);
   market.problem = undefined;
   // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
-  if (fresh) { market.readmes.clear(); market.details.clear(); }
+  if (fresh) { market.readmes.clear(); market.details.clear(); market.partsPlans.clear(); }
   else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
   showView(view, { replace: true });
   announce('');
@@ -165,6 +168,7 @@ export const addMarketplace = (source: string) => act('adding', async () => {
 function dropReads(source: string): void {
   market.readmes.delete(source);
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
+  for (const key of [...market.partsPlans.keys()]) if (forSource(key, source)) market.partsPlans.delete(key);
 }
 
 export const refreshMarketplace = (source: string) => act('refreshing', async () => {
@@ -197,7 +201,7 @@ export const openLink = (url: string) => void api().openExternal(url);
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
-  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin };
+  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin, parts: api().pluginParts };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
   try {
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
@@ -206,6 +210,8 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
+    // Parts are ordinary skills, MCP servers and agents: the other pages see them (and where they came from) at once.
+    if (ops.some(op => isParts(op.action))) { const view = await api().refresh().catch(() => null); if (view) app.home = view; }
   }
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);
 });

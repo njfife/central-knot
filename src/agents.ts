@@ -31,10 +31,10 @@ export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: Neutra
 
 const suffixOf = (tool: HarnessId) => (tool === 'codex-cli' ? '.toml' : tool === 'copilot-cli' ? '.agent.md' : '.md');
 const folder = (context: ShareContext, tool: HarnessId) => join(context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig), 'agents');
-const fileFor = (context: ShareContext, tool: HarnessId, name: string) => join(folder(context, tool), `${name}${suffixOf(tool)}`);
+export const fileFor = (context: ShareContext, tool: HarnessId, name: string) => join(folder(context, tool), `${name}${suffixOf(tool)}`);
 const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
-const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
+export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */
@@ -43,7 +43,7 @@ export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'pr
 /** Frontmatter: `---` on its own first line, then up to the next line that is `---` (at a line start, as Claude Code reads it). */
 const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
 
-function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
+export function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
   const match = FRONT.exec(text);
   if (!match) return undefined;
   const document = parseDocument(match[2].replace(/\r?\n$/, ''));
@@ -156,7 +156,7 @@ interface AgentRecordItem { name: string; state: 'shared' | 'dont-share'; off: H
 /** `roots`: each tool's agents folder identity at the last pass, so a folder made again between passes reads as a reset. */
 interface AgentRecord { formatVersion: number; items: Record<string, AgentRecordItem>; roots?: Partial<Record<HarnessId, { ino: number; birth: number }>> }
 const recordPath = (home: string) => join(storeDirectory(home), 'agents.json');
-async function readAgentRecord(home: string): Promise<AgentRecord> {
+export async function readAgentRecord(home: string): Promise<AgentRecord> {
   try {
     const parsed = JSON.parse(await readFile(recordPath(home), 'utf8'));
     if (parsed && typeof parsed.items === 'object' && parsed.formatVersion === 2) return parsed;
