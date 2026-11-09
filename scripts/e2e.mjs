@@ -127,7 +127,7 @@ async function launch(userData = join(scratch, 'data')) {
     if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text);
     return reply.result.result.value;
   };
-  const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
+  const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
@@ -494,7 +494,7 @@ async function practiceFlow() {
   const pinned = await a.run(`(() => {
     const box = document.querySelector('#plugins-scroll'), head = document.querySelector('.plugin-table .ov-head'), top = () => box.getBoundingClientRect().top;
     box.scrollTop = head.getBoundingClientRect().top - top() + 20;
-    const gap = head.getBoundingClientRect().top - top(), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+    const gap = Math.round(head.getBoundingClientRect().top - top()), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
     box.scrollTop = 0;
     return { gap, rowUnder };
   })()`);

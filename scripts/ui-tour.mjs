@@ -62,6 +62,12 @@ async function shot(a, name, caption) {
 }
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
+// Types a marketplace source into "Add a marketplace" (opening the box first if needed) and clicks Add.
+async function addMarketplace(a, source) {
+  if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+}
 
 const a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
@@ -167,8 +173,7 @@ if (wanted('plugins')) {
   const market = join(scratch, 'market');
   writeMarket(market);
   await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
-  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
+  await addMarketplace(a, market); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
   await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
   await a.click('#market-tab-plugins');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`); await shot(a, 'plugin-page', 'Clicked the "document-tools" row.');
@@ -207,11 +212,7 @@ if (wanted('scroll')) {
   const second = join(scratch, 'second-market');
   writeMarket(second, 'second-list');
   await a.click('#nav-plugins');
-  for (const source of [long, second]) {
-    if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
-    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    await a.click('#add-marketplace');
-  }
+  for (const source of [long, second]) await addMarketplace(a, source);
   await a.run(`[...document.querySelectorAll('.market-item')].find(item => /long-list/.test(item.textContent))?.click()`); await a.settle();
   // Enough skills, MCP servers and agents in the practice copy that every table scrolls at every size.
   for (let index = 1; index <= 40; index++) {
@@ -222,11 +223,23 @@ if (wanted('scroll')) {
     }
     writeFileSync(join(practice, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: An extra agent so the table scrolls.\n---\n\nDo the task.\n`);
   }
-  edit(join(practice, '.copilot/mcp-config.json'), text => { const config = JSON.parse(text); for (let index = 1; index <= 40; index++) config.mcpServers[`extra-${String(index).padStart(2, '0')}`] = { type: 'local', command: 'npx', args: ['-y', `@example/extra-${index}`], tools: ['*'] }; return JSON.stringify(config, null, 2); });
+  edit(join(practice, '.copilot/mcp-config.json'), text => {
+    const config = JSON.parse(text);
+    for (let index = 1; index <= 40; index++) config.mcpServers[`extra-${String(index).padStart(2, '0')}`] = { type: 'local', command: 'npx', args: ['-y', `@example/extra-${index}`], tools: ['*'] };
+    return JSON.stringify(config, null, 2);
+  });
   await a.click('#header-refresh');
   const sizes = [[860, 560, 2], [1280, 800, 2], [1728, 1117, 1], [2560, 1440, 1]];
   // Scrolls the page's main scroller (the tallest one that can scroll) by `by` pixels, so sticky parts are tested over rows.
-  const scroll = by => a.run(`(() => { const box = [...document.querySelectorAll('#page .scroll')].filter(e => e.scrollHeight > e.clientHeight).sort((x, y) => y.clientHeight - x.clientHeight)[0]; if (!box) return 'nothing scrolls'; box.scrollTop = ${by}; const head = box.querySelector('.ov-head'); const gap = head ? Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) : null; return (box.id || box.className) + (head ? '; column header ' + gap + 'px below the scroller top' : ''); })()`);
+  // Returns what scrolled and how far its pinned column header sits below the scroller's top (0 when the stack is right).
+  const scroll = by => a.run(`(() => {
+    const box = [...document.querySelectorAll('#page .scroll')].filter(e => e.scrollHeight > e.clientHeight).sort((x, y) => y.clientHeight - x.clientHeight)[0];
+    if (!box) return 'nothing scrolls';
+    box.scrollTop = ${by};
+    const head = box.querySelector('.ov-head');
+    if (!head) return box.id || box.className;
+    return (box.id || box.className) + '; column header ' + Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) + 'px below the scroller top';
+  })()`);
   for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
     if (!(await a.has(`#nav-${page}`))) continue;
     await a.click(`#nav-${page}`);

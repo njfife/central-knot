@@ -360,19 +360,18 @@ ul { list-style: none; }
 .apply { display: flex; align-items: center; gap: 6px; }
 .apply-count { font-size: 12.5px; color: var(--accent-ink); font-weight: 500; white-space: nowrap; }
 .apply-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
-.ov { --ov-columns: 44px minmax(150px, 240px) 76px 100px 100px minmax(0, 1fr); min-width: 100%; }
-.ov-row { display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); position: relative; }
-.ov-row:not(.ov-head):not(.picked):hover { background: var(--hover); }
-.ov-row.picked { background: var(--selected-row); }
-.ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 /* Sticky table headers, one rule for every table (Skills, MCP servers, Agents, Plugins): the column header pins to the
    top of the table's scroller and a section row pins right under it, both opaque so rows pass beneath them. Sticky
    offsets count from the scroller's padding edge, so a scroller that holds a table has no top padding: rows would
    show through the gap above the pinned header. */
-.ov { --ov-head-height: 60px; --ov-section-height: 32px; }
+.ov { --ov-columns: 44px minmax(150px, 240px) 76px 100px 100px minmax(0, 1fr); --ov-head-height: 60px; --ov-section-height: 32px; min-width: 100%; }
+.ov-row { display: grid; grid-template-columns: var(--ov-columns); align-items: center; height: 40px; box-shadow: inset 0 -1px 0 var(--line); position: relative; }
+.ov-row:not(.ov-head):not(.picked):hover { background: var(--hover); }
+.ov-row.picked { background: var(--selected-row); }
+.ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .ov-head { position: sticky; top: 0; z-index: 3; height: var(--ov-head-height); background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
-/* A row scrolled into view (its details opened) lands below the pinned stack, with a little of the row above it showing */
+/* A row scrolled into view (its details opened) lands below the pinned stack with most of the row above it still showing */
 .ov-row { scroll-margin-top: calc(var(--ov-head-height) + var(--ov-section-height) + 36px); }
 .ov-section { position: sticky; top: var(--ov-head-height); z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; height: var(--ov-section-height); padding: 0 12px 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
 .ov-section-label { font-size: 12px; display: flex; gap: 8px; align-items: center; }
@@ -1156,13 +1155,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { padding-top: 0; padding-bottom: 0; height: auto; line-height: inherit; }
-/* No top padding: this scroller holds a sticky table header (see .ov-head), so the pages in it carry that space */
-.market-main { padding: 0 var(--market-gutter) 32px; }
-.market-page, .plugin-page { padding-top: 18px; }
+/* Never a top padding here: this scroller holds a sticky table header (see .ov-head); the pages in it carry that space */
+.market-main { padding-inline: var(--market-gutter); padding-bottom: 32px; }
 /* The empty page: the add box in the middle, above the examples */
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
 .market-page, .plugin-page { max-width: 900px; }
+.market-page, .plugin-page { padding-top: 18px; }
 .market-page-title { display: flex; align-items: center; gap: 12px; }
 .market-page-title h2, .plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
 .market-page-actions { margin-left: auto; display: flex; gap: 4px; }
@@ -1201,11 +1200,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .result-link:hover { text-decoration-color: currentColor; }
 .result-link:focus-visible { outline: 2px solid var(--focus, var(--accent)); border-radius: 3px; }
 /* The plugin table */
-.plugins-page .plugin-table { max-width: none; }
+/* Its header is shorter than the other tables' and grows when the hint beside the tool names wraps in a narrow window;
+   it has no section rows, so nothing is pinned under it */
+.plugins-page .plugin-table { max-width: none; --ov-head-height: 48px; --ov-section-height: 0px; }
 .plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
-/* Its header is shorter than the other tables' and grows when the hint beside the tool names wraps in a narrow window
-   (it has no section rows, so nothing is pinned under it) */
-.plugins-page .plugin-table { --ov-head-height: 48px; }
 .plugins-page .plugin-table .ov-head { height: auto; min-height: var(--ov-head-height); }
 .plugins-page .plugin-table .ov-head .ov-name { align-self: end; font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 0 0 6px; }
 .plugin-row { cursor: pointer; }
