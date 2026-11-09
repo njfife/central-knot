@@ -34,7 +34,7 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; item?: string; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
+  outcome: undefined as { page: Page; text: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void } } | undefined,
   /** What is typed in the marketplace box, kept through loading and errors. */
   marketDraft: '',
   /** Sync notices the person has dismissed, by History event or item. */
@@ -121,7 +121,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const newCopies = result.results.filter(entry => entry.outcome === 'written' && !/^Now uses/.test(entry.message));
   const newItems = [...new Set(newCopies.map(entry => entry.item))];
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andText(added)}`}` : '', replacedIn.length ? `replaced ${andText(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' New copies aren’t in History: to remove one, delete it in that tool. To stop future syncing, turn Managed off, then Apply all.'), item: singleName };
+  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome, text: `${what}.` + (managed ? ' From now on, an edit in one tool spreads to the others.' : '') + (replacedSome ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.'), item: singleName };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
   const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
@@ -142,7 +142,8 @@ export const loadHome = (mode: HomeMode) => busy('Reading user-wide skills…', 
 export const startHome = () => busy('Reading user-wide skills…', async () => {
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
-  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
+  const practiceNote = view?.mode === 'fixture' && (() => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } })();
+  if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
 export const readAgain = () => busy('Reading user-wide skills…', async () => {
@@ -317,7 +318,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     // The write band right below says what waits for Claude Code; the result names what was written, and where.
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
     const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
-    state.outcome = { page: state.page, item: copied.length === 1 ? copied[0] : undefined, text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}. New copies aren’t in History: to remove one, delete it in that tool.` };
+    state.outcome = { page: state.page, items: [...copied, ...changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key)], text: `${managed ? `${plural(managed, 'server')} now managed` : 'Applied'}. ${copied.length ? `${andText(copied)} copied to ${andText(to)}` : 'Nothing needed writing'}${matched.length && copied.length ? `; ${andText(matched)} already matched there` : ''}. To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.` };
   }
   announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
 });
@@ -338,7 +339,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     const source = (server: (typeof managed)[number]) => { const match = /^One-way from ([^.]+)\./.exec(Object.values(server.limits ?? {})[0] ?? ''); return match?.[1] ?? 'its source'; };
     const how = [...oneWay.map(server => `${nameOf(server)} is one-way from ${source(server)} (↗)`), twoWay.length ? `${andText(twoWay.map(nameOf))} ${twoWay.length === 1 ? 'syncs' : 'sync'} both ways` : ''].filter(Boolean).join('; ');
-    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}` };
+    state.outcome = { page: state.page, text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}.${how ? ` ${how}.` : ''}${result.writes ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}` };
   }
   announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
 });
@@ -349,6 +350,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To stop syncing ${names.length === 1 ? 'it' : 'them'} to Claude Code, turn off ${names.length === 1 ? 'its' : 'their'} Claude Code box, then Apply all.` };
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To take ${names.length === 1 ? names[0] : 'them'} back out of Claude Code, turn off ${names.length === 1 ? 'its' : 'their'} Claude Code box and Apply all.` };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });

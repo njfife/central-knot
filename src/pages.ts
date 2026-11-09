@@ -23,7 +23,7 @@ const emptyBands = () => {
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
   h('div.empty-actions', {},
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
-    state.home?.mode !== 'fixture' ? button({ variant: 'ghost', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
+    state.home?.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here yet', 'None of your tools has a user-wide skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.', id);
 
 /** Shown before any home has been read, or when reading failed. */
@@ -90,10 +90,11 @@ export function overviewPage() {
         kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []))),
       h('div.overview-more', {},
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
-        : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? 'tone-success' : 'tone-warning'),
-          ...(home.syncOn ? ['Automatic sync is on: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.']
+        // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
+        : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
+          ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on and waiting: once something is managed, an edit in one tool spreads to the others within seconds, with a notice and Undo.' : 'Automatic sync is on: an edit in one tool spreads to the others within seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync now', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('panel-left', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
+        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing this window keeps Central Knot syncing. The ${navigator.userAgent.includes('Mac') ? 'menu bar icon' : 'tray icon'} turns sync on or off, starts Central Knot at sign-in, and quits.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Anything automatic sync changes, and any copy Apply all replaces, is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ' with Undo or Restore.'))));
 }
 
@@ -240,6 +241,7 @@ export function toolsPage() {
   if (!home) return h('div.page');
   const done = outcomeBand();
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
-    home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so no app is checked here. Choose your real home to see your installed tools and versions.' : 'This is a folder, not this computer: no app is checked here. Choose your real home to see your installed tools and versions.') : null,
+    home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so no app is checked here. Open ' : 'This is a folder, not this computer: no app is checked here. Open ',
+      button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
     home.snapshots.map(snapshot => toolCard(snapshot, home))));
 }

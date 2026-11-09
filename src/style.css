@@ -912,3 +912,14 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .cannot-dash { color: var(--ink-faint); font-weight: 700; }
 .sync-notice .btn { height: 26px; padding: 0 10px; font-size: 12px; }
 .plugins-page .bands > .band { padding-right: max(16px, calc(100% - 980px)); }
+/* UI round 7 (final pass) */
+.ov-name-text { flex-shrink: 0; }
+.row-tag { flex: 0 1 auto; }
+.notice-age { white-space: nowrap; }
+.sync-notice { flex-wrap: wrap; row-gap: 2px; }
+.sync-notice > span:first-of-type { flex: 1 1 420px; }
+.text-action.text-strong { font-weight: 600; }
+#outcome-undo.text-danger { text-decoration: underline dotted; text-underline-offset: 3px; }
+.decided-undo span { text-decoration: none; color: var(--accent); }
+.legend-plain.cell-oneway .cell-oneway-mark { color: var(--ink-soft); }
+.sync-paused .sync-track { opacity: 0.6; }
