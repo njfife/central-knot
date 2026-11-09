@@ -315,13 +315,13 @@ async function connected(context: ShareContext): Promise<{ state: RepoState; dir
 async function buildView(context: ShareContext, base?: BaseInstructions): Promise<RepoView> {
   const access = await writeAccess(context);
   const found = await connected(context);
-  if (!found) return { connected: false, access };
+  if (!found) return { connected: false, access, withBase: !!base };
   const { state, dir } = found;
   const sides = await readSides(context, dir, state, base);
   const { incoming, outgoing } = classify(sides, state.held);
   const pushBlocked = sides.latestId !== state.base ? 'The repo has changes this computer doesn’t have yet. Pull them first, then push.' : undefined;
   return {
-    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
+    connected: true, access, withBase: !!base, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
     pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, incoming, outgoing, pushBlocked,
   };
 }

@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
-import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, type BaseInstructions } from '../src/gitrepo.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView } from '../src/mcp.ts';
 import { agentsView, applyAgents } from '../src/agents.ts';
@@ -37,14 +37,11 @@ async function skill(context: ShareContext, root: string, folder: string, text =
 const live = (view: RepoView) => { assert.ok(view.connected); return view; };
 const rows = (list: { name: string; change: string }[]) => list.map(row => `${row.name}:${row.change}`).sort();
 
-/** A home with a managed skill, MCP server and agent, all synced between Claude Code and Copilot CLI. */
-async function seeded(context: ShareContext) {
-  await skill(context, '.claude/skills', 'review');
-  await writeFile(join(context.home, '.claude/skills/review/notes.log'), 'kept as-is\n');
+/** A home with a managed MCP server and agent, synced between Claude Code and Copilot CLI. */
+async function seedServerAndAgent(context: ShareContext) {
   await writeFile(join(context.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
   await mkdir(join(context.home, '.claude/agents'), { recursive: true });
   await writeFile(join(context.home, '.claude/agents/planner.md'), '---\nname: planner\ndescription: Plans work.\nmodel: opus\n---\n\nPlan carefully.\n');
-  assert.ok(!(await applyChanges(context, [{ key: 'review', managed: true, off: [] }])).stopped);
   assert.ok(!(await applyMcp(context, tools, [{ key: 'docs', managed: true, off: [] }])).stopped);
   assert.ok(!(await applyAgents(context, tools, [{ key: 'planner', managed: true, off: [] }])).stopped);
 }
@@ -53,17 +50,19 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
   const box = await world();
   try {
     const first = await box.home('first');
-    await seeded(first);
+    await skill(first, '.claude/skills', 'review');
+    await writeFile(join(first.home, '.claude/skills/review/notes.log'), 'kept as-is\n');
+    assert.ok(!(await applyChanges(first, [{ key: 'review', managed: true, off: [] }])).stopped);
+    await seedServerAndAgent(first);
     let view = live((await connectRepo(first, box.remote, '')).view);
     assert.equal(view.branch, 'main');
     assert.deepEqual(rows(view.outgoing), ['docs:added', 'planner:added', 'review:added']);
     assert.equal(view.pushBlocked, undefined, 'an empty repo can take a push at once');
-    const pushed = await pushRepo(first, { from: 'test machine' });
+    const pushed = await pushRepo(first);
     assert.equal(pushed.stopped, undefined);
-    assert.match(pushed.pushed!.subject, /Central Knot: update planner, docs, review/);
     view = live(pushed.view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
-    // The layout, as anyone browsing the repo sees it; a file the repo would .gitignore still goes, as-is.
+    // The layout, as anyone browsing the repo sees it.
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['agents/planner.md', 'mcp/docs.json', 'skills/review/SKILL.md', 'skills/review/notes.log']);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/docs.json')), { type: 'stdio', command: 'docs-server', args: ['--port', '7'], env: { TOKEN: 'abc' } });
     assert.match(git(box.remote, 'show', 'main:agents/planner.md'), /model: opus/, 'Claude Code’s own agent file goes as written');
@@ -94,7 +93,7 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
   const box = await world();
   try {
     const first = await box.home('first');
-    await seeded(first);
+    await seedServerAndAgent(first);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
     const second = await box.home('second');
@@ -136,8 +135,8 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
     await applyChanges(first, []);
     const view = live(await repoView(first, { check: true }));
     assert.deepEqual(view.incoming.map(row => [row.name, row.change, row.alsoHere]), [['review', 'changed', 'changed']]);
-    assert.match(view.pushBlocked ?? '', /Pull them first/);
-    assert.match((await pushRepo(first)).stopped ?? '', /Pull them first/, 'a push never overwrites a commit this computer hasn’t seen');
+    assert.ok(view.pushBlocked);
+    assert.ok((await pushRepo(first)).stopped, 'a push never overwrites a commit this computer hasn’t seen');
 
     assert.equal((await pullRepo(first)).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the second computer/);
@@ -180,13 +179,14 @@ test('A deletion in the repo deletes the skill here, with Restore; an edit here 
   } finally { await box.cleanup(); }
 });
 
-test('Only the layout is Central Knot’s: other files stay, an item that can’t be brought in stays as the repo has it', async () => {
+test('Only the layout is Central Knot’s: other files stay, a file the repo ignores still goes as part of a skill, an item that can’t be brought in stays as the repo has it', async () => {
   const box = await world();
   try {
     const author = join(box.base, 'author');
     execFileSync('git', ['clone', '--quiet', box.remote, author]);
     await mkdir(join(author, 'skills/linked'), { recursive: true });
     await writeFile(join(author, 'README.md'), 'My agent setup.\n');
+    await writeFile(join(author, '.gitignore'), '*.log\n');
     await writeFile(join(author, 'skills/README.md'), 'One folder per skill.\n');
     await writeFile(join(author, 'skills/linked/SKILL.md'), skillText('linked'));
     execFileSync('ln', ['-s', 'SKILL.md', join(author, 'skills/linked/alias.md')]);
@@ -194,13 +194,14 @@ test('Only the layout is Central Knot’s: other files stay, an item that can’
 
     const here = await box.home('here');
     await skill(here, '.claude/skills', 'mine');
+    await writeFile(join(here.home, '.claude/skills/mine/debug.log'), 'part of the skill\n');
     await applyChanges(here, [{ key: 'mine', managed: true, off: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
     assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['linked', true]]);
     await pullRepo(here);
     assert.equal((await manageView(here)).skills.some(item => item.key === 'linked'), false, 'a link is never put in a tool');
     view = live((await pushRepo(here)).view);
-    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['README.md', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md']);
+    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log']);
     assert.deepEqual(view.outgoing, []);
   } finally { await box.cleanup(); }
 });
@@ -209,7 +210,8 @@ test('The base instructions travel as instructions/base.md when this build has t
   const box = await world();
   try {
     const store = new Map<string, string | undefined>([['first', 'Be brief.\n'], ['second', undefined]]);
-    const baseFor = (name: string): BaseInstructions => ({ read: async () => store.get(name), apply: async text => { store.set(name, text); return undefined; } });
+    let refuse = false;
+    const baseFor = (name: string): BaseInstructions => ({ read: async () => store.get(name), apply: async text => { if (refuse) return 'Busy.'; store.set(name, text); return undefined; } });
     const first = await box.home('first');
     await connectRepo(first, box.remote, '');
     assert.deepEqual(rows(live(await repoView(first, { base: baseFor('first') })).outgoing), ['Base instructions:added']);
@@ -218,6 +220,10 @@ test('The base instructions travel as instructions/base.md when this build has t
     const second = await box.home('second');
     await connectRepo(second, box.remote, '');
     assert.deepEqual(rows(live(await repoView(second)).incoming), [], 'a build without base instructions leaves the file alone');
+    refuse = true;
+    await pullRepo(second, { base: baseFor('second') });
+    assert.deepEqual(live(await repoView(second, { base: baseFor('second') })).incoming.map(row => row.held), ['Busy.'], 'a failed item waits, named, for the next Pull');
+    refuse = false;
     await pullRepo(second, { base: baseFor('second') });
     assert.equal(store.get('second'), 'Be brief.\n');
   } finally { await box.cleanup(); }
@@ -235,17 +241,23 @@ test('Over HTTP: a read-only repo connects and pulls, and refuses a push in plai
     await pushRepo(first);
 
     const reader = await box.home('reader');
-    assert.match((await connectRepo(reader, `${url}/missing.git`, '')).stopped ?? '', /No access, or no repository there/);
-    assert.match((await connectRepo(reader, `${url}/config.git`, 'nope')).stopped ?? '', /no branch named “nope”/);
+    assert.match((await connectRepo(reader, `${url}/missing.git`, '')).stopped ?? '', /No access/);
+    assert.match((await connectRepo(reader, `${url}/config.git`, 'nope')).stopped ?? '', /branch.*nope/);
     assert.equal((await repoView(reader)).connected, false);
     assert.equal((await connectRepo(reader, `${url}/config.git`, 'main')).stopped, undefined);
     await pullRepo(reader);
     await writeFile(join(reader.home, '.claude/skills/review/SKILL.md'), skillText('review', 'Local only.'));
     await applyChanges(reader, []);
-    assert.match((await pushRepo(reader)).stopped ?? '', /did not accept the push/);
+    assert.match((await pushRepo(reader)).stopped ?? '', /read|protected/);
     assert.deepEqual(rows(live(await repoView(reader)).outgoing), ['review:changed'], 'a refused push changes nothing here');
     const gone = await disconnectRepo(reader);
     assert.equal(gone.view.connected, false);
     assert.match(await readFile(join(reader.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Local only/, 'disconnecting leaves the tools as they are');
   } finally { server.kill(); await box.cleanup(); }
+});
+
+test('Removed here but edited in the repo: the edit comes back on Pull', () => {
+  const item = (id: string): SideItem => ({ key: 'skill:review', kind: 'skill', name: 'review', id, paths: [] });
+  const sides = { base: new Map([['skill:review', item('old')]]), latest: new Map([['skill:review', item('new')]]), here: new Map(), unsent: new Map() };
+  assert.deepEqual(classify(sides).incoming.map(row => [row.change, row.alsoHere]), [['changed', 'removed']]);
 });

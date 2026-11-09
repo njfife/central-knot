@@ -9,7 +9,7 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import { loadRepo, repo, repoPage } from './repopage.ts';
+import { loadRepo, repo, repoPage, waiting } from './repopage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -27,15 +27,16 @@ function applyLayout() {
   classes.toggle('rail', rail);
   classes.toggle('one-pane', contentWidth < 960);
   classes.toggle('page-skills', state.page === 'skills');
+  classes.toggle('page-repo', state.page === 'repo');
   return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
 }
 
-function navRow(page: Page, label: string, glyph: IconName, count?: number) {
+function navRow(page: Page, label: string, glyph: IconName, count?: number, countTitle?: string) {
   const current = state.page === page;
   return h('button.nav-row', {
     type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true' }, String(count)),
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
@@ -63,7 +64,11 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 }
 
 /** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
-const repoWaiting = () => { const view = repo.view; if (!view?.connected) return undefined; const count = [...view.incoming, ...view.outgoing].filter(change => !change.held).length; return count || undefined; };
+function repoRow() {
+  const view = repo.view;
+  const { pull, push } = view?.connected ? waiting(view) : { pull: 0, push: 0 };
+  return navRow('repo', 'Git repo', 'git-branch', pull + push || undefined, [pull ? `${pull} to pull` : '', push ? `${push} to push` : ''].filter(Boolean).join(' · '));
+}
 
 function renderSidebar() {
   region('nav').replaceChildren(
@@ -75,7 +80,7 @@ function renderSidebar() {
     navRow('plugins', 'Plugins', 'puzzle'),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
-    navRow('repo', 'Git repo', 'git-branch', repoWaiting()),
+    repoRow(),
     navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
   );

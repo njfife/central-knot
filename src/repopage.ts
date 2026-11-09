@@ -109,46 +109,52 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
   return h(`li.repo-row${change.held ? '.repo-row-held' : ''}`, { 'data-key': change.key },
     h('span.repo-row-icon', { title: kind.label }, icon(kind.glyph, 14, 'tone-muted')),
     h('span.repo-row-main', {},
-      h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label)),
-      note ? h(`span.repo-row-note.${tone}`, {}, change.held ? icon('triangle-alert', 12) : null, note) : null),
-    h(`span.repo-row-change.repo-change-${change.change}`, {}, label));
+      h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label),
+        h(`span.repo-row-change.repo-change-${change.change}`, {}, label)),
+      note ? h(`span.repo-row-note.${tone}`, {}, change.held ? icon('triangle-alert', 12) : null, note) : null));
 }
 
-function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string) {
+/** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
+function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, blocked?: string) {
   return h('section.repo-side', { 'aria-labelledby': id },
     h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title, h('span.eyebrow-count', {}, String(changes.length))), action),
+    blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('info', 12), blocked) : null,
     changes.length ? h('ul.repo-list', {}, changes.map(change => changeRow(change, side))) : h('p.repo-empty-side', {}, empty));
 }
 
+/** Changes waiting each way, leaving out items that can't move. */
+export const waiting = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
+
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
-function summary(view: Extract<RepoView, { connected: true }>): { glyph: IconName; tone: string; text: string } {
-  if (repo.checking) return { glyph: 'refresh-cw', tone: 'tone-muted spin', text: 'Checking the repo…' };
-  if (view.problem) return { glyph: 'circle-alert', tone: 'tone-danger', text: 'Couldn’t reach the repo' };
-  const incoming = view.incoming.filter(change => !change.held).length;
-  const outgoing = view.outgoing.filter(change => !change.held).length;
-  if (!incoming && !outgoing) return { glyph: 'circle-check', tone: 'tone-success', text: 'Up to date with the repo' };
-  return { glyph: 'git-branch', tone: 'tone-accent', text: [incoming ? `${incoming} to pull` : '', outgoing ? `${outgoing} to push` : ''].filter(Boolean).join(' · ') };
+function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
+  const part = (glyph: IconName, tone: string, text: string) => h('span.repo-state-part', {}, icon(glyph, 14, tone), h('span', {}, text));
+  const { pull: incoming, push: outgoing } = waiting(view);
+  const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
+    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo')]
+    : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
+    : [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null, outgoing ? part('arrow-up-from-line', 'tone-accent', `${outgoing} to push`) : null];
+  return h('span.repo-state', { id: 'repo-state', role: 'status' }, parts);
 }
 
 function connectedPage(view: Extract<RepoView, { connected: true }>) {
-  const state0 = summary(view);
-  const pullable = view.incoming.filter(change => !change.held).length;
-  const pushable = view.outgoing.filter(change => !change.held).length;
+  const { pull: pullable, push: pushable } = waiting(view);
   const locked = !!state.busy || !view.access.allowed;
   const pullButton = view.incoming.length ? button({ variant: pullable ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', label: pullable ? `Pull ${pullable}` : 'Pull', id: 'repo-pull', disabled: locked || repo.checking || !view.latest,
     attrs: { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' }, onclick: () => void pull() }) : null;
   const pushButton = pushable ? button({ variant: view.pushBlocked ? 'outline' : 'primary', size: 'small', icon: 'arrow-up-from-line', label: `Push ${pushable}`, id: 'repo-push', disabled: locked || repo.checking || !!view.pushBlocked,
-    attrs: { title: view.pushBlocked ?? `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
+    attrs: view.pushBlocked ? { 'aria-describedby': 'repo-outgoing-blocked' } : { title: `Commit the Managed set as it is here to ${view.branch} and push it.` }, onclick: () => void push() }) : null;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
+  const inSync = !view.incoming.length && !view.outgoing.length;
+  const activity = [['Pulled', view.pulledAt], ['pushed', view.pushedAt]].map(([verb, at]) => `${verb} ${when(at) ?? 'never'}`).join(' · ');
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
-      h(`span.repo-state`, { id: 'repo-state', role: 'status' }, icon(state0.glyph, 14, state0.tone), h('span', {}, state0.text)),
+      summary(view),
       h('span.toolbar-spacer'),
       button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled: locked || repo.confirmDisconnect, onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-confirm')?.focus(); } })),
     h('div.bands', {},
       view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)),
       repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
-        h('span.band-text', {}, 'Disconnect from this repo? Your tools and the repo stay as they are; Central Knot forgets its copy and what it last pulled.'),
+        h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
         button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
         button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: () => { repo.confirmDisconnect = false; rerender(); } })) : null,
       problemBand(view.problem && !repo.problem ? `Couldn’t reach the repo when checking${view.checkedAt ? ` ${when(view.checkedAt)}` : ''}: ${view.problem}` : undefined),
@@ -157,16 +163,14 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
       h('section.repo-where', { 'aria-label': 'Repo' },
         h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), middle(view.url, 24, 'mono repo-url'), h('span.repo-branch', { title: 'Branch' }, view.branch)),
         h('dl.facts.repo-facts', {},
-          h('dt', {}, 'In use here'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
+          h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, 'Repo’s latest'), h('dd', {}, !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
-          h('dt', {}, 'Last pulled'), h('dd', {}, when(view.pulledAt) ?? h('span.tone-muted', {}, 'Never')),
-          h('dt', {}, 'Last pushed'), h('dd', {}, when(view.pushedAt) ?? h('span.tone-muted', {}, 'Never')),
-          h('dt', {}, 'Last checked'), h('dd', {}, repo.checking ? h('span.tone-muted', {}, 'Checking now…') : when(view.checkedAt) ?? h('span.tone-muted', {}, 'Not yet')))),
-      h('div.repo-sides', {},
-        changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
-        changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.')),
-      view.pushBlocked && pushable ? h('p.repo-aside', {}, icon('info', 12, 'tone-muted'), view.pushBlocked) : null,
-      h('p.repo-aside', {}, 'Pull and Push use this computer’s git and the sign-in it already has. Only Managed skills, MCP servers and agents go to the repo; other files there stay as they are.')));
+          h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, `${activity} · ${repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}`}`)))),
+      inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
+        : h('div.repo-sides', {},
+          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.'),
+          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushButton, 'Nothing here that the repo doesn’t have.', pushable ? view.pushBlocked : undefined)),
+      h('p.repo-aside', {}, `Pull and Push use this computer’s git and the sign-in it already has. Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 
 function problemBand(text: string | undefined) {
@@ -176,12 +180,15 @@ function problemBand(text: string | undefined) {
     repo.problem ? closeButton(() => { repo.problem = undefined; rerender(); }, { id: 'repo-problem-dismiss' }) : null);
 }
 
+/** What goes to the repo, as words: base instructions only in a build that has them. */
+const carried = (withBase: boolean) => (withBase ? 'skills, MCP servers, agents and base instructions' : 'skills, MCP servers and agents');
+
 /** The repo's layout, shown before connecting so people can set one up by hand or know what Push will make. */
-const layout = () => h('dl.repo-layout', { 'aria-label': 'What goes where in the repo' },
+const layout = (withBase: boolean) => h('dl.repo-layout', { 'aria-label': 'What goes where in the repo' },
   h('dt.mono', {}, 'skills/<folder>/'), h('dd', {}, 'one folder per skill, byte for byte'),
   h('dt.mono', {}, 'mcp/<name>.json'), h('dd', {}, 'one MCP server, in Claude Code’s shape'),
   h('dt.mono', {}, 'agents/<name>.md'), h('dd', {}, 'one agent, in Claude Code’s format'),
-  h('dt.mono', {}, 'instructions/base.md'), h('dd', {}, 'the base instructions'));
+  withBase ? [h('dt.mono', {}, 'instructions/base.md'), h('dd', {}, 'the base instructions')] : null);
 
 function connectForm(allowed: boolean) {
   const ready = () => !state.busy && allowed && !!repo.draftUrl.trim();
@@ -205,8 +212,8 @@ export function repoPage(): HTMLElement {
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
     h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo',
-      'Your Managed skills, MCP servers, agents and base instructions can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.',
-      h('div.repo-start', {}, connectForm(view.access.allowed), layout(),
+      `Your Managed ${carried(view.withBase)} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
+      h('div.repo-start', {}, connectForm(view.access.allowed), layout(view.withBase),
         h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.',
           ' ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.')))));
 }

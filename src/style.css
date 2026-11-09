@@ -1349,8 +1349,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 
 /* Git repo: the Managed set kept in a git repo, with Pull and Push. */
-.repo-state { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.repo-state > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.repo-state { display: inline-flex; align-items: center; gap: 16px; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; }
+.repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.repo-state-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* This page spans the window: its header, bands and empty state are not held to the older 900px content edge. */
+body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; }
+.repo-page > .scroll > .empty { max-width: none; }
 .repo-toolbar .btn { flex: none; }
 .repo-toolbar .toolbar-spacer { flex: 1 1 auto; }
 .repo-scroll { display: flex; flex-direction: column; gap: 24px; padding: 16px calc(16px + var(--overlay-gutter, 0px)) 24px 16px; }
@@ -1360,7 +1364,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .repo-address > svg { flex: none; }
 .repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; }
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
-.repo-facts { grid-template-columns: minmax(96px, 128px) minmax(0, 1fr); }
+.repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
 .repo-facts dd { display: flex; min-width: 0; }
 .repo-commit, .repo-latest { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
 .repo-sha { flex: none; }
@@ -1371,7 +1375,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .repo-side { display: flex; flex-direction: column; min-width: 0; }
 .repo-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
 .repo-list { list-style: none; margin: 0; padding: 0; }
-.repo-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
+.repo-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
 .repo-row-icon { display: flex; padding-top: 3px; }
 .repo-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .repo-row-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
@@ -1379,7 +1383,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
 .repo-row-note > svg { flex: none; align-self: center; }
-.repo-row-change { padding-top: 2px; font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
+.repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-soft); white-space: nowrap; }
+.repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
+.repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); box-shadow: inset 0 -1px 0 var(--line); }
+.repo-side-note > svg { flex: none; align-self: center; }
+.repo-activity { color: var(--ink); }
+.repo-in-sync { margin: 0; color: var(--ink-soft); }
 .repo-change-added { color: var(--success); }
 .repo-change-removed { color: var(--danger); }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }

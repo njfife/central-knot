@@ -412,10 +412,11 @@ export interface RepoChange {
 export interface RepoCommit { id: string; subject: string; at: string }
 
 export type RepoView =
-  | { connected: false; access: WriteAccess }
+  | { connected: false; access: WriteAccess; /** Whether this build carries the base instructions (instructions/base.md). */ withBase: boolean }
   | {
     connected: true;
     access: WriteAccess;
+    withBase: boolean;
     url: string;
     branch: string;
     /** The commit last pulled or pushed here, and the repo's latest commit as last checked. */
