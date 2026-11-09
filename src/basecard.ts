@@ -16,6 +16,14 @@ const names = toolNames as Record<string, string>;
 const shown = new Set<string>();
 const toggle = (key: string) => { if (shown.has(key)) shown.delete(key); else shown.add(key); rerender(); };
 const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+// In the review, Esc goes back to editing; a review that started there (an edited copy, an earlier version) closes.
+document.addEventListener('keydown', event => {
+  const edit = state.baseEdit;
+  if (event.key !== 'Escape' || state.page !== 'instructions' || edit?.stage !== 'review') return;
+  event.preventDefault();
+  if (edit.source?.kind === 'copy' || edit.source?.kind === 'version') state.baseEdit = undefined; else edit.stage = 'edit';
+  rerender();
+});
 const lineCount = (text: string) => (text ? text.replace(/\n$/, '').split('\n').length : 0);
 
 /** What saving the draft does to one tool's file: the new text, and a sentence saying so. Undefined: the file is not involved. */
