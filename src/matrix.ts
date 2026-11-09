@@ -1,6 +1,7 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
+import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { andList, toolNames } from './words.ts';
 import { convertAgent, flashRequests, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
@@ -39,7 +40,7 @@ const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? s
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
 let kind: Kind = 'skills';
 /** Whether a profile switch turned this item off in this tool (Profiles: `held`), not a Disable made by hand. */
-const heldByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.held[`${kind === 'mcp' ? 'mcp' : 'skill'}:${key}`]?.includes(tool as HarnessId);
+const heldByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.held[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;

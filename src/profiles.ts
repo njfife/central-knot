@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { harnesses } from './harnesses.ts';
+import { harnessIds, harnesses } from './harnesses.ts';
 import { appendHistory, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
@@ -19,7 +19,6 @@ import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, 
 
 interface ProfilesFile { formatVersion: 1; profiles: Profile[]; active?: string; held: Record<string, HarnessId[]> }
 const profilesPath = (home: string) => join(storeDirectory(home), 'profiles.json');
-const harnessIds = Object.keys(harnesses) as HarnessId[];
 
 /** The home's profiles. A file that can't be read is reported, never overwritten: the person's profiles may still be in it. */
 export async function readProfiles(home: string): Promise<ProfilesView> {
@@ -54,16 +53,23 @@ async function whyReadOnly(context: ShareContext): Promise<string | undefined> {
   return gate.state === 'stopped' ? gate.reason : undefined;
 }
 
+/** The home's profiles, ready to change, or why they can't be changed here (preview only, another build syncing, unreadable). */
+async function openProfiles(context: ShareContext): Promise<{ view: ProfilesView } | { stop: string }> {
+  const stop = await whyReadOnly(context);
+  if (stop) return { stop };
+  const view = await readProfiles(context.home);
+  return view.problem ? { stop: view.problem } : { view };
+}
+
 /**
  * Adds a profile, or changes an existing one's name or items: a field left out keeps what the profile has now, so a rename and a
  * tick sent close together never undo each other. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
  * made again with that id (Undo of Delete), so History's switches still name it.
  */
 export async function saveProfile(context: ShareContext, input: ProfileEdit): Promise<{ problem?: string; id?: string }> {
-  const stop = await whyReadOnly(context);
-  if (stop) return { problem: stop };
-  const view = await readProfiles(context.home);
-  if (view.problem) return { problem: view.problem };
+  const opened = await openProfiles(context);
+  if ('stop' in opened) return { problem: opened.stop };
+  const view = opened.view;
   const existing = input.id ? view.profiles.find(profile => profile.id === input.id) : undefined;
   const name = (input.name ?? existing?.name ?? '').trim().replace(/\s+/g, ' ');
   if (!name) return { problem: 'A profile needs a name.' };
@@ -79,10 +85,9 @@ export async function saveProfile(context: ShareContext, input: ProfileEdit): Pr
 
 /** Deletes a profile's definition. Its switches stay as they are; the active profile can't be deleted (switch away first). */
 export async function deleteProfile(context: ShareContext, id: string): Promise<{ problem?: string }> {
-  const stop = await whyReadOnly(context);
-  if (stop) return { problem: stop };
-  const view = await readProfiles(context.home);
-  if (view.problem) return { problem: view.problem };
+  const opened = await openProfiles(context);
+  if ('stop' in opened) return { problem: opened.stop };
+  const view = opened.view;
   if (view.active === id) return { problem: 'That profile is in use. Switch to another profile, or to No profile, first.' };
   view.profiles = view.profiles.filter(profile => profile.id !== id);
   await saveProfiles(context.home, view);
@@ -224,16 +229,26 @@ export function heldAfterFailures(planned: Record<string, HarnessId[]>, failed: 
 /** History keys every profile switch with this; Undo finds switches by their kind, 'profile'. */
 const SWITCH_KEY = 'profiles:switch';
 
+/** A switch or undo that didn't start, and why. */
+const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, results: [], flips: [] });
+
+/** The History entry for a switch: the profile in use before and after (by id and name), and every switch it flipped. */
+function switchEvent(context: ShareContext, profiles: ProfilesView, before: string | undefined, flips: ProfileFlip[]): HistoryEvent {
+  const name = (id?: string) => profiles.profiles.find(profile => profile.id === id)?.name;
+  const after = profiles.active;
+  return { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: name(after) ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
+    profile: { ...(before ? { from: before, fromName: name(before) } : {}), ...(after ? { to: after, toName: name(after) } : {}), flips } };
+}
+
 // ---------- Switching, and its Undo ----------
 
 /** Switches to a profile (null: No profile). One History entry names every switch it flipped, so Undo puts each one back. */
 export async function switchProfile(context: ShareContext, id: string | null): Promise<ProfileSwitchResult> {
-  const stop = await whyReadOnly(context);
-  if (stop) return { stopped: stop, results: [], flips: [] };
-  const profiles = await readProfiles(context.home);
-  if (profiles.problem) return { stopped: profiles.problem, results: [], flips: [] };
+  const opened = await openProfiles(context);
+  if ('stop' in opened) return stopped(opened.stop);
+  const profiles = opened.view;
   const target = id === null ? undefined : profiles.profiles.find(profile => profile.id === id);
-  if (id !== null && !target) return { stopped: 'That profile is gone. Nothing was switched.', results: [], flips: [] };
+  if (id !== null && !target) return stopped('That profile is gone. Nothing was switched.');
   const home = await readHome(context);
   const plan = planSwitch(home.items, target, profiles.held);
   const { done, results } = await flipAll(context, home, plan.flips);
@@ -243,9 +258,7 @@ export async function switchProfile(context: ShareContext, id: string | null): P
   profiles.held = heldAfterFailures(plan.held, plan.flips.filter(flip => !done.includes(flip)));
   await saveProfiles(context.home, profiles);
   if (!done.length && before === profiles.active) return { results, flips: done };
-  const fromName = profiles.profiles.find(profile => profile.id === before)?.name;
-  const event: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: target?.name ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
-    profile: { ...(before ? { from: before, fromName } : {}), ...(target ? { to: target.id, toName: target.name } : {}), flips: done } };
+  const event = switchEvent(context, profiles, before, done);
   await appendHistory(context, [event]);
   return { results, flips: done, event: event.id };
 }
@@ -256,14 +269,13 @@ export async function switchProfile(context: ShareContext, id: string | null): P
  * the one that chose the profile in use. The undo is itself a switch in History, so its own Undo redoes it.
  */
 export async function undoProfileSwitch(context: ShareContext, eventId: string): Promise<ProfileSwitchResult> {
-  const stop = await whyReadOnly(context);
-  if (stop) return { stopped: stop, results: [], flips: [] };
+  const opened = await openProfiles(context);
+  if ('stop' in opened) return stopped(opened.stop);
+  const profiles = opened.view;
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
-  if (!past?.profile) return { stopped: 'That switch can’t be undone.', results: [], flips: [] };
-  if (past.undoneBy) return { stopped: 'That switch was already undone.', results: [], flips: [] };
-  const profiles = await readProfiles(context.home);
-  if (profiles.problem) return { stopped: profiles.problem, results: [], flips: [] };
+  if (!past?.profile) return stopped('That switch can’t be undone.');
+  if (past.undoneBy) return stopped('That switch was already undone.');
   const home = await readHome(context);
   const results: DestinationResult[] = [];
   const back: ProfileFlip[] = [];
@@ -283,9 +295,7 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   if (choseProfileInUse(history, past)) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
   profiles.held = heldAfterFlips(profiles.held, done);
   await saveProfiles(context.home, profiles);
-  const name = (id?: string) => profiles.profiles.find(profile => profile.id === id)?.name;
-  const undo: HistoryEvent = { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: name(profiles.active) ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
-    profile: { ...(before ? { from: before, fromName: name(before) } : {}), ...(profiles.active ? { to: profiles.active, toName: name(profiles.active) } : {}), flips: done } };
+  const undo = switchEvent(context, profiles, before, done);
   past.undoneBy = undo.id;
   await replaceHistory(context, [...history, undo]);
   return { results, flips: done, event: undo.id };

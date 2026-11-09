@@ -12,6 +12,9 @@ import type { HarnessId, HistoryEvent, ManageView, McpView, Profile, ProfileFlip
 /** What every screen calls having no profile in use. */
 export const NO_PROFILE = 'No profile';
 
+/** The profile in use, if one is. */
+export const activeProfile = (view: Pick<ProfilesView, 'profiles' | 'active'>) => view.profiles.find(profile => profile.id === view.active);
+
 /** Whether profiles are in play here: one exists, or a switch still holds something off (the menus and the page show them). */
 export const profilesInUse = (view: Pick<ProfilesView, 'profiles' | 'held'>) => view.profiles.length > 0 || Object.keys(view.held).length > 0;
 
@@ -84,8 +87,9 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
   const wanted = profile ? new Set(profile.items) : undefined;
   const flips: ProfileFlip[] = [];
   const blocked: SwitchPlan['blocked'] = [];
-  // An item that isn't here right now (an unreadable folder, a tool not found this time) keeps what it holds.
-  const next: Record<string, HarnessId[]> = Object.fromEntries(Object.entries(held).filter(([id]) => !items.some(item => item.id === id)));
+  // An item that isn't here right now (an unreadable folder, a tool not found this time) keeps what it holds, until No profile:
+  // that lets go of everything, so a hold on an item deleted for good doesn't keep profiles in play forever.
+  const next: Record<string, HarnessId[]> = profile ? Object.fromEntries(Object.entries(held).filter(([id]) => !items.some(item => item.id === id))) : {};
   for (const item of items) {
     const before = held[item.id] ?? [];
     // A hold in a tool whose switch can't be read now, or that has no copy now, is kept as it is: it can't be checked, and
@@ -138,5 +142,5 @@ export function flipWords({ off, on }: { off: number; on: number }, tense: 'will
 
 /** How many items the tools no longer match the profile in use on (or No profile, on what profiles still hold off): 0 when they match. */
 export function driftOf(items: SwitchItem[], profiles: Pick<ProfilesView, 'profiles' | 'active' | 'held'>): number {
-  return new Set(planSwitch(items, profiles.profiles.find(profile => profile.id === profiles.active), profiles.held).flips.map(flip => flip.item)).size;
+  return new Set(planSwitch(items, activeProfile(profiles), profiles.held).flips.map(flip => flip.item)).size;
 }

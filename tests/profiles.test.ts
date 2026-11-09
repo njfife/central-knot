@@ -57,6 +57,9 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
   assert.deepEqual(none.held, {});
+});
+
+test('Holds after a failed flip, the switch that chose the profile in use, and holds on tools that can’t be read', () => {
   // A flip that failed leaves its switch as it was: a failed turn-off isn't held, a failed turn-on still is.
   assert.deepEqual(heldAfterFailures({ 'skill:a': ['claude-cli'], 'mcp:b': [] }, [{ item: 'skill:a', name: 'a', tool: 'claude-cli', disabled: true }, { item: 'mcp:b', name: 'b', tool: 'codex-cli', disabled: false }]), { 'mcp:b': ['codex-cli'] });
   // Which switch chose the profile in use: the latest that changed it. An undo of an older switch (Undo A after B) chooses nothing.
@@ -142,7 +145,7 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
   } finally { await box.cleanup(); }
 });
 
-test('Profiles save only the fields given, and Undo of Delete keeps the id History names', async () => {
+test('Profiles save only the fields given, Undo of Delete keeps the id History names, and an unreadable file is never overwritten', async () => {
   const box = await sandbox();
   try {
     const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
@@ -153,6 +156,9 @@ test('Profiles save only the fields given, and Undo of Delete keeps the id Histo
     await deleteProfile(box.context, dev);
     await saveProfile(box.context, { id: dev, name: 'Dev work', items: ['skill:dev'], restore: true });
     assert.equal((await readProfiles(box.home)).profiles[0]?.id, dev);
+    await writeFile(join(box.home, '.central-knot/profiles.json'), '{ not json');
+    assert.match((await saveProfile(box.context, { name: 'Other' })).problem ?? '', /profiles file Central Knot can read/);
+    assert.equal(await readFile(join(box.home, '.central-knot/profiles.json'), 'utf8'), '{ not json');
   } finally { await box.cleanup(); }
 });
 

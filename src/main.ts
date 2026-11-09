@@ -16,7 +16,7 @@ import { instructionsView, instructionVersion, saveInstruction } from './instruc
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { driftOf, NO_PROFILE, profilesInUse, switchItems } from './profileplan.ts';
+import { activeProfile, driftOf, NO_PROFILE, profilesInUse, switchItems } from './profileplan.ts';
 import { plural } from './model.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
@@ -38,6 +38,8 @@ let lastProfiles: ProfilesView = { profiles: [], held: {} };
 let lastDrift = 0;
 /** The switch files' modification times when drift was last looked at in the background. */
 let lastStamp = '';
+/** After Central Knot's own switch the page already reads again: the background need not look at those files once more. */
+const noteOwnSwitch = async () => { lastStamp = await switchFilesStamp(context()).catch(() => lastStamp); };
 let practiceHome: string | undefined;
 
 /** Files in the package are read-only, so practice happens on a throwaway copy made for this launch. */
@@ -159,7 +161,7 @@ function statusLine() {
   return unseen ? `Sync made changes · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
 }
 /** The active profile's name, or undefined for No profile. */
-const activeProfileName = () => lastProfiles.profiles.find(profile => profile.id === lastProfiles.active)?.name;
+const activeProfileName = () => activeProfile(lastProfiles)?.name;
 /**
  * Profile: one click switches, from the menu bar or the app menu. The label says which is in use; each profile is a radio item.
  * Before any profile exists (and nothing is held off by one), "Profiles…" opens the page that makes one.
@@ -169,6 +171,7 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
   const choose = (id: string | null) => void fromTray(async () => {
     if (!current) return;
     const result = await switchProfile(context(), id);
+    await noteOwnSwitch();
     const page = window && !window.isDestroyed();
     // Reporting: a switch that couldn't start waits on the page like sync's failures. Otherwise its result, failures included,
     // goes to the page's band with Undo; with no window, the failures wait with sync's.
@@ -351,7 +354,7 @@ function background() {
     // looked at on its own while a profile holds anything, and the menus and the page follow it.
     // Looked at only when a switch file changed since the last look, or the pass wrote something (an item may have come or gone).
     // A switch file that changed always reads the page again (its marks show each switch), and the menus follow the drift.
-    const stamp = await switchFilesStamp(context()).catch(() => '');
+    const stamp = profilesInUse(lastProfiles) ? await switchFilesStamp(context()).catch(() => '') : lastStamp;
     if (profilesInUse(lastProfiles) && (stamp !== lastStamp || result?.harnessWrites || mcpChanged)) {
       const switched = stamp !== lastStamp;
       lastStamp = stamp;
@@ -467,6 +470,9 @@ async function startHome(): Promise<HomeView | null> {
 }
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
+
+/** What a write answers when the page shows another home than the one open here. */
+const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();
@@ -589,7 +595,7 @@ app.whenReady().then(async () => {
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), presentTools(await read()), key)
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
+    : { stopped: elsewhere }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool as HarnessId, text, expected)
@@ -598,7 +604,11 @@ app.whenReady().then(async () => {
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
-      if (past?.kind === 'profile') return undoProfileSwitch(context(), eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.flips.length }));
+      if (past?.kind === 'profile') {
+        const undone = await undoProfileSwitch(context(), eventId);
+        await noteOwnSwitch();
+        return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length };
+      }
       const key = past?.key ?? '';
       const tools = (await manageView(context())).tools;
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
@@ -608,12 +618,11 @@ app.whenReady().then(async () => {
       await releaseProfileHolds(context(), switchedByHand([{ key }], restored.results));
       return restored;
     })()
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+    : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
   handle('manage:delete-everywhere', async (key, resume, home) => (home === current?.home && typeof key === 'string'
     ? deleteEverywhere(context(), key, resume === true)
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
+    : { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult));
   // Profiles: their definitions are Central Knot's own file; a switch flips each tool's own switches (profiles.ts).
-  const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
     const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
@@ -628,6 +637,7 @@ app.whenReady().then(async () => {
   handle('profiles:switch', async (id, home) => {
     if (home !== current?.home || (id !== null && typeof id !== 'string')) return { stopped: elsewhere, results: [], flips: [] };
     const result = await switchProfile(context(), id as string | null);
+    await noteOwnSwitch();
     return { ...result, view: await view() };
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? view() : null; });
@@ -636,22 +646,22 @@ app.whenReady().then(async () => {
   // MCP: Apply all writes Copilot and Codex; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, home) => (home === current?.home
     ? applyMcp(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0 }));
   handle('agents:apply', async (list, home) => (home === current?.home
     ? applyAgents(context(), (await manageView(context())).tools, changes(list), syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
   handle('mcp:unwrite-claude', async (written, home) => (home === current?.home && Array.isArray(written)
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
       : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string')))
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
     ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+    : { stopped: elsewhere, results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => {
-    if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult;
+    if (home !== current?.home) return { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult;
     const asked = changes(list);
     const result = await applyChanges(context(), asked, resume === true, syncOn ? {} : { only: new Set(asked.map(change => change.key)) });
     // A Disable or Enable chosen here takes that switch over from profiles: a later switch leaves it as set by hand.

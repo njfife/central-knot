@@ -27,6 +27,13 @@ export async function readMcpSwitches(context: ShareContext, tools: HarnessId[])
 
 const deniesByName = (entry: unknown, name: string) => !!entry && typeof entry === 'object' && (entry as Record<string, unknown>).serverName === name;
 
+/** Pi: the server's own entry in mcp.json's `mcpServers`, if it is there as an object. */
+function piEntry(text: string, name: string): Record<string, unknown> | undefined {
+  const servers = parseJson(text).mcpServers;
+  const entry = servers && typeof servers === 'object' ? (servers as Record<string, unknown>)[name] : undefined;
+  return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
+}
+
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
 const codexTable = (text: string, name: string) => readTomlTables(text).find(table => !table.array && table.path.length === 2 && table.path[0] === 'mcp_servers' && table.path[1] === name);
 
@@ -37,9 +44,7 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     case 'copilot-cli': return list(parseJson(text).disabledMcpServers).includes(name);
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
     case 'pi-cli': {
-      const servers = parseJson(text).mcpServers;
-      const entry = servers && typeof servers === 'object' ? (servers as Record<string, unknown>)[name] : undefined;
-      return !!entry && typeof entry === 'object' && (entry as Record<string, unknown>).enabled === false;
+      return piEntry(text, name)?.enabled === false;
     }
   }
 }
@@ -68,9 +73,7 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
     }
     case 'pi-cli': {
       // Only an entry that is there is switched: one removed meanwhile is never made again as a bare switch.
-      const servers = parseJson(text).mcpServers;
-      const entry = servers && typeof servers === 'object' ? (servers as Record<string, unknown>)[name] : undefined;
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error(`Pi has no "${name}" server to switch.`);
+      if (!piEntry(text, name)) throw new Error(`Pi has no "${name}" server to switch.`);
       return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
     }
   }
