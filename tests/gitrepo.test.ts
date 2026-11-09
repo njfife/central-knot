@@ -5,7 +5,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
-import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsPull, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
+import { whyPushFailed } from '../src/plugins.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsChange, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -120,9 +121,17 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
     const settings = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
     await applyAgents(second, tools, []);
-    assert.equal((await undoSettingsPull(second, settings.id)).stopped, undefined, 'Undo still works after a sync pass');
+    assert.equal((await undoSettingsChange(second, settings.id)).stopped, undefined, 'Undo still works after a sync pass');
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
-    await writeFile(join(second.home, '.claude/agents/planner.md'), (await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8')).replace('model: opus', 'model: sonnet'));
+    const redo = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
+    assert.equal((await undoSettingsChange(second, redo.id)).stopped, undefined, 'and Redo puts the pulled one back');
+    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+    // An edit made since is never undone away.
+    const redone = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
+    const plannerHere = join(second.home, '.claude/agents/planner.md');
+    await writeFile(plannerHere, `${await readFile(plannerHere, 'utf8')}Also check the tests.\n`);
+    assert.match((await undoSettingsChange(second, redone.id)).stopped ?? '', /edited since/);
+    await writeFile(plannerHere, (await readFile(plannerHere, 'utf8')).replace('Also check the tests.\n', ''));
 
     // The repo changes an agent this computer can't read just now: Pull leaves it for later rather than losing it, and once the copy
     // reads again, the repo's version comes in (never overwritten by the next Push).
@@ -342,6 +351,11 @@ test('Over HTTP: a read-only repo connects and pulls, and refuses a push in plai
     assert.equal(gone.view.connected, false);
     assert.match(await readFile(join(reader.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Local only/, 'disconnecting leaves the tools as they are');
   } finally { server.kill(); await box.cleanup(); }
+});
+
+test('A protected branch is said as refused, not as a repo that moved on', () => {
+  assert.match(whyPushFailed(1, '! [remote rejected] main -> main (protected branch hook declined)'), /did not accept the push/);
+  assert.match(whyPushFailed(1, '! [rejected] main -> main (fetch first)'), /changed just now/);
 });
 
 test('Removed here but edited in the repo: the edit comes back on Pull', () => {

@@ -101,8 +101,9 @@ export function whyGitFailed(code: number | 'timeout' | 'missing', output: strin
 /** Why a push failed: the repo moved on, or this account can't write there; anything else as whyGitFailed says. */
 export function whyPushFailed(code: number | 'timeout' | 'missing', output: string, place = 'repo'): string {
   const text = output.toLowerCase();
-  if (/rejected|non-fast-forward|fetch first|stale info/.test(text)) return `The ${place} changed just now. Pull, then push again.`;
+  // Refusals first: a protected branch also says "rejected", and pulling again would not help.
   if (/read-only|403|denied|not allowed|protected branch|pre-receive hook declined/.test(text)) return `The ${place} did not accept the push: your account may only be able to read it, or the branch is protected. Nothing changed here.`;
+  if (/non-fast-forward|fetch first|stale info/.test(text)) return `The ${place} changed just now. Pull, then push again.`;
   return whyGitFailed(code, output, place);
 }
 

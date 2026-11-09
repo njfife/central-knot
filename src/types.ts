@@ -228,8 +228,11 @@ export interface HistoryEvent {
   undoneBy?: string;
   /** Made by Pull from the git repo. */
   via?: 'repo';
-  /** A pull that changed only an agent's Claude Code settings: that tool's file, and the earlier file kept whole for Undo. */
-  settingsFile?: { path: string; kept: string };
+  /**
+   * A change to only an agent's Claude Code settings (by Pull, or by undoing one): that tool's file, the file it replaced (kept whole,
+   * what Undo puts back), and a hash of what it wrote (Undo goes ahead only while the file still holds that).
+   */
+  settingsFile?: { path: string; kept: string; wrote: string };
 }
 
 // ---------- Marketplaces and plugins ----------

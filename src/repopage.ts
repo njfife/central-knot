@@ -39,19 +39,21 @@ export function loadRepoSoon(): void {
 let inFlight: Promise<RepoView | null> | undefined;
 
 export async function loadRepo(check = false): Promise<void> {
-  // A load that overtakes a check still in flight carries the check on, so "Checking…" always ends.
-  check ||= repo.checking;
   const turn = ++loads;
+  // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
+  if (inFlight) { check = false; await inFlight.catch(() => undefined); }
   let view: RepoView | undefined;
   try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
   if (turn !== loads) return;
   repo.view = view;
+  if (!inFlight) repo.checking = false;
   rerender();
   if (!check || !view?.connected || !view.access.allowed) return;
   repo.checking = true;
   rerender();
-  inFlight ??= api().repo(true).finally(() => { inFlight = undefined; });
+  inFlight = api().repo(true).finally(() => { inFlight = undefined; });
   try { view = (await inFlight) ?? view; } catch { /* the view already shown stands */ }
+  // A load that started meanwhile joined this check and shows its result, "Checking…" ended.
   if (turn !== loads) return;
   repo.view = view;
   repo.checking = false;
@@ -212,7 +214,8 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
       view.problem ? h('p.repo-stale', {}, `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}.`) : null,
-      inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
+      inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushButton)
+        : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Changes made in the repo or here show up on this page.')
         : h('div.repo-sides', {},
           changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullButton, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullButton && view.problem ? WAITING : undefined),

@@ -640,7 +640,7 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
         // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
         // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
         if (!facts) wrote({ tool: writer, after: sha(next) });
-        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing) : undefined });
+        else if (existing) wrote({ tool: writer, before: existing.hash, after: agentHash(agent), pending: facts.edited?.includes(writer), settingsOnly: existing.hash === agentHash(agent) ? await keepSettingsFile(context, existing, next) : undefined });
       }
     }
   } catch (error) {
@@ -652,33 +652,48 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
   return !agent || (await agentsView(context, tools)).servers.some(entry => entry.key === key && entry.managed) ? done.results : [...done.results, notManaged(change, writer)];
 }
 
-/**
- * Only Claude Code's own settings (model, tools) differ: sync's kept versions are keyed by what every tool holds, which these don't
- * change, so the earlier file is kept whole under its own bytes, where nothing writes over it, for this pull's Undo.
- */
-async function keepSettingsFile(context: ShareContext, existing: AgentEntry): Promise<HistoryEvent['settingsFile']> {
-  const kept = join(storeDirectory(context.home), 'items', 'agent-settings', encodeURIComponent(existing.key), `${sha(existing.text)}.md`);
-  await writeDurably(kept, existing.text);
-  return { path: existing.file, kept };
+/** Keeps a file whole in Central Knot's store under its own bytes, where nothing writes over it, and returns where. */
+async function keepWhole(context: ShareContext, key: string, text: string): Promise<string> {
+  const kept = join(storeDirectory(context.home), 'items', 'agent-settings', encodeURIComponent(key), `${sha(text)}.md`);
+  await writeDurably(kept, text);
+  return kept;
 }
 
 /**
- * Undo of a pull that changed only an agent's Claude Code settings: the earlier file goes back as it was, if the file still holds
- * what the pull wrote. Nothing spreads: no other tool has those settings.
+ * Only Claude Code's own settings (model, tools) differ: sync's kept versions are keyed by what every tool holds, which these don't
+ * change, so the earlier file is kept whole for this pull's Undo.
  */
-export async function undoSettingsPull(context: ShareContext, eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
+async function keepSettingsFile(context: ShareContext, existing: AgentEntry, next: string): Promise<HistoryEvent['settingsFile']> {
+  return { path: existing.file, kept: await keepWhole(context, existing.key, existing.text), wrote: sha(next) };
+}
+
+/**
+ * Undo (and Redo) of a change to only an agent's Claude Code settings: the file it replaced goes back, only while the file still
+ * holds what that change wrote (an edit since is never lost), and the file it displaces is kept, in a 'restored' event of its own
+ * that undoes this. Nothing spreads: no other tool has those settings. The same gates as every restore come first.
+ */
+export async function undoSettingsChange(context: ShareContext, eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
+  const stop = (stopped: string) => ({ stopped, results: [], harnessWrites: 0 });
+  const access = await writeAccess(context);
+  if (!access.allowed) return stop(access.reason);
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped' || gate.state === 'needs-resume') return stop(gate.reason);
   const history = await readHistory(context.home);
   const past = history.find(event => event.id === eventId);
-  if (!past?.settingsFile) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0 };
-  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
+  if (!past?.settingsFile) return stop('That change can’t be restored.');
+  if (past.undoneBy) return stop('That change was already undone.');
   const earlier = await readFile(past.settingsFile.kept, 'utf8').catch(() => undefined);
-  if (earlier === undefined) return { stopped: 'The kept version is no longer in Central Knot’s store, so it can’t be restored.', results: [], harnessWrites: 0 };
+  if (earlier === undefined) return stop('The kept version is no longer in Central Knot’s store, so it can’t be restored.');
   const now = await readFile(past.settingsFile.path, 'utf8').catch(() => undefined);
+  if (now === undefined || sha(now) !== past.settingsFile.wrote) return stop(`${past.item} was edited since, so nothing was undone. Its file is as you left it.`);
   try { await writeFileChecked(past.settingsFile.path, earlier, now); }
-  catch (error) { return { stopped: `It couldn’t be put back: ${plainError(error)}`, results: [], harnessWrites: 0 }; }
-  past.undoneBy = randomUUID();
-  await replaceHistory(context, history);
-  return { results: [{ item: past.item, harness: 'claude-cli', outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1 };
+  catch (error) { return stop(`It couldn’t be put back: ${plainError(error)}`); }
+  const id = randomUUID();
+  past.undoneBy = id;
+  const winner = past.winner ?? { tool: 'claude-cli' as HarnessId, hash: '' };
+  await replaceHistory(context, [...history, { id, at: new Date().toISOString(), key: past.key, item: past.item, kind: 'restored', winner, losers: [{ tool: winner.tool, hash: winner.hash }], previous: winner.hash, orderProved: true,
+    settingsFile: { path: past.settingsFile.path, kept: await keepWhole(context, past.key, now), wrote: sha(earlier) } }]);
+  return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1 };
 }
 
 /** The base instructions: handed to the base-instructions feature to apply (only reached when this build has it, so `base` is set). */
