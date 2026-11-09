@@ -748,7 +748,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       // A folder made again since (a reset or reinstall) holds a new install: the old deletion has no say over it.
       // A skill put back by hand in another tool since is wanted again: the old deletion stops.
       if (deletedNow.has(key)) continue;
-      const readded = gathered.get(key)?.locations.some(location => !item.copies.some(copy => sameDir(copy.directory, location.copy.directory)));
+      const readded = gathered.get(key)?.locations.some(location => !item.off?.includes(location.tool) && !item.copies.some(copy => sameDir(copy.directory, location.copy.directory)));
       for (const copy of item.copies.filter(entry => entry.status === 'removing')) {
         if (resetRoots.has(dirname(copy.directory)) || readded) { item.copies = item.copies.filter(entry => entry !== copy); continue; }
         try {

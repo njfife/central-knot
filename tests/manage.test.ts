@@ -1019,6 +1019,22 @@ test('A tool whose skills folder was away during a deletion has its copy removed
   } finally { await box.cleanup(); }
 });
 
+test('A copy kept in a tool switched off does not end a removal another tool still owes', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await applyChanges(three(box), [manage('foo', ['copilot-cli'])]);
+    await chmod(join(box.home, CODEX), 0o555);
+    await rm(join(box.home, CLAUDE, 'foo'), { recursive: true });
+    const failed = await applyChanges(three(box), []);
+    assert.deepEqual(failed.results.map(result => [result.harness, result.outcome]), [['codex-cli', 'failed']]);
+    await chmod(join(box.home, CODEX), 0o755);
+    await applyChanges(three(box), []);
+    assert.equal(await exists(join(box.home, COPILOT, 'foo/SKILL.md')), true, 'the switched-off copy stays');
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
 test('R11: a linked skill folder is followed when its source is edited', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
