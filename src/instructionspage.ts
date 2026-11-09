@@ -1,6 +1,6 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { baseDraftChanged, loadInstructionVersion, ownText, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -12,7 +12,7 @@ export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
 /** The base editor holds a change: tool editors wait until it is saved or dropped. */
-const baseDirty = () => { const edit = state.baseEdit; return !!edit && (edit.text !== (state.base?.text ?? '') || edit.tools.join() !== (state.base?.tools ?? []).join() || !!edit.source); };
+const baseDirty = () => !!state.baseEdit && baseDraftChanged(state.baseEdit);
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
@@ -67,8 +67,8 @@ export function changeCounts(diff: { kind: string }[]) {
 function editor(file: InstructionFile) {
   const edit = state.instructionEdit!;
   const name = fileName(file.path);
-  // With the base, the editor holds this tool's own text; the base block stays as it is.
-  const original = ownText(file);
+  // With the base, the editor holds this tool's own text; the base block stays as it is. Restoring compares whole files.
+  const original = edit.restoring ? file.text : ownText(file);
   if (edit.stage === 'review') {
     const diff = lineDiff(original, edit.text);
     const { total, text: counts } = changeCounts(diff);
@@ -157,16 +157,11 @@ function card(file: InstructionFile) {
       : h('div.ins-body', {},
         file.exists && own.trim() ? [h('pre.ins-preview', { tabindex: '0', 'aria-label': `${fileName(file.path)} contents` }, open.has(file.tool) ? preview.join('\n') : preview.slice(0, 14).join('\n')),
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
-          : file.base?.copy !== undefined ? h('p.ins-empty', {}, `No instructions of its own yet: ${names[file.tool]} reads only the base instructions below.`)
+          : file.base?.copy !== undefined ? h('p.ins-empty', {}, `No instructions of its own: ${names[file.tool]} reads only the base instructions below.`)
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         baseStrip(file),
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
-            const open = state.instructionEdit, openFile = open && state.instructions?.find(entry => entry.tool === open.tool);
-            // Typed since the page was drawn: ask on that editor rather than drop the draft.
-            if (open && openFile && open.text !== ownText(openFile)) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
-            startInstructionEdit(file);
-          } }),
+          button({ variant: 'outline', size: 'small', label: !file.exists ? 'Write instructions' : own.trim() || !file.base ? 'Edit' : 'Write its own instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => startInstructionEdit(file) }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},

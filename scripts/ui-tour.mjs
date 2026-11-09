@@ -215,9 +215,10 @@ if (wanted('base')) {
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#base-restore-codex-cli')`);
   await shot(a, 'base-edited-there', 'Outside the app, edited both Codex’s own text and its copy of the base in AGENTS.md, then clicked Refresh.');
   await a.click('#base-diff-codex-cli'); await shot(a, 'base-edited-diff', 'Clicked "See the difference".');
-  await a.click('#base-adopt-codex-cli'); await shot(a, 'base-adopt-review', 'Clicked "Use it as the base".');
-  await a.click('#base-back'); await a.click('#base-cancel'); if (await a.has('#base-discard')) await a.click('#base-discard');
-  await a.click('#base-restore-codex-cli'); await wait(400); await shot(a, 'base-put-back', 'Went back, cancelled, and clicked "Put the base back in AGENTS.md" instead.');
+  await a.click('#base-adopt-codex-cli'); await shot(a, 'base-adopt-review', 'Clicked "Use it as the base…".');
+  await a.click('#base-back');
+  await a.click('#base-restore-codex-cli'); await shot(a, 'base-put-back-review', 'Cancelled, then clicked "Put the base back in AGENTS.md…" instead.');
+  await a.click('#base-save'); await shot(a, 'base-put-back', 'Clicked "Put the base back in AGENTS.md".');
   await a.click('#outcome-undo-base'); await wait(400); await shot(a, 'base-undo', 'Clicked "Undo" on the result.');
   await a.click('#ins-edit-claude-cli'); await shot(a, 'base-own-edit', 'Clicked "Edit" on Claude Code’s card: the editor holds only Claude Code’s own instructions.');
   await a.click('#ins-cancel-claude-cli');
