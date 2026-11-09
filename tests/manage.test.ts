@@ -597,6 +597,18 @@ test('An edit in one tool spreads to the others, and the old copy is kept in His
   } finally { await box.cleanup(); }
 });
 
+test('Apply all that spreads an edit and adds a new copy marks only the spread as a replacement', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited in Claude.'));
+    await skill(box.home, CLAUDE, 'fresh');
+    const result = await applyChanges(fast(box), [manage('fresh')]);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced]).sort(),
+      [['fresh', 'copilot-cli', undefined], ['pair', 'copilot-cli', true]]);
+  } finally { await box.cleanup(); }
+});
+
 test('Competing edits with unknown order: the fixed tool order decides, says so, and Undo applies the losing side', async () => {
   const box = await sandbox();
   try {
@@ -934,7 +946,8 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
     await applyChanges(three(box), []);
     assert.equal((await readHistory(box.home)).length, count, 'a failed copy adds no History when retried');
     await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
-    await applyChanges(three(box), []);
+    const caught = await applyChanges(three(box), []);
+    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced]), [['codex-cli', true]]);
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit one.'), 'caught up');
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex edit.'));
     await applyChanges(three(box), []);
