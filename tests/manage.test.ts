@@ -968,11 +968,27 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
     assert.equal((await readHistory(box.home)).length, count, 'a failed copy adds no History when retried');
     await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
     const caught = await applyChanges(three(box), []);
-    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced]), [['codex-cli', true]]);
+    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced, entry.caughtUp]), [['codex-cli', undefined, true]]);
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit one.'), 'caught up');
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex edit.'));
     await applyChanges(three(box), []);
     assert.equal(await readFile(join(box.home, CLAUDE, 'foo/SKILL.md'), 'utf8'), text('foo', 'Codex edit.'), 'and it spreads again');
+  } finally { await box.cleanup(); }
+});
+
+test('Apply all that manages a new skill while another catches up marks the catch-up apart from new and replaced copies', { skip: noPosix || process.getuid?.() === 0 }, async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await chmod(join(box.home, CODEX), 0o555); await chmod(join(box.home, CODEX, 'foo'), 0o555);
+    await writeFile(join(box.home, CLAUDE, 'foo/SKILL.md'), text('foo', 'Edit one.'));
+    await applyChanges(three(box), []);
+    await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
+    await skill(box.home, CLAUDE, 'fresh');
+    const result = await applyChanges(three(box), [manage('fresh')]);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced, entry.caughtUp]).sort(),
+      [['foo', 'codex-cli', undefined, true], ['fresh', 'codex-cli', undefined, undefined], ['fresh', 'copilot-cli', undefined, undefined]]);
+    assert.ok((await readHistory(box.home)).some(entry => entry.kind === 'added' && entry.key === 'fresh'));
   } finally { await box.cleanup(); }
 });
 

@@ -652,7 +652,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', caughtUp: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
         }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
