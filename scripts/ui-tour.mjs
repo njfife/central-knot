@@ -211,6 +211,9 @@ if (wanted('plugin-skills')) {
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   await a.click('#pskill-0-document-tools-pdf-reader-copilot-cli');
   await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
+  await a.run(`document.querySelector('#pskill-0-document-tools-spreadsheet-codex-cli').focus({ focusVisible: true })`);
+  await shot(a, 'skill-focus', 'Moved keyboard focus to spreadsheet’s Codex switch (as Tab would), beside pdf-reader’s chosen ones.');
+  await a.run(`document.activeElement?.blur()`);
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
   await shot(a, 'skill-off', 'Clicked Apply all. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`.');
   await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');

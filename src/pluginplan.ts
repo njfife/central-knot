@@ -22,9 +22,11 @@ export interface PluginOp {
 export interface ResultLine {
   source: string;
   plugin: string;
+  /** Set on a skill switch's line: its text starts with the skill's name. */
+  skill?: string;
   ok: boolean;
   text: string;
-  /** The same said shorter for a narrow place: three or more tools (two for a skill) counted, not named ("installed in 3 tools"). */
+  /** The same with three or more tools counted, not named ("installed in 3 tools"), for a narrow place; a skill's tools are always named. */
   short: string;
 }
 /** What one op did, as its tool reported it. */
@@ -85,11 +87,19 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   }
 }
 
-/** Counts for the change bar. */
+/**
+ * Counts for the change bar: plugins to install or uninstall and how many of each, and for skill switches how many
+ * skills (each counted once, however many tools) and in how many tools.
+ */
 export function summary(draft: PluginDraft) {
   const ops = [...draft.values()];
   const count = (action: PluginAction) => ops.filter(op => op.action === action).length;
-  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'), skillsOff: count('skill-off'), skillsOn: count('skill-on') };
+  const switches = (action: PluginAction) => {
+    const mine = ops.filter(op => op.action === action);
+    return { skills: new Set(mine.map(op => `${pluginKey(op.source, op.plugin)}\u0000${op.skill}`)).size, tools: new Set(mine.map(op => op.tool)).size };
+  };
+  const plugins = new Set(ops.filter(op => !op.skill).map(op => pluginKey(op.source, op.plugin))).size;
+  return { any: ops.length > 0, plugins, installs: count('install'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on') };
 }
 
 /** One step of a run: one tool command, apart from an install, which runs for every tool chosen at once. */
@@ -135,20 +145,17 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const mine = done.filter(entry => lineKey(entry) === key);
     const { plugin, source, skill } = mine[0]!;
     const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
-    // Each group: the tools, what happened there, and the same said shorter for a narrow place.
-    const groups: [string[], string, string?][] = skill
-      ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`, undo ? undefined : `${skill} off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`, undo ? undefined : `${skill} on in`],
+    const groups: [string[], string][] = skill
+      ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],
         [tools('skill-off', false), `${skill} already off in`], [tools('skill-on', false), `${skill} already on in`]]
       : [[tools('installed', true), undo ? 'put back in' : 'installed in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in']];
-    // A skill's line carries its name too, so its short form counts tools from two.
-    const countFrom = skill ? 2 : 3;
-    const said = (short: boolean) => groups.filter(([list]) => list.length)
-      .map(([list, verb, brief]) => `${short ? brief ?? verb : verb} ${short && list.length >= countFrom ? `${list.length} tools` : andList(list)}`).join('; ');
-    if (said(false)) lines.push({ source, plugin, ok: true, text: said(false), short: said(true) });
+    // A skill switch only ever reaches the few tools that have one, so its tools are always named.
+    const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && !skill && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
+    if (said(false)) lines.push({ source, plugin, ...(skill ? { skill } : {}), ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
       const text = `${names[entry.tool]}${skill ? `, ${skill}` : ''}: ${entry.report.message}`;
-      lines.push({ source, plugin, ok: false, text, short: text });
+      lines.push({ source, plugin, ...(skill ? { skill } : {}), ok: false, text, short: text });
     }
   }
   return lines;
@@ -162,7 +169,8 @@ export function resultParts(lines: ResultLine[], undo: boolean, { short = false 
   const ok = lines.filter(line => line.ok);
   if (!ok.length) return [];
   const parts: (string | { plugin: string; source: string })[] = undo ? ['Undone: '] : [];
-  ok.forEach((line, at) => parts.push(...(at ? ['; '] : []), { plugin: line.plugin, source: line.source }, `${undo ? ' ' : ': '}${short ? line.short : line.text}`));
+  // "Undone: document-tools removed from Codex" reads on; a skill's line starts with the skill, so the plugin takes a colon.
+  ok.forEach((line, at) => parts.push(...(at ? ['; '] : []), { plugin: line.plugin, source: line.source }, `${undo && !line.skill ? ' ' : ': '}${short ? line.short : line.text}`));
   return [...parts, '.'];
 }
 /** resultParts as plain text, for the screen reader and the tooltip. */

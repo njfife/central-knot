@@ -51,7 +51,7 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code can’t turn off one skill of a plugin, only the whole plugin.',
+  'claude-cli': 'Claude Code has no switch for a single skill of a plugin.',
 };
 
 /**

@@ -389,7 +389,7 @@ function copilotSkillsOff(settings: Record<string, unknown> | undefined, plugin:
   const off = new Map<string, SkillOff>();
   for (const name of strings(settings?.disabledSkills) ?? []) {
     if (name.startsWith(`${plugin}:`)) { const skill = name.slice(plugin.length + 1); if (!off.has(skill)) off.set(skill, { skill }); }
-    else if (!name.includes(':')) off.set(name, { skill: name, held: `Copilot CLI has every skill named “${name}” turned off, not only this plugin’s, so it can’t be turned on here alone.` });
+    else if (!name.includes(':')) off.set(name, { skill: name, held: `Copilot CLI has every skill named “${name}” turned off, not only this plugin’s. To turn them all on: copilot skill enable ${name}` });
   }
   return [...off.values()];
 }

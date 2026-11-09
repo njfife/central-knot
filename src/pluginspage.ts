@@ -176,10 +176,12 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  */
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
-  if (counts.plugins) {
+  if (counts.any) {
+    // "1 skill to turn off in 2 tools": a skill is counted once, however many tools it changes in.
+    const switches = ({ skills, tools }: { skills: number; tools: number }, verb: string) => (skills ? `${plural(skills, 'skill')} to turn ${verb}${tools > 1 ? ` in ${tools} tools` : ''}` : '');
     return h('div.apply', {},
-      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
-        counts.skillsOff ? `${plural(counts.skillsOff, 'skill')} to turn off` : '', counts.skillsOn ? `${plural(counts.skillsOn, 'skill')} to turn on` : ''].filter(Boolean).join(' · ')),
+      h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [counts.plugins ? `${plural(counts.plugins, 'plugin')} to change` : '', counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
+        switches(counts.skillsOff, 'off'), switches(counts.skillsOn, 'on')].filter(Boolean).join(' · ')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }

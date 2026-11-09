@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, resultLines, prune, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { batches, resultLines, resultSentence, prune, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -21,7 +21,7 @@ test('Install in all queues every tool, and a second click clears them all', () 
   const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, skillsOff: 0, skillsOn: 0 });
+  assert.deepEqual(summary(draft), { any: true, plugins: 1, installs: 2, removals: 0, skillsOff: { skills: 0, tools: 0 }, skillsOn: { skills: 0, tools: 0 } });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });
@@ -134,13 +134,15 @@ test('A skill’s switch is its own choice: it runs between installs and removal
   assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli'), 'remove', 'the plugin’s own choice stays');
   assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli', 'pdf-reader'), 'skill-off');
   toggle(draft, off('codex-cli', 'spreadsheet'));
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 0, removals: 1, skillsOff: 1, skillsOn: 0 });
+  toggle(draft, off('copilot-cli'));
+  assert.deepEqual(summary(draft), { any: true, plugins: 1, installs: 0, removals: 1, skillsOff: { skills: 1, tools: 2 }, skillsOn: { skills: 0, tools: 0 } }, 'one skill in two tools counts once');
+  toggle(draft, off('copilot-cli'));
   assert.deepEqual(batches([...draft.values(), op('docs', 'claude-cli')]).map(step => [step.action, step.skill]), [['install', undefined], ['skill-off', 'pdf-reader'], ['remove', undefined]]);
   const done = (tool: HarnessId, outcome: 'skill-off' | 'skill-on', changed?: boolean): PluginDone => ({ ...off(tool), action: outcome, report: { tool, outcome, message: '', runs: [], changed } });
   const run = [done('codex-cli', 'skill-off', true), done('copilot-cli', 'skill-off', true), done('claude-cli', 'skill-off')];
   assert.deepEqual(reverse(run).map(back => [back.tool, back.action, back.skill]), [['codex-cli', 'skill-on', 'pdf-reader'], ['copilot-cli', 'skill-on', 'pdf-reader']]);
   assert.equal(resultLines(run)[0]!.text, 'pdf-reader turned off in Codex and Copilot CLI; pdf-reader already off in Claude Code');
-  assert.equal(resultLines([done('codex-cli', 'skill-on', true)], true)[0]!.text, 'pdf-reader back on in Codex');
+  assert.equal(resultSentence(resultLines([done('codex-cli', 'skill-on', true)], true), true), 'Undone: docs: pdf-reader back on in Codex.');
 });
 
 test('A skill’s switch is dropped once it means nothing: not installed there, already as chosen, held off, or a tool with no such switch', () => {

@@ -50,7 +50,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     const state = stateOf(entry, plugin.name, tool);
-    if (state.state === 'installed') return ['Installed', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : ''].filter(Boolean).join(' · ');
+    if (state.state === 'installed') {
+      const switching = (action: PluginOp['action']) => [...market.draft.values()].filter(op => op.source === entry.source && op.plugin === plugin.name && op.tool === tool && op.action === action).length;
+      const willOff = switching('skill-off'), willOn = switching('skill-on');
+      return ['Installed', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
+        willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : ''].filter(Boolean).join(' · ');
+    }
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
     return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
@@ -121,18 +126,20 @@ function skillsGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginVi
   const switchable = tools.filter(tool => !NO_SKILL_SWITCH[tool]);
   const limits = tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => NO_SKILL_SWITCH[tool]!);
   const switches = (skill: string) => h('span.skill-switches', {}, switchable.map(tool => skillSwitch(view, entry, plugin, tool, skill, marketIndex)));
-  // Held off by a switch that isn't this plugin's own: said on the row, not only in the switch's hover text.
-  const heldNote = (skill: string) => {
-    const holders = switchable.filter(tool => skillOff(entry, plugin.name, tool, skill)?.held);
-    return holders.length ? `Off in ${andList(holders.map(tool => names[tool]))} for every skill named “${skill}”, not only this plugin’s; turn it on there.` : undefined;
+  // What a row's switches are waiting to do, and why one is held off, in words on the row, not only in hover text.
+  const rowNote = (skill: string) => {
+    const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, skill) === action).map(tool => names[tool]);
+    const held = [...new Set(switchable.map(tool => skillOff(entry, plugin.name, tool, skill)?.held).filter((why): why is string => !!why))];
+    const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '', ...held];
+    return notes.filter(Boolean).join(' ') || undefined;
   };
   return h('div.plugin-group.plugin-skills', {},
-    h('div.plugin-group-head', {}, h('h4', {}, `Skills (${skills.length})`),
-      switchable.length ? h('span.skill-switches.skill-switch-heads', { 'aria-hidden': 'true' }, switchable.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), h('span.skill-switch-tool', {}, names[tool])))) : null),
-    switchable.length || limits.length ? h('p.plugin-part-what.plugin-skills-note', {}, [
+    h('h4', {}, `Skills (${skills.length})`),
+    switchable.length || limits.length ? h('p.plugin-skills-note', {}, [
       switchable.length ? `Turn a skill off in ${andList(switchable.map(tool => names[tool]))} without uninstalling the plugin; nothing changes until Apply all.` : '',
       ...limits].filter(Boolean).join(' ')) : null,
-    partList(`${owner}\u0000Skills`, skills.map(part => ({ name: part.name, text: part.description, end: switchable.length ? switches(part.name) : undefined, note: heldNote(part.name) }))));
+    switchable.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, switchable.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), names[tool])))) : null,
+    partList(`${owner}\u0000Skills`, skills.map(part => ({ name: part.name, text: part.description, end: switchable.length ? switches(part.name) : undefined, note: rowNote(part.name) }))));
 }
 
 /** After layout: marks each part whose description was cut at two lines, which shows its "Show more". */

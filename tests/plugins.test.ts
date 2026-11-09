@@ -368,6 +368,6 @@ exit 0
     assert.deepEqual([held.outcome, held.runs.length], ['failed', 0]);
     assert.match(held.message, /every skill named “one”/);
     const claude = await setSkill(context, 'ck-test-market', 'full', 'one', 'claude-cli', false, '/m');
-    assert.deepEqual([claude.outcome, claude.message], ['failed', 'Claude Code can’t turn off one skill of a plugin, only the whole plugin.']);
+    assert.deepEqual([claude.outcome, claude.message], ['failed', 'Claude Code has no switch for a single skill of a plugin.']);
   } finally { await box.cleanup(); }
 });
