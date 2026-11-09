@@ -9,7 +9,7 @@ import { harnesses } from './harnesses.ts';
 import { appendHistory, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { driftOf, itemId, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
+import { driftOf, itemId, itemKeyOf, itemKind, planSwitch, releaseHeld, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
 import { strings } from './values.ts';
@@ -43,8 +43,11 @@ async function saveProfiles(home: string, view: ProfilesView) {
   await writeDurably(profilesPath(home), `${JSON.stringify(file, null, 2)}\n`);
 }
 
-/** Profiles change Central Knot's own file only; still, a home that is preview-only gets nothing written. */
-async function writable(context: ShareContext): Promise<string | undefined> {
+/**
+ * Why nothing can be written here, if so: a preview-only home, or another build owning sync. Profiles change only Central Knot's
+ * file and each tool's switches, never the sync record, so a record waiting for Resume does not stop them.
+ */
+async function whyReadOnly(context: ShareContext): Promise<string | undefined> {
   const access = await writeAccess(context);
   if (!access.allowed) return access.reason;
   const gate = await syncGate(context);
@@ -52,20 +55,21 @@ async function writable(context: ShareContext): Promise<string | undefined> {
 }
 
 /**
- * Adds a profile, or changes one's name or items. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
+ * Adds a profile, or changes an existing one's name or items: a field left out keeps what the profile has now, so a rename and a
+ * tick sent close together never undo each other. Names are unique, ignoring case. With `restore`, `id` is a deleted profile's,
  * made again with that id (Undo of Delete), so History's switches still name it.
  */
-export async function saveProfile(context: ShareContext, input: { id?: string; name: string; items: string[]; restore?: boolean }): Promise<{ problem?: string; id?: string }> {
-  const stop = await writable(context);
+export async function saveProfile(context: ShareContext, input: { id?: string; name?: string; items?: string[]; restore?: boolean }): Promise<{ problem?: string; id?: string }> {
+  const stop = await whyReadOnly(context);
   if (stop) return { problem: stop };
   const view = await readProfiles(context.home);
   if (view.problem) return { problem: view.problem };
-  const name = input.name.trim().replace(/\s+/g, ' ');
+  const existing = input.id ? view.profiles.find(profile => profile.id === input.id) : undefined;
+  const name = (input.name ?? existing?.name ?? '').trim().replace(/\s+/g, ' ');
   if (!name) return { problem: 'A profile needs a name.' };
   if (name.length > 40) return { problem: 'Keep the name to 40 characters or fewer.' };
   if (view.profiles.some(profile => profile.id !== input.id && profile.name.toLowerCase() === name.toLowerCase())) return { problem: `There is already a profile called “${name}”.` };
-  const items = [...new Set(input.items.filter(item => /^(skill|mcp):./.test(item)))];
-  const existing = input.id ? view.profiles.find(profile => profile.id === input.id) : undefined;
+  const items = [...new Set((input.items ?? existing?.items ?? []).filter(item => /^(skill|mcp):./.test(item)))];
   if (input.id && !existing && !input.restore) return { problem: 'That profile is gone. Nothing was saved.' };
   const id = existing?.id ?? (input.restore ? input.id : undefined) ?? randomUUID();
   view.profiles = existing ? view.profiles.map(profile => (profile.id === id ? { id, name, items } : profile)) : [...view.profiles, { id, name, items }];
@@ -75,7 +79,7 @@ export async function saveProfile(context: ShareContext, input: { id?: string; n
 
 /** Deletes a profile's definition. Its switches stay as they are; the active profile can't be deleted (switch away first). */
 export async function deleteProfile(context: ShareContext, id: string): Promise<{ problem?: string }> {
-  const stop = await writable(context);
+  const stop = await whyReadOnly(context);
   if (stop) return { problem: stop };
   const view = await readProfiles(context.home);
   if (view.problem) return { problem: view.problem };
@@ -87,7 +91,8 @@ export async function deleteProfile(context: ShareContext, id: string): Promise<
 
 /**
  * The skill switches an explicit Disable, Enable or their Undo flipped (outcome 'switched' in `results`, for one of `changes`'
- * skills), as profile items: profiles stop holding these, since the person set them by hand.
+ * skills), as profile items: profiles stop holding these, since the person set them by hand. A skill's result names it by its
+ * folder (manage.ts), whose itemKey is the change's key.
  */
 export function switchedByHand(changes: { key: string }[], results: DestinationResult[]): { item: string; tool: HarnessId }[] {
   return results.filter(result => result.outcome === 'switched' && result.harness && changes.some(change => change.key === itemKey(result.item)))
@@ -128,8 +133,6 @@ export async function driftNow(context: ShareContext): Promise<number> {
   return view.problem ? 0 : driftOf((await readHome(context)).items, view);
 }
 
-/** An item's key without its kind: `skill:notes` → `notes`. */
-const keyOf = (flip: ProfileFlip) => flip.item.slice(flip.item.indexOf(':') + 1);
 
 /** The file that holds this flip's switch. */
 const fileOf = (context: ShareContext, flip: ProfileFlip) => (itemKind(flip.item) === 'mcp' ? mcpSwitchPath(context, flip.tool) : switchPath(context, flip.tool));
@@ -139,7 +142,7 @@ function editText(context: ShareContext, text: string, group: ProfileFlip[], tar
   const failed = new Map<ProfileFlip, string>();
   for (const flip of group) {
     try {
-      if (itemKind(flip.item) === 'mcp') text = withMcpSwitch(flip.tool, text, keyOf(flip), flip.disabled);
+      if (itemKind(flip.item) === 'mcp') text = withMcpSwitch(flip.tool, text, itemKeyOf(flip.item), flip.disabled);
       else { const target = targets.get(flip); if (!target) throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); text = withSwitch(context, flip.tool, text, target, flip.disabled); }
     } catch (error) { failed.set(flip, error instanceof Error ? error.message : String(error)); }
   }
@@ -176,14 +179,14 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
   const groups = new Map<string, ProfileFlip[]>();
   for (const flip of flips) groups.set(fileOf(context, flip), [...(groups.get(fileOf(context, flip)) ?? []), flip]);
   for (const [file, group] of groups) {
-    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.snapshots, home.manage, keyOf(flip), flip.tool) : undefined]));
+    const targets = new Map(group.map(flip => [flip, itemKind(flip.item) === 'skill' ? skillTarget(home.snapshots, home.manage, itemKeyOf(flip.item), flip.tool) : undefined]));
     const failed = await writeFlips(context, file, group, targets);
     let after = '';
     try { after = await readFile(file, 'utf8'); } catch { /* every flip below then fails its check */ }
     for (const flip of group) {
       let reason = failed.get(flip);
       if (!reason) {
-        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after, keyOf(flip)) : switchState(context, flip.tool, after, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
+        try { if ((itemKind(flip.item) === 'mcp' ? mcpDisabled(flip.tool, after, itemKeyOf(flip.item)) : switchState(context, flip.tool, after, targets.get(flip)!)) !== flip.disabled) reason = `${harnesses[flip.tool].name}’s settings did not take the change.`; }
         catch { reason = `${file} could not be read back.`; }
       }
       if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${harnesses[flip.tool].name}: ${reason}` }); continue; }
@@ -222,7 +225,7 @@ const SWITCH_KEY = 'profiles:switch';
 
 /** Switches to a profile (null: No profile). One History entry names every switch it flipped, so Undo puts each one back. */
 export async function switchProfile(context: ShareContext, id: string | null): Promise<ProfileSwitchResult> {
-  const stop = await writable(context);
+  const stop = await whyReadOnly(context);
   if (stop) return { stopped: stop, results: [], flips: [] };
   const profiles = await readProfiles(context.home);
   if (profiles.problem) return { stopped: profiles.problem, results: [], flips: [] };
@@ -250,7 +253,7 @@ export async function switchProfile(context: ShareContext, id: string | null): P
  * the one that chose the profile in use. The undo is itself a switch in History, so its own Undo redoes it.
  */
 export async function undoProfileSwitch(context: ShareContext, eventId: string): Promise<ProfileSwitchResult> {
-  const stop = await writable(context);
+  const stop = await whyReadOnly(context);
   if (stop) return { stopped: stop, results: [], flips: [] };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
@@ -261,7 +264,15 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   const home = await readHome(context);
   const results: DestinationResult[] = [];
   const back: ProfileFlip[] = [];
+  // A switch changed again after this one, by hand (Disable or Enable on the Skills page) or by a later profile switch, belongs to
+  // that change now: Undo leaves it.
+  const later = history.slice(history.indexOf(past) + 1);
+  const changedSince = new Set([
+    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => `${itemId('skill', entry.key)}|${tool}`)),
+    ...later.filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => `${flip.item}|${flip.tool}`) ?? []),
+  ]);
   for (const flip of past.profile.flips) {
+    if (changedSince.has(`${flip.item}|${flip.tool}`)) { results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${harnesses[flip.tool].name} since, so it stays as it is.` }); continue; }
     const item = home.items.find(entry => entry.id === flip.item);
     if (item?.blocked[flip.tool]) { results.push({ item: flip.name, harness: flip.tool, outcome: 'held', message: item.blocked[flip.tool]! }); continue; }
     const now = item?.tools[flip.tool];
@@ -271,7 +282,8 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   }
   const { done, results: flipped } = await flipAll(context, home, back);
   results.push(...flipped);
-  const governs = profiles.active === past.profile.to;
+  // The profile in use is this switch's choice only while no later switch (or undo) has chosen since.
+  const governs = [...history].reverse().find(entry => entry.kind === 'profile')?.id === past.id;
   const before = profiles.active;
   if (governs) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
   profiles.held = heldAfterFlips(profiles.held, done);

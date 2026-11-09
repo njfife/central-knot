@@ -3,7 +3,7 @@ import type { ApplyResult, Change, DesktopApi, ProfileSwitchResult, DestinationR
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { flipCounts } from './profileplan.ts';
+import { flipCounts, flipWords } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -558,7 +558,7 @@ export const profileState = { open: undefined as string | undefined, confirmDele
 function switchOutcome(name: string, result: ProfileSwitchResult) {
   const { off, on } = flipCounts(result.flips);
   const tools = andList([...new Set(result.flips.map(flip => toolName(flip.tool) ?? flip.tool))]);
-  const what = [off && `${plural(off, 'item')} turned off`, on && `${plural(on, 'item')} turned back on`].filter(Boolean).join(' and ');
+  const what = flipWords({ off, on }, 'did');
   state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)} in ${tools}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
   announce(state.outcome.text, true);
@@ -576,12 +576,12 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
 // A switch from the menu bar: its result and Undo are on the page the next time the window shows.
 api().onProfileSwitched((name, result) => { switchOutcome(name, result); rerender(); });
 
-/** Saves a profile's name and items. Quiet when it works: the page shows the change in place. */
-export const saveProfileDef = (profile: { id?: string; name: string; items: string[]; restore?: boolean }, said?: string) => busy('Saving profile…', async () => {
+/** Saves a profile: only the fields given change. A new or restored profile opens; an edit leaves the page where it is. */
+export const saveProfileDef = (profile: { id?: string; name?: string; items?: string[]; restore?: boolean }, said?: string) => busy('Saving profile…', async () => {
   const result = await api().saveProfile(profile, state.home!.home);
   if (result.view) state.home = result.view;
   if (result.problem) { announce(result.problem); return; }
-  if (result.id) profileState.open = result.id;
+  if (result.id && (!profile.id || profile.restore)) profileState.open = result.id;
   announce(said ?? 'Profile saved.', true);
 });
 

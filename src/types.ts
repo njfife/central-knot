@@ -110,7 +110,7 @@ export interface DesktopApi {
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
-  saveProfile(profile: { id?: string; name: string; items: string[]; restore?: boolean }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
+  saveProfile(profile: { id?: string; name?: string; items?: string[]; restore?: boolean }, home: string): Promise<{ problem?: string; id?: string; view?: HomeView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; view?: HomeView }>;
   /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;

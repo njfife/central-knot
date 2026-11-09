@@ -7,7 +7,7 @@ import { discover } from '../src/discovery.ts';
 import { applyChanges, readHistory } from '../src/manage.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
-import { planSwitch, type SwitchItem } from '../src/profileplan.ts';
+import { itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, heldAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -37,7 +37,7 @@ test('Each tool’s MCP switch: off writes its own form, on takes it out, and ev
   }
 });
 
-const item = (id: string, tools: SwitchItem['tools'], blocked: SwitchItem['blocked'] = {}): SwitchItem => ({ id, kind: id.startsWith('mcp:') ? 'mcp' : 'skill', key: id.slice(id.indexOf(':') + 1), name: id, description: '', tools, blocked, blockedFile: {} });
+const item = (id: string, tools: SwitchItem['tools'], blocked: SwitchItem['blocked'] = {}): SwitchItem => ({ id, kind: id.startsWith('mcp:') ? 'mcp' : 'skill', key: itemKeyOf(id), name: id, description: '', tools, blocked, blockedFile: {} });
 
 test('A switch turns off what the profile leaves out, and back on only what a profile turned off', () => {
   const items = [
@@ -125,16 +125,28 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
     const pager = (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!;
     await switchProfile(box.context, dev);
     await switchProfile(box.context, pager);
+    // Then Development again: the profile in use was chosen by this last switch, not the first.
+    await switchProfile(box.context, dev);
     const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
     await undoProfileSwitch(box.context, first.id);
-    // Development's switch of pager was undone since by Pager's; only sentry goes back on. Pager still holds dev off, and is in use.
+    // The first switch's pager flip was made again by later switches, so it is theirs; only sentry goes back on.
     const after = await readProfiles(box.home);
-    assert.equal(after.active, pager);
-    assert.deepEqual(after.held, { 'skill:dev': ['claude-cli', 'codex-cli'] });
-    // Undo of Delete makes Development again with its own id, so History's switches still name it.
+    assert.equal(after.active, dev);
+    assert.deepEqual(after.held, { 'skill:pager': ['claude-cli'] });
+  } finally { await box.cleanup(); }
+});
+
+test('Profiles save only the fields given, and Undo of Delete keeps the id History names', async () => {
+  const box = await sandbox();
+  try {
+    const dev = (await saveProfile(box.context, { name: 'Development', items: ['skill:dev'] })).id!;
+    // A rename and a tick sent close together: each changes its own field.
+    await saveProfile(box.context, { id: dev, items: ['skill:dev', 'skill:pager'] });
+    await saveProfile(box.context, { id: dev, name: 'Dev work' });
+    assert.deepEqual((await readProfiles(box.home)).profiles, [{ id: dev, name: 'Dev work', items: ['skill:dev', 'skill:pager'] }]);
     await deleteProfile(box.context, dev);
-    await saveProfile(box.context, { id: dev, name: 'Development', items: ['skill:dev'], restore: true });
-    assert.equal((await readProfiles(box.home)).profiles.find(profile => profile.name === 'Development')?.id, dev);
+    await saveProfile(box.context, { id: dev, name: 'Dev work', items: ['skill:dev'], restore: true });
+    assert.equal((await readProfiles(box.home)).profiles[0]?.id, dev);
   } finally { await box.cleanup(); }
 });
 
@@ -150,6 +162,10 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
       await releaseProfileHolds(box.context, switchedByHand(changes, (await applyChanges(box.context, changes)).results));
     }
     assert.equal((await readProfiles(box.home)).held['skill:pager'], undefined);
+    // Undo of the switch leaves pager as set by hand, too.
+    const switched = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    assert.ok(!(await undoProfileSwitch(box.context, switched.id)).flips.some(flip => flip.item === 'skill:pager'));
+    await switchProfile(box.context, dev);
     const result = await switchProfile(box.context, all);
     assert.deepEqual(result.flips.map(flip => flip.item).sort(), ['mcp:sentry', 'mcp:sentry'], 'pager stays off: the last Disable was by hand');
   } finally { await box.cleanup(); }

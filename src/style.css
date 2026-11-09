@@ -1475,3 +1475,4 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 @media (max-width: 1100px) { .pf-sub-sessions { display: none; } }
 /* Skills and MCP pages: a copy a profile turned off reads as off, not only by its corner mark */
 .cell-button.cell-profile-off > .icon:first-child, .cell-button.cell-profile-off > .glyph-fill { opacity: 0.4; }
+.profile-confirm-actions { display: inline-flex; gap: 8px; flex-wrap: nowrap; }

@@ -2,7 +2,7 @@
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { andList, toolNames } from './words.ts';
-import { flipCounts } from './profileplan.ts';
+import { flipCounts, flipWords } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
@@ -53,7 +53,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
 function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; action: string } {
   const switched = event.profile!;
   const { off, on } = flipCounts(switched.flips);
-  const counts = [off && `${off === 1 ? '1 item' : `${off} items`} turned off`, on && `${on === 1 ? '1 item' : `${on} items`} turned back on`].filter(Boolean).join(', ') || 'no switch needed changing';
+  const counts = flipWords({ off, on }, 'did') || 'no switch needed changing';
   // The tools by name, as the result of the switch said them.
   const where = switched.flips.length ? ` in ${andList([...new Set(switched.flips.map(flip => who(flip.tool)))])}` : '';
   const undid = state.history?.find(other => other.undoneBy === event.id);

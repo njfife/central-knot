@@ -6,11 +6,14 @@
 //   remembered as held by profiles.
 // - An item in the profile is turned back on only where a profile turned it off. A switch turned off by hand stays off.
 // - No profile turns back on everything profiles turned off, and holds nothing.
+import { plural } from './model.ts';
 import type { HarnessId, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
 
 export type ItemKind = 'skill' | 'mcp';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
 export const itemKind = (id: string): ItemKind => (id.startsWith('mcp:') ? 'mcp' : 'skill');
+/** An item's key without its kind: `skill:notes` → `notes`. */
+export const itemKeyOf = (id: string) => id.slice(id.indexOf(':') + 1);
 
 /** One skill or MCP server as a profile sees it: which tools have it, and whether each tool's switch has it on. */
 export interface SwitchItem {
@@ -97,6 +100,15 @@ export function releaseHeld(held: Record<string, HarnessId[]>, released: { item:
 export function flipCounts(flips: ProfileFlip[]): { off: number; on: number } {
   const count = (disabled: boolean) => new Set(flips.filter(flip => flip.disabled === disabled).map(flip => flip.item)).size;
   return { off: count(true), on: count(false) };
+}
+
+/**
+ * Flip counts in words: what a switch will do ('turns 4 items off and turns 1 item back on') or did ('4 items turned off and 1 item
+ * turned back on'). '' when there is nothing.
+ */
+export function flipWords({ off, on }: { off: number; on: number }, tense: 'will' | 'did'): string {
+  const said = (count: number, what: string) => (tense === 'will' ? `turns ${plural(count, 'item')} ${what}` : `${plural(count, 'item')} turned ${what}`);
+  return [off && said(off, 'off'), on && said(on, 'back on')].filter(Boolean).join(' and ');
 }
 
 /** How many items the tools no longer match the profile in use on (or No profile, on what profiles still hold off): 0 when they match. */

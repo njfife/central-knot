@@ -162,18 +162,20 @@ const activeProfileName = () => lastProfiles.profiles.find(profile => profile.id
  * Shown once a profile exists; before that, "Profiles…" opens the page that makes one.
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
-  if (!lastProfiles.profiles.length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
+  // Before any profile exists (and nothing is held off by one), "Profiles…" opens the page that makes one.
+  if (!lastProfiles.profiles.length && !Object.keys(lastProfiles.held).length) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
   const choose = (id: string | null) => void fromTray(async () => {
     if (!current) return;
     const result = await switchProfile(context(), id);
-    if (!result.stopped && window && !window.isDestroyed()) window.webContents.send('profile:switched', id === null ? 'No profile' : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
-    // What could not be switched is told on the page, like a background pass's failures.
-    // The page shows the switch's result (failures included) when the window is there; otherwise they wait with sync's.
     const page = window && !window.isDestroyed();
-    for (const entry of [...(page ? [] : result.results.filter(item => item.outcome === 'failed')), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
+    // Reporting: a switch that couldn't start waits on the page like sync's failures. Otherwise its result, failures included,
+    // goes to the page's band with Undo; with no window, the failures wait with sync's.
+    if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
+    else if (page) window.webContents.send('profile:switched', id === null ? 'No profile' : lastProfiles.profiles.find(profile => profile.id === id)?.name ?? 'That profile', result);
+    else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
+    // Menus: the profiles as saved, and what still differs (the page's read updates it when there is a window).
     lastProfiles = await readProfiles(current.home);
-    // Whatever could not be switched still differs: the menu keeps saying so until it is applied.
-    lastDrift = await driftNow(context());
+    if (!page) lastDrift = await driftNow(context());
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
   const drift = lastDrift ? ` (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'} to apply)` : '';
@@ -182,7 +184,7 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
     // The profile in use no longer matches the tools: applying it again is one click here too, as in the status bar menu.
-    ...(lastDrift && lastProfiles.active ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName()} to tools (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'})`, enabled: usable, click: () => choose(lastProfiles.active!) }] : []),
+    ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? 'No profile'} to tools (${lastDrift} ${lastDrift === 1 ? 'item' : 'items'})`, enabled: usable, click: () => choose(lastProfiles.active ?? null) }] : []),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
   ] };
@@ -213,7 +215,9 @@ function refreshTray() {
   const profile = activeProfileName();
   tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : ''}`);
   // The active profile is always in sight: its name sits beside the menu bar icon.
-  if (process.platform === 'darwin') tray.setTitle(`${unseen ? '•' : ''}${profile ? ` ${profile}` : ''}`.trim());
+  // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu).
+  const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
+  if (process.platform === 'darwin') tray.setTitle(`${unseen ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
@@ -341,6 +345,12 @@ function background() {
     const fromEvent = touched;
     touched = false;
     const result = await pass();
+    // A switch turned back in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: drift is
+    // looked at on its own while a profile holds anything, and the menus and the page follow it.
+    if (lastProfiles.active || Object.keys(lastProfiles.held).length) {
+      const drift = await driftNow(context()).catch(() => lastDrift);
+      if (drift !== lastDrift) { lastDrift = drift; refreshTray(); if (!window.isDestroyed()) window.webContents.send('sync:changed'); }
+    }
     // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
     if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
@@ -598,7 +608,7 @@ app.whenReady().then(async () => {
   handle('profiles:save', async (profile, home) => {
     if (home !== current?.home || !profile || typeof profile !== 'object') return { problem: elsewhere };
     const input = profile as { id?: unknown; name?: unknown; items?: unknown; restore?: unknown };
-    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : '', items: strings(input.items) ?? [], restore: input.restore === true });
+    const saved = await saveProfile(context(), { id: typeof input.id === 'string' ? input.id : undefined, name: typeof input.name === 'string' ? input.name : undefined, items: strings(input.items), restore: input.restore === true });
     return saved.problem ? saved : { ...saved, view: await view() };
   });
   handle('profiles:delete', async (id, home) => {
