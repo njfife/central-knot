@@ -52,7 +52,7 @@ test('AT-01/02: discovers only user-wide standalone skills, without changing fil
     assert.equal(snapshot.detection, 'Config found but app not detected');
     assert.equal(snapshot.probe.state, 'not-run');
     assert.equal(snapshot.discovery, 'ready');
-    assert.deepEqual(snapshot.skills.map(item => item.id), ['review']);
+    assert.deepEqual(snapshot.skills.map(item => item.folder), ['review']);
     assert.equal(snapshot.skills[0].name, 'My skill');
     assert.equal(snapshot.skills[0].content, original);
     assert.equal(snapshot.skills[0].status, 'Not shared');
@@ -96,7 +96,7 @@ test('DET-02: honors relocated configuration and does not substitute an unknown 
     await writeFile(join(relocated, 'skills/relocated-skill/SKILL.md'), 'Relocated');
     await skill(setup.home, 'default-must-not-appear', 'Default');
     const result = await discover({ home: setup.home, mode: 'actual', configOverride: relocated });
-    assert.deepEqual(result.skills.map(item => item.id), ['relocated-skill']);
+    assert.deepEqual(result.skills.map(item => item.folder), ['relocated-skill']);
     const unknown = await discover({ home: setup.home, mode: 'actual', configOverride: 'relative-root' });
     assert.equal(unknown.discovery, 'failed');
     assert.equal(unknown.skills.length, 0);
@@ -165,7 +165,7 @@ test('OWN-02: reading a linked skill leaves the link and target unchanged', { sk
     await symlink(join(setup.home, '.claude/skills/original'), join(setup.home, '.claude/skills/linked'));
     const snapshot = await discover({ home: setup.home, mode: 'custom' });
     assert.equal(snapshot.skills.length, 2);
-    assert.ok(snapshot.skills.find(item => item.id === 'linked')!.notes.some(note => note.includes('user link')));
+    assert.ok(snapshot.skills.find(item => item.folder === 'linked')!.notes.some(note => note.includes('user link')));
     assert.ok((await lstat(join(setup.home, '.claude/skills/linked'))).isSymbolicLink());
     assert.equal(await readFile(join(setup.home, '.claude/skills/original/SKILL.md'), 'utf8'), 'User bytes');
   } finally { await setup.cleanup(); }

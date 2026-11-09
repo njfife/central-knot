@@ -11,7 +11,6 @@ export interface ProbeResult {
 }
 
 export interface Skill {
-  id: string;
   /** Folder name: what the harness root holds and what a copy is called. */
   folder: string;
   name: string;
