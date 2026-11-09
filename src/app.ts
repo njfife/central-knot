@@ -35,8 +35,8 @@ export const state = {
   outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
-  /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
-  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
+  /** The one instruction file being edited (InstructionDraft). */
+  instructionEdit: undefined as InstructionDraft | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
@@ -57,6 +57,11 @@ export const rerender = () => {
   render();
   if (focused && document.activeElement?.id !== focused) document.getElementById(focused)?.focus();
 };
+
+/** The practice copy's note on the Overview, shown until the person hides it (kept per viewer, in this window's storage). */
+const PRACTICE_NOTE = 'ck-practice-banner-dismissed';
+export const practiceNoteOpen = (): boolean => { try { return localStorage.getItem(PRACTICE_NOTE) !== '1'; } catch { return true; } };
+export const setPracticeNote = (open: boolean): void => { try { if (open) localStorage.removeItem(PRACTICE_NOTE); else localStorage.setItem(PRACTICE_NOTE, '1'); } catch { /* shown again next time */ } };
 
 export function announce(text: string, quiet = false) {
   const region = document.getElementById('announcement')!;
@@ -93,7 +98,8 @@ function accept(view: HomeView) {
   state.home = view;
   state.applied = undefined;
   state.item = undefined;
-  state.instructionEdit = undefined;
+  // An unsaved Instructions draft outlives a home switch: the Instructions page offers to copy or discard it.
+  if (!draftUnsaved()) state.instructionEdit = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -169,7 +175,7 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
 export const startHome = () => busy('Reading skills, MCP servers and agents…', async () => {
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
-  const practiceNote = view?.mode === 'fixture' && (() => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } })();
+  const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
   if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readSummary(view).replace(` from ${view.label}`, '')}` }; announce(readSummary(view), true); } else announce('');
 });
 
@@ -307,8 +313,43 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
 
 // ---------- Instructions ----------
 
+/**
+ * The one instruction file being edited: the text so far, and `from`, the file as it was opened (its home, path and
+ * text), kept apart from the page's list of files so the draft is still known if that file's tool leaves the home.
+ * `hash` is what a save checks the file against; it moves on when the file changed outside and the draft is kept.
+ */
+export interface InstructionDraft {
+  tool: HarnessId;
+  from: { home: string; path: string; text: string };
+  text: string;
+  hash: string;
+  stage: 'edit' | 'review';
+  restoring?: boolean;
+  confirmDiscard?: boolean;
+  conflict?: boolean;
+  fullDiff?: boolean;
+}
+
+/** The open draft holds changes not saved anywhere. */
+export const draftUnsaved = (): boolean => !!state.instructionEdit && state.instructionEdit.text !== state.instructionEdit.from.text;
+
+/** The file the open draft belongs to, while it is on the page: the same home and the same tool. */
+export const draftFile = (): InstructionFile | undefined => {
+  const edit = state.instructionEdit;
+  return edit && edit.from.home === state.home?.home ? state.instructions?.find(file => file.tool === edit.tool) : undefined;
+};
+
+/** Every draft that replaces the open one comes through here: one with unsaved changes stays, and the page says why. */
+function openDraft(file: InstructionFile, text: string, stage: InstructionDraft['stage'], restoring = false): boolean {
+  if (draftUnsaved()) { announce('Your unsaved instructions draft is still open. Save, copy or discard it first.'); return false; }
+  state.instructionEdit = { tool: file.tool, from: { home: state.home!.home, path: file.path, text: file.text }, text, hash: file.hash, stage, restoring };
+  return true;
+}
+
 export const loadInstructions = () => busy('Reading instruction files…', async () => {
   state.instructions = (await api().instructions()) ?? undefined;
+  // A draft whose file is gone (its tool left the home) is dropped only when it holds nothing unsaved.
+  if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined;
   announce('', true);
 });
 
@@ -347,7 +388,7 @@ const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing
 export function startInstructionEdit(file: InstructionFile) {
   // A save on another card keeps its Undo there; any other result belongs to the last task.
   if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== file.path.split(/[\\/]/).pop())) state.outcome = undefined;
-  state.instructionEdit = { tool: file.tool, text: file.text, hash: file.hash, stage: 'edit' };
+  if (!openDraft(file, file.text, 'edit')) { rerender(); return; }
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
   area?.focus();
@@ -358,8 +399,8 @@ export function startInstructionEdit(file: InstructionFile) {
 export const loadInstructionVersion = (file: InstructionFile, id: string) => busy('Reading the earlier version…', async () => {
   const text = await api().instructionVersion(file.tool, id);
   if (text === undefined) { announce('That version is no longer kept.'); return; }
+  if (!openDraft(file, text, 'review', true)) return;
   state.outcome = undefined;
-  state.instructionEdit = { tool: file.tool, text, hash: file.hash, stage: 'review', restoring: true };
   announce('Review going back to the earlier version, then save to put it back.', true);
 });
 

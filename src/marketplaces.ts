@@ -9,10 +9,11 @@ import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
+import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
 import { heldReason } from './pluginstatus.ts';
-import { isFolder, isHttps, onlyAllowed } from './values.ts';
+import { isFolder, isHttps } from './values.ts';
 import { toolNames } from './words.ts';
 
 /** What the marketplace feature needs from the app around it. */
@@ -45,7 +46,7 @@ export interface MarketplaceEngine {
  */
 async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   const found: Partial<Record<HarnessId, string>> = {};
-  for (const tool of engine.pluginTools) {
+  for (const tool of pluginTools) {
     for (const candidate of executableCandidates(homedir(), process.env.PATH ?? '', harnesses[tool].binary)) {
       if (isBundledCli(candidate)) continue;
       try { await access(candidate, constants.X_OK); found[tool] = candidate; break; } catch { /* next */ }
@@ -55,7 +56,8 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
 }
 const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall };
 
-const toolIds = (value: unknown): engine.PluginTool[] => onlyAllowed(value, engine.pluginTools);
+/** Tools named by the page: only those that install plugins. */
+const toolIds = (value: unknown): PluginTool[] => (Array.isArray(value) ? value.filter(takesPlugins) : []);
 /** Reports go to the page without each run's file bytes (kept only for the record here); the page never reads them. */
 const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
@@ -115,7 +117,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** The tools' states for one marketplace's plugins. A tool holding another marketplace under this name is left alone. */
-  async function statesFor(ctx: engine.PluginContext, tools: engine.PluginTool[], catalog: Catalog, source: string): Promise<MarketplaceView['states']> {
+  async function statesFor(ctx: engine.PluginContext, tools: PluginTool[], catalog: Catalog, source: string): Promise<MarketplaceView['states']> {
     const held = new Map<HarnessId, InstallState>();
     for (const tool of tools) {
       const other = await engine.heldBy(ctx, tool, catalog.name, source);
@@ -130,7 +132,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page. */
-  async function entryView(ctx: engine.PluginContext, tools: engine.PluginTool[], source: string, origins: MarketplaceView['origins'], fresh: boolean): Promise<MarketplaceView> {
+  async function entryView(ctx: engine.PluginContext, tools: PluginTool[], source: string, origins: MarketplaceView['origins'], fresh: boolean): Promise<MarketplaceView> {
     const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: sourceLabel(source) };
     try {
       const { catalog, stale, problem } = await catalogFor(ctx, source, { fresh });
@@ -144,7 +146,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
   async function view(fresh = false): Promise<PluginsView> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
-    const tools = toolIds(await host.tools());
+    const tools = (await host.tools()).filter(takesPlugins);
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
     const note = (source: string, origin: MarketplaceView['origins'][number]) => {
@@ -229,7 +231,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * Each tool's own install. A plugin gone from the marketplace, or a marketplace that now gives another name than the
    * one chosen (`marketName`), fails for its tools instead of stopping the whole run.
    */
-  async function install(source: string, marketName: string, plugin: string, tools: engine.PluginTool[], home: unknown): Promise<PluginActionResult> {
+  async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
@@ -246,7 +248,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
-  async function uninstall(source: string, marketName: string, plugin: string, tool: engine.PluginTool, home: unknown): Promise<PluginActionResult> {
+  async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     return { reports: withoutFileBytes([await use.uninstall(await context({ clis: true }), marketName, plugin, tool, source)]) };

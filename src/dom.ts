@@ -162,9 +162,10 @@ export function fitBars(): void {
     }
     // Still too wide after every step: marked, so tests (scripts/e2e.mjs) read the same measurement instead of a copy of it.
     bar.toggleAttribute('data-overflows', overflows(bar));
-    // A button showing only its icon gets its label as a tooltip; one whose label shows needs none (a title it was given stays).
+    // A button or filter chip showing only its icon gets its label as a tooltip; one whose label shows needs none (a title it
+    // was given stays).
     const iconsOnly = bar.classList.contains('bar-icons');
-    for (const button of bar.querySelectorAll<HTMLElement>('.btn[data-tip]')) {
+    for (const button of bar.querySelectorAll<HTMLElement>('.btn[data-tip], .chip[data-tip]')) {
       if (iconsOnly && !button.title) { button.title = button.dataset.tip!; button.dataset.tipShown = ''; }
       else if (!iconsOnly && 'tipShown' in button.dataset) { button.removeAttribute('title'); delete button.dataset.tipShown; }
     }

@@ -1,12 +1,12 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { homeTools, loadHome, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { homeTools, loadHome, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
-import { pluginTools } from './presence.ts';
+import { takesPlugins } from './presence.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
 import type { HomeMode, ManageView } from './types.ts';
@@ -45,7 +45,6 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number, none
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
-const practiceNoteOpen = () => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } };
 const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents?.servers ?? [])].some(fact => fact.managed);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents?.notices ?? [] : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
@@ -81,7 +80,7 @@ function renderSidebar() {
     navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : home?.mcp.servers.length, noneHold(home?.mcp.tools, 'MCP servers')),
     navRow('agents', 'Agents', 'bot', designMode ? undefined : home?.agents?.servers.length, noneHold(home?.agents?.tools, 'agents')),
     navRow('instructions', 'Instructions', 'pencil-line', undefined, noneHold(homeTools(), 'instructions')),
-    navRow('plugins', 'Plugins', 'puzzle', undefined, noneHold(homeTools().filter(tool => (pluginTools as string[]).includes(tool)), 'plugins')),
+    navRow('plugins', 'Plugins', 'puzzle', undefined, noneHold(homeTools().filter(takesPlugins), 'plugins')),
     h('div.nav-divider', { role: 'separator' }),
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
@@ -105,7 +104,7 @@ function renderHeader(rail: boolean) {
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
     h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
-      onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
+      onclick: () => { setPracticeNote(true); showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),
@@ -131,11 +130,11 @@ function renderStatus() {
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
     // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one. With sync on
-    // and nothing managed yet, the grey switch says Waiting; its tooltip says what it waits for.
+    // and nothing managed yet, the grey switch says "On · nothing managed"; its tooltip says sync starts once something is.
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))
     : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
       title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'Waiting') : 'Off')) : '',
+      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'On · nothing managed') : 'Off')) : '',
   );
   region('status-version').textContent = packageInfo.version;
   // The result band already says what just happened; the status bar does not say it twice.

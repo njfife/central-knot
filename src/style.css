@@ -200,13 +200,8 @@ ul { list-style: none; }
 .status-item { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: pre; }
 .status-home { flex: none; }
 .status-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A message takes the room the facts leave and shortens with an ellipsis; its tooltip has it whole (app.ts announce). */
 #announcement { flex: 1 1 0; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A narrow status bar showing a message gives it room: the write fact keeps its icon, its words move to its tooltip. The
-   message itself keeps its whole text in its tooltip too (app.ts announce). */
-#status { container: status / inline-size; }
-@container status (width < 1100px) {
-  #status-facts:has(~ #announcement:not(:empty):not(.visually-hidden):not([data-quiet="true"])) .status-clip { display: none; }
-}
 #announcement[data-quiet="true"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 #status-end { flex: none; margin-left: auto; }
 #status-version { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 2px; }
@@ -291,8 +286,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .bar-short .toolbar-end { padding-left: 8px; }
 .bar-short .chip { padding: 0 8px; }
 .chip-icon { display: none; }
-.bar-icons .chip-shrinks .chip-label { display: none; }
-.bar-icons .chip-shrinks .chip-icon { display: block; color: var(--warning); }
+.bar-icons .chip-label { display: none; }
+.bar-icons .chip-icon { display: block; }
+.bar-icons .chip-warn .chip-icon { color: var(--warning); }
 .bar-icons .find { min-width: 88px; }
 .bar-wrap { flex-wrap: wrap; row-gap: 2px; }
 .bar-wrap .toolbar-end { border-left: 0; }
@@ -310,7 +306,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .band-danger { background: var(--danger-tint); color: var(--danger); }
 .band-done, .band-done .band-text { color: var(--ink); }
 .band-help { color: var(--ink-soft); }
-.band-why { color: var(--ink-faint); }
+.band-why { color: var(--ink-soft); }
 .band-sync-off .text-action + .text-action { margin-left: 4px; }
 
 .sync-notice-lines { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
@@ -398,7 +394,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 16px; overflow: hidden; }
 .ov-name-text { flex: 0 1 auto; min-width: 3em; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .unmanaged .ov-name-text { font-weight: 400; }
-.ov-name-about { flex: 1 1 0; min-width: 8em; color: var(--ink-faint); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-name-about { flex: 1 1 0; min-width: 8em; color: var(--ink-soft); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-tag ~ .ov-name-about::before { content: "·"; margin-right: 8px; }
 /*
  * A row's name cell gives way in order. It wraps onto lines below its 40px, out of sight: the description goes first
@@ -412,7 +408,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .row-open { display: grid; place-items: center; width: 18px; height: 18px; margin-left: -6px; flex: none; border: 0; background: none; border-radius: 4px; cursor: pointer; color: inherit; }
 .row-open:hover { background: var(--press); }
 .row-open-spacer { display: inline-block; width: 18px; margin-left: -6px; flex: none; }
-.row-tag { flex: none; font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
+.row-tag { flex: none; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
 .held-pill { flex: none; white-space: nowrap; font-size: 11.5px; color: var(--ink-soft); border: 1px solid var(--control-line); border-radius: 999px; padding: 1px 7px; }
 .decided { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px 1px 7px; white-space: nowrap; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-soft); }
 .decided-uses { color: var(--ink-faint); }
@@ -422,7 +418,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ov-cell { position: relative; display: flex; justify-content: center; align-items: center; gap: 6px; }
 .ov-tool-head { flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink); }
 .ov-ghost, .ov-ghost .ov-name-text { color: var(--ink-faint); }
-.ov-ghost-why { margin-left: 10px; font-size: 12px; color: var(--ink-faint); white-space: nowrap; }
+.ov-ghost-why { margin-left: 10px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 .ov-ghost-text { grid-column: 2 / -1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-right: 16px; font-size: 12px; color: var(--ink-soft); }
 
 .switch { position: relative; flex: none; width: 32px; height: 18px; border-radius: 999px; border: 0; padding: 0; background: var(--switch-off); cursor: pointer; transition: background 140ms var(--ease); }
@@ -460,11 +456,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-oneway-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
 .cell-oneway-mark svg { width: 11px; height: 11px; }
 .legend-cell .cell-oneway-mark { top: -4px; right: -4px; width: 10px; height: 10px; }
+.legend-cell .cell-source-mark { top: -3px; left: -3px; width: 7px; height: 7px; }
 .cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.legend-lead { font-size: 12px; color: var(--ink-faint); }
+.legend-lead { font-size: 12px; color: var(--ink-soft); }
 /* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
 .legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
 .legend-plain { border: 1px solid var(--control-line); border-radius: 5px; background: transparent; }
@@ -494,7 +491,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .tool-menu-name { font-weight: 500; }
 .tool-menu-count { margin-left: auto; color: var(--ink-soft); font-size: 11.5px; }
 .tool-menu-note { margin: 0; flex: 1; font-size: 11.5px; line-height: 1.45; color: var(--ink-soft); }
-.tool-menu-foot { margin: 8px 0 0; font-size: 11.5px; color: var(--ink-faint); }
+.tool-menu-foot { margin: 8px 0 0; font-size: 11.5px; color: var(--ink-soft); }
 .tool-menu-stop { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .add-target + .add-target { border-top: 1px solid var(--line); }
 .add-target .tool-menu-row { padding: 8px 0 4px; }
@@ -521,7 +518,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .bulk-divider { width: 1px; height: 18px; background: var(--control-line); margin: 0 4px; }
 
 /* Wide content (renderer.ts .wide): the open row's details dock beside the table, which keeps the rest of the width. */
-.ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 26vw, 560px); grid-template-rows: minmax(0, 1fr); }
+.ov-page.docked { display: grid; grid-template-columns: minmax(0, 1fr) clamp(400px, 30cqw, 560px); grid-template-rows: minmax(0, 1fr); }
 .dock-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .docked .ov-row.open { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
 .dock { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--surface); }
@@ -548,7 +545,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-definition { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 2px 10px; font-size: 12.5px; }
 .details-definition dt { color: var(--ink-faint); }
 .details-definition dd { color: var(--ink); overflow-wrap: anywhere; }
-.details-definition-hint { grid-column: 1 / -1; margin-top: 4px; font-size: 12px; color: var(--ink-faint); }
+.details-definition-hint { grid-column: 1 / -1; margin-top: 4px; font-size: 12px; color: var(--ink-soft); }
 .details-tools { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .details-tool { display: flex; flex-direction: column; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .details-tool:last-child { border-bottom: 0; }
@@ -670,7 +667,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .intro #intro-dismiss { margin-left: auto; }
 .overview-lead { max-width: var(--measure); font-size: 14px; line-height: 1.5; color: var(--ink); }
 .kind-cards { display: flex; flex-wrap: wrap; gap: 12px; }
-.kind-cards > .kind-card { flex: 1 1 0; min-width: 180px; }
+/* The kind cards share a row from the left, each at most 420px, so a wide window places them rather than stretching them. */
+.kind-cards > .kind-card { flex: 1 1 0; min-width: 180px; max-width: 420px; }
+.kind-card-none { border-style: dashed; }
+.kind-card-none .kind-card-head, .kind-card-none .kind-card-count { color: var(--ink-faint); }
 .kind-card { display: flex; flex-direction: column; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; }
 .kind-card-main { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; padding: 14px 16px 6px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .kind-card-main:hover, .kind-card-main:focus-visible { background: var(--selected-row); }
@@ -724,10 +724,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ins-warn { color: var(--ink); }
 .ins-preview, .ins-diff { margin: 0; padding: 10px 12px; max-height: 360px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--chrome); font-family: var(--mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ins-preview { max-height: none; font-size: 12.5px; }
-.ins-empty { font-size: 12.5px; color: var(--ink-faint); }
+.ins-empty { font-size: 12.5px; color: var(--ink-soft); }
 .ins-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .ins-confirm-text { margin-right: 4px; font-size: 12.5px; font-weight: 600; }
-.ins-locked { font-size: 12px; color: var(--ink-faint); }
+.ins-locked { font-size: 12px; color: var(--ink-soft); }
 .ins-editor { display: flex; flex-direction: column; gap: 6px; }
 .ins-text { width: 100%; padding: 10px 12px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font-family: var(--mono); font-size: 12.5px; line-height: 1.5; resize: vertical; }
 .ins-text:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -798,16 +798,20 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-example:hover { border-color: var(--accent); }
 .market-example:disabled { opacity: .5; cursor: default; }
 .market-empty { color: var(--ink-soft); font-size: 13px; }
-.empty-aside { margin: 10px 0 0; font-size: 12px; color: var(--ink-faint); }
+.empty-aside { margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { height: auto; padding-top: 0; padding-bottom: 0; line-height: inherit; }
 .market-main { padding: 18px max(0px, calc(var(--market-gutter) - var(--scrollbar))) 32px var(--market-gutter); }
-.market-page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
-.market-page-title h2, .plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
-.market-page-title .market-page-meta { flex: 0 1 auto; min-width: 0; margin: 0; }
-.market-page-actions { margin-left: auto; display: flex; gap: 4px; align-self: center; }
+/* The toolbar's left on a marketplace's page: its name, then the facts, which shorten first (their tooltip has them all). */
+.market-title-line { flex: 0 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 14px; }
+.market-title-line h2 { flex: none; margin: 0; font-size: 16px; font-weight: 650; white-space: nowrap; }
+.plugin-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.market-title-line .market-page-meta { flex: 0 1 auto; min-width: 0; margin: 0; flex-wrap: nowrap; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.market-page-head { display: flex; align-items: baseline; gap: 4px 16px; }
+.market-page-head > .btn { margin-left: auto; align-self: center; }
 .market-page-about, .plugin-about { margin: 6px 0 0; max-width: var(--measure); font-size: 13.5px; color: var(--ink); }
+.market-page-head .market-page-about { margin: 0; }
 .market-page-meta, .plugin-meta { display: flex; flex-wrap: wrap; align-items: center; margin: 4px 0 0; font-size: 12px; color: var(--ink-faint); }
 .market-page-meta .btn, .plugin-meta .btn { height: auto; min-height: 0; padding: 0; font-size: 12px; }
 .meta-dot { margin: 0 6px; color: var(--ink-faint); }
@@ -842,7 +846,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .result-link:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
 /* The plugin table: the plugin takes the free width, each tool a steady column. */
 .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
-.plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-faint); }
+.plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .plugin-row { cursor: pointer; }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
 .plugin-row-name > span { max-width: 100%; }
@@ -857,6 +861,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .cell-button.cell-pending-remove, .legend-cell.cell-pending-remove { border-style: dashed; border-color: var(--danger); color: var(--danger); background: color-mix(in oklab, var(--danger) 8%, transparent); }
 .plugin-legend { padding: 10px 16px 0; }
+/* "Click a box…": in the plugin table's header, or, in narrow content, on its own line above the table. */
+.plugin-hint { display: none; margin: 0 0 4px; font-size: 12px; color: var(--ink-soft); }
+.hint-narrow { display: none; }
 .plugin-legend .legend-cell.cell-absent { border-style: solid; }
 /* A plugin's own page */
 .plugin-head h2 { display: inline; margin-right: 8px; }
@@ -867,7 +874,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
-.plugin-tool-rows > .btn { margin-left: auto; }
+.plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
 /* From 1400px of page, what it holds and how each tool takes it sit beside the README; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 @container plugin (width >= 1400px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -897,7 +904,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .part-more:hover { text-decoration: underline; }
 .part-more:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
 .plugin-parts li.clamped .part-more { display: inline; }
-.plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+.plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* Narrow content: the marketplaces become a strip above the page they open. */
 @container content (width < 880px) {
@@ -920,6 +927,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .plugin-row-holds { order: 1; flex: none; }
   .plugin-row-about ~ .plugin-row-holds::after { content: "·"; margin: 0 6px; }
   .plugin-row-about { order: 2; flex: 1 1 0; min-width: 0; }
+  .plugin-hint { display: block; }
+  .hint-wide { display: none; }
+  .hint-narrow { display: inline; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
@@ -948,7 +958,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .settings-card h2 { margin: 0; font-size: 14px; font-weight: 650; }
 .settings-switch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
 .settings-switch-label { font-weight: 500; }
-.settings-why { flex-basis: 100%; font-size: 12px; color: var(--ink-faint); }
+.settings-why { flex-basis: 100%; font-size: 12px; color: var(--ink-soft); }
 .settings-hint { margin: 0 0 6px; max-width: var(--measure); font-size: 12.5px; color: var(--ink-soft); }
 .appearance-choices { display: flex; flex-wrap: wrap; gap: 10px; }
 .appearance-choice { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 8px; width: 112px; padding: 14px 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink-soft); font-size: 13px; cursor: pointer; }

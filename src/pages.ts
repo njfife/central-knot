@@ -1,9 +1,9 @@
-import { announce, homeToolNames, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { announce, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, isPresent } from './presence.ts';
+import { absentTools, isPresent, takesPlugins } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 import { andList, orList } from './words.ts';
 
@@ -53,12 +53,10 @@ function notRead() {
   return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void (state.lastMode ? loadHome(state.lastMode) : startHome()) })));
 }
 
-const remembered = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
-const remember = (key: string) => { try { localStorage.setItem(key, '1'); } catch { /* per-viewer convenience only */ } };
 
 /** The practice copy explains itself the first times it opens: what it is, that it is safe, and how to move to the real thing. */
 function practiceBanner() {
-  if (state.home?.mode !== 'fixture' || remembered('ck-practice-banner-dismissed')) return null;
+  if (state.home?.mode !== 'fixture' || !practiceNoteOpen()) return null;
   return h('div.intro', { role: 'note' },
     h('div.intro-text', {},
       h('strong', {}, 'This is a practice copy.'),
@@ -66,11 +64,20 @@ function practiceBanner() {
     // The first step stays inside the sandbox; the real home is the quieter second choice.
     button({ variant: 'primary', size: 'small', label: 'Try it: open Skills', id: 'intro-try', onclick: () => showPage('skills') }),
     (() => { const real = button({ variant: 'link', size: 'small', label: `or use ${realHomeName}`, id: 'intro-use-real', onclick: () => void loadHome('actual') }); real.title = 'Only reads your tools; nothing is written there until you click Apply all.'; return real; })(),
-    button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { remember('ck-practice-banner-dismissed'); rerender(); } }));
+    button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
 }
 
 /** One card per kind: how many, how many are managed, and the one thing that needs attention, if any. */
-function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Parameters<typeof icon>[0], noun: [string, string], facts: { managed: boolean; edited?: unknown[]; waits?: boolean; differs: boolean }[], waitsForClaude = 0) {
+/**
+ * One kind on the Overview: how many there are and how many are managed, and what needs attention. `holders` are the
+ * tools here that can hold this kind; with none, the card says so, quieter and with no arrow, and still opens its page.
+ */
+function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Parameters<typeof icon>[0], noun: [string, string], facts: { managed: boolean; edited?: unknown[]; waits?: boolean; differs: boolean }[], holders: HarnessId[], waitsForClaude = 0) {
+  if (!holders.length) {
+    return h('div.kind-card.kind-card-none', {}, h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
+      h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title)),
+      h('span.kind-card-count', {}, `${title} unavailable in this home: no tool here holds them`)));
+  }
   const total = facts.length;
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
@@ -90,6 +97,16 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
       : h(`span.kind-card-state.${attention.tone}`, {}, icon(attention.glyph, 13), attention.text));
 }
 
+/**
+ * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it; with one
+ * tool there is nothing to keep in step, so it says how a second one joins.
+ */
+function nextStep(home: HomeView, nothingManaged: boolean): string {
+  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents?.servers.length) return ' Nothing found in this home yet.';
+  if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
+  return nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : '';
+}
+
 export function overviewPage() {
   if (designMode) return designOverview();
   const home = state.home;
@@ -104,11 +121,11 @@ export function overviewPage() {
       practiceBanner(),
       h('p.overview-lead', {}, leadSentence(homeTools(), home.agents.tools),
         // The next step only where it can be taken: something to manage, and a home that can be written.
-        !home.manage.skills.length && !home.mcp.servers.length && !(home.agents?.servers.length) ? ' Nothing found in this home yet.' : nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : ''),
+        nextStep(home, nothingManaged)),
       h('div.kind-cards', {},
-        kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills)),
-        kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.claudePending.length),
-        kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []))),
+        kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills), homeTools()),
+        kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
+        kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []), home.agents.tools)),
       h('div.overview-more', {},
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
@@ -118,7 +135,9 @@ export function overviewPage() {
         nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in the ${navigator.userAgent.includes('Mac') ? 'menu bar' : 'tray'}. Turn sync off${navigator.userAgent.includes('Linux') ? '' : ', set it to start at sign-in,'} or quit from there.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are.
-        h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file) and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace).'))));
+        // Plugins only where a tool here installs them.
+        h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
+          ...(homeTools().some(takesPlugins) ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
 }
 
 // ---------- MCP servers ----------

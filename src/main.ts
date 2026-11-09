@@ -245,23 +245,25 @@ let pendingMcpNotices: SyncNotice[] = [], pendingAgentNotices: SyncNotice[] = []
 let lastStopped: string | undefined;
 
 interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
-/** `tools`: the tools in the home as this pass found them, when it read them (with Sync on). */
-interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult; tools?: HarnessId[] }
+interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
 
-/** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
-async function pass(explicit = false): Promise<PassResult> {
+/**
+ * One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence.
+ * `tools`: the tools in the home, when the caller has just read them; otherwise the pass reads them itself.
+ */
+async function pass(explicit = false, tools?: HarnessId[]): Promise<PassResult> {
   const shared = context();
   if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
-  const tools = (await manageView(shared)).tools;
+  const present = tools ?? presentTools(await read());
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  const mcp = await applyMcp(shared, tools, []).catch(crashed('MCP sync'));
+  const mcp = await applyMcp(shared, present, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
-  const agents = await applyAgents(shared, tools, []).catch(crashed('Agents sync'));
-  return { skills, tools, mcpAndAgents: {
+  const agents = await applyAgents(shared, present, []).catch(crashed('Agents sync'));
+  return { skills, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
     mcpNotices: mcp?.notices ?? [], agentNotices: agents?.notices ?? [], settling: !!(mcp?.settling || agents?.settling),
@@ -317,10 +319,16 @@ async function backgroundPass() {
   if (!current) return;
   const fromEvent = touched;
   touched = false;
-  const { skills, mcpAndAgents, tools } = await pass();
+  // Which tools are in the home is read on every pass, whatever Sync or write access say (reading writes nothing). A tool
+  // installed or removed changes every page's columns, so the page reads again; until it has, the next pass tells it again.
+  // Its folders are watched from then on, as a home's are when it opens.
+  const tools = presentTools(await read());
+  if (tools.join() !== presentTools(latestSnapshots).join()) {
+    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+    void startWatching();
+  }
+  const { skills, mcpAndAgents } = await pass(false, tools);
   keepMcpAndAgents(mcpAndAgents);
-  // A tool that appeared or went away changes every page's columns, even when the pass wrote nothing: the page reads again.
-  if (tools && tools.join() !== presentTools(latestSnapshots).join() && !window.isDestroyed()) window.webContents.send('sync:changed');
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
   if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.

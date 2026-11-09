@@ -179,7 +179,7 @@ test('A tool holding a different marketplace under the same name is left alone',
   } finally { await box.cleanup(); }
 });
 
-test('Refresh lets go of a marketplace’s its plugins’ copies from other repositories, so they are read again', async () => {
+test('Refresh lets go of the copies a marketplace’s plugins keep from other repositories, so they are read again', async () => {
   const box = await setup();
   try {
     const root = join(box.base, 'market');

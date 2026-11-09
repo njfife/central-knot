@@ -38,7 +38,6 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
   return context.reads.get(key) as Promise<T>;
 }
 
-export { pluginTools, type PluginTool };
 
 // ---------- Sources and access ----------
 

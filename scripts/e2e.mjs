@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, renameSync, utimesSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -174,13 +174,15 @@ async function mainProcess(port) {
     clickMenu: async (label, checked) => {
       await send('HeapProfiler.collectGarbage');
       const prototype = await send('Runtime.evaluate', { expression: `${electron}.Menu.prototype` });
+      if (!prototype.result?.result?.objectId) throw new Error('No Electron Menu in the main process: the menu test cannot find the menu bar menu.');
       const menus = await send('Runtime.queryObjects', { prototypeObjectId: prototype.result.result.objectId });
       const clicked = await send('Runtime.callFunctionOn', { objectId: menus.result.objects.objectId, arguments: [{ value: label }, { value: checked }], returnByValue: true,
+        // Every object with Menu's prototype comes back, not only menus: only a menu has .items.
         functionDeclaration: `function (label, checked) { const items = this.filter(menu => Array.isArray(menu.items)).flatMap(menu => menu.items).filter(item => item.label === label && item.checked === checked); for (const item of items) item.click({}, undefined, undefined); return items.length; }` });
       return clicked.result.result.value;
     },
     /** Makes one request from the page fail until `restore` runs; the real handler stays aside meanwhile. */
-    failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
+    failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the failed-Refresh test needs another way to make a request fail.'); globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
     close: () => socket.close(),
   };
@@ -418,7 +420,7 @@ async function practiceFlow() {
 
   // Details open under a row.
   await a.click('#open-release-notes');
-  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in Claude Code, Copilot CLI and Codex'), await a.text('.details'));
+  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in all 3 tools'), await a.text('.details'));
   await a.click('#open-release-notes');
 
   // Choose which copy to use.
@@ -666,22 +668,31 @@ async function practiceFlow() {
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
-  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   // A tool that goes away while Plugins is open leaves its column on Refresh, and comes back with its folder.
+  const codexKept = join(scratch, 'codex-kept');
+  cpSync(join(practice, '.codex'), codexKept, { recursive: true });
   renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
   await a.click('#header-refresh');
   for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 2; tries++) await wait(100);
   same('Refresh on Plugins drops a tool that went away', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 2);
-  // Its folder comes back with nothing to write: the background pass alone (no Refresh) finds the tool, and Plugins follows.
-  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
-  const nudged = join(practice, '.claude/skills', readdirSync(join(practice, '.claude/skills'))[0], 'SKILL.md');
-  utimesSync(nudged, new Date(), new Date());
+  // It comes back as a new folder while Automatic sync is off, and nothing else changes: no folder being watched sees it,
+  // so the background poll alone (no Refresh, no file event) finds the tool, and Plugins follows.
+  await a.click('#sync-switch');
+  same('Automatic sync is off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
+  // Passes still due from the folder going away (a deletion's settle window) run out first, so only a later pass can find it.
+  await wait(5000);
+  cpSync(codexKept, join(practice, '.codex'), { recursive: true });
+  const polled = Date.now();
   for (let tries = 0; tries < 300 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
-  same('a background pass brings its column back on Plugins, with no Refresh', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  same('with sync off, the background poll brings its column back on Plugins', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  console.log(`(the poll found Codex after ${Math.round((Date.now() - polled) / 1000)} s)`);
+  rmSync(join(practice, '.codex-away'), { recursive: true, force: true });
+  await a.click('#sync-switch');
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
     check('the refresh request is made to fail', await main.failRequest('discovery:refresh'));
@@ -754,6 +765,20 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // A draft whose tool leaves the home is kept, offered to copy or discard, and never silently replaced by another edit.
+  await a.click('#ins-edit-codex-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value = area.value + 'Codex draft.'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-orphan')); tries++) await wait(100);
+  check('a draft whose tool left the home is offered to copy or discard', await a.exists('#ins-orphan-copy') && /Codex is no longer in this home/.test(await a.text('#ins-orphan') ?? '') && !(await a.exists('#ins-text-codex-cli')), await a.text('#ins-orphan'));
+  check('and no other edit can replace it', await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`));
+  await a.shot('instructions-orphan-draft');
+  await a.click('#ins-orphan-discard');
+  check('Discard draft lets it go', !(await a.exists('#ins-orphan')) && !(await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`)));
+  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-edit-codex-cli')); tries++) await wait(100);
   // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);

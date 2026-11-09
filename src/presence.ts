@@ -16,5 +16,8 @@ export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.fi
 export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 
+/** Whether a tool (or a value from the page) is one that installs plugins. */
+export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.some(entry => entry === tool);
+
 /** The tools looked for and not found here, in discovery order: only the Tools page names them, as information. */
 export const absentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);

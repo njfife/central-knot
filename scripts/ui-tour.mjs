@@ -5,7 +5,7 @@
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -204,6 +204,14 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+  // A draft whose tool leaves the home: kept, and offered to copy or discard.
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.copilot'), join(practice, '.copilot-away'));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
+  await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
+  await a.click('#ins-orphan-discard');
+  renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
+  await a.click('#header-refresh');
 }
 
 // ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
@@ -300,7 +308,13 @@ if (wanted('sizes')) {
     await a.size(width, height);
     await everyPage(`${width}`);
     // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
-    if (width === 860) { await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle'); }
+    if (width === 860) {
+      await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
+      // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
+      await a.click('#nav-skills');
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+      if (box) { await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560.'); }
+    }
   }
   await a.theme('light');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }

@@ -94,14 +94,26 @@ function markClamped(): void {
 }
 
 /**
- * Marks the cut descriptions once the page is laid out, and again whenever the column they sit in changes width (a
- * window resize, or the README moving beside them at 1400px), since that changes which are cut.
+ * "Choose all" follows the last tool with the same gap; when it no longer fits on that line and wraps, it moves to the
+ * right edge, where a lone button reads as belonging to the whole row (style.css .choice-wrapped).
  */
-const clampWatcher = new ResizeObserver(markClamped);
-function watchClamps(column: HTMLElement): HTMLElement {
-  clampWatcher.disconnect();
-  clampWatcher.observe(column);
-  return column;
+function markWrappedChoice(): void {
+  const rows = document.querySelector<HTMLElement>('.plugin-tool-rows'), all = rows?.querySelector<HTMLElement>(':scope > .btn');
+  const first = rows?.firstElementChild as HTMLElement | null;
+  if (!rows || !all || !first) return;
+  all.classList.remove('choice-wrapped');
+  all.classList.toggle('choice-wrapped', all.offsetTop > first.offsetTop + first.offsetHeight / 2);
+}
+
+/**
+ * Lays out what depends on width once the page is drawn, and again whenever it changes width (a window resize, or the
+ * README moving beside the contents at 1400px): which descriptions are cut, and where Choose all sits.
+ */
+const layoutWatcher = new ResizeObserver(() => { markClamped(); markWrappedChoice(); });
+function watchLayout(page: HTMLElement): HTMLElement {
+  layoutWatcher.disconnect();
+  layoutWatcher.observe(page);
+  return page;
 }
 
 const group = (owner: string, title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(`${owner}\u0000${title}`, parts.map(part => ({ name: part.name, text: part.description })))) : null;
@@ -134,7 +146,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
-  return h('article.plugin-page', { 'aria-label': title },
+  return watchLayout(h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
@@ -143,8 +155,8 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     installPanel(view, entry, plugin, marketIndex, components),
     // What it holds and how each tool takes it, beside the README on a wide page (style.css), one above the other otherwise.
     h('div.plugin-columns', {},
-      watchClamps(h('div.plugin-column', {},
+      h('div.plugin-column', {},
         contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
-        components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null)),
-      detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null));
+        components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null),
+      detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null)));
 }
