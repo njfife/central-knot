@@ -110,6 +110,9 @@ if (wanted('disable')) {
   await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
   await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
   await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
+  await a.click('#open-release-notes'); await a.click('#delete-release-notes');
+  await shot(a, 'delete-everywhere-confirm', 'Opened release-notes (unmanaged, only in Claude Code) and clicked "Delete everywhere…": it asks once more.');
+  await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
   await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
   const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
   if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked "Restore in Copilot CLI" on the removal.'); }
@@ -129,6 +132,10 @@ if (wanted('disable')) {
       await shot(a, `size-${width}-${theme}`, `notes' details (managed, disabled in Codex) at ${width}×${height}, ${theme}.`);
     }
   }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark'); await a.click('#enable-notes-claude-cli'); await a.click('#remove-notes-copilot-cli');
+  await shot(a, 'pending-860-dark', 'At 860×560: queued Disable in Claude Code and Remove in Copilot CLI for notes, not applied.');
+  await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
 }

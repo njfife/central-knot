@@ -26,9 +26,10 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'switched': {
       const turned = (disabled: boolean) => list((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
       const text = [turned(true) && `disabled in ${turned(true)}`, turned(false) && `enabled in ${turned(false)}`].filter(Boolean).join('; ');
-      return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, with ${(event.switched ?? []).length === 1 ? 'that tool’s' : 'each tool’s'} own switch.`, action: 'Undo' };
+      const one = (event.switched ?? []).length === 1 ? who(event.switched![0].tool) : undefined;
+      return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, using ${one ? `${one}’s` : 'each tool’s'} own switch.`, action: 'Undo' };
     }
-    case 'removed': return { glyph: 'trash-2', text: `Removed from ${list(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };
+    case 'removed': return { glyph: 'circle-minus', text: `Removed from ${list(event.losers.map(loser => loser.tool))}. Restore puts ${event.losers.length === 1 ? 'it' : 'them'} back.`, action: 'Restore' };
     case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${list(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${list(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
