@@ -89,7 +89,7 @@ async function describeCommit(dir: string, id: string | undefined): Promise<Repo
 
 /** Each file of a commit or tree: its mode, blob and path. */
 async function listTree(dir: string, treeish: string): Promise<{ mode: string; blob: string; path: string }[]> {
-  const output = await gitOrThrow(dir, ['-c', 'core.quotePath=false', 'ls-tree', '-r', '-z', '--full-tree', treeish]);
+  const output = await gitOrThrow(dir, ['ls-tree', '-r', '-z', '--full-tree', treeish]);
   return output.split('\0').filter(Boolean).map(line => {
     const tab = line.indexOf('\t');
     const [mode, , blob] = line.slice(0, tab).split(' ');
@@ -206,7 +206,8 @@ async function readSide(dir: string, treeish: string | undefined, withBase: bool
 
 // ---------- The Managed set here, written into the clone ----------
 
-/** Prefers the tools that take any skill or agent as written. */
+/** Which tool Pull writes first, and whose copy stands for an item: Claude Code takes any skill or agent as written. (Sync's own
+ * orders, in mcp.ts and agents.ts, rank copies for other reasons.) */
 const preference: HarnessId[] = ['claude-cli', 'codex-cli', 'copilot-cli', 'pi-cli'];
 const byPreference = (first: HarnessId, second: HarnessId) => preference.indexOf(first) - preference.indexOf(second);
 
@@ -230,7 +231,7 @@ function sourceTool(facts: SkillFacts, avoid: HarnessId[] = []): HarnessId | typ
 type Unsent = Map<string, { item: SideItem; reason: string }>;
 const unsendable = (unsent: Unsent, key: string, kind: RepoKind, name: string, reason: string) => unsent.set(key, { item: { key, kind, name, id: '', paths: [] }, reason });
 
-async function writeSkills(context: ShareContext, dir: string, skills: SkillFacts[], unsent: Unsent) {
+async function writeSkills(dir: string, skills: SkillFacts[], unsent: Unsent) {
   // Only what the layout holds is replaced: a README beside the skills, or any other file in the repo, stays.
   for (const entry of await readdir(join(dir, 'skills'), { withFileTypes: true }).catch(() => [])) if (entry.isDirectory()) await removeTree(join(dir, 'skills', entry.name));
   for (const facts of skills.filter(skill => skill.managed)) {
@@ -283,7 +284,7 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
 async function writeManaged(context: ShareContext, dir: string, baseId: string | undefined, base?: BaseInstructions): Promise<Unsent> {
   const unsent: Unsent = new Map();
   const view = await manageView(context);
-  await writeSkills(context, dir, view.skills, unsent);
+  await writeSkills(dir, view.skills, unsent);
   await writeServers(context, dir, view.tools, unsent);
   await writeAgents(context, dir, view.tools, unsent, baseId);
   if (base) {
@@ -325,9 +326,13 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
   const outgoing: RepoChange[] = [];
   const { base, latest, here, unsent } = sides;
   for (const key of new Set([...base.keys(), ...latest.keys(), ...here.keys()])) {
-    // An item that can't be sent is listed once, below, with why, whatever the repo has.
-    if (unsent.has(key)) continue;
     const [atBase, inRepo, atHere] = [base.get(key), latest.get(key), here.get(key)];
+    // An item that can't be sent from here is listed among what goes out, below, with why. If the repo changed it too, that change
+    // waits as well, listed coming in: Pull won't take it while this computer's copy can't be read, and keeps it for later.
+    if (unsent.has(key)) {
+      if (!same(atBase, inRepo) || unfinished[key]) incoming.push({ key, kind: (inRepo ?? atBase ?? unsent.get(key)!.item).kind, name: (inRepo ?? atBase ?? unsent.get(key)!.item).name, change: changeFrom(atBase, inRepo), held: unsent.get(key)!.reason });
+      continue;
+    }
     if (same(inRepo, atHere)) continue;
     const { kind, name } = (inRepo ?? atHere ?? atBase)!;
     const row = { key, kind, name };
@@ -340,7 +345,7 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     // Removed here (or no longer Managed) but edited in the repo: the edit comes back. Otherwise the repo's edit wins.
     else incoming.push({ ...row, change: changeFrom(atBase, inRepo), alsoHere: atHere ? 'changed' : 'removed' });
   }
-  for (const [key, { item, reason }] of unsent) outgoing.push({ key, kind: item.kind, name: item.name, change: latest.has(key) ? 'changed' : 'added', held: reason });
+  for (const [key, { item, reason }] of unsent) if (same(base.get(key), latest.get(key)) && !unfinished[key]) outgoing.push({ key, kind: item.kind, name: item.name, change: latest.has(key) ? 'changed' : 'added', held: reason });
   const order = (first: RepoChange, second: RepoChange) => first.kind.localeCompare(second.kind) || first.name.localeCompare(second.name);
   return { incoming: incoming.sort(order), outgoing: outgoing.sort(order) };
 }
@@ -384,16 +389,17 @@ async function buildView(context: ShareContext, base?: BaseInstructions): Promis
  */
 export function repoView(context: ShareContext, options: { check?: boolean; base?: BaseInstructions } = {}): Promise<RepoView> {
   return exclusive(async () => {
-    if (options.check) await check(context);
+    // A page's check gives up sooner than Pull's: a Pull or Push waiting behind it holds every other change in the app.
+    if (options.check) await check(context, 20_000);
     return buildView(context, options.base);
   });
 }
 
 /** Asks the repo for its latest commit; a failure is kept to show, and changes nothing else. */
-async function check(context: ShareContext): Promise<string | undefined> {
+async function check(context: ShareContext, timeoutMs?: number): Promise<string | undefined> {
   const found = await openClone(context);
   if (!found || !(await writeAccess(context)).allowed) return undefined;
-  const fetched = await git(found.dir, ['fetch', '--quiet', '--prune', 'origin']);
+  const fetched = await git(found.dir, ['fetch', '--quiet', '--prune', 'origin'], timeoutMs);
   const problem = fetched.code === 0 ? undefined : whyGitFailed(fetched.code, fetched.output, 'repo');
   await saveState(context.home, { ...found.state, checkedAt: new Date().toISOString(), problem });
   return problem;
@@ -517,6 +523,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
     if (here) await keepServerVersion(context, change.name, here.server, here);
     const problem = await editEntry(context, writer, change.name, here?.hash, server);
     if (problem) return [notIn(change.name, problem)];
+    // History accounts for this write when sync can't: a server no tool had (no facts), or this tool's own entry replaced (here).
     if (server && (!facts || here)) wrote(writer, here?.hash, serverHash(server));
   }
   const changes: Change[] = server ? [{ key: change.name, managed: true, off: facts?.off ?? [], use: writer, useHash: serverHash(server) }] : [];
@@ -548,6 +555,8 @@ async function pullAgent(context: ShareContext, dir: string, change: RepoChange,
         if (existing) await keepAgentVersion(context, existing);
         await mkdir(dirname(file), { recursive: true });
         await writeFileChecked(file, next, existing?.text);
+        // History accounts for this write when sync can't. An agent no tool had: Undo add matches the file's bytes. This tool's own
+        // agent replaced: Undo restores the kept version by the agent's identity, which is what its store is keyed by.
         if (!facts) wrote(writer, undefined, sha(next));
         else if (existing && existing.hash !== agentHash(agent)) wrote(writer, existing.hash, agentHash(agent));
       }
@@ -569,6 +578,9 @@ async function pullBase(dir: string, change: RepoChange, item: SideItem | undefi
 interface FirstWrite { change: RepoChange; tool: HarnessId; before?: string; after: string }
 
 /**
+ * (Follow-up: this reaches into the engines' bookkeeping, the 'added' event's losers and a skill copy's `created`; an engine option
+ * for "the caller placed this first copy" would let sync record it itself.)
+ *
  * Says in History that Pull made these events (`made`: each pulled item's new events), so their Undo reads as undoing a pull, and
  * accounts for the copy Pull wrote into the first tool itself, which sync never saw being replaced:
  * - an item no tool here had: that copy joins its 'added' event (one is made if sync added no other copy), so Undo add takes every
@@ -600,7 +612,7 @@ async function tellHistory(context: ShareContext, made: Set<string>, firstWrites
 }
 
 /** What Pull and Push both start from: a writable home, a connected repo checked just now, and the three sides compared. */
-async function prepared(context: ShareContext, base: BaseInstructions | undefined): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
+async function readyToMove(context: ShareContext, base: BaseInstructions | undefined): Promise<{ dir: string; state: RepoState; sides: Sides } | { refused: RepoResult }> {
   const access = await writeAccess(context);
   if (!access.allowed) return { refused: await refusal(context, access.reason, base) };
   const found = await openClone(context);
@@ -617,7 +629,7 @@ async function prepared(context: ShareContext, base: BaseInstructions | undefine
  */
 export function pullRepo(context: ShareContext, options: { base?: BaseInstructions; syncOn?: boolean } = {}): Promise<RepoResult> {
   return exclusive(async () => {
-    const ready = await prepared(context, options.base);
+    const ready = await readyToMove(context, options.base);
     if ('refused' in ready) return ready.refused;
     const { dir, state, sides } = ready;
     if (!sides.latestId) return { results: [], view: await buildView(context, options.base), pulled: 0 };
@@ -627,6 +639,9 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
     await gitOrThrow(dir, ['clean', '--quiet', '-ffdx']);
     const results: DestinationResult[] = [];
     const unfinished: Record<string, string> = {};
+    // A repo change to an item this computer can't read right now isn't taken, and isn't lost: once the copy here reads again, it
+    // comes in like any change the last Pull couldn't finish (and the repo's version wins over this computer's, as it would have).
+    for (const [key, { reason }] of sides.unsent) if (!same(sides.base.get(key), sides.latest.get(key)) || state.unfinished?.[key]) unfinished[key] = reason;
     // With Sync off, each pass runs for its one item alone, as Apply all does: nothing else spreads, and a deletion of an MCP server or
     // agent waits for Sync like any other (it shows here as unfinished until then; skills have their own Delete everywhere).
     const only: Only = key => (options.syncOn === false ? new Set([key]) : undefined);
@@ -659,8 +674,9 @@ export function pullRepo(context: ShareContext, options: { base?: BaseInstructio
 
 /** Puts items back in the working tree exactly as the base commit has them, or takes out those the base doesn't have. */
 async function keepAsBase(dir: string, items: { atBase?: SideItem; here?: SideItem }[], baseId: string | undefined) {
-  for (const { atBase, here } of items) {
-    if (atBase || !here) continue;
+  // This computer's copy goes first, so a kept skill has exactly the base's files, none of this computer's extra ones.
+  for (const { here } of items) {
+    if (!here) continue;
     if (here.kind === 'skill') await removeTree(join(dir, 'skills', here.folder!));
     else for (const path of here.paths) await rm(join(dir, path), { force: true });
   }
@@ -695,7 +711,7 @@ function message(outgoing: RepoChange[], from: string): string {
  */
 export function pushRepo(context: ShareContext, options: { base?: BaseInstructions; from?: string } = {}): Promise<RepoResult> {
   return exclusive(async () => {
-    const ready = await prepared(context, options.base);
+    const ready = await readyToMove(context, options.base);
     if ('refused' in ready) return ready.refused;
     const { dir, state, sides } = ready;
     if (sides.latestId !== state.base) return refusal(context, PULL_FIRST, options.base);

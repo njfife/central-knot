@@ -1,5 +1,5 @@
 import { loadSettings } from './settingspage.ts';
-import { loadRepo } from './repopage.ts';
+import { loadRepo, loadRepoSoon } from './repopage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
@@ -81,7 +81,7 @@ export async function busy(message: string, work: () => Promise<void>) {
   rerender();
   focusById(focused);
   // Any change may change what differs from the git repo: its page and sidebar count read again (no fetch).
-  if (state.home) void loadRepo();
+  if (state.home) loadRepoSoon();
 }
 
 function accept(view: HomeView) {
@@ -408,7 +408,7 @@ const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'p
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
 api().onSyncChanged(async () => {
-  void loadRepo();
+  loadRepoSoon();
   if (state.busy || refreshing || !state.home) return;
   refreshing = true;
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.

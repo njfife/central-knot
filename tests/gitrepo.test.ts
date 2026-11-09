@@ -77,7 +77,8 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     view = live((await connectRepo(second, box.remote, '')).view);
     assert.deepEqual(rows(view.incoming), ['docs:added', 'planner:added', 'review:added']);
     assert.equal((await manageView(second)).skills.length, 0, 'connecting writes nothing to the tools');
-    const pulled = await pullRepo(second);
+    // With Sync off, Pull still does what it shows (each item's pass runs for that item alone).
+    const pulled = await pullRepo(second, { syncOn: false });
     assert.equal(pulled.stopped, undefined);
     assert.equal(pulled.pulled, 3);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.equal(await readFile(join(second.home, root, 'review/notes.log'), 'utf8'), 'kept as-is\n');
@@ -117,6 +118,20 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await pushRepo(first);
     await pullRepo(second);
     assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+
+    // The repo changes an agent this computer can't read just now: Pull leaves it for later rather than losing it, and once the copy
+    // reads again, the repo's version comes in (never overwritten by the next Push).
+    const secondCopilot = join(second.home, '.copilot/agents/planner.agent.md');
+    const readable = await readFile(secondCopilot, 'utf8');
+    await writeFile(secondCopilot, 'half saved');
+    await writeFile(firstPlanner, (await readFile(firstPlanner, 'utf8')).replace('Plan carefully.', 'Plan in small steps.'));
+    await applyAgents(first, tools, []);
+    await pushRepo(first);
+    await pullRepo(second);
+    assert.deepEqual(live(await repoView(second)).incoming.map(row => [row.name, !!row.held]), [['planner', true]]);
+    await writeFile(secondCopilot, readable);
+    await pullRepo(second);
+    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /Plan in small steps/);
 
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
     await rm(join(first.home, '.claude/agents/planner.md'));

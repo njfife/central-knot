@@ -27,8 +27,17 @@ export const repo = {
 /** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */
 let loads = 0;
 
+/** After a change elsewhere: read again soon, once, rather than on every action and sync notice (it rewrites the clone to compare). */
+let soon: ReturnType<typeof setTimeout> | undefined;
+export function loadRepoSoon(): void {
+  clearTimeout(soon);
+  soon = setTimeout(() => void loadRepo(), 1500);
+}
+
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
+  // A load that overtakes a check still in flight carries the check on, so "Checking…" always ends.
+  check ||= repo.checking;
   const turn = ++loads;
   let view: RepoView | undefined;
   try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
