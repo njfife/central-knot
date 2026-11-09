@@ -109,7 +109,7 @@ export const succeeded = (report: ActionReport) => report.outcome === 'installed
  * is said as such ("already in Codex"), never as a change this run made. For an Undo, the verbs say what came back:
  * "removed from" for an install reversed, "put back in" for an uninstall reversed.
  */
-export function describe(done: PluginDone[], undo = false): ResultLine[] {
+export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
   const lines: ResultLine[] = [];
   const verbs = undo ? { installed: 'put back in', uninstalled: 'removed from' } : { installed: 'installed in', uninstalled: 'uninstalled from' };
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {
@@ -148,12 +148,12 @@ export const resultSentence = (lines: ResultLine[], undo: boolean) => resultPart
 export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => succeeded(entry.report) && opKey(entry) === opKey(op)));
 
 /** The last Apply all (or Undo): each tool's report, whether it was an Undo, in which home, and for an Undo the reversals that didn't succeed. */
-export interface LastRun { reports: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] }
+export interface LastRun { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] }
 
 /** After a run: what ran leaves the draft (what wasn't reached stays chosen), and the run is recorded for the toolbar and its Undo. */
 export function recordRun(draft: PluginDraft, ops: PluginOp[], done: PluginDone[], undo: boolean, home: string): LastRun {
   for (const entry of done) clear(draft, entry);
-  return { reports: done, undo, home, rest: undo ? notUndone(ops, done) : undefined };
+  return { done, undo, home, rest: undo ? notUndone(ops, done) : undefined };
 }
 
 /** The two calls a run needs, as the page's API gives them (tests pass their own). */

@@ -6,10 +6,16 @@ import { toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
+/** The same, as the reason nothing can run there. */
+export const noCli = (tool: HarnessId) => `${cliMissing(tool)}, so its plugin commands can’t run.`;
+/** Why nothing can change in a home that is only previewed. */
+export const PREVIEW_ONLY = 'Preview only: nothing can be installed or uninstalled in this home.';
+/** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
+export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
-  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : `${cliMissing(tool)}, so its plugin commands can’t run.`;
+  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
 
@@ -34,7 +40,7 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
 export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
-  if (!view.canWrite) return 'Preview only: nothing can be installed or uninstalled in this home.';
+  if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
 

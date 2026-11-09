@@ -40,7 +40,8 @@ async function readInside(root: string, path: string, limit = READ_LIMIT): Promi
   } catch { return undefined; }
 }
 const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
-const parseObject = (raw: string) => { try { return record(JSON.parse(raw)); } catch { return undefined; } };
+/** A JSON object from text, or undefined when it isn't JSON or isn't an object. */
+export const parseObject = (raw: string) => { try { return record(JSON.parse(raw)); } catch { return undefined; } };
 /** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
 const jsonInside = async (root: string, path: string) => { const read = await readInside(root, path); return read?.whole ? parseObject(read.text) : undefined; };
 

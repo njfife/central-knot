@@ -14,7 +14,10 @@ import { andList, toolNames as names } from './words.ts';
 const tone: Record<Outcome['result'], string> = { works: 'tone-muted', limited: 'tone-warning', ignored: 'tone-faint', fails: 'tone-danger', unknown: 'tone-faint' };
 const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'check', limited: 'circle-minus', ignored: 'circle-off', fails: 'circle-x', unknown: 'circle-question-mark' };
 
-/** What installing does in each tool. Tools that behave the same share one line, so a real difference stands out. */
+/**
+ * What installing does in each tool. Tools that behave the same share one line, so a real difference stands out. When
+ * every part works everywhere (only names differ), it is a few plain lines; a limit anywhere makes it a table.
+ */
 function outcomesBlock(view: PluginsView, plugin: PluginView, components: Components) {
   const byTool = Object.fromEntries(view.tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
   const groups = new Map<string, HarnessId[]>();
@@ -26,7 +29,8 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
   const example = (kind: Outcome['names']) => `${plugin.name}:${kind === 'skill' ? components.skillNames?.[0] ?? 'skill' : 'agent'}`;
   const line = (outcome: Outcome) => h('span.plugin-outcome-item', {}, outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]),
     `${outcome.component} ${outcome.text}`, outcome.names ? [' ', h('code.plugin-name', {}, example(outcome.names))] : null);
-  return h('ul.plugin-outcome-list', {}, [...groups.values()].map(tools => h('li.plugin-outcome-row', {},
+  const allWork = view.tools.every(tool => byTool[tool].every(outcome => outcome.result === 'works'));
+  return h(`ul.plugin-outcome-list${allWork ? '.plugin-outcome-plain' : ''}`, {}, [...groups.values()].map(tools => h('li.plugin-outcome-row', {},
     h('span.plugin-outcome-tools', {}, tools.map(tool => brandMark(tool, 14)), h('strong', {}, tools.map(tool => names[tool]).join(', '))),
     h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
 }
@@ -53,7 +57,10 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const batch = ops.length ? ops : removals;
   const allButton = batch.length && view.canWrite ? button({
     variant: 'outline', size: 'small', id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
-    label: allQueued(market.draft, batch) ? 'Choose none' : `Choose ${batch.length > 1 ? `all ${batch.length}` : names[batch[0]!.tool]}${ops.length ? '' : ' to uninstall'}`,
+    // An uninstall only chooses (the ellipsis says more is to come: Apply all); the boxes then read "Will uninstall".
+    label: allQueued(market.draft, batch) ? 'Choose none'
+      : ops.length ? `Choose ${batch.length > 1 ? `all ${batch.length}` : names[batch[0]!.tool]}`
+      : `Uninstall ${batch.length > 1 ? `all ${batch.length}` : `from ${names[batch[0]!.tool]}`}…`,
     onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
@@ -65,16 +72,14 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     })));
 }
 
-/** Descriptions opened with "Show more", by part name, so a redraw keeps them open. */
-const opened = new Set<string>();
-
 /**
  * One group of named parts, each description held to two lines. Once laid out, a description that was cut gets a "Show
  * more" button (see markClamped); one that fits has none.
  */
-const partList = (parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => {
-  const open = opened.has(part.name);
-  const more = h('button.part-more', { type: 'button', onclick: () => { if (open) opened.delete(part.name); else opened.add(part.name); rerender(); } }, open ? 'Show less' : 'Show more');
+const partList = (owner: string, parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => {
+  const key = `${owner}\u0000${part.name}`;
+  const open = market.opened.has(key);
+  const more = h('button.part-more', { type: 'button', onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } }, open ? 'Show less' : 'Show more');
   return h(`li${open ? '.clamped' : ''}`, {},
     h('code.plugin-name', {}, part.name),
     part.text ? h('span.plugin-part-body', {}, h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text), more) : null);
@@ -87,10 +92,10 @@ function markClamped(): void {
   }
 }
 
-const group = (title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(parts.map(part => ({ name: part.name, text: part.description })))) : null;
+const group = (owner: string, title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(`${owner}\u0000${title}`, parts.map(part => ({ name: part.name, text: part.description })))) : null;
 
-/** The plugin's parts by name, with what each says it does. */
-function contentsBlock(plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean) {
+/** The plugin's parts by name, with what each says it does. `owner` (its plugin key) keeps each part's "Show more" its own. */
+function contentsBlock(owner: string, plugin: PluginView, detail: PluginDetail | null | undefined, reading: boolean) {
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
   if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
@@ -98,11 +103,11 @@ function contentsBlock(plugin: PluginView, detail: PluginDetail | null | undefin
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem) : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
-    group('Skills', detail.skills), group('Commands', detail.commands), group('Agents', detail.agents),
+    group(owner, 'Skills', detail.skills), group(owner, 'Commands', detail.commands), group(owner, 'Agents', detail.agents),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
-    detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
-    detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(detail.lspServers.map(name => ({ name, text: '' })))) : null,
-    detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList([{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
+    detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
+    detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,
+    detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList(`${owner}\u0000bin`, [{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
 }
 
 export function pluginPage(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
@@ -125,7 +130,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
     installPanel(view, entry, plugin, marketIndex, components),
-    contentsBlock(plugin, detail, reading),
+    contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
     detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts.map(part => part.name)))) : null);
 }

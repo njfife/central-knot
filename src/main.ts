@@ -1,3 +1,4 @@
+import { onlyAllowed } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
 import { homedir, tmpdir } from 'node:os';
@@ -373,7 +374,7 @@ async function startHome(): Promise<HomeView | null> {
   return selectHome('fixture');
 }
 
-const ids = (value: unknown) => (Array.isArray(value) ? value.filter((id): id is HarnessId => harnessIds.includes(id as HarnessId)) : []);
+const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
 /** One thing at a time: planning and writing never interleave. */
 let queue: Promise<unknown> = Promise.resolve();

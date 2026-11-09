@@ -7,9 +7,9 @@ import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
-import { describe, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
+import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
-import { addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
+import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolName, toolNames as names } from './words.ts';
@@ -97,9 +97,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // One hint line per tool that can't take this marketplace, in the words its boxes use (pluginstatus.blocked).
   const reasons = view.tools.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
   const someCan = view.canWrite && reasons.length < view.tools.length;
-  const anyInstalled = entry.plugins.some(plugin => view.tools.some(tool => installed(entry, plugin.name, tool)));
-  const howTo = anyInstalled ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Click a tool’s box to choose it; nothing runs until Apply all.';
-  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? howTo : 'Plugin'),
+  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a box to install or uninstall; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
@@ -188,33 +186,31 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   if (last && parts.length) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
-    // On another plugin's page the result is only named, so it never reads as being about the plugin on screen.
+    // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
+    // Undo still says it was undone.
     const elsewhere = market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin);
     const changed = parts.filter(part => typeof part !== 'string');
     const sentence = elsewhere
-      ? ['Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)])]
+      ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)])]
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'),
       h('span.toolbar-result-text', { title: resultSentence(lines, last.undo) }, sentence), undoButton(), dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
   }
+  // An Undo that undid nothing still offers its way back here, whether or not its failures are still shown.
+  const back = undoButton();
+  if (last && back) return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, h('span.toolbar-result-text', {}, 'Not everything was undone.'), back, dismiss(() => { market.lastRun = undefined; }, 'report-dismiss'));
   const outcome = app.outcome?.page === 'plugins' ? app.outcome : undefined;
   if (!outcome) return null;
   const action = outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, disabled: !!app.busy, onclick: () => outcome.act!.run() }) : null;
   return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: outcome.text }, outcome.text), action, dismiss(clearNotice, 'report-dismiss'));
 }
 
-/**
- * What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. When
- * nothing in the run succeeded, its Undo (if any) is here, since the toolbar has no result to put it beside.
- */
+/** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
 function problemBand(lines: ResultLine[]) {
-  const last = market.lastRun;
   const failures = lines.filter(line => !line.ok);
   if (!market.problem && !failures.length) return null;
-  const undo = lines.some(line => line.ok) ? null : undoButton();
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),
-    undo,
     dismiss(dismissProblems));
 }
 
@@ -235,22 +231,19 @@ function toolbar(shown: MarketplaceView | undefined, lines: ResultLine[]) {
       h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), marketTitle(shown)),
       icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, pluginTitle(plugin)))
     : market.nav.tab === 'plugins' ? filters(shown) : null;
-  return h('div.toolbar.plugins-toolbar.plugins-toolbar-aligned', {}, left, h('span.toolbar-spacer'), right);
+  // An empty toolbar keeps its height (nothing below moves) but loses its rule, so it reads as margin.
+  return h(`div.toolbar.plugins-toolbar.plugins-toolbar-aligned${left || right ? '' : '.toolbar-quiet'}`, {}, left, h('span.toolbar-spacer'), right);
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */
 const EXAMPLES = ['anthropics/skills', 'github/copilot-plugins'];
 
-const activityText: Record<NonNullable<typeof market.activity>, string> = {
-  reading: 'Reading marketplaces… Nothing is installed by this.', adding: 'Reading the marketplace… Nothing is installed by this.', refreshing: 'Refreshing the marketplace… Nothing is installed by this.',
-  removing: 'Removing from the list…', applying: 'Applying… Each change runs that tool’s own command and can take a few seconds.', undoing: 'Undoing… Each change runs that tool’s own command and can take a few seconds.',
-};
 
 export function pluginsPage() {
   const view = market.view;
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.activity ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
   const shown = current();
-  const lines = market.lastRun ? describe(market.lastRun.reports, market.lastRun.undo) : [];
+  const lines = market.lastRun ? resultLines(market.lastRun.done, market.lastRun.undo) : [];
   // With no marketplaces, adding one is the only thing to do: its box sits in the middle of the page, with examples.
   const empty = emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
     h('div.market-empty-add', {},
@@ -261,7 +254,7 @@ export function pluginsPage() {
     toolbar(shown?.entry, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
-      market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, activityText[market.activity])) : null,
+      market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band)) : null,
       problemBand(lines)),
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry), h('div.scroll.market-main', { id: 'plugins-scroll' }, marketPage(view, shown.entry, shown.index)))

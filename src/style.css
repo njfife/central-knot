@@ -1244,6 +1244,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugins-toolbar { gap: 12px; }
 .plugins-page .btn:disabled { opacity: 0.5; }
 /* Its left part starts where the marketplace column's content starts, so filters and crumbs sit over what they act on */
+.plugins-toolbar.toolbar-quiet { border-bottom-color: transparent; background: transparent; }
 .plugins-toolbar-aligned { padding-left: calc(var(--market-list-width) + var(--market-gutter)); }
 /* The toolbar's right side: what is chosen, or what just happened */
 .toolbar-result { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 70%; font-size: 12.5px; color: var(--ink-soft); }
@@ -1267,8 +1268,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-row-holds { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-go { display: grid; place-items: center; }
 /* A tool that can still take the plugin: a plus that reads as a control, brighter than the dash of one that can't */
-.plugin-add { border-color: color-mix(in oklab, var(--ink) 30%, transparent); }
-.plugin-add .plugin-add-glyph { opacity: .85; }
+.plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
+.plugin-add .plugin-add-glyph { opacity: 1; }
 .plugin-add:hover .plugin-add-glyph, .plugin-add:focus-visible .plugin-add-glyph { opacity: 1; }
 .cell-button.cell-chosen, .legend-cell.cell-chosen { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-ink); }
 .cell-button.cell-pending-remove, .legend-cell.cell-pending-remove { border-style: dashed; border-color: var(--danger, #f85149); color: var(--danger, #f85149); background: color-mix(in oklab, var(--danger, #f85149) 8%, transparent); }
@@ -1281,13 +1282,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-panel { margin: 18px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
 .plugin-panel-head { display: flex; align-items: center; gap: 12px; height: 28px; margin-bottom: 10px; }
 .plugin-panel-head .btn { margin-left: auto; }
-.plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 13px; font-weight: 650; }
+.plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 28px; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; }
 .plugin-tool .ov-cell { width: auto; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.plugin-tool-state { font-size: 11.5px; color: var(--ink-faint); }
+.plugin-tool-state { font-size: 11.5px; color: var(--ink-soft); }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
 /* What installing does, one line per group of tools that behave alike */
@@ -1295,6 +1296,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plugin-outcome-row { display: grid; grid-template-columns: minmax(200px, auto) minmax(0, 1fr); gap: 4px 16px; align-items: center; padding: 8px 12px; }
 .plugin-outcome-row + .plugin-outcome-row { border-top: 1px solid var(--line); }
 .plugin-outcome-row .plugin-name { line-height: inherit; }
+/* Nothing limited anywhere: plain lines, no box */
+.plugin-outcome-list.plugin-outcome-plain { border: 0; background: transparent; }
+.plugin-outcome-plain .plugin-outcome-row { padding: 3px 0; border-top: 0; }
 .plugin-outcome-what { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
 .plugin-outcome-item { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .plugin-outcome-tools { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
@@ -1315,7 +1319,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* README text */
 .md { font-size: 13px; line-height: 1.55; color: var(--ink); max-width: 76ch; }
 .md h3, .md h4, .md h5, .md h6 { margin: 16px 0 6px; font-size: 13px; font-weight: 650; color: var(--ink); }
-.md h3 { font-size: 13.5px; }
 .md p, .md ul, .md ol, .md blockquote, .md pre, .md .md-table { margin: 0 0 10px; }
 .md ul, .md ol { padding-left: 20px; }
 .md code { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; padding: 0 3px; border-radius: 4px; background: color-mix(in oklab, var(--ink) 7%, transparent); }

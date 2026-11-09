@@ -120,6 +120,26 @@ test('A choice made before the marketplace renamed itself fails, rather than ins
   } finally { await box.cleanup(); }
 });
 
+test('A plugin’s page and the marketplace’s About read their files; Remove takes it off the list only', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root, 'team', ['pdf']);
+    await put(join(root, 'README.md'), '# team\n\nOur tools.\n');
+    await put(join(root, 'plugins/pdf/README.md'), 'Reads PDFs.\n');
+    assert.match((await box.markets.add('-x')).problem ?? '', /isn’t a marketplace/);
+    assert.match((await box.markets.add('./market')).problem ?? '', /full path/);
+    await box.markets.add(root);
+    assert.match(await box.markets.readme(root) ?? '', /Our tools/);
+    const detail = await box.markets.detail(root, 'pdf');
+    assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim()], [['pdf'], 'Reads PDFs.']);
+    assert.equal(await box.markets.detail(root, 'missing'), null);
+    const after = await box.markets.forget(root);
+    assert.equal(after.marketplaces.length, 0);
+    assert.ok(!box.calls.some(call => call.startsWith('uninstall')), 'nothing was uninstalled');
+  } finally { await box.cleanup(); }
+});
+
 test('A plugin gone from the marketplace fails for its tools; uninstall names the marketplace source it is for', async () => {
   const box = await setup();
   try {

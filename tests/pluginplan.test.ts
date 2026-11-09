@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, describe, prune, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { batches, resultLines, prune, reverse, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -44,7 +44,7 @@ test('Undo reverses only what really changed, and the report names each plugin o
     { ...op('xlsx', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: 'Already installed in Claude Code.', runs: [] } },
   ];
   assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['pdf', 'claude-cli', 'remove'], ['docx', 'copilot-cli', 'install']]);
-  assert.deepEqual(describe(done), [
+  assert.deepEqual(resultLines(done), [
     { source: 'anthropics/skills', plugin: 'pdf', ok: true, text: 'installed in Claude Code', short: 'installed in Claude Code' },
     { source: 'anthropics/skills', plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.', short: 'Codex: It stopped with exit code 1.' },
     { source: 'anthropics/skills', plugin: 'docx', ok: true, text: 'uninstalled from Copilot CLI', short: 'uninstalled from Copilot CLI' },
@@ -57,7 +57,7 @@ test('Two marketplaces may offer the same plugin name: their reports stay apart'
     { ...op('pdf', 'claude-cli'), report: { tool: 'claude-cli', outcome: 'installed', message: '', runs: [], changed: true } },
     { ...op('pdf', 'codex-cli'), source: 'other/market', report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true } },
   ];
-  assert.equal(describe(done).length, 2);
+  assert.equal(resultLines(done).length, 2);
 });
 
 test('Choices for a plugin or marketplace no longer listed are dropped', () => {
@@ -117,12 +117,12 @@ test('An Undo says what came back, and keeps what it did not get to', async () =
     // Already gone when the Undo reached it: nothing left to do, so "Undo the rest" doesn't offer it again.
     { ...undoOps[3]!, report: { tool: 'codex-cli', outcome: 'uninstalled', message: 'Not installed in Codex.', runs: [] } },
   ];
-  assert.equal(resultSentence(describe(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
-  assert.deepEqual(resultParts(describe(done.slice(0, 1), true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
+  assert.equal(resultSentence(resultLines(done.slice(0, 2), true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
+  assert.deepEqual(resultParts(resultLines(done.slice(0, 1), true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
   assert.deepEqual(notUndone(undoOps, done).map(entry => entry.plugin), ['xlsx']);
   // A run where nothing succeeded has no result sentence (its failures show in the problem band).
   const failed: PluginDone[] = [{ ...undoOps[2]!, report: { tool: 'claude-cli', outcome: 'failed', message: 'x', runs: [] } }];
-  assert.equal(resultSentence(describe(failed, true), true), '');
+  assert.equal(resultSentence(resultLines(failed, true), true), '');
 });
 
 test('After a run, what ran leaves the draft, the rest stays chosen, and the toolbar counts three or more tools', async () => {
@@ -134,7 +134,7 @@ test('After a run, what ran leaves the draft, the rest stays chosen, and the too
   const run = recordRun(draft, ops, done, false, '/h');
   assert.deepEqual([...draft.values()].map(entry => entry.plugin), ['docx'], 'docx was not reached: still chosen');
   assert.deepEqual([run.home, run.undo, run.rest], ['/h', false, undefined]);
-  const lines = describe(run.reports);
+  const lines = resultLines(run.done);
   assert.equal(lines[0]!.text, 'installed in Claude Code, Copilot CLI and Codex');
   assert.deepEqual(resultParts(lines, false, { short: true }), [{ plugin: 'pdf', source: 'anthropics/skills' }, ': installed in 3 tools', '.']);
 });

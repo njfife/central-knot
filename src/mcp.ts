@@ -3,6 +3,7 @@
 // The safety rules are the skills engine's: a file that is missing or unreadable is never read as deletions, every write rereads
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
+import { withoutBom } from './values.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -126,7 +127,7 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       }
       return { entries, exists: true, text, invalid: [...inline], section: tables.some(table => table.path[0] === 'mcp_servers') || inline.size > 0 };
     }
-    const parsed = JSON.parse(text.replace(/^﻿/, '')) as { mcpServers?: unknown };
+    const parsed = JSON.parse(withoutBom(text)) as { mcpServers?: unknown };
     const section = !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed;
     // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
     const servers = section ? parsed.mcpServers : {};

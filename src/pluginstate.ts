@@ -2,7 +2,7 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { describe, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
@@ -12,6 +12,15 @@ const api = () => window.centralKnot;
 export type MarketTab = 'plugins' | 'about';
 /** What the page is doing, so it can say so; set by each action, cleared when it ends. */
 export type MarketActivity = 'reading' | 'adding' | 'refreshing' | 'removing' | 'applying' | 'undoing';
+/** Each activity's short label (the app's busy line) and what the page's band says while it runs. */
+export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }> = {
+  reading: { label: 'Reading marketplaces…', band: 'Reading marketplaces… Nothing is installed by this.' },
+  adding: { label: 'Reading the marketplace…', band: 'Reading the marketplace… Nothing is installed by this.' },
+  refreshing: { label: 'Refreshing the marketplace…', band: 'Refreshing the marketplace… Nothing is installed by this.' },
+  removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
+  applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
+  undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
+};
 
 const startNav = () => ({ source: undefined as string | undefined, tab: 'plugins' as MarketTab, plugin: undefined as string | undefined, find: '', category: undefined as string | undefined });
 
@@ -33,6 +42,8 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
+  /** Part descriptions opened with "Show more", by plugin key and part, so a redraw keeps them open. */
+  opened: new Set<string>(),
   /** What is typed in the add box, kept through loading and errors. */
   draftSource: '',
   /** The add box is open: always with no marketplaces yet, otherwise after "Add marketplace" is clicked. */
@@ -42,7 +53,7 @@ export const market = {
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
   market.view = undefined; market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); market.details.clear(); market.nav = startNav();
+  market.readmes.clear(); market.details.clear(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -67,7 +78,13 @@ function readShown(): void {
   if (!entry) return;
   const source = entry.source;
   const readPlugin = (name: string) => readInto(market.details, pluginKey(source, name), () => api().pluginDetail(source, name).catch(() => null), rerender);
-  if (market.nav.plugin) readPlugin(market.nav.plugin);
+  if (market.nav.plugin) {
+    // Opening a plugin whose files couldn't be read tries again; only a read that worked is kept.
+    const key = pluginKey(source, market.nav.plugin);
+    const last = market.details.get(key);
+    if (last && !last.reading && (!last.value || last.value.problem)) market.details.delete(key);
+    readPlugin(market.nav.plugin);
+  }
   else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
   // Plugins kept in other repositories say what they hold once read; the first few rows on screen are read ahead.
   else for (const plugin of shownPlugins(entry).filter(candidate => !candidate.components && candidate.from).slice(0, REMOTE_READ_AHEAD)) readPlugin(plugin.name);
@@ -112,7 +129,7 @@ export function browse(patch: Partial<typeof market.nav>): void {
 }
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
-export const loadPlugins = (fresh = false) => act('reading', 'Reading marketplaces…', async () => {
+export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);
   market.problem = undefined;
   // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
@@ -120,19 +137,17 @@ export const loadPlugins = (fresh = false) => act('reading', 'Reading marketplac
   else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
   showView(view, { replace: true });
   announce('');
-  // With no marketplaces yet, the box to type one in is where the work starts.
-  if (market.view && !market.view.marketplaces.length) requestAnimationFrame(() => document.getElementById('marketplace-source')?.focus());
 });
 
 /** Runs an action with the page saying what it is doing. */
-function act(activity: MarketActivity, label: string, work: () => Promise<void>) {
-  return busy(label, async () => {
+function act(activity: MarketActivity, work: () => Promise<void>) {
+  return busy(ACTIVITIES[activity].label, async () => {
     market.activity = activity;
     try { await work(); } finally { market.activity = undefined; }
   });
 }
 
-export const addMarketplace = (source: string) => act('adding', 'Reading the marketplace…', async () => {
+export const addMarketplace = (source: string) => act('adding', async () => {
   const result = await api().addMarketplace(source);
   market.problem = result.problem;
   if (result.problem) { showView(result.view); announce(result.problem); return; }
@@ -143,6 +158,7 @@ export const addMarketplace = (source: string) => act('adding', 'Reading the mar
   showView(result.view);
   app.outcome = { page: 'plugins', item: added?.name || undefined, text: `${added ? `${marketTitle(added)} added: ${plural(added.plugins.length, 'plugin')}` : 'Marketplace added'}. Nothing was installed.` };
   announce(app.outcome.text, true);
+  // Once added, focus leaves the add box (now gone), so the next key press doesn't land in an input that isn't there.
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 
 /** Forgets what was read for one marketplace (its README, its plugins' contents), so it is read again when shown. */
@@ -151,7 +167,7 @@ function dropReads(source: string): void {
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
 }
 
-export const refreshMarketplace = (source: string) => act('refreshing', 'Refreshing the marketplace…', async () => {
+export const refreshMarketplace = (source: string) => act('refreshing', async () => {
   const view = await api().refreshMarketplace(source);
   dropReads(source);
   showView(view);
@@ -160,7 +176,7 @@ export const refreshMarketplace = (source: string) => act('refreshing', 'Refresh
   announce(app.outcome.text, true);
 });
 
-export const forgetMarketplace = (source: string) => act('removing', 'Removing from the list…', async () => {
+export const forgetMarketplace = (source: string) => act('removing', async () => {
   const gone = market.view?.marketplaces.find(entry => entry.source === source);
   const name = gone ? marketTitle(gone) : undefined;
   const view = await api().forgetMarketplace(source);
@@ -178,7 +194,7 @@ export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();
 export const openLink = (url: string) => void api().openExternal(url);
 
 /** Runs plugin changes through each tool's own command and keeps what each one did; choices not reached stay chosen. */
-export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', undo ? 'Undoing…' : 'Applying…', async () => {
+export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
   const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin };
@@ -191,7 +207,7 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
   }
-  announce(market.problem ?? (resultSentence(describe(result.done, undo), undo) || 'Nothing changed.'), true);
+  announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);
 });
 
 /**
@@ -200,12 +216,12 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
  */
 export function dismissProblems(): void {
   market.problem = undefined;
-  if (market.lastRun) market.lastRun = { ...market.lastRun, reports: market.lastRun.reports.filter(entry => succeeded(entry.report)) };
+  if (market.lastRun) market.lastRun = { ...market.lastRun, done: market.lastRun.done.filter(entry => succeeded(entry.report)) };
 }
 
 /** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {
   const last = market.lastRun;
   if (!last || last.home !== app.home?.home) return [];
-  return last.undo ? last.rest ?? [] : reverse(last.reports);
+  return last.undo ? last.rest ?? [] : reverse(last.done);
 }

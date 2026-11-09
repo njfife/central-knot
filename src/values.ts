@@ -19,6 +19,12 @@ export function githubRepo(source: string): string | undefined {
   return /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(trimmed)?.[1];
 }
 
+/** Text without a leading byte-order mark (Windows editors add one; JSON.parse refuses it). */
+export const withoutBom = (text: string) => text.replace(/^\uFEFF/, '');
+
+/** The items of `value` (a list from a request or a file) that are among `allowed`, in their order; [] for anything else. */
+export const onlyAllowed = <T extends string>(value: unknown, allowed: readonly T[]): T[] => (Array.isArray(value) ? value.filter((item): item is T => allowed.includes(item as T)) : []);
+
 /** True for an https link with no spaces: the only kind Central Knot opens or reads a repository from. */
 export const isHttps = (value: unknown): value is string => typeof value === 'string' && /^https:\/\/\S+$/.test(value);
 

@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { outcomes } from '../src/pluginoutcomes.ts';
-import { cachedCatalog, classify, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -118,16 +118,14 @@ test('One repository is recognised however it was typed', () => {
 });
 
 test('Git access failures are told apart, and an unknown one is shown as it is', () => {
-  assert.equal(classify('missing', '').state, 'git-missing');
-  assert.equal(classify('timeout', '').state, 'network');
-  assert.equal(classify(128, 'fatal: unable to access: Could not resolve host: x').state, 'network');
-  assert.equal(classify(128, 'Host key verification failed.').state, 'unknown-host');
-  assert.equal(classify(128, 'Enter passphrase for key').state, 'passphrase');
-  assert.equal(classify(128, 'fatal: could not read Username for https://x: terminal prompts disabled').state, 'sign-in');
-  assert.equal(classify(128, 'remote: Repository not found.').state, 'no-access');
-  const odd = classify(1, 'something new happened');
-  assert.equal(odd.state, 'unclassified');
-  assert.match('message' in odd ? odd.message : '', /something new happened/);
+  assert.match(whyGitFailed('missing', ''), /Git is not installed/);
+  assert.match(whyGitFailed('timeout', ''), /Can’t reach/);
+  assert.match(whyGitFailed(128, 'fatal: unable to access: Could not resolve host: x'), /Can’t reach/);
+  assert.match(whyGitFailed(128, 'Host key verification failed.'), /SSH host is not known/);
+  assert.match(whyGitFailed(128, 'Enter passphrase for key'), /passphrase/);
+  assert.match(whyGitFailed(128, 'fatal: could not read Username for https://x: terminal prompts disabled'), /Sign-in needed/);
+  assert.match(whyGitFailed(128, 'remote: Repository not found.'), /No access/);
+  assert.match(whyGitFailed(1, 'something new happened'), /something new happened/);
 });
 
 test('Each tool’s marketplaces are read from where it records them', async () => {
@@ -171,6 +169,12 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(cache, 'skills/s/SKILL.md'), 'x');
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'p')).state, 'installed');
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'other')).state, 'not-installed');
+    // Installed for one project only is not installed for this person: only the user scope counts.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'project', projectPath: '/repo', installPath: cache }] } }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p')).state, 'not-installed');
+    // A settings file saved with a byte-order mark is read like any other.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), `\uFEFF${JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache }] } })}`);
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p')).state, 'installed');
 
     const copied = join(box.home, '.copilot/installed-plugins/m/p');
     await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', cache_path: copied, enabled: true }] })}`);

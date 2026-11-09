@@ -96,7 +96,6 @@ const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line);
 const cells = (line: string) => line.trim().replace(/^\||\|$/g, '').split('|').map(cell => parseInline(cell.trim()));
 const ITEM = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
 
-/** Markdown text as blocks. Headings keep their level; the builder decides how they look. */
 /**
  * An ATX heading ("## Title ##"): its level and text, without the closing #s. Scanned by hand, not with one regular
  * expression: a pattern with optional runs of spaces and #s backtracks for seconds on a long line of spaces.
@@ -113,6 +112,7 @@ function headingOf(line: string): [string, string, string] | undefined {
   return [line, marks, line.slice(marks.length, end).trim()];
 }
 
+/** Markdown text as blocks. Headings keep their level; the builder decides how they look. */
 export function parseMarkdown(source: string, depth = 0): Block[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n');
   const blocks: Block[] = [];
