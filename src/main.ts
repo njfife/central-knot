@@ -564,13 +564,14 @@ app.whenReady().then(async () => {
         const check = async () => {
           if (document.body.dataset.ready === 'true') {
             const view = await window.centralKnot.refresh();
-            resolveResult({ rows: document.querySelectorAll('.ov-row[data-key]').length, home: document.querySelector('#home-label').textContent, skills: view.manage.skills.map(skill => skill.key + ':' + Object.keys(skill.copies).length).join(','), allowed: view.manage.access.allowed });
+            resolveResult({ rows: document.querySelectorAll('.kind-card').length, home: document.querySelector('#home-label').textContent, skills: view.manage.skills.map(skill => skill.key + ':' + Object.keys(skill.copies).length).join(','), allowed: view.manage.access.allowed });
           } else if (Date.now() > deadline) rejectResult(new Error('Renderer did not become ready'));
           else setTimeout(check, 30);
         }; check();
       })`);
       const skills = 'notes:2,release-notes:1,review:2,standup:1';
-      if (result.rows !== 4 || result.home !== 'Practice copy' || result.skills !== skills || !result.allowed) throw new Error('Unexpected fixture render.');
+      // The Overview opens first: one card each for skills, MCP servers and agents.
+      if (result.rows !== 3 || result.home !== 'Practice copy' || result.skills !== skills || !result.allowed) throw new Error('Unexpected fixture render.');
       console.log(JSON.stringify({ smoke: 'pass', ...result }));
       app.exit(0);
     } catch {
