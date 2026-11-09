@@ -489,6 +489,10 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  const pinned = await a.run(`(() => { const box = document.querySelector('#plugins-scroll'); box.scrollTop = box.scrollHeight; const gap = document.querySelector('.plugin-table .ov-head').getBoundingClientRect().top - box.getBoundingClientRect().top; box.scrollTop = 0; return { scrolled: box.scrollHeight > box.clientHeight, gap }; })()`);
+  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { scrolled: true, gap: 0 });
+  await a.send('Emulation.clearDeviceMetricsOverride');
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));

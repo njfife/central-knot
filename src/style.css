@@ -169,7 +169,7 @@ ul { list-style: none; }
 .btn.ghost:hover:not(:disabled) { background: var(--press); color: var(--ink); }
 .btn.link { color: var(--accent-ink); }
 .btn.link:hover:not(:disabled) { text-decoration: underline; }
-.result-count, .list-fraction, .mx-found, .copy-count { font-variant-numeric: tabular-nums; }
+.result-count, .list-fraction { font-variant-numeric: tabular-nums; }
 
 /* Toolbar and find */
 .toolbar { container-type: inline-size; flex: none; height: 37px; display: flex; align-items: center; gap: 8px; padding: 2px 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
@@ -192,53 +192,6 @@ ul { list-style: none; }
 
 /* Matrix */
 .matrix { container-type: inline-size; position: relative; }
-.mx { --matrix-columns: minmax(192px, 512px) 136px 72px 88px 88px minmax(0, 1fr); min-width: 100%; }
-.mx-row { display: grid; grid-template-columns: var(--matrix-columns); align-items: stretch; }
-.mx-head { position: sticky; top: 0; z-index: 3; background: var(--surface); border-bottom: 1px solid var(--line); }
-.mx-head .mx-row { height: 36px; }
-.mx-name-head, .mx-status-head, .mx-col-head { display: flex; align-items: center; font-size: 12px; line-height: 16px; font-weight: 500; }
-.mx-name-head { padding-left: 16px; color: var(--ink-soft); }
-.mx-status-head { padding-left: 4px; color: var(--ink-soft); }
-.mx-col-head { justify-content: center; padding: 0 4px; text-align: center; white-space: nowrap; border-radius: 6px; }
-.mx-section { position: sticky; top: 37px; z-index: 2; height: 33px; display: flex; align-items: center; padding: 0 16px; background: var(--chrome); border-bottom: 1px solid var(--line); font-size: 12px; line-height: 16px; }
-.mx-section strong { font-weight: 600; }
-.mx-section-count { margin-left: 8px; color: var(--ink-soft); }
-.mx-item { position: relative; height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
-.mx-item:hover { background: var(--hover); }
-.mx-item.selected, .mx-item.selected:hover { background: var(--picked); box-shadow: inset 2px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
-.mx-item:has(.row-button:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
-.mx-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 16px; }
-.row-button { all: unset; min-width: 0; display: block; font-weight: 500; flex: 0 1 auto; }
-.row-button:focus-visible { outline: none; }
-.mx-status { min-width: 0; display: flex; align-items: center; padding-left: 4px; }
-.status-text { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.status-word { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mx-status .status-word { color: var(--ink-soft); font-size: 12px; line-height: 16px; }
-.mx-found { display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
-.mx-cell { position: relative; display: flex; align-items: center; justify-content: center; }
-.copy-count { position: absolute; left: calc(50% + 10px); font-size: 11px; line-height: 14px; font-weight: 500; color: var(--ink-soft); }
-.mx-missing { display: none; }
-.mx-fill { min-width: 0; }
-.mx:has([data-col="claude-cli"]:hover) [data-col="claude-cli"],
-.mx:has([data-col="copilot-cli"]:hover) [data-col="copilot-cli"] { background: var(--hover); }
-
-@container (max-width: 639px) {
-  .mx-head { display: none; }
-  .mx-section { top: 0; height: 17px; }
-  .mx-item { height: auto; grid-template-columns: 36px auto auto minmax(0, 1fr) auto; padding: 4px 16px 8px 0; row-gap: 4px; column-gap: 4px; align-items: center; }
-  .mx-name { grid-column: 1 / 5; grid-row: 1; height: 28px; }
-  .mx-found { grid-column: 5; grid-row: 1; }
-  .mx-cell { grid-row: 2; height: 28px; gap: 4px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; }
-  .mx-cell[data-present="false"] { display: none; }
-  .mx-cell[data-tool="claude-cli"] { grid-column: 2; }
-  .mx-cell[data-tool="copilot-cli"] { grid-column: 3; }
-  .mx-cell::before { content: attr(data-mono); font-size: 12px; color: var(--ink-soft); }
-  .copy-count { position: static; }
-  .mx-missing { display: block; grid-row: 2; grid-column: 4; font-size: 12px; line-height: 16px; color: var(--ink-soft); padding-left: 4px; }
-  .mx-status { grid-row: 2; grid-column: 5; padding: 0; }
-  .mx-fill { display: none; }
-}
-
 .skeleton { background: linear-gradient(90deg, var(--hover), var(--press), var(--hover)); background-size: 200% 100%; animation: shimmer 2.4s linear infinite; }
 .skeleton-bar { width: 60%; height: 16px; border-radius: 4px; }
 .skeleton-dot { width: 16px; height: 16px; border-radius: 50%; }
@@ -420,9 +373,14 @@ ul { list-style: none; }
 .ov-row:not(.ov-head):not(.picked):hover { background: var(--hover); }
 .ov-row.picked { background: var(--selected-row); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
-.ov-head { position: sticky; top: 0; z-index: 3; background: var(--surface); height: 48px; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
+/* Sticky table headers, one rule for every table (Skills, MCP servers, Agents, Plugins): the column header pins to the
+   top of the table's scroller and a section row pins right under it, both opaque so rows pass beneath them. Sticky
+   offsets count from the scroller's padding edge, so a scroller that holds a table has no top padding: rows would
+   show through the gap above the pinned header. */
+.ov { --ov-head-height: 60px; --ov-section-height: 32px; }
+.ov-head { position: sticky; top: 0; z-index: 3; height: var(--ov-head-height); background: var(--surface); font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .ov-head > * { align-self: center; }
-.ov-section { display: grid; grid-template-columns: 44px 1fr; align-items: center; height: 32px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 48px; z-index: 2; }
+.ov-section { position: sticky; top: var(--ov-head-height); z-index: 2; display: grid; grid-template-columns: 1fr auto; align-items: center; height: var(--ov-section-height); padding: 0 12px 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); }
 .ov-section-label { font-size: 12px; display: flex; gap: 8px; align-items: center; }
 .ov-section-label strong { font-weight: 600; }
 .ov-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
@@ -505,9 +463,6 @@ ul { list-style: none; }
 /* ---------- option a/b/c, no checkboxes ---------- */
 .ov { --ov-columns: minmax(170px, 300px) 76px 108px 108px minmax(0, 1fr); }
 .ov-page .ov-name { padding-left: 16px; }
-.ov-section { grid-template-columns: 1fr auto; padding: 0 12px 0 16px; }
-.ov-head { height: 64px; }
-.ov-section { top: 64px; }
 .head-action { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; margin-top: 2px; border-radius: 999px; border: 1px solid var(--control-line); background: none; color: var(--accent-ink); font: inherit; font-size: 11px; cursor: pointer; }
 .head-action:hover:not(:disabled) { background: var(--hover); }
 .head-action:disabled { color: var(--ink-faint); border-color: transparent; cursor: default; }
@@ -748,8 +703,6 @@ button.apply-state.text-action:hover { text-decoration-color: currentColor; }
 .cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 .legend-cell { position: relative; }
 .decided-undo { width: auto; padding: 0 6px; gap: 3px; display: inline-flex; align-items: center; font-size: 11.5px; }
-.ov-head { height: 60px; }
-.ov-section { top: 60px; }
 .item-name { font-weight: 600; color: var(--ink); }
 .ov-row.unmanaged .cell-absent:not(.cell-pending-edit) { border-style: dotted; border-color: var(--ink-faint); }
 button.apply-state.text-action { text-decoration: underline dotted; text-underline-offset: 3px; }
@@ -785,7 +738,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .details { padding-bottom: 8px; }
 .legend-cell.cell-absent { border-style: dotted; }
 .cell-cannot { background-image: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px) !important; }
-.ov-row { scroll-margin-top: 96px; }
+.ov-row { scroll-margin-top: calc(var(--ov-head-height) + var(--ov-section-height) + 4px); }
 .list-head { padding-right: 23px; }
 .list-head-tool > * { width: 12px !important; height: 12px !important; font-size: 7px; }
 /* UI round 5 */
@@ -1211,7 +1164,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { padding-top: 0; padding-bottom: 0; height: auto; line-height: inherit; }
-.market-main { padding: 18px var(--market-gutter) 32px; }
+.market-main { padding: 0 var(--market-gutter) 32px; }
+.market-main > :first-child { margin-top: 18px; }
 /* The empty page: the add box in the middle, above the examples */
 .market-empty-add { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .market-empty-add .market-add { width: 360px; max-width: 100%; text-align: left; }
@@ -1256,6 +1210,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The plugin table */
 .plugins-page .plugin-table { max-width: none; }
 .plugins-page .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 92px) 28px; height: auto; min-height: 40px; }
+.plugins-page .plugin-table .ov-head { padding-block: 8px; }
 .plugins-page .plugin-table .ov-head .ov-name { font-size: 12px; color: var(--ink-faint); font-weight: 400; padding: 6px 0; }
 .plugin-row { cursor: pointer; }
 .plugin-row:hover { background: var(--hover); }

@@ -181,6 +181,56 @@ if (wanted('plugins')) {
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of Apply all.'); }
 }
 
+// ---------- Scrolled pages: sticky headers and toolbars ----------
+if (wanted('scroll')) {
+  begin('scroll');
+  // A marketplace long enough to scroll (35 plugins), and a second one so the header shows "Refresh all".
+  const long = join(scratch, 'long-market');
+  writeMarket(long, 'long-list');
+  edit(join(long, '.claude-plugin/marketplace.json'), text => JSON.stringify({ ...JSON.parse(text), plugins: Array.from({ length: 35 }, (_, index) => ({
+    name: `team-plugin-${String(index + 1).padStart(2, '0')}`, source: './plugins/issue-tracker', category: index % 3 ? 'development' : 'productivity',
+    description: index % 2 ? 'MCP server for the team tracker, with skills for triage' : 'A longer description that goes on for a while to show how a row with plenty of text wraps or ends with an ellipsis at narrow sizes',
+  })) }, null, 2));
+  const second = join(scratch, 'second-market');
+  writeMarket(second, 'second-list');
+  await a.click('#nav-plugins');
+  for (const source of [long, second]) {
+    if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => /long-list/.test(item.textContent))?.click()`); await a.settle();
+  // Enough skills, MCP servers and agents in the practice copy that every table scrolls at every size.
+  for (let index = 1; index <= 40; index++) {
+    const name = `extra-${String(index).padStart(2, '0')}`;
+    for (const tool of index % 2 ? ['.claude'] : ['.claude', '.copilot']) {
+      mkdirSync(join(practice, tool, 'skills', name), { recursive: true });
+      writeFileSync(join(practice, tool, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: An extra skill so the table scrolls.\n---\n\nFollow the steps.\n`);
+    }
+    writeFileSync(join(practice, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: An extra agent so the table scrolls.\n---\n\nDo the task.\n`);
+  }
+  edit(join(practice, '.copilot/mcp-config.json'), text => { const config = JSON.parse(text); for (let index = 1; index <= 40; index++) config.mcpServers[`extra-${String(index).padStart(2, '0')}`] = { type: 'local', command: 'npx', args: ['-y', `@example/extra-${index}`], tools: ['*'] }; return JSON.stringify(config, null, 2); });
+  await a.click('#header-refresh');
+  const sizes = [[860, 560, 2], [1280, 800, 2], [1728, 1117, 1], [2560, 1440, 1]];
+  // Scrolls the page's main scroller (the tallest one that can scroll) by `by` pixels, so sticky parts are tested over rows.
+  const scroll = by => a.run(`(() => { const box = [...document.querySelectorAll('#page .scroll')].filter(e => e.scrollHeight > e.clientHeight).sort((x, y) => y.clientHeight - x.clientHeight)[0]; if (!box) return 'nothing scrolls'; box.scrollTop = ${by}; const head = box.querySelector('.ov-head'); const gap = head ? Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) : null; return (box.id || box.className) + (head ? '; column header ' + gap + 'px below the scroller top' : ''); })()`);
+  for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
+    if (!(await a.has(`#nav-${page}`))) continue;
+    await a.click(`#nav-${page}`);
+    for (const [width, height, scale] of sizes) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
+      for (const theme of ['dark', 'light']) {
+        await a.theme(theme);
+        const what = await scroll(Math.round(height * 0.4)); await wait(100);
+        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
+      }
+      await scroll(0);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
+}
+
 // ---------- Instructions ----------
 if (wanted('instructions')) {
   begin('instructions');
