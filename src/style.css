@@ -1365,12 +1365,14 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; }
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
 .repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
-.repo-facts dd { display: flex; min-width: 0; }
-.repo-commit, .repo-latest { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
-.repo-sha { flex: none; }
-.repo-subject { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-.repo-when { flex: none; font-size: 12px; line-height: 16px; }
-.repo-new { flex: none; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
+.repo-facts dd { min-width: 0; }
+/* A commit reads as one line of text that wraps where it must: id, subject, then when, never pinned apart. */
+.repo-commit, .repo-latest { display: inline; min-width: 0; overflow-wrap: anywhere; }
+.repo-commit > * + *, .repo-latest > * + * { margin-left: 8px; }
+.repo-sha { white-space: nowrap; }
+.repo-subject { overflow-wrap: anywhere; }
+.repo-when { white-space: nowrap; font-size: 12px; line-height: 16px; }
+.repo-new { white-space: nowrap; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .repo-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 24px 32px; align-items: start; }
 .repo-side { display: flex; flex-direction: column; min-width: 0; }
 .repo-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
