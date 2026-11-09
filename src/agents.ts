@@ -299,7 +299,7 @@ function originOnApply(item: AgentRecordItem | undefined, slot: AgentSlot, prese
 const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
 interface AgentPass { context: ShareContext; present: AgentTool[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
-  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number }
+  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number }
 interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number } type Loser = { tool: HarnessId; hash: string };
 type Situation = 'rootMoved' | 'removalOwed' | 'folderRemade' | 'stopped' | 'away' | 'off' | 'oneWay' | 'oneWayChanged' | 'deleted' | 'unchanged' | 'edited';
 type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface CopyNow<Is = Exclude<StaysRecorded, 'oneWayChanged'>> { copy: AgentCopy; entry?: AgentEntry; is: Is }
@@ -317,7 +317,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const displacedByEarlierPass = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
   const { folderIds, resetTools } = await readFolderIds(context, present, record.roots);
   const { chosen, newlyManaged } = recordChoices(record, onDisk.byKey, changes, log);
-  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000 };
+  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, deletedNow: new Set(), limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000 };
   const outcomes: AgentOutcome[] = [];
   for (const [key, item] of Object.entries(record.items)) if (item.state === 'shared' && (!options.only || options.only.has(key))) outcomes.push(await syncAgent(pass, log, key, item));
   await finishPendingRemovals(pass, log);
@@ -434,6 +434,7 @@ async function spreadDeletion(pass: AgentPass, log: PassLog, key: string, item: 
   for (const { tool, entry, recorded } of targets) if (entry && !recorded) log.results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} has a different “${item.name}” that was never synced. It stays.` });
   const id = logEvent(log, { key: `agent:${key}`, item: item.name, kind: 'deleted', winner: { tool: deletedIn, hash: item.hash }, losers: [], orderProved: true, previous: item.hash });
   log.notices.push({ key: `agent:${key}`, item: item.name, kind: 'deleted', winner: deletedIn, losers: removedFrom, orderProved: true, history: id });
+  pass.deletedNow.add(key);
   Object.assign(item, { state: 'dont-share', deleted: { at: new Date(pass.now).toISOString(), tool: deletedIn, hash: item.hash }, copies: remaining } satisfies Partial<AgentRecordItem>);
 }
 async function spreadContent(pass: AgentPass, log: PassLog, key: string, item: AgentRecordItem, copies: CopyNow[], targets: Target[], deletedMeanwhile: HarnessId[]) {
@@ -520,7 +521,7 @@ function logSpreadEvents(log: PassLog, key: string, item: AgentRecordItem, sourc
 async function finishPendingRemovals(pass: AgentPass, log: PassLog) {
   for (const [key, item] of Object.entries(pass.record.items)) {
     const pending = item.copies.filter(copy => copy.status === 'removing');
-    if ((pass.limitedToKeys && !pass.limitedToKeys.has(key)) || !pending.length) continue;
+    if ((pass.limitedToKeys && !pass.limitedToKeys.has(key)) || pass.deletedNow.has(key) || !pending.length) continue;
     const slot = pass.onDisk.byKey.get(key) ?? {};
     const inUseAgain = item.state === 'shared' || (Object.values(slot) as AgentEntry[]).some(entry => !item.off.includes(entry.tool) && !item.copies.some(copy => copy.tool === entry.tool));
     const done: AgentCopy[] = [];

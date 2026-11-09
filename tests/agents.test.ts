@@ -400,6 +400,22 @@ test('A deletion first seen before an agent was unmanaged still waits the settle
   } finally { await box.cleanup(); }
 });
 
+test('A deletion removed from one tool still finishes later in a tool that was away', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+  } finally { await box.cleanup(); }
+});
+
 test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
   const box = await sandbox();
   try {
