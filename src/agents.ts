@@ -35,10 +35,9 @@ export const fileFor = (context: ShareContext, tool: HarnessId, name: string) =>
 export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
 export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
-const sha = sha256;
 
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */
-export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
+export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha256(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
 
 /** Frontmatter: `---` on its own first line, then up to the next line that is `---` (at a line start, as Claude Code reads it). */
 const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
@@ -87,7 +86,7 @@ export async function readAgents(context: ShareContext, tool: HarnessId): Promis
     let agent: NeutralAgent | undefined;
     try { agent = tool === 'codex-cli' ? fromToml(name, text) : fromMarkdown(name, text); } catch { agent = undefined; }
     if (!agent) { problems.push(`${path} could not be read as an agent, so it is left alone.`); unreadable.set(keyOf(name), path); continue; }
-    entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha(text) });
+    entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text) });
   }
   return { entries, problems, unreadable, folderExists: true };
 }
@@ -447,8 +446,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
       }
       writes++;
       if (here) replaced.push({ tool, hash: here.hash });
-      else if (newlyManaged.has(key)) addedHere.push({ tool, hash: sha(text) });
-      copies.push({ tool, file: path, hash: agentHash(source.agent), bytes: sha(text), oneWay: oneWay || undefined });
+      else if (newlyManaged.has(key)) addedHere.push({ tool, hash: sha256(text) });
+      copies.push({ tool, file: path, hash: agentHash(source.agent), bytes: sha256(text), oneWay: oneWay || undefined });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
     }
     const historyKey = `agent:${key}`;
@@ -631,7 +630,7 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
     } catch (error) { results.push({ item: item.name, harness: tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
     writes++;
     if (here) replaced.push({ tool, hash: here.hash });
-    copies.push({ tool, file: path, hash, bytes: sha(text), oneWay: oneWay || undefined });
+    copies.push({ tool, file: path, hash, bytes: sha256(text), oneWay: oneWay || undefined });
     results.push({ item: item.name, harness: tool, outcome: 'written', message: 'Restored.' });
   }
   item.state = 'shared';
@@ -677,7 +676,7 @@ async function restoreReplacedOneWay(context: ShareContext, tools: HarnessId[], 
     writes++;
     replaced.push({ tool: loser.tool, hash: here.hash });
     copy.hash = loser.hash;
-    copy.bytes = sha(text);
+    copy.bytes = sha256(text);
     copy.stopped = true;
     results.push({ item: item.name, harness: loser.tool, outcome: 'written', message: `Its edited copy is back; it doesn’t receive updates from ${harnesses[item.origin ?? past.winner?.tool ?? 'claude-cli'].name}.` });
   }

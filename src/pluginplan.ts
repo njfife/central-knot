@@ -91,11 +91,13 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   }
 }
 
-/** Counts for the change bar. */
-export function summary(draft: PluginDraft) {
+/** Counts for the change bar. `isUpdate`: whether a parts install is an update (that tool has the plugin's parts already). */
+export function summary(draft: PluginDraft, isUpdate: (op: PluginOp) => boolean = () => false) {
   const ops = [...draft.values()];
   const count = (action: PluginAction) => ops.filter(op => op.action === action).length;
-  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'), partsRemovals: count('remove-parts') };
+  const partsUpdates = ops.filter(op => op.action === 'install-parts' && isUpdate(op)).length;
+  return { plugins: new Set(ops.map(op => pluginKey(op.source, op.plugin))).size, installs: count('install'), removals: count('remove'),
+    partsInstalls: count('install-parts') - partsUpdates, partsUpdates, partsRemovals: count('remove-parts') };
 }
 
 /** Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then removals and parts tool by tool. */

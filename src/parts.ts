@@ -13,7 +13,7 @@ import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { removeChecked, replaceCopy, rootProblem } from './manage.ts';
-import { cannotHold, editEntry, fromJson, keep as keepServer, kept as keptServer, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
+import { canonical, cannotHold, editEntry, fromJson, keep as keepServer, kept as keptServer, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts';
 import {
   changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, placeCopy, readRecord, readTree, removeFileChecked, storeDirectory, storeFolder, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
@@ -54,7 +54,6 @@ interface PartsRun { target: PartsOf; before: PartsInstall | null; after: PartsI
 
 // ---------- What a plugin offers a tool ----------
 
-const same = samePart;
 /** "its timeout setting stays with the plugin": what a tool can't hold of a part, said once for agents and servers alike. */
 const staysBehind = (fields: string[]) => (fields.length ? `its ${fields.join(', ')} setting${fields.length > 1 ? 's stay' : ' stays'} with the plugin` : undefined);
 
@@ -147,12 +146,17 @@ export async function planParts(context: ShareContext, files: PluginFiles, tools
     const ours = installs.find(install => install.tool === tool)?.items ?? [];
     const holds = await namesInUse(context, tool);
     const plan = (await partsFor(context, files, tool)).plan;
+    const sentence = (why: string) => `${why[0]!.toUpperCase()}${why.slice(1)}.`;
     for (const part of plan) {
-      const own = ours.find(item => same(item, part));
-      if (own?.removed && !part.why) part.why = `You removed it from ${toolNames[tool]}, so it stays out.`;
-      if (part.why || own) continue;
-      const why = blocker(await onDisk(context, tool, part), holds, part, tool);
-      if (why) part.why = `${why[0]!.toUpperCase()}${why.slice(1)}.`;
+      if (part.why) continue;
+      const own = ours.find(item => samePart(item, part));
+      const now = await onDisk(context, tool, part);
+      // A part of this plugin's already there follows the run's rules for it: removed, changed or managed since means left.
+      if (own && (own.removed || (own.seen && now.state === 'absent'))) { part.why = `You removed it from ${toolNames[tool]}, so it stays out.`; continue; }
+      if (own && now.state === 'there') { const left = leftBecause(own, now, holds); if (left) part.why = sentence(left); continue; }
+      if (own) continue;
+      const why = blocker(now, holds, part, tool);
+      if (why) part.why = sentence(why);
     }
     plans[tool] = plan;
   }
@@ -199,6 +203,7 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
 }
 type There = Extract<OnDisk, { state: 'there' }>;
 
+type NamesInUse = Awaited<ReturnType<typeof namesInUse>>;
 /** Names in use around a tool: skill folders in any folder it reads, and items the person manages (sync then owns them). */
 async function namesInUse(context: ShareContext, tool: HarnessId) {
   const roots = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).map(root => root.path);
@@ -231,11 +236,21 @@ const stillOurs = (old: PartItem, now: There) =>
  * the tool already has one of that name (here or in another folder it reads), or one of that name is managed, so its own
  * page decides where it goes and it is never claimed as a part.
  */
-function blocker(now: OnDisk, holds: Awaited<ReturnType<typeof namesInUse>>, part: Pick<PartItem, 'kind' | 'name'>, tool: HarnessId): string | undefined {
+function blocker(now: OnDisk, holds: NamesInUse, part: Pick<PartItem, 'kind' | 'name'>, tool: HarnessId): string | undefined {
   if (part.kind === 'skill' && holds.skillRootProblem) return holds.skillRootProblem.replace(/\.$/, '');
   if (now.state === 'unreadable') return `its place in ${toolNames[tool]} can’t be read right now`;
   if (now.state === 'there' || (part.kind === 'skill' && holds.skillNamed(part.name))) return `${toolNames[tool]} already has one of that name`;
   if (holds.managed(part)) return 'one of that name is managed, so its own page decides where it goes';
+  return undefined;
+}
+
+/**
+ * Why a part these parts put there is now the person's to keep, if it is, the same for the page's plan and for a run: it
+ * was changed after it went in, or it is managed now (its own page then decides where it goes).
+ */
+function leftBecause(old: PartItem, now: There, holds: NamesInUse): string | undefined {
+  if (!stillOurs(old, now)) return 'it was changed after it was installed';
+  if (holds.managed(old)) return 'it is managed now, so it belongs to its own page';
   return undefined;
 }
 
@@ -293,9 +308,9 @@ interface Moved { held: PartItem[]; notes: string[]; wrote: number; failed: numb
 async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[]): Promise<Moved> {
   const holds = await namesInUse(context, tool);
   const moved: Moved = { held: [], notes: [], wrote: 0, failed: 0, goneBefore: [] };
-  for (const each of [...from, ...to.filter(item => !from.some(old => same(old, item)))]) {
-    const old = from.find(item => same(item, each));
-    try { await settle(context, tool, holds, old, to.find(item => same(item, each)), moved); }
+  for (const each of [...from, ...to.filter(item => !from.some(old => samePart(old, item)))]) {
+    const old = from.find(item => samePart(item, each));
+    try { await settle(context, tool, holds, old, to.find(item => samePart(item, each)), moved); }
     catch (error) {
       moved.failed++;
       moved.notes.push(`Couldn’t change ${labelOf(old ?? each)}: ${plainReason(error)}.`);
@@ -314,10 +329,12 @@ const labelOf = (part: Pick<PartItem, 'kind' | 'name'>) => `the ${partWords[part
  *  2. the person removed it: it stays out (on record as removed) while the plugin still has it;
  *  3. new, or claimed by a run that stopped before writing it: written where nothing blocks it (`blocker`);
  *  4. removed by hand since it went in: left out, and remembered as removed;
- *  5. edited since, or 6. managed since: left as it is, no longer a part;
+ *  5. edited since, or 6. managed since: left as it is, no longer a part (`leftBecause`);
  *  7. the plugin dropped it: removed; 8. unchanged: kept; 9. changed: replaced.
+ * Rules 7 and 9 write through the tool's skills folder, so for a skill they fail while that folder is a link or shared
+ * with another tool (as on the Skills page). A failure throws: `move` records it and keeps the part's old state.
  */
-async function settle(context: ShareContext, tool: HarnessId, holds: Awaited<ReturnType<typeof namesInUse>>, old: PartItem | undefined, want: PartItem | undefined, moved: Moved) {
+async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse, old: PartItem | undefined, want: PartItem | undefined, moved: Moved) {
   const part = (old ?? want)!;
   const label = labelOf(part);
   const now = await onDisk(context, tool, part);
@@ -327,20 +344,8 @@ async function settle(context: ShareContext, tool: HarnessId, holds: Awaited<Ret
     const written = await onDisk(context, tool, want!);
     moved.held.push({ kind: want!.kind, name: want!.name, hash: want!.hash, ...(written.state === 'there' ? { seen: written.seen } : {}) });
   };
-  // A skills folder that is a link or shared with another tool is never written through, as on the Skills page: for a
-  // part already there that is a failure (retryable once the folder is the tool's own again); a new one meets blocker().
-  if (part.kind === 'skill' && holds.skillRootProblem && old) {
-    moved.failed++;
-    moved.notes.push(`Couldn’t change ${label}: ${holds.skillRootProblem.replace(/\.$/, '')}.`);
-    if (old) moved.held.push(old);
-    return;
-  }
-  if (now.state === 'unreadable') {
-    moved.failed++;
-    moved.notes.push(`Couldn’t change ${label}: it can’t be read in ${toolNames[tool]} right now.`);
-    if (old) moved.held.push(old);
-    return;
-  }
+  const throughSkillsFolder = () => { if (part.kind === 'skill' && holds.skillRootProblem) throw new Error(holds.skillRootProblem); };
+  if (now.state === 'unreadable') throw new Error(`it can’t be read in ${toolNames[tool]} right now`);
   if (old?.removed || want?.removed) {
     if (want && now.state === 'absent') moved.held.push({ ...want, removed: true });
     return;
@@ -359,11 +364,12 @@ async function settle(context: ShareContext, tool: HarnessId, holds: Awaited<Ret
     moved.held.push({ ...want, removed: true });
     return;
   }
-  if (!stillOurs(old, now)) { moved.notes.push(`Left ${label} as it is: it was changed after it was installed.`); return; }
-  if (holds.managed(part)) { moved.notes.push(`Left ${label} as it is: it is managed now, so it belongs to its own page.`); return; }
-  if (!want) { await take(context, tool, old, now); moved.wrote++; return; }
+  const left = leftBecause(old, now, holds);
+  if (left) { moved.notes.push(`Left ${label} as it is: ${left}.`); return; }
+  if (!want) { throughSkillsFolder(); await take(context, tool, old, now); moved.wrote++; return; }
   // Unchanged: kept, and a part claimed before it was written learns what it is on disk now.
   if (want.hash === old.hash) { moved.held.push(old.seen ? old : { ...old, seen: now.seen }); return; }
+  throughSkillsFolder();
   await writeIn(now);
 }
 
@@ -380,7 +386,7 @@ async function saveRun(context: ShareContext, run: PartsRun): Promise<string> {
 
 /** The record as the run found it on disk: parts already gone are marked removed, so its Undo leaves them out. */
 const asFound = (before: PartsInstall | null, moved: Moved): PartsInstall | null =>
-  (before ? { ...before, items: before.items.map(item => (moved.goneBefore.includes(item) ? { ...item, removed: true as const } : item)) } : null);
+  (before ? { ...before, items: before.items.map(item => (moved.goneBefore.some(gone => samePart(gone, item)) ? { ...item, removed: true as const } : item)) } : null);
 
 const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: string, more: { run?: string; changed?: boolean; notes?: string[]; updated?: boolean } = {}): ActionReport =>
   ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}) });
@@ -409,7 +415,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
     : null);
   const previous = { version: before?.version, digest: before?.digest ?? '' };
   // Claimed first: every part this run may write is on record (as the plugin was), so a run that stops halfway still owns it.
-  const claimed = [...(before?.items ?? []), ...wanted.filter(item => !before?.items.some(old => same(old, item)))];
+  const claimed = [...(before?.items ?? []), ...wanted.filter(item => !before?.items.some(old => samePart(old, item)))];
   await saveEntry(context.home, target, record(claimed, previous.version, previous.digest));
   const moved = await move(context, tool, before?.items ?? [], wanted);
   // Settled: what is there now. With failures it keeps the plugin's old version and digest, so it still shows as changed.
@@ -417,7 +423,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   await saveEntry(context.home, target, after);
   // A version change counts only while parts remain: a record that just went away is no change to undo.
   const changed = moved.wrote > 0 || (!!after && before?.version !== after.version);
-  const run = changed ? await saveRun(context, { target, before: asFound(before, moved), after }) : undefined;
+  const run = changed ? await saveRun(context, { target: { source: target.source, plugin: target.plugin, tool: target.tool }, before: asFound(before, moved), after }) : undefined;
   const skipped = plan.filter(part => part.why).map(part => `${part.name}: ${part.why}`);
   const left = skipped.length ? ` Not installed: ${skipped.join('; ')}` : '';
   if (moved.failed) return report(tool, 'failed', `Not every part could be changed. ${moved.notes.join(' ')}${left}`.trim(), { run, changed });
@@ -429,7 +435,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
 }
 
 /** Removes a plugin's parts from a tool: each one still as it was installed. Edited or managed parts stay. Undoable. */
-export async function removeParts(context: ShareContext, target: Pick<PartsTarget, 'source' | 'plugin' | 'tool'>): Promise<ActionReport> {
+export async function removeParts(context: ShareContext, target: PartsOf): Promise<ActionReport> {
   const { tool } = target;
   const access = await writeAccess(context);
   if (!access.allowed) return report(tool, 'failed', access.reason);
@@ -438,7 +444,7 @@ export async function removeParts(context: ShareContext, target: Pick<PartsTarge
   const moved = await move(context, tool, before.items, []);
   const after = moved.held.length ? { ...before, items: moved.held } : null;
   await saveEntry(context.home, target, after);
-  const run = moved.wrote ? await saveRun(context, { target, before: asFound(before, moved), after }) : undefined;
+  const run = moved.wrote ? await saveRun(context, { target: { source: target.source, plugin: target.plugin, tool: target.tool }, before: asFound(before, moved), after }) : undefined;
   if (moved.failed) return report(tool, 'failed', [`Not every part could be removed from ${toolNames[tool]}.`, ...moved.notes].join(' '), { run, changed: moved.wrote > 0 });
   return report(tool, 'uninstalled', `Parts removed from ${toolNames[tool]}.`, { run, changed: moved.wrote > 0, notes: moved.notes });
 }

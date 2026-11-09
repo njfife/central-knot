@@ -8,7 +8,7 @@ import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox } from
 import { allQueued, pluginKey, queued, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { installed, partWords, partsEligible, partsFit, partsMark, partsWhy, limitNote, missingTools, partsOf, partsOffer, pluginTools, removableTools, unavailable, versionWord } from './pluginstatus.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PartPlan, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import { plural } from './model.ts';
 import { openItem } from './matrix.ts';
@@ -114,6 +114,23 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
 }
 
 /**
+ * One tool's line in a plugin's parts table, in words: what Apply all will do (`pending`), what is there and from which
+ * version, that the plugin has changed since, or what can go in and what can't (`plan`, undefined while it is read:
+ * `reading`, or when the plugin's files couldn't be read).
+ */
+function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, pending: PluginAction | undefined, reading: boolean): (string | HTMLElement)[] {
+  const going = (plan ?? []).filter(part => !part.why);
+  if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
+  if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ', ...partNames(going.length ? going : parts?.items ?? []))];
+  const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
+  const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
+  if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
+  if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true))];
+  if (!plan) return [h('span.plugin-outcome-item', {}, reading ? 'Reading its parts…' : 'Its files couldn’t be read.')];
+  return [h('span.plugin-outcome-item', {}, ...(going.length ? ['Can go in: ', ...partNames(going)] : ['Nothing in it can go in here.'])), ...limited, ...missing];
+}
+
+/**
  * Tools that can't take the plugin can take its parts: each skill, MCP server and agent as a separate item. One row per
  * tool (tools alike share one until anything is installed or chosen), saying why the plugin can't go there and what Apply
  * all will do, what is there and from which version, what changed, or what can go in. Its buttons choose for the tools
@@ -140,21 +157,6 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const next = changed.length ? choose(changed.map(tool => op(tool, 'install-parts')), `Update parts in ${which(changed)}`, `pparts-${plugin.name}`, 'outline')
     : without.length ? choose(without.map(tool => op(tool, 'install-parts')), `Install parts in ${which(without)}`, `pparts-${plugin.name}`, 'outline') : null;
   const removal = holding.length ? choose(holding.map(tool => op(tool, 'remove-parts')), `Remove parts from ${which(holding)}`, `punparts-${plugin.name}`, next ? 'ghost' : 'outline', 'circle-minus') : null;
-  // One line per tool, in words: what Apply all will do, what is there (and from which version), what changed, or what can go in.
-  const line = (tool: HarnessId): (string | HTMLElement)[] => {
-    const parts = partsIn(tool);
-    const plan = plans?.[tool];
-    const going = (plan ?? []).filter(part => !part.why);
-    const pending = chosen(tool);
-    if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
-    if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ', ...partNames(going.length ? going : parts?.items ?? []))];
-    const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
-    const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
-    if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true))];
-    if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true))];
-    if (!plan) return [h('span.plugin-outcome-item', {}, read && !read.reading && !read.value ? 'Its files couldn’t be read.' : 'Reading its parts…')];
-    return [h('span.plugin-outcome-item', {}, ...(going.length ? ['Can go in: ', ...partNames(going)] : ['Nothing in it can go in here.'])), ...limited, ...missing];
-  };
   // Before anything is installed or chosen, tools alike share a row; after, each tool has its own, in column order.
   const settled = tools.every(tool => !partsIn(tool) && !chosen(tool));
   const groups = new Map<string, HarnessId[]>();
@@ -166,7 +168,7 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     h('ul.plugin-outcome-list.plugin-parts-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-parts-tool', {}, h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, andList(group.map(tool => names[tool])))),
         partsWhy(view, entry, group[0]!)[0] ? h('span.plugin-parts-why', {}, partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]) : null),
-      h('span.plugin-outcome-what', {}, line(group[0]!))))),
+      h('span.plugin-outcome-what', {}, partsLine(partsIn(group[0]!), plans?.[group[0]!], chosen(group[0]!), !read || read.reading || (!!read.value && !plans?.[group[0]!])))))),
     behind.length ? h('p.plugin-muted', {}, `Stays with the plugin: ${andList(behind)}.`) : null);
 }
 

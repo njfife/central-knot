@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
@@ -199,5 +199,15 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     assert.match(removed.notes?.join(' ') ?? '', /MCP server “figma” as it is: it was changed/);
     assert.match(await readFile(config, 'utf8'), /enabled = false/);
+
+    // A skills folder made a link later: the skill needs no write, so an update that changes only another part still succeeds.
+    await writeFile(config, '');
+    await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
+    await rename(join(box.home, '.codex/skills'), join(box.home, 'linked-skills'));
+    await symlink(join(box.home, 'linked-skills'), join(box.home, '.codex/skills'));
+    await writeFile(join(box.plugin, '.mcp.json'), JSON.stringify({ mcpServers: { figma: { command: 'npx', args: ['-y', 'figma-mcp@2'] } } }));
+    const linked = await installParts(box.context, { ...target, version: '3.0.0', tool: 'codex-cli' }, await box.files());
+    assert.equal(linked.outcome, 'installed', linked.message);
+    assert.match(await readFile(config, 'utf8'), /figma-mcp@2/);
   } finally { await box.cleanup(); }
 });

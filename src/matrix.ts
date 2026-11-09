@@ -20,8 +20,8 @@ const names = toolNames as Record<Tool, string>;
  * The plugins this item came from as a part (parts.ts): each plugin once, with the tools it went into as a separate item
  * because they can't take the plugin. Empty for an ordinary item.
  */
-function fromPlugins(skill: SampleSkill): { install: PartsInstall; tools: HarnessId[] }[] {
-  const partKind = kind === 'skills' ? 'skill' : kind === 'mcp' ? 'mcp' : 'agent';
+function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; tools: HarnessId[] }[] {
+  const partKind = page === 'skills' ? 'skill' : page === 'mcp' ? 'mcp' : 'agent';
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
@@ -45,7 +45,7 @@ function openPlugin(install: PartsInstall) {
 function partNote(skill: SampleSkill) {
   // Once read, the Plugins page knows whether the plugin is still listed; a page that can't show it isn't linked to.
   const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
-  return fromPlugins(skill).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
+  return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
     h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
         : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
@@ -118,7 +118,8 @@ export const showFiltered = (which: Kind, filter: Filter) => { views[which].filt
 /** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
 export function openItem(which: Kind, name: string) {
   const facts = which === 'skills' ? state.home?.manage.skills : which === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers;
-  const key = facts?.find(item => item.key.toLowerCase() === name.toLowerCase() || item.name.toLowerCase() === name.toLowerCase())?.key;
+  const partKind = which === 'skills' ? 'skill' : which === 'mcp' ? 'mcp' : 'agent';
+  const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
   views[which].filter = 'all';
   views[which].comparing = key;
   showPage(which);
@@ -527,7 +528,7 @@ function details(skill: SampleSkill, closable = true) {
       : kind === 'mcp' && skill.waits?.includes('claude-cli') && !draft ? `Waits for Write to Claude Code · synced in ${andList(toolList().filter(tool => tool !== 'claude-cli' && cellOf(skill, tool) === 'synced').map(tool => names[tool]))}`
       : kind === 'mcp' && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced in ${andList(toolList().map(tool => names[tool]))}`
       : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)}` : 'Managed · syncing to no tool')
-    : differs ? 'Not managed yet. Its copies differ.' : fromPlugins(skill).length ? 'Unmanaged: Central Knot doesn’t sync its copies.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
+    : differs ? 'Not managed yet. Its copies differ.' : fromPlugins(skill, kind).length ? 'Unmanaged: Central Knot doesn’t sync its copies.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
   // MCP keeps one layout in every state (a row per tool with its status and settings file), so it never takes the one-line form.
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
@@ -645,7 +646,7 @@ function row(skill: SampleSkill) {
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', {}, skill.name ?? skill.key),
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
-        fromPlugins(skill).map(({ install, tools }) => h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('blocks', 12, 'tone-faint'), `from ${install.plugin}`)),
+        fromPlugins(skill, kind).map(({ install, tools }) => h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('blocks', 12, 'tone-faint'), `from ${install.plugin}`)),
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
         decided ? h('span.decided', { title: decided === 'separate' ? 'Keeping separate copies, on Apply all' : `Every tool will use ${names[decided]}’s copy, on Apply all` },

@@ -198,17 +198,12 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  * link to its page, with Undo), or else the last notice ("… added"). Shown in place, so nothing on the page moves.
  */
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
-  const counts = summary(market.draft);
   // Parts chosen where some are already there are an update; elsewhere an install.
-  const partsCounts = () => {
-    const ops = [...market.draft.values()].filter(op => op.action === 'install-parts');
-    const updates = ops.filter(op => { const entry = market.view?.marketplaces.find(candidate => candidate.source === op.source); return !!entry && !!partsOf(entry, op.plugin, op.tool); }).length;
-    return [ops.length - updates ? `install parts in ${plural(ops.length - updates, 'tool')}` : '', updates ? `update parts in ${plural(updates, 'tool')}` : ''];
-  };
+  const counts = summary(market.draft, op => { const entry = market.view?.marketplaces.find(candidate => candidate.source === op.source); return !!entry && !!partsOf(entry, op.plugin, op.tool); });
   if (counts.plugins) {
     return h('div.apply', {},
       h('span.apply-count.apply-quiet', { title: 'Nothing runs until Apply all' }, [`${plural(counts.plugins, 'plugin')} to change`, counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
-        ...partsCounts(), counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
+        counts.partsInstalls ? `install parts in ${plural(counts.partsInstalls, 'tool')}` : '', counts.partsUpdates ? `update parts in ${plural(counts.partsUpdates, 'tool')}` : '', counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : ''].filter(Boolean).join(' · ')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
