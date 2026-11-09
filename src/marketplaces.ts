@@ -9,8 +9,9 @@ import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
-import { cachedCatalog, installState, isFolder, parseCatalog, pluginTools, registeredMarketplaces, registeredSource, remoteCopyFolder, sameSource, type PluginContext } from './plugins.ts';
+import { SAFE_NAME, cachedCatalog, heldBy, installState, parseCatalog, pluginTools, registeredMarketplaces, remoteCopyFolder, sameSource, type PluginContext } from './plugins.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
+import { isFolder, isHttps } from './values.ts';
 
 /** What the marketplace feature needs from the app around it. */
 export interface MarketplaceHost {
@@ -59,13 +60,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   };
   const saveAdded = async (list: string[]) => { await mkdir(host.dataDir, { recursive: true }); await writeFile(listPath, `${JSON.stringify(list, null, 2)}\n`); };
   /**
-   * A context for one request. CLIs are looked for only when a request runs or reports on them. Only a read-only view
-   * shares reads: an install reads the tool's records again after its command, and must see the change.
+   * A context for one request. `clis`: look for the tools' CLIs (only a request that runs or reports on them needs them).
+   * `shareReads`: read each record once for the whole request; only a read-only view may, because an install reads the
+   * tool's records again after its command and must see the change.
    */
-  const context = async (withClis: boolean, shareReads = false): Promise<PluginContext> => {
+  const context = async ({ clis = false, shareReads = false } = {}): Promise<PluginContext> => {
     const open = host.home();
     if (!open) throw new Error('No home is open.');
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: withClis ? await use.findClis() : {}, overrides: open.overrides, reads: shareReads ? new Map() : undefined };
+    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: clis ? await use.findClis() : {}, overrides: open.overrides, reads: shareReads ? new Map() : undefined };
   };
 
   /** Each Git catalog as known this session: its catalog, why the last fetch failed, and whether it shows an older copy. */
@@ -105,8 +107,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function statesFor(ctx: PluginContext, tools: HarnessId[], catalog: Catalog, source: string): Promise<MarketplaceView['states']> {
     const held = new Map<HarnessId, InstallState>();
     for (const tool of tools) {
-      const registered = await registeredSource(ctx, tool, catalog.name);
-      if (registered && !sameSource(registered, source)) held.set(tool, { state: 'held', reason: `${harnesses[tool].name} has a different marketplace named “${catalog.name}” (${registered}). Central Knot leaves it alone.` });
+      const other = await heldBy(ctx, tool, catalog.name, source);
+      if (other) held.set(tool, { state: 'held', reason: `${harnesses[tool].name} has a different marketplace named “${catalog.name}” (${other}). Central Knot leaves it alone.` });
     }
     const states: MarketplaceView['states'] = {};
     for (const plugin of catalog.plugins) {
@@ -130,7 +132,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** Every marketplace: added here, or already added in a tool. `fresh`: one source, or every Git source, fetched again. */
   async function view(fresh?: string | true): Promise<PluginsView> {
-    const ctx = await context(true, true);
+    const ctx = await context({ clis: true, shareReads: true });
     const tools = (await host.tools()).filter(tool => pluginTools.includes(tool));
     const access = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
@@ -150,7 +152,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** A plugin's contents and README: from the marketplace's files, or from its own repository when it lives elsewhere. */
   async function detail(source: string, plugin: string): Promise<PluginDetail | null> {
-    const ctx = await context(false);
+    const ctx = await context();
     const { catalog } = await catalogFor(ctx, source);
     const item = catalog?.plugins.find(entry => entry.name === plugin);
     if (!catalog?.root || !item) return null;
@@ -165,14 +167,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** The marketplace's own README, from the copy already read. */
   async function readme(source: string): Promise<string | null> {
-    const { catalog } = await catalogFor(await context(false), source);
+    const { catalog } = await catalogFor(await context(), source);
     return catalog?.root ? (await readmeIn(catalog.root)) ?? null : null;
   }
 
   async function add(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }> {
     const text = source.trim();
     if (text.startsWith('-')) return { problem: 'That isn’t a marketplace: owner/repo, a Git URL or a folder.' };
-    const catalog = await use.readCatalog(await context(false), text);
+    const catalog = await use.readCatalog(await context(), text);
     if (catalog.problem) return { problem: catalog.problem };
     const list = await added();
     const stored = list.find(item => sameSource(item, text)) ?? text;
@@ -188,7 +190,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   async function forget(source: string): Promise<PluginsView> {
     await saveAdded((await added()).filter(item => !sameSource(item, source)));
-    fetched.delete(source);
+    for (const known of fetched.keys()) if (sameSource(known, source)) fetched.delete(known);
     return view();
   }
 
@@ -196,14 +198,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const guard = async (home: unknown) => {
     if (home !== host.home()?.home) return 'The home on screen is not the one open. Nothing was installed. Read it again.';
     const access = await host.writeAccess();
-    return access.allowed ? undefined : access.reason;
+    return access.allowed ? undefined : access.reason ?? 'Writing isn’t allowed in this home, so nothing was installed.';
   };
 
   /** Each tool's own install. A plugin gone from the marketplace fails for its tools instead of stopping the whole run. */
   async function install(source: string, plugin: string, tools: HarnessId[], home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
-    const ctx = await context(true);
+    const ctx = await context({ clis: true });
     const { catalog } = await catalogFor(ctx, source);
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     const reports: ActionReport[] = [];
@@ -214,7 +216,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   async function uninstall(source: string, marketplace: string, plugin: string, tool: HarnessId, home: unknown): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
-    return { reports: lean([await use.uninstall(await context(true), marketplace, plugin, tool, source)]) };
+    return { reports: lean([await use.uninstall(await context({ clis: true }), marketplace, plugin, tool, source)]) };
   }
 
   return { view, detail, readme, add, refresh, forget, install, uninstall };
@@ -222,6 +224,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
 const isText = (value: unknown, max = 2000): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
+/** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
+const isName = (value: unknown): value is string => typeof value === 'string' && SAFE_NAME.test(value);
 
 /** The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. */
 export function registerMarketplaces(handle: Handle, host: MarketplaceHost): void {
@@ -229,18 +233,18 @@ export function registerMarketplaces(handle: Handle, host: MarketplaceHost): voi
   const open = () => !!host.home();
   handle('plugins:view', async fresh => (open() ? markets.view(fresh === true ? true : undefined) : null));
   handle('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
-  handle('plugins:detail', async (source, plugin) => (open() && isText(source) && isText(plugin, 300) ? markets.detail(source, plugin) : null));
+  handle('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
-  handle('open:external', async url => { if (isText(url) && /^https:\/\/\S+$/.test(url)) await host.openExternal(url); });
+  handle('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:refresh', async source => (open() && isText(source) ? markets.refresh(source) : null));
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
-  handle('plugins:install', async (source, plugin, tools, home) => (open() && isText(source) && isText(plugin, 300) ? markets.install(source, plugin, toolIds(tools), home) : refused(tools)));
+  handle('plugins:install', async (source, plugin, tools, home) => (open() && isText(source) && isName(plugin) ? markets.install(source, plugin, toolIds(tools), home) : refused(tools)));
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {
     const ids = toolIds([tool]);
-    return open() && isText(source) && isText(marketplace, 300) && isText(plugin, 300) && ids.length ? markets.uninstall(source, marketplace, plugin, ids[0]!, home) : refused(tool);
+    return open() && isText(source) && isName(marketplace) && isName(plugin) && ids.length ? markets.uninstall(source, marketplace, plugin, ids[0]!, home) : refused(tool);
   });
 }

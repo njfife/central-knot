@@ -8,8 +8,9 @@ export const componentsFrom = (contents: PluginContents): Components => ({
   mcp: contents.mcpServers.length, mcpRootVariable: contents.mcpUsesPluginRoot, bin: contents.bin, skillNames: contents.skills.map(skill => skill.name),
 });
 
-/** What each component does on each tool (capability data, Appendix D, tested versions). */
+/** What each component does on each tool (capability data, Appendix D, tested versions). Tools without plugins get []. */
 export function outcomes(tool: HarnessId, components: Components): Outcome[] {
+  if (tool !== 'claude-cli' && tool !== 'copilot-cli' && tool !== 'codex-cli') return [];
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string, names?: Outcome['names']) => { if (present) list.push({ component, result, text, ...(names ? { names } : {}) }); };
   if (tool === 'claude-cli') {
@@ -24,7 +25,7 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
     add(components.agents, 'Agents', 'works', 'get the plugin’s name in front, e.g.', 'agent');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others may not');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
-  } else {
+  } else if (tool === 'codex-cli') {
     add(components.skills, 'Skills', 'works', 'get the plugin’s name in front, e.g.', 'skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');

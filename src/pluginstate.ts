@@ -24,10 +24,10 @@ export const market = {
   /** Changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
   draft: new Map() as PluginDraft,
   /**
-   * What the last Apply all (or its Undo) did, in which home, so the toolbar can say it and offer the way back there
-   * only. An Undo that was stopped or failed part-way keeps `rest`, the reversals it didn't get to.
+   * The last Apply all (or Undo): each tool's report, whether it was an Undo, and in which home, so the toolbar can say
+   * what happened and offer the way back there only. An Undo keeps `rest`, the reversals that didn't succeed.
    */
-  done: undefined as { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] } | undefined,
+  lastRun: undefined as { reports: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] } | undefined,
   /** The plugin and tools a command is running for, so their boxes show it is working. */
   working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
   /** Where the person is: the marketplace shown, its tab, an open plugin page, and the filter. */
@@ -38,11 +38,13 @@ export const market = {
   details: new Map<string, Read<PluginDetail | null>>(),
   /** What is typed in the add box, kept through loading and errors. */
   draftSource: '',
+  /** The add box is open: always with no marketplaces yet, otherwise after "Add marketplace" is clicked. */
+  addOpen: false,
 };
 
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
-  market.view = undefined; market.problem = undefined; market.draft.clear(); market.done = undefined; market.working = undefined;
+  market.view = undefined; market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
   market.readmes.clear(); market.details.clear(); market.nav = startNav();
 }
 
@@ -53,8 +55,8 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
   return list[index] ? { entry: list[index]!, index } : undefined;
 }
 
-/** The "added" or "removed" message has done its job once the person moves on or chooses something. */
-export function clearPluginOutcome(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
+/** The toolbar's notice ("… added", "… refreshed") has done its job once the person moves on or chooses something. */
+export function clearNotice(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
 
 /** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
 const REMOTE_READ_AHEAD = 8;
@@ -74,7 +76,7 @@ function readShown(): void {
 /** Moves within the page and reads what the new place shows. */
 export function browse(patch: Partial<typeof market.nav>): void {
   market.nav = { ...market.nav, ...patch };
-  clearPluginOutcome();
+  clearNotice();
   readShown();
   rerender();
   document.getElementById('plugins-scroll')?.scrollTo(0, 0);
@@ -107,15 +109,21 @@ export const addMarketplace = (source: string) => act('adding', 'Reading the mar
   if (result.problem) { announce(result.problem); return; }
   const added = market.view?.marketplaces.find(entry => entry.source === result.source);
   market.draftSource = '';
+  market.addOpen = false;
   market.nav = { ...startNav(), source: added?.source };
   app.outcome = { page: 'plugins', item: added?.name || undefined, text: `${added ? `${added.name || added.source} added: ${plural(added.plugins.length, 'plugin')}` : 'Marketplace added'}. Nothing was installed.` };
   announce(app.outcome.text, true);
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 
-export const refreshMarketplace = (source: string) => act('refreshing', 'Refreshing the marketplace…', async () => {
-  market.view = (await api().refreshMarketplace(source)) ?? market.view;
+/** Forgets what was read for one marketplace (its README, its plugins' contents), so it is read again when shown. */
+function dropReads(source: string): void {
   market.readmes.delete(source);
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
+}
+
+export const refreshMarketplace = (source: string) => act('refreshing', 'Refreshing the marketplace…', async () => {
+  market.view = (await api().refreshMarketplace(source)) ?? market.view;
+  dropReads(source);
   prune(market.draft, market.view);
   readShown();
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
@@ -126,6 +134,7 @@ export const refreshMarketplace = (source: string) => act('refreshing', 'Refresh
 export const forgetMarketplace = (source: string) => act('removing', 'Removing from the list…', async () => {
   const name = market.view?.marketplaces.find(entry => entry.source === source)?.name;
   market.view = (await api().forgetMarketplace(source)) ?? market.view;
+  dropReads(source);
   prune(market.draft, market.view);
   if (market.nav.source === source) market.nav = startNav();
   const text = `${name || 'It'} was removed from this list. Tools that added it keep it, and nothing was uninstalled.`;
@@ -149,17 +158,17 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   } finally {
     market.working = undefined;
     for (const entry of result.done) clear(market.draft, entry);
-    market.done = { done: result.done, undo, home, rest: undo ? notUndone(ops, result.done) : undefined };
+    market.lastRun = { reports: result.done, undo, home, rest: undo ? notUndone(ops, result.done) : undefined };
     market.problem = result.stopped;
     market.view = (await api().plugins().catch(() => null)) ?? market.view;
     prune(market.draft, market.view);
   }
-  announce(market.problem ?? resultSentence(describe(result.done, toolNames, andList, undo), undo), true);
+  announce(market.problem ?? (resultSentence(describe(result.done, toolNames, andList, undo), undo) || 'Nothing changed.'), true);
 });
 
 /** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {
-  const last = market.done;
+  const last = market.lastRun;
   if (!last || last.home !== app.home?.home) return [];
-  return last.undo ? last.rest ?? [] : reverse(last.done);
+  return last.undo ? last.rest ?? [] : reverse(last.reports);
 }

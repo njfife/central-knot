@@ -5,7 +5,7 @@ import { andList } from '../src/words.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const names = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<HarnessId, string>;
-const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', market: 'anthropic-agent-skills', plugin, tool, action });
+const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
 
 test('Choosing a box queues it, choosing it again takes it back, and another action replaces it', () => {
   const draft: PluginDraft = new Map();
@@ -47,10 +47,10 @@ test('Undo reverses only what really changed, and the report names each plugin o
   ];
   assert.deepEqual(reverse(done).map(entry => [entry.plugin, entry.tool, entry.action]), [['pdf', 'claude-cli', 'remove'], ['docx', 'copilot-cli', 'install']]);
   assert.deepEqual(describe(done, names, andList), [
-    { plugin: 'pdf', ok: true, text: 'installed in Claude Code' },
-    { plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.' },
-    { plugin: 'docx', ok: true, text: 'uninstalled from Copilot CLI' },
-    { plugin: 'xlsx', ok: true, text: 'already in Claude Code' },
+    { source: 'anthropics/skills', plugin: 'pdf', ok: true, text: 'installed in Claude Code' },
+    { source: 'anthropics/skills', plugin: 'pdf', ok: false, text: 'Codex: It stopped with exit code 1.' },
+    { source: 'anthropics/skills', plugin: 'docx', ok: true, text: 'uninstalled from Copilot CLI' },
+    { source: 'anthropics/skills', plugin: 'xlsx', ok: true, text: 'already in Claude Code' },
   ]);
 });
 
@@ -104,12 +104,18 @@ test('A run goes on past a step that throws, and a refusal stops it with the res
 });
 
 test('An Undo says what came back, and keeps what it did not get to', async () => {
-  const { notUndone, resultSentence } = await import('../src/pluginplan.ts');
-  const undoOps = [op('pdf', 'claude-cli', 'remove'), op('docx', 'codex-cli', 'install'), op('xlsx', 'claude-cli', 'remove')];
+  const { notUndone, resultParts, resultSentence } = await import('../src/pluginplan.ts');
+  const undoOps = [op('pdf', 'claude-cli', 'remove'), op('docx', 'codex-cli', 'install'), op('xlsx', 'claude-cli', 'remove'), op('pptx', 'codex-cli', 'remove')];
   const done: PluginDone[] = [
     { ...undoOps[0]!, report: { tool: 'claude-cli', outcome: 'uninstalled', message: '', runs: [], changed: true } },
     { ...undoOps[1]!, report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true } },
+    // Already gone when the Undo reached it: nothing left to do, so "Undo the rest" doesn't offer it again.
+    { ...undoOps[3]!, report: { tool: 'codex-cli', outcome: 'uninstalled', message: 'Not installed in Codex.', runs: [] } },
   ];
-  assert.equal(resultSentence(describe(done, names, andList, true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
+  assert.equal(resultSentence(describe(done.slice(0, 2), names, andList, true), true), 'Undone: pdf removed from Claude Code; docx put back in Codex.');
+  assert.deepEqual(resultParts(describe(done.slice(0, 1), names, andList, true), true), ['Undone: ', { plugin: 'pdf', source: 'anthropics/skills' }, ' removed from Claude Code', '.']);
   assert.deepEqual(notUndone(undoOps, done).map(entry => entry.plugin), ['xlsx']);
+  // A run where nothing succeeded has no result sentence (its failures show in the problem band).
+  const failed: PluginDone[] = [{ ...undoOps[2]!, report: { tool: 'claude-cli', outcome: 'failed', message: 'x', runs: [] } }];
+  assert.equal(resultSentence(describe(failed, names, andList, true), true), '');
 });

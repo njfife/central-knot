@@ -5,11 +5,15 @@ import { open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
 import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
-import { githubRepo, record, strings, text } from './values.ts';
+import { githubRepo, isFolder, isHttps, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
 /** No file from a repository is read past this; front matter and READMEs need far less. */
 const READ_LIMIT = 256 * 1024;
+/** A marketplace.json lists every plugin, so it may be far larger than any other file read here. */
+const MANIFEST_LIMIT = 8 * 1024 * 1024;
+/** Where a marketplace describes itself, relative to its root. */
+export const MANIFEST = '.claude-plugin/marketplace.json';
 
 /** True when `path` names something inside `root`, after both are resolved through links. A missing path is not inside. */
 export async function inside(root: string, path: string): Promise<boolean> {
@@ -20,26 +24,40 @@ export async function inside(root: string, path: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** The start of a file's text, at most READ_LIMIT bytes, only if it resolves inside `root`. */
-async function readInside(root: string, path: string): Promise<string | undefined> {
+/**
+ * A file's text, only if it resolves inside `root`: at most `limit` bytes, with `whole` false when the file goes on past
+ * that. Undefined when it is missing, unreadable or outside.
+ */
+async function readInside(root: string, path: string, limit = READ_LIMIT): Promise<{ text: string; whole: boolean } | undefined> {
   if (!(await inside(root, path))) return undefined;
   try {
     const file = await open(path, 'r');
     try {
-      const buffer = Buffer.alloc(READ_LIMIT);
-      const { bytesRead } = await file.read(buffer, 0, READ_LIMIT, 0);
-      return buffer.subarray(0, bytesRead).toString('utf8');
+      const buffer = Buffer.alloc(limit + 1);
+      const { bytesRead } = await file.read(buffer, 0, limit + 1, 0);
+      return { text: buffer.subarray(0, Math.min(bytesRead, limit)).toString('utf8'), whole: bytesRead <= limit };
     } finally { await file.close(); }
   } catch { return undefined; }
 }
+const textInside = async (root: string, path: string) => (await readInside(root, path))?.text;
+const parseObject = (raw: string) => { try { return record(JSON.parse(raw)); } catch { return undefined; } };
 /** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
-export const jsonInside = async (root: string, path: string) => { const raw = await readInside(root, path); try { return raw === undefined ? undefined : record(JSON.parse(raw)); } catch { return undefined; } };
+export const jsonInside = async (root: string, path: string) => { const read = await readInside(root, path); return read?.whole ? parseObject(read.text) : undefined; };
+
+/** The marketplace.json in `root` as an object, or the problem that kept it from being read. */
+export async function readManifest(root: string): Promise<{ manifest: Record<string, unknown> } | { problem: string }> {
+  const read = await readInside(root, join(root, MANIFEST), MANIFEST_LIMIT);
+  if (!read) return { problem: 'There is no marketplace here: no .claude-plugin/marketplace.json.' };
+  if (!read.whole) return { problem: `Its marketplace.json is larger than ${MANIFEST_LIMIT / 1024 / 1024} MB, so it isn’t read.` };
+  const manifest = parseObject(read.text);
+  return manifest ? { manifest } : { problem: 'Its marketplace.json could not be read as JSON.' };
+}
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
 
 /** The README in this folder, cut to a readable size. */
 export async function readmeIn(folder: string, root = folder): Promise<string | undefined> {
   const name = (await listInside(root, folder)).find(entry => /^readme(\.md|\.markdown|\.txt)?$/i.test(entry));
-  const body = name ? await readInside(root, join(folder, name)) : undefined;
+  const body = name ? await textInside(root, join(folder, name)) : undefined;
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
@@ -48,7 +66,7 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
 async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
-    const body = await readInside(root, join(dir, 'SKILL.md'));
+    const body = await textInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
     const meta = nameAndDescription(body);
     found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
@@ -64,7 +82,7 @@ async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path] : (await listInside(root, path)).filter(name => name.endsWith('.md')).map(name => join(path, name));
     for (const file of files) {
-      const body = await readInside(root, file);
+      const body = await textInside(root, file);
       if (body === undefined) continue;
       const meta = nameAndDescription(body);
       found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '' });
@@ -128,7 +146,7 @@ export function remoteOf(where: unknown): { url: string; path: string; ref?: str
   const sha = /^[0-9a-f]{7,40}$/i.test(text(entry.sha)) ? text(entry.sha) : undefined;
   const repo = entry.source === 'github' ? githubRepo(text(entry.repo)) : undefined;
   if (repo) return { url: `https://github.com/${repo}.git`, path, ref, sha };
-  if (['url', 'git-subdir', 'git'].includes(text(entry.source)) && /^https:\/\/\S+$/.test(text(entry.url))) return { url: text(entry.url), path, ref, sha };
+  if (['url', 'git-subdir', 'git'].includes(text(entry.source)) && isHttps(entry.url)) return { url: text(entry.url), path, ref, sha };
   return undefined;
 }
 
@@ -155,7 +173,7 @@ export function sourceOf(where: unknown): { label: string; url?: string } | unde
 export function sourceLabel(source: string): string {
   const repo = githubRepo(source);
   if (repo) return `GitHub: ${repo}`;
-  return isAbsolute(source) && !/^[a-z]+:\/\//i.test(source) ? `Folder: ${basename(resolve(source))}` : source;
+  return isFolder(source) ? `Folder: ${basename(resolve(source))}` : source;
 }
 
 /** A web page for the marketplace itself, for GitHub sources. */

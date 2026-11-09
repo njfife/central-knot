@@ -51,6 +51,13 @@ test('An opening title and lead that only repeat the page are left out', () => {
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Use');
 });
 
+test('A list that only names parts already on the page is left out, with a heading it alone filled', () => {
+  const source = '## Skills\n\n- `pdf-reader`: reads PDFs\n- **sheet-tidy** — tidies sheets\n\n## Setup\n\n- Install it\n- pdf-readers are great\n\n## More\n\nIncludes:\n\n- pdf-reader\n- sheet-tidy\n';
+  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['pdf-reader', 'sheet-tidy'] });
+  assert.deepEqual(blocks.map(block => block.kind), ['heading', 'list', 'heading', 'paragraph']);
+  assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Setup');
+});
+
 test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {
   const badge = parseInline('[![CI](https://img.example/ci.svg)](https://example.com/ci) done');
   assert.deepEqual(badge[0], { kind: 'link', label: [{ kind: 'text', text: 'CI' }], url: 'https://example.com/ci' });

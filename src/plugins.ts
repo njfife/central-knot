@@ -4,14 +4,13 @@ import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
-import { harnesses } from './harnesses.ts';
-import { inside, jsonInside, pluginContents, remoteOf, sourceOf } from './catalogdetail.ts';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
+import { configRoot, harnesses } from './harnesses.ts';
+import { MANIFEST, inside, pluginContents, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { githubRepo, record, text } from './values.ts';
-export { outcomes } from './pluginoutcomes.ts';
+import { readTomlTables, type TomlValue } from './textedit.ts';
+import { githubRepo, isFolder, isHttps, record, text } from './values.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
-export type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, InstallState, NativeRun, Outcome } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -38,15 +37,14 @@ export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli
 
 // ---------- Sources and access ----------
 
-export const isFolder = (source: string) => isAbsolute(source) && !/^[a-z]+:\/\//i.test(source);
-
 /** One spelling for one repository, so the same marketplace is recognised however it was typed (MKT-07). */
 export function sameSource(first: string, second: string): boolean {
   const norm = (value: string) => {
     let text = value.trim();
     // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
     if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
-    if (/^[\w.-]+\/[\w.-]+$/.test(text)) text = `https://github.com/${text}`; // owner/repo means GitHub
+    const repo = githubRepo(text);
+    if (repo) return `github.com/${repo.toLowerCase()}`;
     const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
     if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
     try {
@@ -58,7 +56,7 @@ export function sameSource(first: string, second: string): boolean {
 }
 
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
-const fetchUrl = (source: string) => (/^[\w.-]+\/[\w.-]+$/.test(source.trim()) ? `https://github.com/${githubRepo(source)}.git` : source.trim());
+const fetchUrl = (source: string) => { const repo = githubRepo(source); return repo ? `https://github.com/${repo}.git` : source.trim(); };
 
 const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
@@ -165,15 +163,13 @@ export async function readCatalog(context: PluginContext, source: string): Promi
 export async function cachedCatalog(context: PluginContext, source: string): Promise<Catalog | undefined> {
   if (isFolder(source)) return undefined;
   const target = catalogFolder(context, source);
-  try { await stat(join(target, '.claude-plugin/marketplace.json')); } catch { return undefined; }
-  const catalog = await parseCatalog(target, source, 'git');
-  catalog.fetchedAt = (await stat(join(target, '.claude-plugin/marketplace.json'))).mtime.toISOString();
-  return catalog;
+  const fetched = await stat(join(target, MANIFEST)).catch(() => undefined);
+  if (!fetched) return undefined;
+  return { ...(await parseCatalog(target, source, 'git')), fetchedAt: fetched.mtime.toISOString() };
 }
 
-
 /** A marketplace or plugin name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
-const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
+export const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
 
 /** Why Copilot CLI would refuse a whole marketplace because of this one entry's source (MKT-06), if it would. */
 function copilotRefusal(name: string, where: unknown): string | undefined {
@@ -194,7 +190,7 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
   const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
   const plugin: CatalogPlugin = {
     name: item.name, description: text(item.description), version: text(item.version) || undefined, displayName: text(item.displayName) || undefined,
-    category: text(item.category) || undefined, author: author || undefined, homepage: /^https:\/\//.test(text(item.homepage)) ? text(item.homepage) : undefined,
+    category: text(item.category) || undefined, author: author || undefined, homepage: isHttps(item.homepage) ? item.homepage : undefined,
     license: text(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source), remote: remoteOf(item.source), entry: item,
   };
   if (typeof item.source === 'string') {
@@ -214,10 +210,9 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
 export async function parseCatalog(root: string, source: string, kind: Catalog['kind']): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
   const failed = (problem: string): Catalog => ({ name: '', source, kind, fetchedAt, plugins: [], problem });
-  const manifestPath = join(root, '.claude-plugin/marketplace.json');
-  if (!(await inside(root, manifestPath))) return failed('There is no marketplace here: no .claude-plugin/marketplace.json.');
-  const manifest = await jsonInside(root, manifestPath);
-  if (!manifest) return failed('Its marketplace.json could not be read as JSON.');
+  const read = await readManifest(root);
+  if ('problem' in read) return failed(read.problem);
+  const { manifest } = read;
   const name = text(manifest.name);
   if (!name) return failed('Its marketplace.json has no name.');
   // Names reach each tool's command line as plugin@marketplace: anything that could read as an option is not offered.
@@ -238,30 +233,24 @@ export async function componentsOf(folder: string, entry: Record<string, unknown
 
 // ---------- What each tool has ----------
 
-const configRootOf = (context: PluginContext, tool: HarnessId) => context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig);
+const configRootOf = (context: PluginContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
 async function readJson(path: string): Promise<Record<string, unknown> | undefined> {
   try { const value = JSON.parse((await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : undefined; } catch { return undefined; }
 }
 const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
-const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async () => { try { return readCodexTables(await readFile(join(root, 'config.toml'), 'utf8')); } catch { return undefined; } });
-
-/** Only the two kinds of table Central Knot reads from Codex's config.toml: `[marketplaces.NAME]` and `[plugins."ID"]`. Never written. */
-export function readCodexTables(text: string): { marketplaces: Record<string, Record<string, string>>; plugins: Record<string, Record<string, string>> } {
-  const marketplaces: Record<string, Record<string, string>> = Object.create(null);
-  const plugins: Record<string, Record<string, string>> = Object.create(null);
-  let current: Record<string, string> | undefined;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const header = line.match(/^\[\s*(marketplaces|plugins)\.(?:"((?:[^"\\]|\\.)*)"|([\w.-]+))\s*\]$/);
-    if (header) { const table = header[1] === 'marketplaces' ? marketplaces : plugins; current = table[header[2] ?? header[3]] ??= Object.create(null); continue; }
-    if (line.startsWith('[')) { current = undefined; continue; }
-    const pair = current && line.match(/^([\w-]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^#]*?))\s*(?:#.*)?$/);
-    if (pair && current) current[pair[1]] = pair[2] ?? (pair[3] ?? '').trim();
-  }
-  return { marketplaces, plugins };
-}
+type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>>;
+/** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name. Empty when it can't be read. */
+const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
+  const found: CodexTables = { marketplaces: Object.create(null), plugins: Object.create(null) };
+  try {
+    for (const table of readTomlTables(await readFile(join(root, 'config.toml'), 'utf8'))) {
+      const [kind, name, ...deeper] = table.path;
+      if ((kind === 'marketplaces' || kind === 'plugins') && name && !deeper.length) found[kind][name] = Object.fromEntries(table.entries.map(entry => [entry.key, entry.value]));
+    }
+  } catch { /* missing, or not TOML this reader can follow: nothing registered */ }
+  return found;
+});
 
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
 
@@ -270,34 +259,44 @@ export async function registeredSource(context: PluginContext, tool: HarnessId, 
   return (await registeredMarketplaces(context, tool)).find(entry => entry.name === marketplace)?.source;
 }
 
+/**
+ * The source of a different marketplace the tool already has under this name, if it has one. Central Knot never installs
+ * from, uninstalls from or replaces such a marketplace: it is "held".
+ */
+export async function heldBy(context: PluginContext, tool: HarnessId, marketplace: string, source: string): Promise<string | undefined> {
+  const registered = await registeredSource(context, tool, marketplace);
+  return registered && !sameSource(registered, source) ? registered : undefined;
+}
+
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
 export async function installState(context: PluginContext, tool: HarnessId, marketplace: string, plugin: string): Promise<InstallState> {
   const root = configRootOf(context, tool);
   const id = `${plugin}@${marketplace}`;
   if (tool === 'claude-cli') {
-    const record = await recordJson(context, join(root, 'plugins/installed_plugins.json'));
-    const entries = (record?.plugins as Record<string, { scope?: string; installPath?: string }[]> | undefined)?.[id];
-    const user = entries?.find(entry => entry.scope === 'user') ?? entries?.[0];
-    if (!user?.installPath) return { state: 'not-installed' };
-    return (await hasFiles(user.installPath)) ? { state: 'installed', path: user.installPath } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+    const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins)?.[id];
+    const entries = (Array.isArray(listed) ? listed : []).map(record).filter(entry => !!entry);
+    const path = text((entries.find(entry => entry.scope === 'user') ?? entries[0])?.installPath);
+    if (!path) return { state: 'not-installed' };
+    return (await hasFiles(path)) ? { state: 'installed', path } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
   }
   if (tool === 'copilot-cli') {
-    const config = await recordJson(context, join(root, 'config.json'));
-    const entry = (config?.installedPlugins as { name?: string; marketplace?: string; cache_path?: string; enabled?: boolean }[] | undefined)?.find(item => item.name === plugin && item.marketplace === marketplace);
-    if (entry?.cache_path) return (await hasFiles(entry.cache_path)) ? { state: 'installed', path: entry.cache_path } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+    const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
+    const entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
+    const cache = text(entry?.cache_path);
+    if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
     // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
     const settings = await recordJson(context, join(root, 'settings.json'));
-    const enabled = (settings?.enabledPlugins as Record<string, boolean> | undefined)?.[id] === true;
-    const source = (settings?.extraKnownMarketplaces as Record<string, { source?: { source?: string; path?: string } }> | undefined)?.[marketplace]?.source;
-    if (enabled && source?.source === 'directory' && source.path) {
-      const catalog = await once(context, `catalog:${source.path}`, () => parseCatalog(source.path!, source.path!, 'folder'));
+    const enabled = record(settings?.enabledPlugins)?.[id] === true;
+    const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
+    const folderPath = text(source?.path);
+    if (enabled && source?.source === 'directory' && folderPath) {
+      const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder'));
       const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
       return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
     }
     return { state: 'not-installed' };
   }
-  const tables = await codexTables(context, root);
-  if (!tables?.plugins[id]) return { state: 'not-installed' };
+  if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const versions = await readdir(cache).catch(() => [] as string[]);
   for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version) };
@@ -355,10 +354,10 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   }
   const already = await installState(context, tool, catalog.name, plugin);
   if (already.state === 'installed') return { tool, outcome: 'installed', message: `Already installed in ${name}.`, runs };
-  const registered = await registeredSource(context, tool, catalog.name);
-  if (registered && !sameSource(registered, catalog.source)) return { tool, outcome: 'held', message: `${name} already has a different marketplace named “${catalog.name}” (${registered}). Central Knot doesn’t replace it.`, runs };
+  const held = await heldBy(context, tool, catalog.name, catalog.source);
+  if (held) return { tool, outcome: 'held', message: `${name} already has a different marketplace named “${catalog.name}” (${held}). Central Knot doesn’t replace it.`, runs };
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
-  if (!registered) {
+  if (!(await registeredSource(context, tool, catalog.name))) {
     const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
     runs.push(add);
     if (!add.ok) return { tool, outcome: 'failed', message: `Could not add the marketplace. ${lastLines(add.output)}`.trim(), runs };
@@ -376,8 +375,8 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
 export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source?: string): Promise<ActionReport> {
   const name = harnesses[tool].name;
-  const registered = source ? await registeredSource(context, tool, marketplace) : undefined;
-  if (registered && source && !sameSource(registered, source)) return { tool, outcome: 'held', message: `${name}’s “${marketplace}” is a different marketplace (${registered}). Central Knot doesn’t change it.`, runs: [] };
+  const held = source ? await heldBy(context, tool, marketplace, source) : undefined;
+  if (held) return { tool, outcome: 'held', message: `${name}’s “${marketplace}” is a different marketplace (${held}). Central Knot doesn’t change it.`, runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`;
@@ -388,16 +387,23 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   return { tool, outcome: 'failed', message: `Still installed. ${lastLines(removed.output)}`.trim(), runs: [removed] };
 }
 
-/** The marketplaces a tool already has, as added there: no setup needed to browse them. */
+/**
+ * The marketplaces a tool already has, as added there: no setup needed to browse them. Claude Code records the ones its
+ * own command added in plugins/known_marketplaces.json; Claude Code and Copilot CLI also read extraKnownMarketplaces in
+ * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
+ */
 export async function registeredMarketplaces(context: PluginContext, tool: HarnessId): Promise<{ name: string; source: string }[]> {
   const root = configRootOf(context, tool);
-  if (tool === 'codex-cli') return Object.entries((await codexTables(context, root))?.marketplaces ?? {}).filter(([, entry]) => entry.source).map(([name, entry]) => ({ name, source: entry.source! }));
-  const settings = await recordJson(context, join(root, 'settings.json'));
-  const entries = record(settings?.extraKnownMarketplaces) ?? {};
-  return Object.entries(entries).map(([name, entry]) => {
+  if (tool === 'codex-cli') return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
+  const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
+  if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
+  const found = new Map<string, string>();
+  for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
     const source = record(record(entry)?.source);
-    return { name, source: text(source?.url) || text(source?.path) || text(source?.repo) };
-  }).filter(entry => entry.source);
+    const where = text(source?.url) || text(source?.path) || text(source?.repo);
+    if (where && !found.has(name)) found.set(name, where);
+  }
+  return [...found].map(([name, source]) => ({ name, source }));
 }
 
 /** The end of a tool's own message, shown as it is. */

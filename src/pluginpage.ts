@@ -4,10 +4,10 @@ import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { dotted, readme, toolBox } from './pluginparts.ts';
+import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { blocked, installed, missingTools, stateOf } from './pluginstatus.ts';
-import { clearPluginOutcome, market, openLink } from './pluginstate.ts';
+import { installed, limitNote, missingTools, unavailable } from './pluginstatus.ts';
+import { clearNotice, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -32,35 +32,35 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
 }
 
 /**
- * Where to install it: a box per tool, each with a second line that is always there (so the card never changes height),
- * and in the heading row the one button for every tool still without it, plus how to take it out once installed.
+ * Where to install it: a box per tool with a second line that is always there (so the card never changes height), and
+ * in the heading row (always the same height) the one button for every tool still without it, or how to uninstall.
  */
-function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, index: number, components?: Components) {
+function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
-  const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, market: entry.name, plugin: plugin.name, tool, action: 'install' }));
+  const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'install' }));
   const allChosen = allQueued(market.draft, ops);
-  // A tool where some part won't fully work says so under its box, where the choice is made; "In each tool" has the detail.
+  // A tool where some part won't fully work names it under its box, where the choice is made; "In each tool" has the detail.
   const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     if (installed(entry, plugin.name, tool)) return 'Installed';
-    if (blocked(view, entry, tool) || stateOf(entry, plugin.name, tool).state === 'held') return 'Not available';
-    return limits(tool).length ? 'Not installed · some limits' : 'Not installed';
+    if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
+    return ['Not installed', limitNote(limits(tool))].filter(Boolean).join(' · ');
   };
   const anyChosen = view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool));
   const anyInstalled = view.tools.some(tool => installed(entry, plugin.name, tool));
   const chooseAll = ops.length && view.canWrite
-    ? button({ variant: 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!app.busy,
-      onclick: () => { toggleMany(market.draft, ops); clearPluginOutcome(); rerender(); } })
+    ? button({ variant: 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
+      onclick: () => { toggleMany(market.draft, ops); clearNotice(); rerender(); } })
     : null;
-  return h('section.plugin-panel', { 'aria-label': 'Tools' },
-    h('div.plugin-panel-head', {}, h('h3', {}, 'Tools'),
+  return h('section.plugin-panel', { 'aria-label': 'Your tools' },
+    h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools'),
       !anyChosen && anyInstalled ? h('span.plugin-panel-hint', {}, 'To uninstall, click its check, then Apply all.') : null,
       chooseAll),
     h('div.plugin-tool-rows', {}, view.tools.map(tool => {
-      const why = blocked(view, entry, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
-      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, index),
+      const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
+      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
         h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
     })));
 }
@@ -85,25 +85,26 @@ function contentsBlock(plugin: PluginView, detail: PluginDetail | null | undefin
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(detail.lspServers.map(name => ({ name, text: '' })))) : null);
 }
 
-export function pluginPage(view: PluginsView, entry: MarketplaceView, index: number, plugin: PluginView) {
+export function pluginPage(view: PluginsView, entry: MarketplaceView, marketIndex: number, plugin: PluginView) {
   const read = market.details.get(pluginKey(entry.source, plugin.name));
   const reading = !read || read.reading;
   const detail = read && !read.reading ? read.value : undefined;
   // A plugin kept elsewhere has no counts from the catalog; once its files are read, its contents give them.
   const components = plugin.components ?? (detail && !detail.problem ? componentsFrom(detail) : undefined);
-  const title = plugin.displayName ?? plugin.name;
-  const facts: (string | HTMLElement)[] = [plugin.version && `Version ${plugin.version}`, plugin.author && `by ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
+  const title = pluginTitle(plugin);
+  const facts: (string | HTMLElement)[] = [plugin.version && `Version ${plugin.version}`, plugin.author && `By ${plugin.author}`, plugin.category, plugin.license].filter((fact): fact is string => !!fact);
   if (plugin.homepage) facts.push(button({ variant: 'link', size: 'micro', label: 'Website', id: 'plugin-homepage', onclick: () => openLink(plugin.homepage!) }));
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
-  const descriptions = [plugin.description, ...(detail ? [...detail.skills, ...detail.commands, ...detail.agents].map(part => part.description) : [])];
+  const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
+  const descriptions = [plugin.description, ...parts.map(part => part.description)];
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
-    installPanel(view, entry, plugin, index, components),
+    installPanel(view, entry, plugin, marketIndex, components),
     contentsBlock(plugin, detail, reading),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
-    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions))) : null);
+    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts.map(part => part.name)))) : null);
 }

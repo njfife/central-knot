@@ -259,7 +259,7 @@ export interface NativeRun { tool: HarnessId; command: string; ok: boolean; outp
 
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
 
-/** A catalog plugin with what each tool would get from it. */
+/** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
 
 export interface MarketplaceView {

@@ -17,7 +17,14 @@ export type Block =
   | { kind: 'quote'; blocks: Block[] }
   | { kind: 'table'; head: Inline[][]; rows: Inline[][][] }
   | { kind: 'rule' };
-export interface MarkdownOptions { /** Leave out an opening heading that only repeats this name. */ skipTitle?: string; /** Leave out a first paragraph that mostly repeats one of these (a description already on the page). */ skipLead?: string[] }
+export interface MarkdownOptions {
+  /** Leave out an opening heading that only repeats this name. */
+  skipTitle?: string;
+  /** Leave out a first paragraph that mostly repeats one of these (a description already on the page). */
+  skipLead?: string[];
+  /** Names already listed on the page (a plugin's skills, commands, agents): a list naming only these is left out. */
+  skipListsOf?: string[];
+}
 
 const MAX_QUOTE_DEPTH = 6;
 // Each pattern is tried only where its first character appears, and every repeat is bounded, so no README can make the
@@ -167,13 +174,32 @@ export function repeats(first: string, second: string): boolean {
   return small.size >= 4 && [...small].filter(word => large.has(word)).length / small.size >= 0.6;
 }
 
-/** Leaves out an opening title and lead paragraph that only repeat what the page already shows. */
+/** Whether `text` names `name` as a whole word or more ("pdf-reader:" yes, "pdf-readers" no), ignoring case. */
+const names = (text: string, name: string) => {
+  const at = text.toLowerCase().indexOf(name.toLowerCase());
+  const edge = (char: string | undefined) => !char || !/[\w-]/.test(char);
+  return at >= 0 && edge(text[at - 1]) && edge(text[at + name.length]);
+};
+
+/**
+ * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and any list of two or
+ * more items that each name something in `skipListsOf` (with its heading, when the list was all that heading held).
+ */
 export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Block[] {
   let rest = blocks;
   if (options.skipTitle && rest[0]?.kind === 'heading' && same(plainText(rest[0].content), options.skipTitle)) rest = rest.slice(1);
   const lead = rest[0]?.kind === 'paragraph' ? plainText(rest[0].content) : '';
   if (lead && options.skipLead?.some(text => repeats(lead, text))) rest = rest.slice(1);
-  return rest;
+  const listed = (options.skipListsOf ?? []).filter(name => name.length >= 3);
+  if (!listed.length) return rest;
+  const kept: Block[] = [];
+  for (const [at, block] of rest.entries()) {
+    const repeated = block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => names(plainText(item), name)));
+    if (!repeated) { kept.push(block); continue; }
+    const next = rest[at + 1];
+    if (kept.at(-1)?.kind === 'heading' && (!next || next.kind === 'heading')) kept.pop();
+  }
+  return kept;
 }
 
 function inlineNodes(content: Inline[], open: (url: string) => void): (HTMLElement | string)[] {

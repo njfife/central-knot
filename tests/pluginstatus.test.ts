@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, missingTools, summaryOf } from '../src/pluginstatus.ts';
+import { blocked, limitNote, missingTools, summaryOf, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginsView } from '../src/types.ts';
 
@@ -14,6 +14,15 @@ test('A tool can take a plugin only when its CLI is there, it is not held or ref
   assert.match(blocked({ ...view, clis: {}, desktopOnly: ['codex-cli'] }, entry, 'codex-cli') ?? '', /Only ChatGPT desktop/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
   assert.deepEqual(missingTools(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
+  // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
+  assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
+  assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
+  assert.match(unavailable({ ...view, clis: {} }, entry, 'p', 'copilot-cli') ?? '', /wasn’t found/);
+});
+
+test('A tool’s limits are named in a few words', () => {
+  assert.equal(limitNote([{ component: 'Skills', result: 'works', text: '' }]), '');
+  assert.equal(limitNote([{ component: 'Agents', result: 'ignored', text: '' }, { component: 'MCP servers', result: 'fails', text: '' }]), 'Agents ignored +1');
 });
 
 test('A summary names only what a plugin holds', () => {
