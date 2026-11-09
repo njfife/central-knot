@@ -12,25 +12,16 @@ test('Adding Copilot to Claude Code tells new, same, different and synced apart'
     skill('fresh', { 'copilot-cli': 'a' }),
     skill('same', { 'copilot-cli': 'b', 'claude-cli': 'b' }),
     skill('clash', { 'copilot-cli': 'c', 'claude-cli': 'c2' }),
+    skill('clash-elsewhere', { 'copilot-cli': 'f', 'codex-cli': 'f2' }),
     skill('synced', { 'copilot-cli': 'd', 'claude-cli': 'd' }, { managed: true }),
+    skill('synced-third-differs', { 'copilot-cli': 'g', 'claude-cli': 'g', 'codex-cli': 'g2' }, { managed: true }),
     skill('claude-only', { 'claude-cli': 'e' }),
   ], 'copilot-cli', 'claude-cli', tools);
   assert.deepEqual(keys(plan.fresh), ['fresh']);
   assert.deepEqual(keys(plan.same), ['same']);
-  assert.deepEqual(plan.differ.map(entry => [entry.skill.key, entry.replaced, entry.here]), [['clash', ['claude-cli'], true]]);
-  assert.deepEqual(keys(plan.synced), ['synced']);
+  assert.deepEqual(plan.differ.map(entry => [entry.skill.key, entry.replaced, entry.here]), [['clash', ['claude-cli'], true], ['clash-elsewhere', ['codex-cli'], false]]);
+  assert.deepEqual(keys(plan.synced), ['synced', 'synced-third-differs'], 'a third tool differing must not turn a synced pair into a conflict');
   assert.equal(plan.skip.length + plan.blocked.length + plan.resume.length, 0, 'a skill the source lacks is not counted');
-});
-
-test('A pair already syncing one copy stays synced, even when a third tool differs', () => {
-  const plan = planAdd([skill('wizard', { 'claude-cli': 'e', 'copilot-cli': 'e2', 'codex-cli': 'e' }, { managed: true })], 'claude-cli', 'codex-cli', tools);
-  assert.deepEqual(keys(plan.synced), ['wizard'], 'adding Claude to Codex must not replace Copilot’s copy as a side effect');
-  assert.equal(plan.differ.length, 0);
-});
-
-test('A conflict only in another tool is different, and says it is not the target’s copy', () => {
-  const plan = planAdd([skill('review', { 'copilot-cli': 'j2', 'claude-cli': 'j' })], 'copilot-cli', 'codex-cli', tools);
-  assert.deepEqual(plan.differ.map(entry => [entry.skill.key, entry.replaced, entry.here]), [['review', ['claude-cli'], false]]);
 });
 
 test('A managed skill with syncing turned off is its own group, not "same"', () => {
@@ -48,15 +39,10 @@ test('Blocked conflicts, held skills, unloadable tools and kept-separate skills 
     skill('held', { 'copilot-cli': 'b' }, { held: 'It contains a link.' }),
     skill('dot', { 'copilot-cli': 'c' }, { cannot: { 'claude-cli': 'Not loadable.' } }),
     skill('separate', { 'copilot-cli': 'd', 'claude-cli': 'd2' }, { separate: true }),
+    skill('block-off', { 'copilot-cli': 'e', 'claude-cli': 'e2' }, { off: ['codex-cli'], blocks: { 'copilot-cli': [{ tool: 'codex-cli', reason: 'irrelevant' }] } }),
   ], 'copilot-cli', 'claude-cli', tools);
   assert.deepEqual(plan.blocked.map(entry => entry.skill.key), ['blocked']);
   assert.match(plan.blocked[0].reason, /different copy elsewhere/);
   assert.deepEqual(plan.skip.map(entry => entry.skill.key), ['held', 'dot', 'separate']);
-  assert.equal(plan.differ.length, 0);
-});
-
-test('A block on a tool the skill would not sync to does not count', () => {
-  const plan = planAdd([skill('x', { 'copilot-cli': 'a', 'claude-cli': 'a2' }, { off: ['codex-cli'], blocks: { 'copilot-cli': [{ tool: 'codex-cli', reason: 'irrelevant' }] } })], 'copilot-cli', 'claude-cli', tools);
-  assert.equal(plan.blocked.length, 0);
-  assert.equal(plan.differ.length, 1);
+  assert.deepEqual(plan.differ.map(entry => entry.skill.key), ['block-off'], 'a block on a tool it would not sync to does not count');
 });
