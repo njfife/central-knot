@@ -131,7 +131,7 @@ test('An MCP server edited and an agent deleted on one computer arrive on the ot
     await writeFile(firstPlanner, (await readFile(firstPlanner, 'utf8')).replace('Plan carefully.', 'Plan in small steps.'));
     await applyAgents(first, tools, []);
     await pushRepo(first);
-    await pullRepo(second);
+    assert.equal((await pullRepo(second)).pulled, 0, 'a change left waiting is not counted as pulled');
     assert.deepEqual(live(await repoView(second)).incoming.map(row => [row.name, !!row.held]), [['planner', true]]);
     await writeFile(secondCopilot, readable);
     await pullRepo(second);

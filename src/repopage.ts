@@ -79,12 +79,11 @@ const pull = () => busy('Pulling from the repo…', async () => {
   await settle(result, count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.', count ? `${count === 1 ? 'It is' : 'Each is'} in History.` : undefined);
   // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
   // didn't take is said in the result, by tool.
-  const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held') && !(entry.harness === 'claude-cli' && /Write now/.test(entry.message)))
+  const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
   if (missed.length && state.outcome) state.outcome.text += ` ${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.`;
-  const waiting = result.results.filter(entry => entry.harness === 'claude-cli' && /Write now/.test(entry.message)).map(entry => entry.item);
-  if (waiting.length && state.outcome) {
-    const names = [...new Set(waiting)];
+  const names = result.waitsForClaude ?? [];
+  if (names.length && state.outcome) {
     state.outcome.text += ` ${andList(names)} ${names.length === 1 ? 'isn’t' : 'aren’t'} in Claude Code yet: close Claude Code, then click Write to Claude Code on MCP servers.`;
     state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
   }
@@ -205,7 +204,7 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), middle(view.url, 24, 'mono repo-url'), h('span.repo-branch', { title: 'Branch' }, view.branch)),
         h('dl.facts.repo-facts', {},
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
-          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
+          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
       view.problem ? h('p.repo-stale', {}, `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}.`) : null,
       inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullButton)

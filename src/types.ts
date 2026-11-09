@@ -434,6 +434,8 @@ export type RepoView =
     outgoing: RepoChange[];
     /** Why Push can't run now. */
     pushBlocked?: string;
+    /** The repo no longer has this branch: Push puts it back. */
+    branchGone?: boolean;
   };
 
-export interface RepoResult { view: RepoView; stopped?: string; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number }
+export interface RepoResult { view: RepoView; stopped?: string; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }
