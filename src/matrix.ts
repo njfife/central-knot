@@ -587,8 +587,9 @@ function legend(list: SampleSkill[]) {
   // A legend with only "Synced" explains nothing under an all-green table.
   const pendingEntries = [...keyed.children].filter(child => / on Apply all/.test(child.textContent ?? ''));
   if (pendingEntries.length) {
-    pendingEntries[0].before(h('span.legend-lead', {}, 'On Apply all:'));
-    for (const entry of pendingEntries) for (const node of [...entry.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.textContent = (node.textContent ?? '').replace(/ on Apply all/, '').replace(/^Starts syncing$/, 'starts syncing').replace(/^Becomes Managed$/, 'becomes Managed').replace(/^Replaced /, 'replaced ').replace(/^Gets /, 'gets ');
+    // Plain states first, then one lead-in and the marks that happen on Apply all, so the lead-in governs only those.
+    keyed.append(h('span.legend-lead', {}, 'On Apply all:'), ...pendingEntries);
+    for (const entry of pendingEntries) for (const node of [...entry.childNodes]) if (node.nodeType === Node.TEXT_NODE) node.textContent = (node.textContent ?? '').replace(/ ?\(?on Apply all\)?/, '').replace(/^./, first => first.toLowerCase());
   }
   return keyed.childElementCount > 1 ? keyed : null;
 }
