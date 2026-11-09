@@ -449,7 +449,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
       if (here) replaced.push({ tool, hash: here.hash });
       else if (newlyManaged.has(key)) addedHere.push({ tool, hash: sha(text) });
       copies.push({ tool, file: path, hash: agentHash(source.agent), bytes: sha(text), oneWay: oneWay || undefined });
-      results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
+      results.push({ item: name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
     }
     const historyKey = `agent:${key}`;
     if (addedHere.length) event({ key: historyKey, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash });

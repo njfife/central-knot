@@ -468,7 +468,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       else if (newlyManaged.has(name)) addedHere.push({ tool, hash: source.hash });
       if (tool === 'claude-cli') claudeWritten.push({ name, before: claudeBefore, after: source.hash });
-      results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
+      results.push({ item: name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
     if (addedHere.length) event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash });

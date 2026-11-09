@@ -629,7 +629,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           inSync.add(location.copy.directory);
           replaced.push(location.tool);
           losers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now has ${harnesses[sourceTool].name}'s edit. The replaced copy is kept in History. ${harnesses[location.tool].nextStep}` });
         }
       } else if ((hashes.size > 1 || !hashes.has(item.hash)) && item.hash && !chosen && active.every(location => location.copy.hash === item.hash || location.copy.hash === recordedHash.get(location.copy.directory))
         && (active.some(location => location.copy.hash === item.hash) || await exists(storedRevision(context, key, item.hash)))) {
@@ -655,7 +655,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           }
           writes++;
           inSync.add(location.copy.directory);
-          results.push({ item: name, harness: location.tool, outcome: 'written', message: `Caught up. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Caught up. ${harnesses[location.tool].nextStep}` });
         }
       } else if (hashes.size > 1) {
         if (!chosen) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }
@@ -683,7 +683,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
           writes++;
           inSync.add(location.copy.directory);
           chosenLosers.push({ tool: location.tool, hash: location.copy.hash });
-          results.push({ item: name, harness: location.tool, outcome: 'written', replacedByChoice: true, message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
+          results.push({ item: name, harness: location.tool, outcome: 'written', replaced: true, message: `Now uses ${harnesses[chosen].name}'s copy. The replaced copy is kept in Central Knot's store. ${harnesses[location.tool].nextStep}` });
         }
       } else for (const location of active) inSync.add(location.copy.directory);
       delete item.use;
