@@ -322,6 +322,7 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     const separate = change.use === 'separate', use = change.use === 'separate' ? undefined : change.use;
     if (use && change.useHash && slot[use]?.hash !== change.useHash) { log.results.push({ item: change.key, outcome: 'held', message: 'The copy you chose changed since you chose it. Nothing was changed; choose again.' }); continue; }
     const item = record.items[change.key] ??= { name: (Object.values(slot) as AgentEntry[])[0].name, state: 'dont-share', off: [], hash: '', copies: [] };
+    const copiesBefore = item.copies;
     const shared = change.managed && !separate;
     if (shared && item.state !== 'shared') newlyManaged.add(change.key);
     item.state = shared ? 'shared' : 'dont-share';
@@ -331,6 +332,7 @@ function recordChoices(record: AgentRecord, byKey: Map<string, AgentSlot>, chang
     else delete item.deleted;
     const used = use && slot[use];
     if (used) { item.origin = used.tool; item.hash = used.hash; item.name = used.name; item.copies = []; chosen.add(change.key); }
+    for (const copy of copiesBefore) if (!item.copies.includes(copy)) firstSeenMissingAt.delete(copy.file);
   }
   return { chosen, newlyManaged };
 }

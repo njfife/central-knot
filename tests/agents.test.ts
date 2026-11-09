@@ -315,3 +315,21 @@ test('A deletion leaves the copy in a tool switched off for the agent, and still
     assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
   } finally { await box.cleanup(); }
 });
+
+test('A deletion first seen before an agent was unmanaged still waits the settle window once it is managed again', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }], { now: 1100, settleMs: 2000 });
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { now: 10000, settleMs: 2000 });
+    await rm(claude);
+    const pass = await applyAgents(box.context, tools, [], { now: 10001, settleMs: 2000 });
+    assert.equal(pass.writes, 0, JSON.stringify(pass.results));
+    assert.equal(pass.settling, true);
+  } finally { await box.cleanup(); }
+});
