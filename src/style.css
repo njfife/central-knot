@@ -1352,8 +1352,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */
 .cell-disabled.cell-on:not(.cell-pending-edit) { background: transparent; border-color: var(--control-line); }
 .cell-disabled.cell-synced:not(.cell-pending-edit) { color: var(--ink-soft); }
-.cell-disabled-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
-.cell-disabled-mark svg { width: 11px; height: 11px; }
+.cell-disabled-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
+.cell-disabled-mark svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.mini-cell.cell-disabled { position: relative; }
+.legend-cell.mini-cell .cell-disabled-mark { top: -5px; right: -5px; width: 11px; height: 11px; }
+.legend-cell.mini-cell .cell-disabled-mark svg { width: 8px; height: 8px; }
 .legend-cell .cell-disabled-mark { top: -5px; right: -5px; width: 12px; height: 12px; }
 .legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
 .cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
@@ -1364,6 +1367,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-tools { container-type: inline-size; }
 @container (max-width: 560px) { .details-skills .details-tool-head { grid-template-columns: 150px minmax(0, 1fr); } .details-tool-head > .details-tool-actions { grid-column: 2; justify-self: start; } }
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+/* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
+.details-tool-actions .tool-switch .switch { height: 18px; }
+.delete-armed { display: inline-flex; align-items: center; gap: 8px; }
 .tool-switch-word { min-width: 56px; text-align: right; }
 /* Queued, like the Managed switch: a dashed outline, never a ring that reads as focus. */
 .tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }

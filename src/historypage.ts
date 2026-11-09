@@ -84,7 +84,10 @@ function actions(event: HistoryEvent, action?: string) {
   // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
   const touched = event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
-  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
+  // A switch's Undo says what it does: Enable where it was disabled, Disable where it was enabled.
+  const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
+  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
+    : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Enable' : 'Disable') : action;
   const label = ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
@@ -99,7 +102,7 @@ export function historyPage() {
   // The row's own button redoes; the band only confirms.
   // The new top row says what happened (and the announcement reads it out); a band repeating it would say it twice.
   const done = null;
-  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
@@ -107,7 +110,7 @@ export function historyPage() {
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
-      event.undoneBy ? h('span.history-done', {}, 'Undone') : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
+      event.undoneBy ? h('span.history-done', {}, event.kind === 'removed' ? 'Restored' : 'Undone') : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
       changePanel(event.id))];
   }))));
 }
