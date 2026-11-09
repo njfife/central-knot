@@ -62,3 +62,10 @@ test('Common README shapes read right: badges, code in emphasis, a fence in a li
   assert.deepEqual(parseMarkdown('1. Run:\n   ```\n   npm test\n   ```\n2. Done').map(block => block.kind), ['list', 'code', 'list']);
   assert.deepEqual(parseMarkdown('Title\n=====\n\nSub\n---\n\nText').map(block => block.kind), ['heading', 'heading', 'paragraph']);
 });
+
+test('Loose numbered steps stay one list, a list after a code block keeps counting, and placeholders in angle brackets stay', () => {
+  assert.deepEqual(parseMarkdown('1. one\n\n2. two\n\n3. three').map(block => block.kind), ['list']);
+  const blocks = parseMarkdown('1. Run:\n   ```\n   npm test\n   ```\n2. Done');
+  assert.equal((blocks[2] as Extract<Block, { kind: 'list' }>).start, 2);
+  assert.equal(text(parseInline('install <name>@<marketplace> then <b>go</b>')), 'install <name>@<marketplace> then go');
+});

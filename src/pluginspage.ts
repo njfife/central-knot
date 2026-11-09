@@ -1,27 +1,21 @@
 // Plugins: browse marketplaces, choose which plugins go to which tools, then Apply all.
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
-import { rerender, shownPath, showPage, state as app } from './app.ts';
+import { rerender, showPage, state as app } from './app.ts';
 import { button, emptyState, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { cliMissing, readme, stateOf, summaryOf, toolBox } from './pluginparts.ts';
-import { describe, pluginKey, queued, summary } from './pluginplan.ts';
+import { dotted, readme, toolBox } from './pluginparts.ts';
+import { describe, pluginKey, queued, resultSentence, succeeded, summary } from './pluginplan.ts';
+import { cliMissing, stateOf, summaryOf } from './pluginstatus.ts';
 import { addMarketplace, applyPluginOps, browse, clearPluginOutcome, current, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
 const when = (iso: string) => new Date(iso).toDateString() === new Date().toDateString() ? new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-/** Where a marketplace comes from, short: "GitHub: owner/repo", or "Folder: name" (the full path is its tooltip). */
-function sourceLabel(entry: MarketplaceView): string {
-  if (entry.kind === 'folder') return `Folder: ${shownPath(entry.source).split(/[\\/]/).filter(Boolean).at(-1) ?? entry.source}`;
-  const repo = entry.source.replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
-  return entry.page ? `GitHub: ${repo}` : entry.source;
-}
-const titleOf = (entry: MarketplaceView) => entry.name || sourceLabel(entry);
-const dotted = (parts: (string | HTMLElement)[]) => parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part]));
+const titleOf = (entry: MarketplaceView) => entry.name || entry.sourceLabel;
 
 /** Every marketplace, with how many plugins it lists, installed and chosen; the add box below. */
 function marketList(view: PluginsView, shown?: MarketplaceView) {
@@ -57,7 +51,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, index: number, plu
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
       h('button.plugin-row-open', { type: 'button', id: `popen-${index}-${plugin.name}`, 'aria-label': `Open ${plugin.displayName ?? plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
-        h('span.plugin-row-title', {}, plugin.displayName ?? plugin.name), plugin.category ? h('span.plugin-chip', {}, plugin.category) : null),
+        // The category pill is left out while that category is the filter: every row would say the same.
+        h('span.plugin-row-title', {}, plugin.displayName ?? plugin.name), plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
       holds ? h('span.plugin-row-holds', {}, holds) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, index)),
@@ -90,7 +85,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, index: number) {
   const shown = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
   const someCan = view.canWrite && view.tools.some(tool => view.clis[tool]);
   const cannot = view.tools.filter(tool => !view.clis[tool]);
-  const refusal = view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? entry.plugins.find(plugin => plugin.copilotRefuses)?.copilotRefuses : undefined;
+  const refusal = view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? entry.copilotRefuses : undefined;
   const filters = [entry.plugins.length > 8 ? findBox(entry) : null, categories.length > 1 ? categoryChips(entry, categories) : null].filter(Boolean) as HTMLElement[];
   const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name', { role: 'columnheader' }, someCan ? 'Click a tool’s box to choose it; nothing runs until Apply all.' : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
@@ -119,7 +114,7 @@ function marketPage(view: PluginsView, entry: MarketplaceView, index: number) {
   remove.title = 'Removes it from this list only. Installed plugins stay installed.';
   // Where it was added is worth saying only when a tool added it; added here is the usual case, and installs register it too.
   const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(origin => names[origin as keyof typeof names]);
-  const source = entry.page ? button({ variant: 'link', size: 'micro', label: sourceLabel(entry), id: `market-page-${index}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, sourceLabel(entry));
+  const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${index}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   const meta = dotted([entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : '', source].filter(Boolean) as (string | HTMLElement)[]);
   return h('section.market-page', { 'aria-label': titleOf(entry) },
     h('header.market-page-head', {},
@@ -151,7 +146,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     states.has('not-known') ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     states.has('cannot') ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
     chosen.size ? h('span.legend-lead', {}, 'On Apply all:') : null,
-    chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('plus', 10))) : null,
+    chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
     chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null);
 }
 
@@ -159,13 +154,6 @@ function legend(view: PluginsView, entry: MarketplaceView) {
 function withTools(view: PluginsView, table: HTMLElement) {
   table.style.setProperty('--tool-count', String(view.tools.length));
   return table;
-}
-
-/** What the last Apply all (or its Undo) changed, said in one line: "document-tools: installed in Claude Code and Codex". */
-function resultText(lines: ReturnType<typeof describe>, undo: boolean): string {
-  const ok = lines.filter(line => line.ok);
-  if (undo) return `Undone: ${ok.map(line => `${line.plugin} ${line.text.replace(/^uninstalled from/, 'removed from').replace(/^installed in/, 'put back in')}`).join('; ')}.`;
-  return `${ok.map(line => `${line.plugin}: ${line.text}`).join('; ')}.`;
 }
 
 /**
@@ -184,9 +172,9 @@ function toolbarRight(): HTMLElement | null {
   const last = market.done;
   const lines = last ? describe(last.done, names, andList) : [];
   if (last && lines.some(line => line.ok)) {
-    const text = resultText(lines, last.undo);
+    const text = resultSentence(describe(last.done, names, andList, last.undo), last.undo);
     const back = undoOps();
-    const undo = back.length ? button({ variant: 'outline', size: 'small', label: 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) }) : null;
+    const undo = back.length ? button({ variant: 'outline', size: 'small', label: last.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) }) : null;
     if (undo) undo.title = 'Reverses what changed, through each tool’s own command: uninstalls what was installed and reinstalls what was uninstalled.';
     return h('div.toolbar-result', { role: 'status', id: 'plugins-result' }, icon('check', 14, 'tone-success'), h('span.toolbar-result-text', { title: text }, text), undo, dismiss(() => { market.done = undefined; }));
   }
@@ -198,11 +186,11 @@ function toolbarRight(): HTMLElement | null {
 
 /** What went wrong in the last run, or why a marketplace couldn't be added: a band, because it needs reading. */
 function problemBand() {
-  const failures = market.done ? describe(market.done.done, names, andList).filter(line => !line.ok) : [];
+  const failures = market.done ? describe(market.done.done, names, andList, market.done.undo).filter(line => !line.ok) : [];
   if (!market.problem && !failures.length) return null;
   return h('div.band.plugin-problems', { role: 'alert' }, icon('triangle-alert', 14, 'tone-warning'),
     h('span.band-text.band-lines', {}, failures.map(line => h('span', {}, h('strong.item-name', {}, line.plugin), `: ${line.text}`)), market.problem ? h('span', {}, market.problem) : null),
-    h('button.band-dismiss', { type: 'button', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { market.problem = undefined; if (market.done) market.done = { ...market.done, done: market.done.done.filter(entry => ['installed', 'uninstalled'].includes(entry.report.outcome)) }; rerender(); } }, icon('x', 12)));
+    h('button.band-dismiss', { type: 'button', 'aria-label': 'Dismiss', title: 'Dismiss', onclick: () => { market.problem = undefined; if (market.done) market.done = { ...market.done, done: market.done.done.filter(entry => succeeded(entry.report)) }; rerender(); } }, icon('x', 12)));
 }
 
 /** Where the person is, once inside a plugin (team-tools › document-tools, the marketplace a link back), then the right side. */
@@ -211,8 +199,13 @@ function toolbar(shown?: MarketplaceView) {
   const crumbs = shown && plugin ? h('nav.market-crumbs', { 'aria-label': 'You are here' },
     h('button.crumb-link', { type: 'button', id: 'plugin-back', onclick: () => browse({ plugin: undefined }) }, icon('arrow-left', 13), titleOf(shown)),
     icon('chevron-right', 12, 'tone-faint'), h('span.crumb-here', {}, plugin.displayName ?? plugin.name)) : null;
-  return h('div.toolbar', {}, crumbs, h('span.toolbar-spacer'), toolbarRight());
+  const right = toolbarRight();
+  // With nothing to say (no plugin open, nothing chosen, nothing just done) there is no toolbar at all.
+  return crumbs || right ? h('div.toolbar', {}, crumbs, h('span.toolbar-spacer'), right) : null;
 }
+
+/** Public marketplaces to try from the empty page; a click only fills the add box. */
+const EXAMPLES = ['anthropics/skills', 'github/copilot-plugins'];
 
 const activityText: Record<NonNullable<typeof market.activity>, string> = {
   reading: 'Reading marketplaces… Nothing is installed by this.', adding: 'Reading the marketplace… Nothing is installed by this.', refreshing: 'Refreshing the marketplace… Nothing is installed by this.',
@@ -235,5 +228,7 @@ export function pluginsPage() {
         shown
           ? marketPage(view, shown.entry, shown.index)
           : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a Git repository or folder that lists plugins. Adding one installs nothing.',
-            h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.')))));
+            h('div', {},
+              h('div.market-examples', {}, h('span', {}, 'Try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', onclick: () => { market.draftSource = example; rerender(); document.getElementById('marketplace-source')?.focus(); } }, example))),
+              h('p.empty-aside', {}, 'Marketplaces you added in Claude Code, Copilot CLI or Codex show up here by themselves.'))))));
 }

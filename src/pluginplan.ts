@@ -17,6 +17,8 @@ export const failedFor = (tools: HarnessId[], message: string): ActionReport[] =
 /** One plugin in one marketplace: two marketplaces may both offer a plugin with the same name. */
 export const pluginKey = (source: string, plugin: string) => `${source}\u0000${plugin}`;
 const opKey = (op: Pick<PluginOp, 'source' | 'plugin' | 'tool'>) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}`;
+/** Whether a plugin key (or a key made from one) belongs to this marketplace. */
+export const forSource = (key: string, source: string) => key.startsWith(`${source}\u0000`);
 
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool }))?.action;
 
@@ -30,9 +32,12 @@ export function toggle(draft: PluginDraft, op: PluginOp): void {
   else draft.set(key, op);
 }
 
+/** Whether every one of these ops is already chosen, exactly as given. */
+export const allQueued = (draft: PluginDraft, ops: PluginOp[]) => ops.length > 0 && ops.every(op => draft.get(opKey(op))?.action === op.action);
+
 /** Queues or clears one action for several tools at once: all queued already means take them all back. */
 export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
-  const all = ops.length > 0 && ops.every(op => draft.get(opKey(op))?.action === op.action);
+  const all = allQueued(draft, ops);
   for (const op of ops) { if (all) draft.delete(opKey(op)); else draft.set(opKey(op), op); }
 }
 
@@ -74,23 +79,37 @@ export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed)
   .map(({ report: _report, ...op }) => ({ ...op, action: op.action === 'install' ? 'remove' : 'install' }));
 
+/** A tool did what was asked (installed or uninstalled), whether this run changed it or it already was. */
+export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'uninstalled';
+
 /**
  * One line per plugin and outcome, e.g. "document-tools: installed in Claude Code and Codex". What a tool already had
- * is said as such ("already in Codex"), never as a change this run made.
+ * is said as such ("already in Codex"), never as a change this run made. For an Undo, the verbs say what came back:
+ * "removed from" for an install reversed, "put back in" for an uninstall reversed.
  */
-export function describe(done: PluginDone[], names: Record<HarnessId, string>, andList: (items: string[]) => string): { plugin: string; ok: boolean; text: string }[] {
+export function describe(done: PluginDone[], names: Record<HarnessId, string>, andList: (items: string[]) => string, undo = false): { plugin: string; ok: boolean; text: string }[] {
   const lines: { plugin: string; ok: boolean; text: string }[] = [];
+  const verbs = undo ? { installed: 'put back in', uninstalled: 'removed from' } : { installed: 'installed in', uninstalled: 'uninstalled from' };
   for (const key of new Set(done.map(entry => pluginKey(entry.source, entry.plugin)))) {
     const mine = done.filter(entry => pluginKey(entry.source, entry.plugin) === key);
     const plugin = mine[0]!.plugin;
     const tools = (outcome: ActionReport['outcome'], changed: boolean) => mine.filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed).map(entry => names[entry.tool]);
     const phrase = (list: string[], text: string) => (list.length ? `${text} ${andList(list)}` : '');
-    const parts = [phrase(tools('installed', true), 'installed in'), phrase(tools('uninstalled', true), 'uninstalled from'), phrase(tools('installed', false), 'already in'), phrase(tools('uninstalled', false), 'wasn’t installed in')].filter(Boolean);
+    const parts = [phrase(tools('installed', true), verbs.installed), phrase(tools('uninstalled', true), verbs.uninstalled), phrase(tools('installed', false), 'already in'), phrase(tools('uninstalled', false), 'wasn’t installed in')].filter(Boolean);
     if (parts.length) lines.push({ plugin, ok: true, text: parts.join('; ') });
-    for (const entry of mine.filter(candidate => !['installed', 'uninstalled'].includes(candidate.report.outcome))) lines.push({ plugin, ok: false, text: `${names[entry.tool]}: ${entry.report.message}` });
+    for (const entry of mine.filter(candidate => !succeeded(candidate.report))) lines.push({ plugin, ok: false, text: `${names[entry.tool]}: ${entry.report.message}` });
   }
   return lines;
 }
+
+/** The successful lines as one sentence: "document-tools: installed in Codex." or, for an Undo, "Undone: document-tools removed from Codex." */
+export function resultSentence(lines: ReturnType<typeof describe>, undo: boolean): string {
+  const ok = lines.filter(line => line.ok);
+  return undo ? `Undone: ${ok.map(line => `${line.plugin} ${line.text}`).join('; ')}.` : `${ok.map(line => `${line.plugin}: ${line.text}`).join('; ')}.`;
+}
+
+/** What an Undo did not get to: ops it was given that did not come back changed (stopped before them, or failed). */
+export const notUndone = (ops: PluginOp[], done: PluginDone[]): PluginOp[] => ops.filter(op => !done.some(entry => entry.report.changed && opKey(entry) === opKey(op)));
 
 /** The two calls a run needs, as the page's API gives them (tests pass their own). */
 export interface PlanApi {

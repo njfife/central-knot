@@ -3,14 +3,13 @@
 // Every file read must resolve, links followed, to a path inside the marketplace (or the plugin's own repository).
 import { open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { nameAndDescription } from './discovery.ts';
 import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
+import { githubRepo, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
 /** No file from a repository is read past this; front matter and READMEs need far less. */
 const READ_LIMIT = 256 * 1024;
-const text = (value: unknown) => (typeof value === 'string' ? value : '');
-const strings = (value: unknown) => (typeof value === 'string' ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : undefined);
-const record = (value: unknown) => (typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined);
 
 /** True when `path` names something inside `root`, after both are resolved through links. A missing path is not inside. */
 export async function inside(root: string, path: string): Promise<boolean> {
@@ -33,7 +32,8 @@ async function readInside(root: string, path: string): Promise<string | undefine
     } finally { await file.close(); }
   } catch { return undefined; }
 }
-const jsonInside = async (root: string, path: string) => { const raw = await readInside(root, path); try { return raw === undefined ? undefined : record(JSON.parse(raw)); } catch { return undefined; } };
+/** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
+export const jsonInside = async (root: string, path: string) => { const raw = await readInside(root, path); try { return raw === undefined ? undefined : record(JSON.parse(raw)); } catch { return undefined; } };
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
 
 /** The README in this folder, cut to a readable size. */
@@ -43,24 +43,6 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
-/** `name` and `description` from a Markdown file's front matter, including folded (`>`) and literal (`|`) descriptions. */
-export function frontMatter(body: string): { name?: string; description?: string } {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
-  if (!match) return {};
-  const lines = match[1]!.split(/\r?\n/);
-  const value = (key: string) => {
-    const at = lines.findIndex(line => line.startsWith(`${key}:`));
-    if (at < 0) return undefined;
-    const first = lines[at]!.slice(key.length + 1).trim();
-    if (/^[>|]-?$/.test(first)) {
-      const rest: string[] = [];
-      for (const line of lines.slice(at + 1)) { if (!/^\s+\S/.test(line)) break; rest.push(line.trim()); }
-      return rest.join(first.startsWith('|') ? '\n' : ' ');
-    }
-    return first.replace(/^(["'])([\s\S]*)\1$/, '$2');
-  };
-  return { name: value('name'), description: value('description') };
-}
 
 /** Skills from the given paths: each one a skill folder (with SKILL.md) or a folder of skill folders. */
 async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
@@ -68,7 +50,7 @@ async function skillsIn(root: string, paths: string[]): Promise<NamedPart[]> {
   const add = async (dir: string) => {
     const body = await readInside(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
-    const meta = frontMatter(body);
+    const meta = nameAndDescription(body);
     found.push({ name: meta.name || basename(dir), description: meta.description ?? '' });
     return true;
   };
@@ -84,7 +66,7 @@ async function markdownIn(root: string, paths: string[]): Promise<NamedPart[]> {
     for (const file of files) {
       const body = await readInside(root, file);
       if (body === undefined) continue;
-      const meta = frontMatter(body);
+      const meta = nameAndDescription(body);
       found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '' });
     }
   }
@@ -127,18 +109,14 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   };
 }
 
-/** Contents plus README. A plugin that is the marketplace's own root shares the marketplace's README, shown there once. */
-export async function pluginDetail(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginDetail> {
-  const sharesRoot = resolve(folder) === resolve(root) && entry.source !== undefined;
-  return { ...(await pluginContents(folder, entry, root)), readme: sharesRoot ? undefined : await readmeIn(folder, root) };
+/**
+ * A plugin's contents plus its README. `withReadme: false` leaves the README out: a plugin that is the marketplace's own
+ * root shares the marketplace's README, which the marketplace's page already shows.
+ */
+export async function pluginDetail(folder: string, entry: Record<string, unknown>, root: string, withReadme = true): Promise<PluginDetail> {
+  return { ...(await pluginContents(folder, entry, root)), readme: withReadme ? await readmeIn(folder, root) : undefined };
 }
 
-/** One plugin's own entry in a marketplace.json, as written. */
-export async function entryIn(root: string, plugin: string): Promise<Record<string, unknown>> {
-  const manifest = await jsonInside(root, join(root, '.claude-plugin/marketplace.json'));
-  const entries = Array.isArray(manifest?.plugins) ? manifest.plugins as unknown[] : [];
-  return entries.map(record).find(entry => entry?.name === plugin) ?? {};
-}
 
 /** Where a plugin outside the marketplace lives: a Git URL to read it from (https only), a folder in it and a branch. */
 export function remoteOf(where: unknown): { url: string; path: string; ref?: string; sha?: string } | undefined {
@@ -148,7 +126,8 @@ export function remoteOf(where: unknown): { url: string; path: string; ref?: str
   // A branch or tag must look like one (never an option); a pinned commit is 7 to 40 hex digits.
   const ref = /^[\w./-]{1,200}$/.test(text(entry.ref)) && !text(entry.ref).startsWith('-') ? text(entry.ref) : undefined;
   const sha = /^[0-9a-f]{7,40}$/i.test(text(entry.sha)) ? text(entry.sha) : undefined;
-  if (entry.source === 'github' && /^[\w.-]+\/[\w.-]+$/.test(text(entry.repo))) return { url: `https://github.com/${text(entry.repo)}.git`, path, ref, sha };
+  const repo = entry.source === 'github' ? githubRepo(text(entry.repo)) : undefined;
+  if (repo) return { url: `https://github.com/${repo}.git`, path, ref, sha };
   if (['url', 'git-subdir', 'git'].includes(text(entry.source)) && /^https:\/\/\S+$/.test(text(entry.url))) return { url: text(entry.url), path, ref, sha };
   return undefined;
 }
@@ -161,9 +140,9 @@ export function sourceOf(where: unknown): { label: string; url?: string } | unde
   const remote = remoteOf(where);
   if (remote) {
     const web = remote.url.replace(/\.git$/, '');
-    const github = web.startsWith('https://github.com/');
-    const label = `${github ? `GitHub: ${web.slice('https://github.com/'.length)}` : web.slice('https://'.length)}${remote.path ? `/${remote.path}` : ''}`;
-    return { label, url: remote.path && github ? `${web}/tree/${remote.ref ?? 'HEAD'}/${remote.path}` : web };
+    const repo = githubRepo(web);
+    const label = `${repo ? `GitHub: ${repo}` : web.slice('https://'.length)}${remote.path ? `/${remote.path}` : ''}`;
+    return { label, url: remote.path && repo ? `${web}/tree/${remote.ref ?? 'HEAD'}/${remote.path}` : web };
   }
   if (kind === 'npm' && /^(@[\w.-]+\/)?[\w.-]+$/.test(text(entry.package))) return { label: `npm: ${text(entry.package)}`, url: `https://www.npmjs.com/package/${text(entry.package)}` };
   if (kind === 'pip' && text(entry.package)) return { label: `pip: ${text(entry.package)}` };
@@ -172,9 +151,15 @@ export function sourceOf(where: unknown): { label: string; url?: string } | unde
   return kind ? { label: kind } : undefined;
 }
 
+/** Where a marketplace comes from, short: "GitHub: owner/repo", "Folder: name" (a local folder), or the source as given. */
+export function sourceLabel(source: string): string {
+  const repo = githubRepo(source);
+  if (repo) return `GitHub: ${repo}`;
+  return isAbsolute(source) && !/^[a-z]+:\/\//i.test(source) ? `Folder: ${basename(resolve(source))}` : source;
+}
+
 /** A web page for the marketplace itself, for GitHub sources. */
 export function marketplacePage(source: string): string | undefined {
-  if (/^[\w.-]+\/[\w.-]+$/.test(source)) return `https://github.com/${source}`;
-  const match = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(source);
-  return match ? `https://github.com/${match[1]}` : undefined;
+  const repo = githubRepo(source);
+  return repo ? `https://github.com/${repo}` : undefined;
 }

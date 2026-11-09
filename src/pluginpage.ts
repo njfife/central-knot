@@ -4,8 +4,9 @@ import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { blocked, installed, missingTools, readme, toolBox } from './pluginparts.ts';
-import { pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
+import { dotted, readme, toolBox } from './pluginparts.ts';
+import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
+import { blocked, installed, missingTools, stateOf } from './pluginstatus.ts';
 import { clearPluginOutcome, market, openLink } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -30,34 +31,38 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
     h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
 }
 
-/** Where to install it: one box per tool on a line, and one button for every tool still without it. */
-function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, index: number) {
+/**
+ * Where to install it: a box per tool, each with a second line that is always there (so the card never changes height),
+ * and in the heading row the one button for every tool still without it, plus how to take it out once installed.
+ */
+function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, index: number, components?: Components) {
   const missing = missingTools(view, entry, plugin.name);
   const ops: PluginOp[] = missing.map(tool => ({ source: entry.source, market: entry.name, plugin: plugin.name, tool, action: 'install' }));
-  const allChosen = ops.length > 0 && ops.every(op => queued(market.draft, op.source, op.plugin, op.tool) === 'install');
+  const allChosen = allQueued(market.draft, ops);
+  // A tool where some part won't fully work says so under its box, where the choice is made; "In each tool" has the detail.
+  const limits = (tool: HarnessId) => (components ? outcomes(tool, components).filter(outcome => outcome.result !== 'works') : []);
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     if (chosen) return chosen === 'install' ? 'Will install' : 'Will uninstall';
     if (installed(entry, plugin.name, tool)) return 'Installed';
-    // An empty box already says "not installed"; only what can't be chosen needs words.
-    return blocked(view, entry, tool) || entry.states[plugin.name]?.[tool]?.state === 'held' ? 'Not available' : '';
+    if (blocked(view, entry, tool) || stateOf(entry, plugin.name, tool).state === 'held') return 'Not available';
+    return limits(tool).length ? 'Not installed · some limits' : 'Not installed';
   };
   const anyChosen = view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool));
   const anyInstalled = view.tools.some(tool => installed(entry, plugin.name, tool));
-  // The toolbar says what Apply all will do; this line only explains how to take a plugin out. It keeps its height either way.
-  const note = !anyChosen && anyInstalled ? 'To uninstall, click its check, then Apply all.' : '';
   const chooseAll = ops.length && view.canWrite
-    ? button({ variant: allChosen ? 'ghost' : 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!app.busy,
+    ? button({ variant: 'outline', size: 'small', label: allChosen ? 'Choose none' : ops.length > 1 ? `Choose all ${ops.length}` : `Choose ${names[missing[0]!]}`, id: `pinstall-${index}-${plugin.name}`, disabled: !!app.busy,
       onclick: () => { toggleMany(market.draft, ops); clearPluginOutcome(); rerender(); } })
     : null;
   return h('section.plugin-panel', { 'aria-label': 'Tools' },
-    h('h3', {}, 'Tools'),
-    h('div.plugin-tool-rows', {},
-      view.tools.map(tool => h('div.plugin-tool', {},
-        toolBox(view, entry, plugin, tool, index),
-        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: blocked(view, entry, tool) ?? '' }, status(tool))))),
+    h('div.plugin-panel-head', {}, h('h3', {}, 'Tools'),
+      !anyChosen && anyInstalled ? h('span.plugin-panel-hint', {}, 'To uninstall, click its check, then Apply all.') : null,
       chooseAll),
-    h('p.plugin-panel-note', {}, note));
+    h('div.plugin-tool-rows', {}, view.tools.map(tool => {
+      const why = blocked(view, entry, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
+      return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, index),
+        h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why }, status(tool))));
+    })));
 }
 
 /** One group of named parts, each description held to two lines (the whole of it on hover). */
@@ -96,9 +101,9 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, index: num
       h('h2', {}, title),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
-      facts.length ? h('p.plugin-meta', {}, facts.flatMap((fact, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), fact] : [fact]))) : null),
-    installPanel(view, entry, plugin, index),
+      facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),
+    installPanel(view, entry, plugin, index, components),
     contentsBlock(plugin, detail, reading),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
-    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'README'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions))) : null);
+    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions))) : null);
 }

@@ -50,7 +50,7 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
     assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, skillNames: catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames });
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames!.length, 2);
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'escape')!.components, undefined, 'a path outside is not read');
-    assert.equal(catalog.plugins.some(plugin => plugin.copilotRefuses), false);
+    assert.equal(catalog.copilotRefuses, undefined);
   } finally { await box.cleanup(); }
 });
 
@@ -60,8 +60,10 @@ test('Copilot’s whole-marketplace refusals are found before anything is added'
     const root = join(box.base, 'market');
     await marketplace(root, [{ name: 'from-npm', source: { source: 'npm', package: 'x' } }, { name: 'scp', source: { source: 'url', url: 'git@host:org/repo.git' } }]);
     const catalog = await parseCatalog(root, root, 'folder');
-    assert.match(catalog.plugins.find(plugin => plugin.name === 'from-npm')!.copilotRefuses ?? '', /npm/);
-    assert.match(catalog.plugins.find(plugin => plugin.name === 'scp')!.copilotRefuses ?? '', /SCP/);
+    assert.match(catalog.copilotRefuses ?? '', /npm/, 'the first refusing entry is named');
+    const scpOnly = join(box.base, 'scp-only');
+    await marketplace(scpOnly, [{ name: 'scp', source: { source: 'url', url: 'git@host:org/repo.git' } }]);
+    assert.match((await parseCatalog(scpOnly, scpOnly, 'folder')).copilotRefuses ?? '', /SCP/);
     const report = await install(box.context, catalog, 'marker', 'copilot-cli');
     assert.equal(report.outcome, 'held');
     assert.deepEqual(report.runs, [], 'nothing was run');
@@ -230,5 +232,37 @@ test('A plugin from another repository is copied once; a pinned commit that can�
     assert.ok('problem' in failed && /could not be read/.test(failed.problem), JSON.stringify(failed));
     const { stat } = await import('node:fs/promises');
     assert.equal(await stat(remoteCopyFolder(box.context, pinned)).then(() => true, () => false), false, 'the branch head is never kept in its place');
+  } finally { await box.cleanup(); }
+});
+
+test('A successful install and uninstall through Claude Code’s own CLI are each a real change, read back from its record', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    // A stand-in for `claude` that writes the files Claude Code keeps: the marketplace in settings.json, the install in
+    // plugins/installed_plugins.json with its files at installPath.
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), `#!/bin/sh
+set -e
+mkdir -p "$HOME/.claude/plugins"
+case "$2 $3" in
+  "marketplace add") printf '{"extraKnownMarketplaces":{"ck-test-market":{"source":{"source":"directory","path":"%s"}}}}' "$4" > "$HOME/.claude/settings.json" ;;
+  "install marker@ck-test-market") mkdir -p "$HOME/.claude/plugins/cache/marker" && echo x > "$HOME/.claude/plugins/cache/marker/plugin.json"
+    printf '{"plugins":{"marker@ck-test-market":[{"scope":"user","installPath":"%s"}]}}' "$HOME/.claude/plugins/cache/marker" > "$HOME/.claude/plugins/installed_plugins.json" ;;
+  "uninstall marker@ck-test-market") printf '{"plugins":{}}' > "$HOME/.claude/plugins/installed_plugins.json" ;;
+esac
+`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const catalog = await parseCatalog(root, root, 'folder');
+    const installed = await install(context, catalog, 'marker', 'claude-cli');
+    assert.deepEqual([installed.outcome, installed.changed], ['installed', true], installed.message);
+    assert.ok(installed.runs.some(run => run.changed.some(change => change.path.endsWith('installed_plugins.json') && change.before === null && change.after)), 'the bytes before and after are kept');
+    const again = await install(context, catalog, 'marker', 'claude-cli');
+    assert.deepEqual([again.outcome, again.changed], ['installed', undefined], 'already installed is not a change');
+    const { uninstall } = await import('../src/plugins.ts');
+    const removed = await uninstall(context, 'ck-test-market', 'marker', 'claude-cli', root);
+    assert.deepEqual([removed.outcome, removed.changed], ['uninstalled', true], removed.message);
   } finally { await box.cleanup(); }
 });

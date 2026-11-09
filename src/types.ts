@@ -231,8 +231,6 @@ export interface CatalogPlugin {
   /** The plugin's folder, when it sits inside the marketplace itself. Elsewhere its components are not known before install. */
   folder?: string;
   components?: Components;
-  /** Why Copilot CLI would refuse the whole marketplace because of this entry (MKT-06). */
-  copilotRefuses?: string;
   displayName?: string;
   category?: string;
   author?: string;
@@ -248,7 +246,7 @@ export interface CatalogPlugin {
   entry?: Record<string, unknown>;
 }
 
-export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string }
+export interface Catalog { name: string; source: string; kind: 'folder' | 'git'; fetchedAt: string; plugins: CatalogPlugin[]; problem?: string; /** The folder its files were read from. */ root?: string; owner?: string; description?: string; /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */ copilotRefuses?: string }
 
 export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
@@ -281,6 +279,10 @@ export interface MarketplaceView {
   description?: string;
   /** Its web page, for GitHub sources. */
   page?: string;
+  /** Where it comes from, short: "GitHub: owner/repo", "Folder: name", or the source as given. */
+  sourceLabel: string;
+  /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
+  copilotRefuses?: string;
 }
 
 /** One named part of a plugin (a skill, command or agent) with what it says it does. */

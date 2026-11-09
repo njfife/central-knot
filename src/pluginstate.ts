@@ -2,8 +2,9 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { clear, describe, pluginKey, prune, reverse, runPlan, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import type { MarketplaceView, PluginDetail, PluginsView } from './types.ts';
+import { clear, describe, forSource, notUndone, pluginKey, prune, resultSentence, reverse, runPlan, type PluginDone, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { readInto, type Read } from './reads.ts';
+import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
 import { andList, toolNames } from './words.ts';
 
 const api = () => window.centralKnot;
@@ -11,8 +12,6 @@ const api = () => window.centralKnot;
 export type MarketTab = 'plugins' | 'about';
 /** What the page is doing, so it can say so; set by each action, cleared when it ends. */
 export type MarketActivity = 'reading' | 'adding' | 'refreshing' | 'removing' | 'applying' | 'undoing';
-/** Something read in the background: still being read, or what came back. */
-export type Read<T> = { reading: true } | { reading: false; value: T };
 
 const startNav = () => ({ source: undefined as string | undefined, tab: 'plugins' as MarketTab, plugin: undefined as string | undefined, find: '', category: undefined as string | undefined });
 
@@ -24,10 +23,13 @@ export const market = {
   activity: undefined as MarketActivity | undefined,
   /** Changes chosen but not applied (pluginplan.ts): nothing runs until Apply all. */
   draft: new Map() as PluginDraft,
-  /** What the last Apply all (or its Undo) did, in which home, so the band can say it and offer the way back there only. */
-  done: undefined as { done: PluginDone[]; undo: boolean; home: string } | undefined,
+  /**
+   * What the last Apply all (or its Undo) did, in which home, so the toolbar can say it and offer the way back there
+   * only. An Undo that was stopped or failed part-way keeps `rest`, the reversals it didn't get to.
+   */
+  done: undefined as { done: PluginDone[]; undo: boolean; home: string; rest?: PluginOp[] } | undefined,
   /** The plugin and tools a command is running for, so their boxes show it is working. */
-  working: undefined as { source: string; plugin: string; tools: string[] } | undefined,
+  working: undefined as { source: string; plugin: string; tools: HarnessId[] } | undefined,
   /** Where the person is: the marketplace shown, its tab, an open plugin page, and the filter. */
   nav: startNav(),
   /** Each marketplace's README, by source. */
@@ -54,24 +56,19 @@ export function current(): { entry: MarketplaceView; index: number } | undefined
 /** The "added" or "removed" message has done its job once the person moves on or chooses something. */
 export function clearPluginOutcome(): void { if (app.outcome?.page === 'plugins') app.outcome = undefined; }
 
-/**
- * Reads into a map in the background. The result is kept only while the map still holds this read's own placeholder: a
- * Refresh or a home switch that cleared the map in the meantime wins, and the stale result is dropped.
- */
-function readInto<T>(map: Map<string, Read<T>>, key: string, read: () => Promise<T>): void {
-  if (map.has(key)) return;
-  const placeholder: Read<T> = { reading: true };
-  map.set(key, placeholder);
-  void read().then(value => { if (map.get(key) === placeholder) { map.set(key, { reading: false, value }); rerender(); } });
-}
+/** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
+const REMOTE_READ_AHEAD = 8;
 
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {
   const source = current()?.entry.source;
   if (!source) return;
   const plugin = market.nav.plugin;
-  if (plugin) readInto(market.details, pluginKey(source, plugin), () => api().pluginDetail(source, plugin).catch(() => null));
-  else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined));
+  const readPlugin = (name: string) => readInto(market.details, pluginKey(source, name), () => api().pluginDetail(source, name).catch(() => null), rerender);
+  if (plugin) readPlugin(plugin);
+  else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
+  // Plugins kept in other repositories say what they hold once read; a few are read ahead so their rows can say it too.
+  else for (const entry of (current()?.entry.plugins ?? []).filter(candidate => !candidate.components && candidate.from).slice(0, REMOTE_READ_AHEAD)) readPlugin(entry.name);
 }
 
 /** Moves within the page and reads what the new place shows. */
@@ -118,7 +115,7 @@ export const addMarketplace = (source: string) => act('adding', 'Reading the mar
 export const refreshMarketplace = (source: string) => act('refreshing', 'Refreshing the marketplace…', async () => {
   market.view = (await api().refreshMarketplace(source)) ?? market.view;
   market.readmes.delete(source);
-  for (const key of [...market.details.keys()]) if (key.startsWith(pluginKey(source, ''))) market.details.delete(key);
+  for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
   prune(market.draft, market.view);
   readShown();
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
@@ -152,17 +149,17 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
   } finally {
     market.working = undefined;
     for (const entry of result.done) clear(market.draft, entry);
-    market.done = { done: result.done, undo, home };
+    market.done = { done: result.done, undo, home, rest: undo ? notUndone(ops, result.done) : undefined };
     market.problem = result.stopped;
     market.view = (await api().plugins().catch(() => null)) ?? market.view;
     prune(market.draft, market.view);
   }
-  announce(market.problem ?? describe(result.done, toolNames, andList).map(line => `${line.plugin}: ${line.text}`).join('. '), true);
+  announce(market.problem ?? resultSentence(describe(result.done, toolNames, andList, undo), undo), true);
 });
 
-/** Undo for the last Apply all, while it is for the home on screen. */
+/** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */
 export function undoOps(): PluginOp[] {
   const last = market.done;
-  if (!last || last.undo || last.home !== app.home?.home) return [];
-  return reverse(last.done);
+  if (!last || last.home !== app.home?.home) return [];
+  return last.undo ? last.rest ?? [] : reverse(last.done);
 }

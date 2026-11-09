@@ -5,6 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
+import { isBundledCli } from './platform.ts';
 import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 
 function errorCode(error: unknown): string {
@@ -46,6 +47,15 @@ function frontmatter(content: string): Record<string, unknown> | null {
   if (metadata === null || metadata === undefined) return {};
   if (typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('Frontmatter must be a mapping.');
   return metadata as Record<string, unknown>;
+}
+
+/** A Markdown file's `name` and `description` from its frontmatter, trimmed for display; nothing when it has none or it can't be read. Never throws. */
+export function nameAndDescription(content: string): { name?: string; description?: string } {
+  try {
+    const fields = frontmatter(content) ?? {};
+    const field = (value: unknown) => (typeof value === 'string' ? value.trim() : undefined);
+    return { name: field(fields.name), description: field(fields.description) };
+  } catch { return {}; }
 }
 
 export function parseSkill(content: string, folder: string): Pick<Skill, 'name' | 'description' | 'notes' | 'hasFrontmatter' | 'metadataKeys'> {
@@ -140,7 +150,7 @@ export async function discover(options: {
       const probe = await probeVersion(binary, options.timeoutMs);
       if (probe.state === 'missing') continue;
       // An app's bundled CLI never counts as a CLI install (CD §3): it shows the desktop app is there, and says so.
-      if (binary.includes('/ChatGPT.app/')) { probe.detail = 'ChatGPT desktop’s own Codex; no Codex CLI found. Version only; no session started.'; probe.bundled = true; }
+      if (isBundledCli(binary)) { probe.detail = 'ChatGPT desktop’s own Codex; no Codex CLI found. Version only; no session started.'; probe.bundled = true; }
       snapshot.probe = probe;
       snapshot.detection = probe.state === 'restricted' ? snapshot.detection : probe.state === 'ok' ? 'Installed' : 'Version unknown';
       break;

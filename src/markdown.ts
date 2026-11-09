@@ -12,7 +12,7 @@ export type Inline =
 export type Block =
   | { kind: 'heading'; level: number; content: Inline[] }
   | { kind: 'paragraph'; content: Inline[] }
-  | { kind: 'list'; ordered: boolean; items: Inline[][] }
+  | { kind: 'list'; ordered: boolean; items: Inline[][]; /** The first number of a numbered list, when it isn't 1. */ start?: number }
   | { kind: 'code'; text: string }
   | { kind: 'quote'; blocks: Block[] }
   | { kind: 'table'; head: Inline[][]; rows: Inline[][][] }
@@ -36,6 +36,8 @@ const PATTERNS: [RegExp, (match: RegExpExecArray) => Inline[]][] = [
   [/<(https:\/\/[^>\s]{1,500})>/y, match => linkOrText([{ kind: 'text', text: match[1]! }], match[1]!)],
   [/https:\/\/[^\s<>()]{0,499}[^\s<>().,;:!?'"]/y, match => linkOrText([{ kind: 'text', text: match[0] }], match[0])],
 ];
+/** Tags of the HTML found in READMEs. Only these are dropped: other <words> (an "install <name>" placeholder) stay as text. */
+const HTML_TAG = /<\/?(?:a|abbr|b|blockquote|br|center|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|picture|pre|source|span|strong|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul|video)\b[^>]{0,300}>/gi;
 const STARTS = /[*_![<h\\]/g;
 
 /** An https link stays a link; anything else (relative paths, other schemes) is just its label. */
@@ -43,7 +45,7 @@ const linkOrText = (label: Inline[], url: string): Inline[] => (/^https:\/\/\S+$
 
 /** Text with no code spans in it: tags are dropped (autolinks kept), then emphasis and links are found. */
 function inlineText(text: string): Inline[] {
-  const plain = text.replace(/<(?!https:\/\/)\/?[a-zA-Z][^>]{0,300}>/g, '');
+  const plain = text.replace(HTML_TAG, '');
   const out: Inline[] = [];
   let from = 0;
   let last = 0;
@@ -119,15 +121,19 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
     if (item) {
       flush();
       const ordered = /\d/.test(item[2]!);
+      const start = ordered ? Number.parseInt(item[2]!, 10) : 1;
       const items: Inline[][] = [];
+      const sameKind = (at: number) => { const next = ITEM.exec(lines[at] ?? ''); return !!next && /\d/.test(next[2]!) === ordered; };
       for (; index < lines.length; index++) {
         const next = ITEM.exec(lines[index]!);
         if (next && /\d/.test(next[2]!) === ordered) items.push(parseInline(next[3]!.replace(/^\[[ xX]\]\s*/, '')));
+        // A blank line between items of the same list ("loose" steps) keeps the list going.
+        else if (!lines[index]!.trim() && sameKind(index + 1)) continue;
         // A code block inside an item ends the list here and is shown as a block, not flattened into the item.
         else if (/^\s{2,}\S/.test(lines[index]!) && items.length && !/^\s*(```|~~~)/.test(lines[index]!)) items.at(-1)!.push({ kind: 'text', text: ' ' }, ...parseInline(lines[index]!.trim()));
         else break;
       }
-      blocks.push({ kind: 'list', ordered, items });
+      blocks.push({ kind: 'list', ordered, items, ...(ordered && start !== 1 ? { start } : {}) });
       continue;
     }
     if (isTableRow(line) && /^\s*\|?\s*:?-{2,}/.test(lines[index + 1] ?? '')) {
@@ -142,7 +148,7 @@ export function parseMarkdown(source: string, depth = 0): Block[] {
     const underline = /^\s*(=+|-+)\s*$/.exec(lines[index + 1] ?? '');
     if (underline && !paragraph.length && line.trim()) { blocks.push({ kind: 'heading', level: underline[1]!.startsWith('=') ? 1 : 2, content: parseInline(line.trim()) }); index += 2; continue; }
     // A blank line ends a paragraph; a line that is only HTML (a centred logo, a badge row) says nothing as text.
-    if (!line.trim() || (/^\s*<(?!https:\/\/)/.test(line) && !line.replace(/<[^>]{0,300}>/g, '').trim())) { flush(); index++; continue; }
+    if (!line.trim() || (/^\s*</.test(line) && !line.replace(HTML_TAG, '').trim())) { flush(); index++; continue; }
     paragraph.push(line.trim());
     index++;
   }
@@ -186,7 +192,7 @@ function blockNodes(blocks: Block[], open: (url: string) => void): HTMLElement[]
     switch (block.kind) {
       case 'heading': return h(`h${Math.min(6, block.level + 2)}`, {}, ...inlineNodes(block.content, open));
       case 'paragraph': return h('p', {}, ...inlineNodes(block.content, open));
-      case 'list': return h(block.ordered ? 'ol' : 'ul', {}, block.items.map(item => h('li', {}, ...inlineNodes(item, open))));
+      case 'list': return h(block.ordered ? 'ol' : 'ul', block.start ? { start: String(block.start) } : {}, block.items.map(item => h('li', {}, ...inlineNodes(item, open))));
       case 'code': return h('pre', {}, h('code', {}, block.text));
       case 'quote': return h('blockquote', {}, blockNodes(block.blocks, open));
       case 'table': return h('div.md-table', {}, h('table', {}, h('thead', {}, h('tr', {}, block.head.map(cell => h('th', {}, ...inlineNodes(cell, open))))),

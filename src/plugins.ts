@@ -6,8 +6,9 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { inside, pluginContents, remoteOf, sourceOf } from './catalogdetail.ts';
+import { inside, jsonInside, pluginContents, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
+import { githubRepo, record, text } from './values.ts';
 export { outcomes } from './pluginoutcomes.ts';
 import type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
 export type { AccessResult, ActionReport, Catalog, CatalogPlugin, Components, InstallState, NativeRun, Outcome } from './types.ts';
@@ -45,7 +46,7 @@ export function sameSource(first: string, second: string): boolean {
     let text = value.trim();
     // A folder may be named through a link (macOS: /var is /private/var), and tools record whichever spelling they saw.
     if (isFolder(text)) { try { return realpathSync(text); } catch { return resolve(text); } }
-    if (/^[\w.-]+\/[\w.-]+$/.test(text)) text = `https://github.com/${text}`;
+    if (/^[\w.-]+\/[\w.-]+$/.test(text)) text = `https://github.com/${text}`; // owner/repo means GitHub
     const scp = text.match(/^([\w.-]+)@([\w.-]+):(.+)$/);
     if (scp) text = `ssh://${scp[1]}@${scp[2]}/${scp[3]}`;
     try {
@@ -57,7 +58,7 @@ export function sameSource(first: string, second: string): boolean {
 }
 
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
-const fetchUrl = (source: string) => (/^[\w.-]+\/[\w.-]+$/.test(source.trim()) ? `https://github.com/${source.trim()}.git` : source.trim());
+const fetchUrl = (source: string) => (/^[\w.-]+\/[\w.-]+$/.test(source.trim()) ? `https://github.com/${githubRepo(source)}.git` : source.trim());
 
 const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
@@ -82,7 +83,8 @@ export async function checkAccess(source: string, timeoutMs = 20_000): Promise<A
   return classify(result.code, result.output);
 }
 
-export function classify(code: number | 'timeout' | 'missing', output: string): AccessResult {
+/** Why a Git command failed, in words a person can act on. Only called for a failure, so it never says "ok". */
+export function classify(code: number | 'timeout' | 'missing', output: string): Exclude<AccessResult, { state: 'ok' }> {
   const text = output.toLowerCase();
   if (code === 'missing') return { state: 'git-missing', message: 'Git is not installed, so this marketplace cannot be read.' };
   if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: 'Can’t reach the marketplace. Check your connection; a company marketplace may need its network or VPN.' };
@@ -99,17 +101,16 @@ const catalogFolder = (context: PluginContext, source: string) => join(context.d
 
 /**
  * A fresh shallow copy of a Git repository, with hooks and submodules off, swapped into `target` only once complete.
- * Returns a problem to show (true: failed for no reason Git gave), or undefined when the copy is in place.
+ * Returns a problem to show, or undefined when the copy is in place.
  */
-async function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | true | undefined> {
+async function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   const git = (args: string[]) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs: context.timeoutMs ?? 60_000 });
   const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage]);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
-    const failure = classify(cloned.code, cloned.output);
-    return failure.state === 'ok' ? true : failure.message;
+    return classify(cloned.code, cloned.output).message;
   }
   // A pinned commit is checked out in the stage too: the copy takes its place only when it is exactly what was asked for.
   if (sha) {
@@ -126,7 +127,7 @@ async function shallowClone(context: PluginContext, url: string, target: string,
 export const remoteCopyFolder = (context: PluginContext, remote: { url: string; ref?: string; sha?: string }) =>
   join(context.dataDir, 'remote', createHash('sha256').update(`${remote.url}\u0000${remote.ref ?? ''}\u0000${remote.sha ?? ''}`).digest('hex').slice(0, 24));
 /** Copies being made right now, so two pages opened together share one clone instead of racing on the same folder. */
-const copying = new Map<string, Promise<string | true | undefined>>();
+const copying = new Map<string, Promise<string | undefined>>();
 
 /**
  * A plugin kept in its own repository, read so its page can show what it holds: a shallow copy kept with Central Knot's
@@ -139,7 +140,7 @@ export async function readRemotePlugin(context: PluginContext, remote: { url: st
     const pending = copying.get(root) ?? shallowClone(context, remote.url, root, remote.ref, remote.sha).finally(() => copying.delete(root));
     copying.set(root, pending);
     const problem = await pending;
-    if (problem) return { problem: problem === true ? 'Its repository could not be copied.' : problem };
+    if (problem) return { problem };
   }
   const folder = resolve(root, remote.path || '.');
   return (await inside(root, folder)) ? { folder, root } : { problem: 'Its folder is outside its repository.' };
@@ -154,7 +155,7 @@ export async function readCatalog(context: PluginContext, source: string): Promi
     if (access.state !== 'ok') return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: access.message };
     const target = catalogFolder(context, source);
     const problem = await shallowClone(context, fetchUrl(source), target);
-    if (problem) return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem: problem === true ? 'The marketplace could not be copied.' : problem };
+    if (problem) return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem };
     root = target;
   }
   return parseCatalog(root, source, kind);
@@ -170,57 +171,63 @@ export async function cachedCatalog(context: PluginContext, source: string): Pro
   return catalog;
 }
 
-const stringOr = (value: unknown, fallback = '') => (typeof value === 'string' ? value : fallback);
 
 /** A marketplace or plugin name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
 const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
 
+/** Why Copilot CLI would refuse a whole marketplace because of this one entry's source (MKT-06), if it would. */
+function copilotRefusal(name: string, where: unknown): string | undefined {
+  const source = record(where);
+  if (!source) return undefined;
+  if (['npm', 'pip', 'archive'].includes(text(source.source))) return `Copilot CLI refuses a marketplace with a ${text(source.source)} plugin source (“${name}”).`;
+  if (/^[\w.-]+@[\w.-]+:/.test(text(source.url))) return `Copilot CLI refuses a marketplace with an SCP-style plugin URL (“${name}”).`;
+  return undefined;
+}
+
+/**
+ * One marketplace.json entry as a plugin the page can show, or undefined when its name isn't one the tools accept. A
+ * plugin stored in the marketplace (a string `source`) gets its folder and counts; one kept elsewhere gets where it lives.
+ */
+async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string): Promise<CatalogPlugin | undefined> {
+  if (typeof item.name !== 'string' || !SAFE_NAME.test(item.name)) return undefined;
+  const author = typeof item.author === 'string' ? item.author : text(record(item.author)?.name);
+  const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
+  const plugin: CatalogPlugin = {
+    name: item.name, description: text(item.description), version: text(item.version) || undefined, displayName: text(item.displayName) || undefined,
+    category: text(item.category) || undefined, author: author || undefined, homepage: /^https:\/\//.test(text(item.homepage)) ? text(item.homepage) : undefined,
+    license: text(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source), remote: remoteOf(item.source), entry: item,
+  };
+  if (typeof item.source === 'string') {
+    const where = item.source;
+    const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
+    // A path outside the marketplace, through a link or not, is not read.
+    if (await inside(root, folder)) { plugin.folder = folder; plugin.components = await componentsOf(folder, item, root); }
+  }
+  return plugin;
+}
+
+/**
+ * Reads the marketplace.json in `root` (a folder, or Central Knot's copy of a Git marketplace) into a catalog: its name,
+ * owner and description, and its plugins sorted by name. A file that is missing, outside `root`, unreadable or misnamed
+ * gives a catalog with no plugins and a `problem` to show. Nothing is fetched or run.
+ */
 export async function parseCatalog(root: string, source: string, kind: Catalog['kind']): Promise<Catalog> {
   const fetchedAt = new Date().toISOString();
-  let manifest: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(await readFile(join(root, '.claude-plugin/marketplace.json'), 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) throw new SyntaxError('not an object');
-    manifest = parsed as Record<string, unknown>;
-  }
-  catch (error) {
-    const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
-    return { name: '', source, kind, fetchedAt, plugins: [], problem: missing ? 'There is no marketplace here: no .claude-plugin/marketplace.json.' : 'Its marketplace.json could not be read as JSON.' };
-  }
-  const name = stringOr(manifest.name);
-  if (!name) return { name: '', source, kind, fetchedAt, plugins: [], problem: 'Its marketplace.json has no name.' };
+  const failed = (problem: string): Catalog => ({ name: '', source, kind, fetchedAt, plugins: [], problem });
+  const manifestPath = join(root, '.claude-plugin/marketplace.json');
+  if (!(await inside(root, manifestPath))) return failed('There is no marketplace here: no .claude-plugin/marketplace.json.');
+  const manifest = await jsonInside(root, manifestPath);
+  if (!manifest) return failed('Its marketplace.json could not be read as JSON.');
+  const name = text(manifest.name);
+  if (!name) return failed('Its marketplace.json has no name.');
   // Names reach each tool's command line as plugin@marketplace: anything that could read as an option is not offered.
-  if (!SAFE_NAME.test(name)) return { name: '', source, kind, fetchedAt, plugins: [], problem: `Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.` };
-  const pluginRoot = stringOr((manifest.metadata as Record<string, unknown> | undefined)?.pluginRoot);
-  const entries = Array.isArray(manifest.plugins) ? manifest.plugins : [];
-  const plugins: CatalogPlugin[] = [];
-  for (const entry of entries) {
-    if (typeof entry !== 'object' || entry === null || !SAFE_NAME.test(String((entry as Record<string, unknown>).name))) continue;
-    const item = entry as Record<string, unknown>;
-    const author = typeof item.author === 'string' ? item.author : stringOr((item.author as Record<string, unknown> | undefined)?.name);
-    const words = [...(Array.isArray(item.keywords) ? item.keywords : []), ...(Array.isArray(item.tags) ? item.tags : [])].filter((word): word is string => typeof word === 'string');
-    const plugin: CatalogPlugin = { name: item.name as string, description: stringOr(item.description), version: typeof item.version === 'string' ? item.version : undefined,
-      displayName: stringOr(item.displayName) || undefined, category: stringOr(item.category) || undefined, author: author || undefined, homepage: /^https:\/\//.test(stringOr(item.homepage)) ? stringOr(item.homepage) : undefined,
-      license: stringOr(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source), remote: remoteOf(item.source), entry: item };
-    const where = item.source;
-    if (typeof where === 'string') {
-      const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
-      // A path outside the marketplace, through a link or not, is not read.
-      if (await inside(root, folder)) {
-        plugin.folder = folder;
-        plugin.components = await componentsOf(folder, item, root);
-      }
-    } else if (typeof where === 'object' && where !== null) {
-      const kindOf = stringOr((where as Record<string, unknown>).source);
-      const url = stringOr((where as Record<string, unknown>).url);
-      if (['npm', 'pip', 'archive'].includes(kindOf)) plugin.copilotRefuses = `Copilot CLI refuses a marketplace with a ${kindOf} plugin source (“${plugin.name}”).`;
-      else if (/^[\w.-]+@[\w.-]+:/.test(url)) plugin.copilotRefuses = `Copilot CLI refuses a marketplace with an SCP-style plugin URL (“${plugin.name}”).`;
-    }
-    plugins.push(plugin);
-  }
-  const owner = stringOr((manifest.owner as Record<string, unknown> | undefined)?.name);
-  const about = stringOr(manifest.description) || stringOr((manifest.metadata as Record<string, unknown> | undefined)?.description);
-  return { name, source, kind, fetchedAt, root, owner: owner || undefined, description: about || undefined, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
+  if (!SAFE_NAME.test(name)) return failed(`Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.`);
+  const metadata = record(manifest.metadata);
+  const entries = (Array.isArray(manifest.plugins) ? manifest.plugins : []).map(record).filter((item): item is Record<string, unknown> => !!item);
+  const plugins = (await Promise.all(entries.map(item => catalogEntry(item, root, text(metadata?.pluginRoot))))).filter((plugin): plugin is CatalogPlugin => !!plugin);
+  const copilotRefuses = entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
+  return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
+    copilotRefuses, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
 }
 
 /** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
@@ -260,11 +267,7 @@ const hasFiles = async (path: string) => { try { return (await readdir(path)).le
 
 /** The marketplace a tool has under a name, as the source it was added from. */
 export async function registeredSource(context: PluginContext, tool: HarnessId, marketplace: string): Promise<string | undefined> {
-  const root = configRootOf(context, tool);
-  if (tool === 'codex-cli') return (await codexTables(context, root))?.marketplaces[marketplace]?.source;
-  const settings = await recordJson(context, join(root, 'settings.json'));
-  const entry = (settings?.extraKnownMarketplaces as Record<string, { source?: { source?: string; url?: string; path?: string; repo?: string } }> | undefined)?.[marketplace]?.source;
-  return entry ? entry.url ?? entry.path ?? entry.repo : undefined;
+  return (await registeredMarketplaces(context, tool)).find(entry => entry.name === marketplace)?.source;
 }
 
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
@@ -347,7 +350,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const runs: NativeRun[] = [];
   const name = harnesses[tool].name;
   if (tool === 'copilot-cli') {
-    const refusal = catalog.plugins.find(item => item.copilotRefuses)?.copilotRefuses;
+    const refusal = catalog.copilotRefuses;
     if (refusal) return { tool, outcome: 'held', message: `${refusal} Nothing was added to Copilot CLI.`, runs };
   }
   const already = await installState(context, tool, catalog.name, plugin);
@@ -388,15 +391,13 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
 /** The marketplaces a tool already has, as added there: no setup needed to browse them. */
 export async function registeredMarketplaces(context: PluginContext, tool: HarnessId): Promise<{ name: string; source: string }[]> {
   const root = configRootOf(context, tool);
-  if (tool === 'codex-cli') {
-    try {
-      const tables = readCodexTables(await readFile(join(root, 'config.toml'), 'utf8'));
-      return Object.entries(tables.marketplaces).filter(([, entry]) => entry.source).map(([name, entry]) => ({ name, source: entry.source! }));
-    } catch { return []; }
-  }
-  const settings = await readJson(join(root, 'settings.json'));
-  const entries = (settings?.extraKnownMarketplaces ?? {}) as Record<string, { source?: { url?: string; path?: string; repo?: string } }>;
-  return Object.entries(entries).map(([name, entry]) => ({ name, source: entry.source?.url ?? entry.source?.path ?? entry.source?.repo ?? '' })).filter(entry => entry.source);
+  if (tool === 'codex-cli') return Object.entries((await codexTables(context, root))?.marketplaces ?? {}).filter(([, entry]) => entry.source).map(([name, entry]) => ({ name, source: entry.source! }));
+  const settings = await recordJson(context, join(root, 'settings.json'));
+  const entries = record(settings?.extraKnownMarketplaces) ?? {};
+  return Object.entries(entries).map(([name, entry]) => {
+    const source = record(record(entry)?.source);
+    return { name, source: text(source?.url) || text(source?.path) || text(source?.repo) };
+  }).filter(entry => entry.source);
 }
 
 /** The end of a tool's own message, shown as it is. */

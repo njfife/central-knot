@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { frontMatter, inside, marketplacePage, pluginContents, pluginDetail, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
+import { nameAndDescription as frontMatter } from '../src/discovery.ts';
+import { inside, marketplacePage, pluginContents, pluginDetail, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -16,7 +17,10 @@ test('Front matter gives name and description, quoted, folded or literal, with W
   assert.deepEqual(frontMatter('---\r\nname: "pdf"\r\ndescription: Reads PDFs\r\n---\r\nbody'), { name: 'pdf', description: 'Reads PDFs' });
   assert.deepEqual(frontMatter('---\nname: x\ndescription: >\n  Reads PDFs\n  and tables\n---\n'), { name: 'x', description: 'Reads PDFs and tables' });
   assert.deepEqual(frontMatter('---\ndescription: |\n  one\n  two\n---\n'), { name: undefined, description: 'one\ntwo' });
-  assert.deepEqual(frontMatter('no front matter'), {});
+  // Shapes a hand-written reader got wrong: a plain description over two lines, a trailing comment, a byte-order mark.
+  assert.deepEqual(frontMatter('---\nname: pdf # the name\ndescription: Reads PDFs and\n  extracts tables\n---\n'), { name: 'pdf', description: 'Reads PDFs and extracts tables' });
+  assert.deepEqual(frontMatter('\ufeff---\nname: x\n---\n'), { name: 'x', description: undefined });
+  assert.deepEqual(frontMatter('no front matter'), { name: undefined, description: undefined });
 });
 
 test('A strict:false entry holds only the skills it lists, and listed commands too', async () => {
@@ -29,7 +33,8 @@ test('A strict:false entry holds only the skills it lists, and listed commands t
     assert.deepEqual(contents.commands, [{ name: 'notes', description: 'Takes notes' }]);
     // The plugin is the marketplace's own root: its README belongs to the marketplace and is shown there.
     await put(join(root, 'README.md'), '# Market');
-    assert.equal((await pluginDetail(root, { source: './' }, root)).readme, undefined);
+    assert.equal((await pluginDetail(root, { source: './' }, root, false)).readme, undefined);
+    assert.equal((await pluginDetail(root, { source: './' }, root)).readme, '# Market');
   } finally { await cleanup(); }
 });
 

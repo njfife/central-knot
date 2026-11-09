@@ -1,36 +1,13 @@
-// Pieces the marketplace and plugin pages share: why a tool can't take a plugin, its install box, a summary of what a
-// plugin holds, and README rendering. A box only chooses a change; Apply all runs it (pluginplan.ts, pluginstate.ts).
+// Pieces the marketplace and plugin pages draw alike: a tool's install box, a README, and "a · b · c" lines. A box only
+// chooses a change; Apply all runs it (pluginplan.ts, pluginstate.ts). What the boxes say comes from pluginstatus.ts.
 import { rerender, state as app } from './app.ts';
 import { h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
-import { plural } from './model.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearPluginOutcome, market, openLink } from './pluginstate.ts';
-import type { Components, HarnessId, InstallState, MarketplaceView, PluginView, PluginsView } from './types.ts';
+import { blocked, cliMissing, stateOf } from './pluginstatus.ts';
+import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
-
-/** The one way of saying a tool's CLI is missing. */
-export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
-
-/** Why a tool can't take this marketplace's plugins, if it can't. */
-export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
-  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : `${cliMissing(tool)}, so its plugin commands can’t run.`;
-  if (tool === 'copilot-cli') return entry.plugins.find(plugin => plugin.copilotRefuses)?.copilotRefuses;
-  return undefined;
-}
-
-export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
-export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessId) => stateOf(entry, plugin, tool).state === 'installed';
-
-/** Tools that can still take this plugin: found, allowed, not holding another marketplace of this name, not installed yet. */
-export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
-  view.tools.filter(tool => !blocked(view, entry, tool) && ['not-installed', 'not-known'].includes(stateOf(entry, plugin, tool).state));
-
-/** "3 skills · 1 MCP server", from a plugin's counts. */
-export function summaryOf(parts: Components): string {
-  return [parts.skills && plural(parts.skills, 'skill'), parts.commands && plural(parts.commands, 'command'), parts.agents && plural(parts.agents, 'agent'),
-    parts.hooks && 'hooks', parts.mcp && plural(parts.mcp, 'MCP server'), parts.bin && 'a bin/ folder'].filter(Boolean).join(' · ');
-}
 
 /** One tool's box for one plugin: installed, not installed, chosen for Apply all, or not available, each saying why. */
 export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, index: number) {
@@ -61,7 +38,8 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   }
   const why = blocked(view, entry, tool);
   if (why) return cannot(why);
-  if (pending === 'install') return box('cell-pending.cell-chosen.cell-on', 'install', `${names[tool]}: installed on Apply all. Click to leave it out.`, icon('plus', 15), 'install');
+  // Chosen differs from empty by shape, not only colour: a dashed check where the empty box has a plus.
+  if (pending === 'install') return box('cell-pending.cell-chosen.cell-on', 'install', `${names[tool]}: installed on Apply all. Click to leave it out.`, icon('check', 15), 'install');
   if (status.state === 'not-known') return box('cell-differs', 'not-known', cantWhy ? `${status.reason} ${cantWhy}` : `${status.reason} Click to install again on Apply all.`, icon('circle-question-mark', 16), 'install');
   return box('cell-absent.plugin-add', 'absent', cantWhy ? `Not installed in ${names[tool]}. ${cantWhy}` : `Not installed in ${names[tool]}. Click to install on Apply all.`, icon('plus', 14, 'plugin-add-glyph'), 'install');
 }
@@ -81,3 +59,6 @@ export function readme(body: string, name: string, descriptions: string[] = []):
   rendered.set(cacheKey, node);
   return node;
 }
+
+/** Parts joined with a quiet middle dot between them: "Version 1.2 · by Docs crew · productivity". */
+export const dotted = (parts: (string | Element)[]) => parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part]));

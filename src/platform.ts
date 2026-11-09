@@ -1,5 +1,8 @@
 import { isAbsolute, join } from 'node:path';
 
+/** An app's own bundled copy of a CLI (ChatGPT desktop's Codex): it shows the app is there, but never counts as the CLI. */
+export const isBundledCli = (path: string) => path.includes('/ChatGPT.app/');
+
 export function executableCandidates(home: string, searchPath: string, binary = 'claude'): string[] {
   const fixed = [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
   const directories = [...fixed, ...searchPath.split(':').filter(isAbsolute)];
