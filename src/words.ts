@@ -9,6 +9,9 @@ export const toolName = (tool: string) => (toolNames as Record<string, string>)[
 /** The last part of a path, on any OS: `CLAUDE.md` from `…/.claude/CLAUDE.md`. */
 export const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
+/** A text's lines, without the empty one after a final line break ('' has one empty line). */
+export const linesOf = (text: string) => text.replace(/\n$/, '').split('\n');
+
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join(' and '));
 

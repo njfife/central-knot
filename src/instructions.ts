@@ -1,13 +1,14 @@
 // Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02).
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
-// earlier version can be put back. Nothing here deletes or empties a file, and no project or workspace file is read or written.
+// earlier version can be put back. Nothing here empties a file; the only deletion is an Undo removing a file its own base save
+// created, while it still holds what was written. No project or workspace file is read or written.
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { lineDiff } from './diff.ts';
 import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { blockText, fileWithBase, sameBase, splitBase } from './basetext.ts';
-import { andList, toolNames } from './words.ts';
+import { baseAction, blockText, fileWithBase, sameBase, splitBase } from './basetext.ts';
+import { andList, linesOf, toolNames } from './words.ts';
 import { harnessIds } from './harnesses.ts';
 import { onlyAllowed } from './values.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
@@ -22,7 +23,7 @@ const basePath = (home: string) => join(storeDirectory(home), 'instructions', 'b
 const baseListPath = (home: string) => join(storeDirectory(home), 'instructions', 'base-tools.json');
 /** The hash of a base copy as a block holds it, so a copy and the base text it came from compare equal. */
 const copyHash = (copy: string) => sha(blockText(copy));
-/** A tool file's hash for checks: '' when there is no file (the base, kept in Central Knot's store, hashes a missing file as empty text). */
+/** A file's hash for checks: '' when there is no file. */
 const hashOf = (text: string | undefined) => (text === undefined ? '' : sha(text));
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
@@ -65,7 +66,7 @@ async function shelf(home: string, which: Shelf): Promise<{ id: string; text: st
 
 /** Each version says what it was: its date, first non-empty line, length and how far it is from `now`. */
 const describe = (kept: { id: string; text: string }[], now: string) => kept.map(({ id, text }) => {
-  const lines = text.replace(/\n$/, '').split('\n');
+  const lines = linesOf(text);
   return { id, at: new Date(Number(id.split('-')[0])).toISOString(), firstLine: (lines.find(line => line.trim()) ?? '').trim().slice(0, 80), lines: text ? lines.length : 0, differs: lineDiff(text, now).filter(line => line.kind !== 'same').length };
 });
 
@@ -92,7 +93,7 @@ export async function baseView(context: ShareContext): Promise<BaseView> {
   const base = await readBase(context.home);
   return viewOf(context.home, base);
 }
-const viewOf = (home: string, base: StoredBase): BaseView => ({ path: basePath(home), text: base.text, hash: sha(base.text), tools: base.list.tools, versions: describe(base.earlier, base.text) });
+const viewOf = (home: string, base: StoredBase): BaseView => ({ path: basePath(home), text: base.text, hash: hashOf(base.raw), tools: base.list.tools, versions: describe(base.earlier, base.text) });
 
 /** How a tool's file holds the base: the same, the copy Central Knot last wrote there (an older base), edited there, or not at
  *  all; and whether its whole text is the plain base text left there when the tool was taken off the list. */
@@ -134,7 +135,7 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
 }
 
 /** Saves one tool's file: only if it still holds what was opened, keeping the text it replaces first. */
-export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string): Promise<InstructionSave> {
+export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string, restoring = false): Promise<InstructionSave> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
   const snapshot = snapshots.find(entry => entry.harness === tool);
@@ -145,6 +146,16 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
   if (current === text) return { saved: false };
   try { await keepAndWrite(context.home, tool, path, text, current); }
   catch { return { stopped: 'The file changed just now, so nothing was saved. Read it again and redo the edit.' }; }
+  // An earlier version put back holds a base copy Central Knot wrote then: it counts as an older base, not an edit made there.
+  const copy = splitBase(text).copy;
+  if (restoring && copy !== undefined) {
+    const list = await readBaseList(context.home);
+    const readers = (await destinations(snapshots)).find(entry => entry.snapshot.harness === tool);
+    if (list.tools.includes(tool)) {
+      for (const reader of [tool, ...(readers?.sameFile ?? [])]) list.written[reader] = copyHash(copy);
+      await writeBaseList(context.home, list).catch(() => undefined);
+    }
+  }
   return { saved: true };
 }
 
@@ -174,7 +185,7 @@ async function storeBaseText(home: string, text: string, seen: string | undefine
 }
 
 /** A base.md write that failed: changed meanwhile (the review is shown again), or could not be written at all. */
-const storeFailed = (error: unknown, changed: BaseResult): BaseResult => (['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error)) ? changed
+const storeFailure = (error: unknown, changed: BaseResult): BaseResult => (['CK_CHANGED', 'CK_OCCUPIED'].includes(errorCode(error)) ? changed
   : { stopped: `The base instructions could not be saved: ${plainError(error)} Nothing was changed.`, written: [], left: [] });
 
 /**
@@ -190,28 +201,19 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
   if (!access.allowed) return { stopped: access.reason, written: [], left: [] };
   const baseChanged = { stopped: 'The base instructions changed outside Central Knot since the review, so nothing was saved. Review again.', changed: true, written: [], left: [] };
   const stored = await readBase(context.home, true);
-  if (sha(stored.text) !== request.expected) return baseChanged;
+  if (hashOf(stored.raw) !== request.expected) return baseChanged;
   const bound = await destinations(snapshots);
   // One physical file is chosen when any tool reading it is.
   const chosen = new Set(request.text.trim() ? bound.filter(entry => request.tools.includes(entry.snapshot.harness)).flatMap(entry => [entry.snapshot.harness, ...entry.sameFile]) : []);
-  const tools = bound.map(entry => entry.snapshot.harness).filter(tool => chosen.has(tool));
-  const files: { tool: HarnessId; readers: HarnessId[]; path: string; current: string | undefined }[] = [];
-  for (const { snapshot, path, sameFile } of bound.filter(entry => entry.snapshot.harness in request.seen)) {
-    if (files.some(file => sameFile.includes(file.tool))) continue;
-    const current = await readText(path);
-    // The review named a file and what it held: a different file now bound (an override appeared) or new content stops the save.
-    const reviewed = request.seen[snapshot.harness]!;
-    if (path !== reviewed.path || hashOf(current) !== reviewed.hash) return { stopped: `${basename(path)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
-    files.push({ tool: snapshot.harness, readers: [snapshot.harness, ...sameFile], path, current });
-  }
-  try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailed(error, baseChanged); }
-  const list: BaseList = { tools, written: { ...stored.list.written }, leftPlain: { ...stored.list.leftPlain } };
-  const result: BaseResult = { written: [], left: [], undo: { text: stored.text, list: stored.list, baseHash: sha(request.text), files: [] } };
+  const files = await reviewedFiles(bound, request.seen);
+  if ('changed' in files) return { stopped: `${basename(files.changed)} changed since the review, so nothing was saved. Review again.`, changed: true, written: [], left: [] };
+  try { await storeBaseText(context.home, request.text, stored.raw); } catch (error) { return storeFailure(error, baseChanged); }
+  const list: BaseList = { tools: bound.map(entry => entry.snapshot.harness).filter(tool => chosen.has(tool)), written: { ...stored.list.written }, leftPlain: { ...stored.list.leftPlain } };
+  const result: BaseResult = { written: [], left: [], undo: { text: stored.text, list: stored.list, baseHash: hashOf(stored.raw === undefined && !request.text ? undefined : request.text), files: [] } };
   for (const { tool, readers, path, current } of files) {
     const text = current ?? '';
     const isChosen = chosen.has(tool);
-    const action = request.adopt === tool ? 'adopt' : request.overwrite?.includes(tool) ? 'putBack' : 'save';
-    const planned = fileWithBase(text, request.text, { chosen: isChosen, held: baseState(text, tool, stored), action });
+    const planned = fileWithBase(text, request.text, { chosen: isChosen, held: baseState(text, tool, stored), action: baseAction(readers, request) });
     if (planned.edited) { result.left.push({ tool, why: 'edited' }); continue; }
     const { next } = planned;
     // Nothing to change, and a missing file is never created empty.
@@ -222,18 +224,37 @@ export async function applyBase(context: ShareContext, snapshots: Snapshot[], re
       catch { result.left.push({ tool, why: 'failed' }); continue; }
       result.written.push({ tool, path, before: current ?? null, afterHash: sha(next) });
     }
-    // What Central Knot now has in this file, for every tool reading it: the copy it wrote, or the plain text it left.
-    for (const reader of readers) {
-      if (isChosen) { list.written[reader] = copyHash(request.text); delete list.leftPlain[reader]; continue; }
-      delete list.written[reader];
-      if (!unchanged && !splitBase(text).own.trim()) list.leftPlain[reader] = sha(next);
-    }
+    recordHeld(list, readers, isChosen ? { copy: request.text } : { plain: !unchanged && !splitBase(text).own.trim() ? next : undefined });
   }
   result.undo!.files = result.written;
   // The files are written either way; a list that could not be saved is said, and Undo still puts the files back.
   try { await writeBaseList(context.home, list); }
   catch (error) { result.problem = `The list of tools that get the base could not be saved: ${plainError(error)} The files above were written.`; }
   return result;
+}
+
+/** The files a review showed, once per physical file, read now; or the first that is no longer what the review saw (another file
+ *  bound, as when an override appeared, or other content). */
+async function reviewedFiles(bound: Awaited<ReturnType<typeof destinations>>, seen: BaseApply['seen']) {
+  const files: { tool: HarnessId; readers: HarnessId[]; path: string; current: string | undefined }[] = [];
+  for (const { snapshot, path, sameFile } of bound.filter(entry => entry.snapshot.harness in seen)) {
+    if (files.some(file => sameFile.includes(file.tool))) continue;
+    const current = await readText(path);
+    const reviewed = seen[snapshot.harness]!;
+    if (path !== reviewed.path || hashOf(current) !== reviewed.hash) return { changed: path };
+    files.push({ tool: snapshot.harness, readers: [snapshot.harness, ...sameFile], path, current });
+  }
+  return files;
+}
+
+/** Records what Central Knot now has in one physical file, for every tool reading it: the base copy it wrote there, or (taken off
+ *  the list with nothing of its own) the plain base text it left, so adding the tool again moves that text back into the block. */
+function recordHeld(list: BaseList, readers: HarnessId[], held: { copy: string } | { plain: string | undefined }) {
+  for (const reader of readers) {
+    delete list.written[reader]; delete list.leftPlain[reader];
+    if ('copy' in held) list.written[reader] = copyHash(held.copy);
+    else if (held.plain !== undefined) list.leftPlain[reader] = sha(held.plain);
+  }
 }
 
 /** Undo of an apply: the base and its list as they were (only if the base is still as that apply left it), and each file it
@@ -245,11 +266,11 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
   const baseChanged = { stopped: 'The base instructions changed after that save, so nothing was undone. Earlier versions of the base and of each file are still kept.', written: [], left: [] };
   await recoverParked(dirname(basePath(context.home)));
   const seenBase = await readText(basePath(context.home));
-  if (sha(seenBase ?? '') !== undo.baseHash) return baseChanged;
-  try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailed(error, baseChanged); }
+  if (hashOf(seenBase) !== undo.baseHash) return baseChanged;
+  try { await storeBaseText(context.home, undo.text, seenBase); } catch (error) { return storeFailure(error, baseChanged); }
+  const now = await readBaseList(context.home);
+  const bound = await destinations(snapshots);
   const result: BaseResult = { written: [], left: [] };
-  try { await writeBaseList(context.home, undo.list); }
-  catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   for (const file of undo.files) {
     // The very file the save wrote, even if the tool now reads another (an override appeared since): that one is never touched.
     const snapshot = snapshots.find(entry => entry.harness === file.tool);
@@ -264,6 +285,16 @@ export async function undoBase(context: ShareContext, snapshots: Snapshot[], und
     } catch { result.left.push({ tool: file.tool, why: 'failed' }); continue; }
     result.written.push({ tool: file.tool, path, before: current, afterHash: file.before === null ? '' : sha(file.before) });
   }
+  // A file the undo left as it is keeps the records that describe it now, so its copy isn't taken for an edit made there.
+  const list: BaseList = { tools: undo.list.tools, written: { ...undo.list.written }, leftPlain: { ...undo.list.leftPlain } };
+  for (const { tool } of result.left) {
+    for (const reader of [tool, ...(bound.find(entry => entry.snapshot.harness === tool)?.sameFile ?? [])]) {
+      if (now.written[reader] === undefined) delete list.written[reader]; else list.written[reader] = now.written[reader];
+      if (now.leftPlain[reader] === undefined) delete list.leftPlain[reader]; else list.leftPlain[reader] = now.leftPlain[reader];
+    }
+  }
+  try { await writeBaseList(context.home, list); }
+  catch (error) { result.problem = `The list of tools that get the base could not be put back: ${plainError(error)}`; }
   return result;
 }
 

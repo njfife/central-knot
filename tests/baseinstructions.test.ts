@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
-import { applyBase, baseView, instructionsView, undoBase } from '../src/instructions.ts';
+import { applyBase, baseView, instructionsView, saveInstruction, undoBase } from '../src/instructions.ts';
 import { splitBase, withBase, withOwn, withoutBase } from '../src/basetext.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { BaseApply, HarnessId } from '../src/types.ts';
@@ -154,13 +154,32 @@ test('Tools reading one linked file are one destination: chosen together and wri
     await writeFile(claude, 'Mine.\n');
     await symlink(claude, codex);
     assert.deepEqual((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.sameFile, ['claude-cli']);
-    const saved = await box.set('Shared.\n', ['claude-cli', 'codex-cli']);
+    // Started from Codex's AGENTS.md (the second reader): the text moves into the block once, not repeated.
+    const saved = await box.set('Mine.\n', ['claude-cli', 'codex-cli'], { adopt: 'codex-cli' });
     assert.deepEqual([saved.written.length, saved.left], [1, []]);
+    assert.deepEqual(splitBase(await readFile(claude, 'utf8')), { own: '', copy: 'Mine.\n' });
     // Unticking one of them leaves the file with the base, since the other still reads it; a base edit writes it once.
     await box.set('Shared.\n', ['codex-cli']);
     const edited = await box.set('Shared, again.\n', ['codex-cli']);
+
     assert.deepEqual([edited.written.length, edited.left], [1, []]);
-    assert.deepEqual(splitBase(await readFile(claude, 'utf8')), { own: 'Mine.\n', copy: 'Shared, again.\n' });
+    assert.deepEqual(splitBase(await readFile(claude, 'utf8')), { own: '', copy: 'Shared, again.\n' });
+  } finally { await box.cleanup(); }
+});
+
+test('Putting back an earlier version of a tool’s file reads as an older base, not an edit made there', async () => {
+  const box = await sandbox();
+  const codex = box.file('.codex/AGENTS.md');
+  try {
+    await writeFile(codex, 'Codex only.\n');
+    await box.set('Be brief.\n', tools);
+    const older = await readFile(codex, 'utf8');
+    await box.set('Be brief.\nCite files.\n', tools);
+    const now = await readFile(codex, 'utf8');
+    await saveInstruction(box.context, await box.snapshots(), 'codex-cli', older, (await box.seen())['codex-cli']!.hash, true);
+    assert.equal((await instructionsView(box.context, await box.snapshots())).find(file => file.tool === 'codex-cli')!.base!.state, 'older');
+    assert.equal((await box.set('Be brief.\nCite files.\n', tools)).left.length, 0);
+    assert.equal(await readFile(codex, 'utf8'), now);
   } finally { await box.cleanup(); }
 });
 

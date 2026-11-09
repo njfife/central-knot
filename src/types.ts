@@ -98,7 +98,8 @@ export interface DesktopApi {
   pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
-  saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
+  /** `restoring`: an earlier version put back, whose base copy counts as one Central Knot wrote (an older base, not an edit). */
+  saveInstruction(tool: HarnessId, text: string, expected: string, home: string, restoring?: boolean): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId | 'base', id: string): Promise<string | undefined>;
   /** The base instructions and the tools that get them (INS-03). */
   instructionBase(): Promise<BaseView | null>;
@@ -378,7 +379,7 @@ export interface InstructionFile {
   /** Other tools reading this same physical file (linked dotfiles): one destination for the base. */
   sameFile: HarnessId[];
   /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
-   *  and how that copy compares ('edited': it is neither the base nor an earlier base, so someone wrote in it). */
+   *  and how that copy compares (see BaseHeld.state). */
   base?: BaseHeld;
 }
 /** How a tool's file holds the base. */

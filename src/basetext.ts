@@ -2,7 +2,7 @@
 // Everything outside the block is the tool's own text and is never rewritten here; only the block is added, replaced or taken out.
 // (Adding a block after own text that has no final line break gives it one, so the block starts on its own line; and when a tool's
 // own text is saved from its editor, own text someone put after the block moves before it.)
-import type { BaseHeld } from './types.ts';
+import type { BaseHeld, HarnessId } from './types.ts';
 
 const START = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->';
 const END = '<!-- Central Knot base instructions: end -->';
@@ -71,6 +71,14 @@ export function fileWithBase(text: string, base: string, { chosen, held, action 
   const { copy } = splitBase(text);
   if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { edited: true };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
-  const moveIn = action === 'adopt' || (copy === undefined && held?.leftPlain);
-  return { next: withBase(moveIn ? withOwn(text, '') : text, base) };
+  // Text that is (or was) the base moves into the block: what the file had outside the block becomes nothing of its own.
+  const intoBlock = action === 'adopt' || held?.leftPlain;
+  return { next: withBase(intoBlock ? withOwn(text, '') : text, base) };
+}
+
+/** What a save does to one physical file read by `readers`: its own text moves into the base ('adopt': the base started from it),
+ *  its edited copy is replaced ('putBack'), or the base is simply saved there. */
+export function baseAction(readers: HarnessId[], { adopt, overwrite }: { adopt?: HarnessId; overwrite?: HarnessId[] }): 'save' | 'adopt' | 'putBack' {
+  if (adopt && readers.includes(adopt)) return 'adopt';
+  return overwrite?.some(tool => readers.includes(tool)) ? 'putBack' : 'save';
 }

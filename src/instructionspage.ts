@@ -2,7 +2,7 @@
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
 import { baseDraftTyped, loadInstructionVersion, ownText, toolDraftTyped, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { fileName, toolNames } from './words.ts';
+import { fileName, linesOf, toolNames } from './words.ts';
 import { plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
@@ -103,18 +103,20 @@ function editor(file: InstructionFile) {
     const title = !changed ? 'Nothing changed.'
       : onlyBreak ? `Review before saving ${name}: the final line break is ${edit.text.endsWith('\n') ? 'added' : 'removed'}.`
       : !file.exists ? `Review before creating ${name}: ${counts}.`
+      : edit.takeOut ? `Take the base block out of ${name}: ${counts}.`
       : edit.restoring ? `Going back to an earlier version of ${name}: ${counts}.`
       : `Review before saving ${name}: ${counts}.`;
     const empties = changed && original.trim() && !edit.text.trim() && !file.base?.copy?.trim();
     return h('div.ins-editor', {},
       h('p.ins-review-title', {}, title),
-      edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
+      edit.takeOut ? h('p.base-explain', {}, `${names[file.tool]}’s own instructions stay; the earlier text is kept under Earlier versions.`)
+        : edit.restoring && file.base ? h('p.base-explain', {}, `This restores the whole file, including its base instructions as they were then. The base itself and the other tools’ files stay as they are.`) : null,
       empties ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `This leaves ${name} empty. ${names[file.tool]} will start sessions with no instructions from it.`)) : null,
       edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
-      legend(`${name} now`, edit.restoring ? 'the earlier version' : 'after saving'),
+      legend(`${name} now`, edit.restoring && !edit.takeOut ? 'the earlier version' : 'after saving'),
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-        button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+        button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
         button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
         edit.restoring ? null : edit.confirmDiscard
           ? discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
@@ -159,14 +161,14 @@ const open = new Set<string>();
 
 /** A text shown 14 lines at a time, with "Show all N lines" / "Show less" (remembered by `key`). */
 export function previewBlock(text: string, key: string, label: string, moreId: string) {
-  const lines = text.replace(/\n$/, '').split('\n');
+  const lines = linesOf(text);
   const all = open.has(key);
   return [h('pre.ins-preview', { tabindex: '0', 'aria-label': label }, (all ? lines : lines.slice(0, 14)).join('\n')),
     lines.length > 14 ? button({ variant: 'link', size: 'micro', label: all ? 'Show less' : `Show all ${lines.length} lines`, id: moreId, onclick: () => { if (all) open.delete(key); else open.add(key); rerender(); } }) : null];
 }
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && /^Saved /.test(state.outcome.text);
+const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === 'instructions' && state.outcome.item === fileName(file.path) && state.outcome.kind === 'tool-save';
 
 function card(file: InstructionFile) {
   const editing = state.instructionEdit?.tool === file.tool;
@@ -200,7 +202,7 @@ function card(file: InstructionFile) {
 export function instructionsPage() {
   const files = state.instructions;
   if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading instruction files…' : 'Instruction files could not be read.')));
-  const done = state.outcome && /^Saved /.test(state.outcome.text) ? null : outcomeBand();
+  const done = state.outcome?.kind === 'tool-save' ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,

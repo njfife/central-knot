@@ -1,6 +1,6 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
-import { withOwn } from './basetext.ts';
+import { withOwn, withoutBase } from './basetext.ts';
 import { plural } from './model.ts';
 import { andList, fileName, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
@@ -42,11 +42,13 @@ export const state = {
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
   /** What the last action did, shown as a band on the page it happened on until the next action or page. */
-  outcome: undefined as { page: Page; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
+  /** `kind` 'tool-save': a tool file's save, shown on its card with Undo; any other result is a band at the top of the page. */
+  outcome: undefined as { page: Page; kind?: 'tool-save'; text: string; note?: string; item?: string; items?: string[]; carry?: boolean; history?: boolean; undo?: { id: string; label: string }; act?: { label: string; id: string; run: () => void; title?: string } } | undefined,
   /** Each tool's instruction file, read when the Instructions page opens. */
   instructions: undefined as InstructionFile[] | undefined,
   /** The one file being edited: its text so far, the hash it was opened at, and whether the diff is showing. */
-  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
+  /** `restoring`: the draft is a whole file to put back (an earlier version, or `takeOut`: the file without its base block). */
+  instructionEdit: undefined as { tool: HarnessId; text: string; hash: string; stage: 'edit' | 'review'; restoring?: boolean; takeOut?: boolean; confirmDiscard?: boolean; conflict?: boolean; fullDiff?: boolean } | undefined,
   /** The base instructions and which tools get them, read with the instruction files. */
   base: undefined as BaseView | undefined,
   /** The base being edited: its text and tools so far, the hash it was opened at, and where the draft came from. */
@@ -311,7 +313,8 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // A tool that gets the base is edited for its own text; its base block stays as it is in the file.
   // Restoring an earlier version puts the whole file back as it was, base block included.
   const text = file.base && !state.instructionEdit?.restoring ? withOwn(file.text, own) : own;
-  const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
+  const edit = state.instructionEdit;
+  const result = await api().saveInstruction(file.tool, text, edit?.hash ?? file.hash, state.home!.home, !!edit?.restoring && !edit.takeOut);
   await readInstructions();
   const name = fileName(file.path);
   if (result.stopped) {
@@ -325,7 +328,7 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page: 'instructions', kind: file.exists && result.saved ? 'tool-save' : undefined, item: name, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });
@@ -380,13 +383,23 @@ function askAboutOpenDraft(): boolean {
 export function startInstructionEdit(file: InstructionFile) {
   if (askAboutOpenDraft()) return;
   // A save on another card keeps its Undo there; any other result belongs to the last task.
-  if (!(state.outcome && /^Saved /.test(state.outcome.text) && state.outcome.item !== fileName(file.path))) state.outcome = undefined;
+  if (!(state.outcome?.kind === 'tool-save' && state.outcome.item !== fileName(file.path))) state.outcome = undefined;
   state.baseEdit = undefined;
   state.instructionEdit = { tool: file.tool, text: ownText(file), hash: file.hash, stage: 'edit' };
   rerender();
   const area = document.getElementById(`ins-text-${file.tool}`) as HTMLTextAreaElement | null;
   area?.focus();
   document.getElementById(`ins-actions-${file.tool}`)?.scrollIntoView({ block: 'nearest' });
+}
+
+/** Reviews taking a base block out of a tool's file (a tool no longer on the list); saving it is an ordinary checked save. */
+export function startTakeOut(file: InstructionFile) {
+  if (askAboutOpenDraft()) return;
+  state.outcome = undefined;
+  state.baseEdit = undefined;
+  state.instructionEdit = { tool: file.tool, text: withoutBase(file.text), hash: file.hash, stage: 'review', restoring: true, takeOut: true };
+  rerender();
+  document.getElementById(`ins-save-${file.tool}`)?.focus();
 }
 
 /** Loads an earlier version into the editor; putting it back is an ordinary save, with its diff first. */
@@ -420,7 +433,7 @@ function leftText(result: BaseResult, undoing = false) {
 /** Opens the base in its editor; a clean tool editor closes, since only one thing is edited at a time. */
 export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?: BaseEdit['stage'] }) {
   if (askAboutOpenDraft()) return;
-  if (!(state.outcome && /^Saved /.test(state.outcome.text))) state.outcome = undefined;
+  if (state.outcome?.kind !== 'tool-save') state.outcome = undefined;
   state.instructionEdit = undefined;
   state.baseEdit = { stage: 'edit', ...draft, hash: state.base?.hash ?? '' };
   rerender();
