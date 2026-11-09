@@ -432,6 +432,23 @@ test('A deletion leaves the copy in a tool switched off for the agent while its 
   } finally { await box.cleanup(); }
 });
 
+test('A copy put back after its tool was switched off and on waits the full settle window when deleted again', async () => {
+  const box = await sandbox();
+  try {
+    const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rm(copilot);
+    await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'] }], { now: 1500, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { now: 1600, settleMs: 2000 });
+    await rm(copilot);
+    const pass = await applyAgents(box.context, tools, [], { now: 3500, settleMs: 2000 });
+    assert.equal(pass.writes, 0, JSON.stringify(pass.results));
+    assert.equal(pass.settling, true);
+  } finally { await box.cleanup(); }
+});
+
 test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
   const box = await sandbox();
   try {

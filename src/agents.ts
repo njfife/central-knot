@@ -491,6 +491,7 @@ async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, {
     return { copy: failedWriteKeepsRecordedCopy, wrote: false };
   }
   log.writes++;
+  firstSeenMissingAt.delete(path);
   log.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
   return { copy: { tool, file: path, hash: agentHash(source.agent), bytes: sha(text), oneWay }, wrote: true };
 }
