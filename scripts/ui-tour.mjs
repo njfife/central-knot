@@ -2,7 +2,7 @@
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -202,6 +202,13 @@ if (wanted('instructions')) {
 // ---------- Scrolled pages: sticky headers and toolbars (last: it adds a lot to the practice copy) ----------
 if (wanted('scroll')) {
   begin('scroll');
+  // Stand-in CLIs (they answer --version and refuse anything else), so the plugin boxes are live and the column header
+  // shows its "Click a box…" hint, as on a computer with the tools installed. Nothing is clicked, so nothing runs.
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [name, version] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`);
+    chmodSync(join(HOME, '.local/bin', name), 0o755);
+  }
   // A marketplace long enough to scroll (35 plugins), and a second one so the header shows "Refresh all".
   const long = join(scratch, 'long-market');
   writeMarket(long, 'long-list');
