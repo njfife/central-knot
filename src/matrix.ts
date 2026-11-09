@@ -242,7 +242,7 @@ function changeBar(bulk = true) {
       // An unresolved copy choice is not "up to date", even while its chooser is open.
       : needChoice ? h('span.apply-state.apply-waiting', {}, icon('diff', 14, 'tone-warning'), `${needChoice} ${needChoice === 1 ? 'has' : 'have'} different copies`)
         : state.home && !state.home.syncOn ? h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off')
-          : h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'All synced');
+          : bulk ? h('span.apply-state', {}, icon('check', 14, 'tone-success'), 'All synced') : null;
   if (manageAll || choiceNote) return h('div.apply', {}, choiceNote, manageAll, edits || writes ? status : null);
   return status;
 }
@@ -389,8 +389,9 @@ function details(skill: SampleSkill, closable = true) {
   return h(`div.compare.details${differs ? '.details-differs' : ''}`, { role: 'region', 'aria-label': `Details for ${skill.key}` },
     closable ? h('button.details-close', { type: 'button', id: `close-${skill.key}`, 'aria-label': `Close details for ${skill.key}`, title: 'Close', onclick: () => { view.comparing = undefined; rerender(); } }, icon('x', 14)) : null,
     h('div.details-head', {},
-      !closable && allSame ? null : h('p.details-status', {}, allSame ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}` : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
-      skill.description && !(differs && !draft) ? h('p.details-description', {}, skill.description) : null),
+      kind === 'mcp' && skill.description ? h('p.details-description.details-definition', {}, skill.description) : null,
+      (!closable && allSame) || (differs && !skill.managed && !draft) || (kind === 'mcp' && allSame) ? null : h('p.details-status', {}, allSame ? `Synced · same copy in ${andList(toolList().map(tool => names[tool]))}${paused}` : status, draft ? h('span.details-pending', {}, ' · not applied yet') : null),
+      kind !== 'mcp' && skill.description && !(differs && !draft) ? h('p.details-description', {}, skill.description) : null),
     differs ? compareChoices(skill) : null,
     waitsHere ? h('div.details-waits', {}, icon('clock', 14, 'tone-warning'),
       h('span', {}, skill.copies['claude-cli'] === undefined ? 'Claude Code doesn’t have it yet. Quit Claude Code, then write it.' : 'Claude Code has an older copy. Quit Claude Code, then write the new one.'),
@@ -411,7 +412,7 @@ function details(skill: SampleSkill, closable = true) {
     kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
       h('span.compare-foot-start', {},
         // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
-        !designMode && kind === 'skills' && closable ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
+        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
       !designMode && kind === 'skills' && committedOf(skill.key).managed
         ? view.confirmDelete === skill.key
@@ -451,11 +452,10 @@ function compareChoices(skill: SampleSkill) {
       // Comparing comes before choosing: the full files side by side, next to the question.
       !designMode && kind === 'skills' ? smallAction('Read both copies', `diff-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
     h('p.compare-note', {}, 'Nothing changes until Apply all. Replaced copies are kept in History, and the chosen copy then stays in sync everywhere.'),
-    h('div.compare-choices', {}, compared.map(choice),
-      h('button.version.version-quiet', { type: 'button', id: `separate-${skill.key}`, onclick: () => resolve(skill.key, 'separate') },
-        h('span.version-head', {}, h('strong', {}, 'Keep separate copies')),
-        h('span.version-effect', {}, 'Nothing is copied; ', h('strong.item-name', {}, skill.name ?? skill.key), ' stays out of sync.'),
-        h('span.version-cta', { 'aria-hidden': 'true' }, 'Keep separate'))));
+    h('div.compare-choices', {}, compared.map(choice)),
+    // The third way is quieter: it decides nothing about content, so it is a line, not a card.
+    h('p.compare-separate', {}, 'Or ', smallAction('keep separate copies', `separate-${skill.key}`, () => resolve(skill.key, 'separate')),
+      ': each tool keeps its own, nothing is copied, and Central Knot stops flagging ', h('strong.item-name', {}, skill.name ?? skill.key), '.'));
 }
 
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
@@ -597,7 +597,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[]) {
       unavailable.length > 20 ? h('li', {}, `and ${unavailable.length - 20} more`) : null) : null,
     plan.differ.length ? h('div.add-conflict', {},
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}’s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
-        swatch('differs', true), plan.differ.length === 1 && plan.differ.every(entry => !entry.here) ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.every(entry => !entry.here) ? `${plan.differ.length === 1 ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ` : ''}other tools have different copies; gets ${names[from]}’s if included` : `differs: gets ${names[from]}’s copy if included`)),
+        swatch('differs', true), plan.differ.length === 1 && plan.differ.every(entry => !entry.here) ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: copies differ; gets ${names[from]}’s copy if included` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
       toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),

@@ -484,6 +484,6 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Codeâ
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, text: `Written to Claude Code: ${names.join(', ')}. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}. To take ${names.length === 1 ? names[0] : 'them'} back out of Claude Code, turn off the Claude Code box on ${names.length === 1 ? names[0] : 'each'}, Apply all, then remove ${names.length === 1 ? 'it' : 'them'} in Claude Code.` };
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.` };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });

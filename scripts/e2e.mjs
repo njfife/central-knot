@@ -376,7 +376,7 @@ async function practiceFlow() {
   await a.click('#open-review');
   // Slash finds in the Files view too.
   await a.click('#open-review');
-  await a.click('#files-review');
+  await a.click('#files-review, #diff-review');
   await a.run(`document.activeElement?.blur()`);
   await a.press('/', 'Slash');
   same('slash focuses find in the Files view', await a.run(`document.activeElement?.id`), 'skills-find');
@@ -440,7 +440,7 @@ async function practiceFlow() {
   check('the marketplace and its plugin show', await a.exists('[data-plugin="ck-marker"]') && (await a.text('.market-head')).includes('Added in Central Knot'), await a.text('#plugins-scroll'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="ck-marker"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
   await a.click('#popen-0-ck-marker');
-  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('Skills work, named ck-marker:ck-marker-skill'), await a.text('.plugin-details'));
+  check('details say what each tool gets', (await a.text('.plugin-details')).includes('1 skill') && (await a.text('.plugin-details')).includes('skills are called ck-marker:ck-marker-skill'), await a.text('.plugin-details'));
   await a.click('#pinstall-0-ck-marker');
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-report')), await a.text('.bands'));
   await a.shot('practice-plugins');

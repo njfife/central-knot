@@ -65,14 +65,14 @@ function details(view: PluginsView, plugin: PluginView, entry: MarketplaceView) 
   return h('div.compare.details.plugin-details', { role: 'region', 'aria-label': `Details for ${plugin.name}` },
     // The row already shows a short description; the details repeat it only when the row has to cut it.
     h('div.details-head', {}, plugin.description && plugin.description.length > 70 ? h('p.details-description', {}, plugin.description) : null,
-      h('p.details-status', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : `Contains ${summary}${skillList ? `: ${skillList}` : ''}`)),
+      h('p.details-status', {}, !parts ? 'Contents aren’t known until installation: this plugin’s files are outside the marketplace.' : summary === 'Nothing Central Knot recognises' ? 'No recognized components.' : h('span', {}, `Contains ${summary}`, ...(skillList ? [': ', ...skillNames.slice(0, 2).flatMap((skill, index) => [index ? ', ' : '', h('code.plugin-name', {}, skill)]), skillNames.length > 2 ? ` +${skillNames.length - 2} more` : ''] : [])))),
     parts ? withTools(view, h('div.plugin-outcome-grid', {}, view.tools.map(tool => h('div.plugin-outcome-card', {},
       // Status on the heading; what installing would do under a label of its own.
       h('div.details-tool-head', {}, brandMark(tool, 14), h('strong', {}, names[tool]),
-        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : 'Not installed')),
+        h('span.plugin-card-state', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed' : view.clis[tool] ? 'Not installed' : 'Not installed · unavailable')),
       // One line per outcome, led by when it applies: "When installed: skills keep their own names."
       h('ul.plugin-outcomes', {}, (plugin.outcomes[tool] ?? []).map(outcome => h('li', {}, icon(glyph[outcome.result], 12, tone[outcome.result]),
-        h('span', {}, h('span.plugin-when', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed: ' : 'When installed: '), ...namedText(`${outcome.component} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
+        h('span', {}, h('span.plugin-when', {}, entry.states[plugin.name]?.[tool]?.state === 'installed' ? 'Installed: ' : 'When installed: '), ...namedText(`${outcome.component.replace(/^[A-Z](?![A-Z])/, first => first.toLowerCase())} ${outcome.text}`, plugin.name, firstSkill))))))))) : null);
 }
 
 // Escape takes back an armed uninstall, wherever focus is.
@@ -134,13 +134,14 @@ function market(view: PluginsView, entry: MarketplaceView, index: number) {
       // One hint, chosen by what can be done here: how installing works only where some box can be clicked.
       const someCan = view.tools.some(tool => view.clis[tool]) && view.canWrite;
       const anyInstalled = entry.plugins.some(plugin => view.tools.some(tool => entry.states[plugin.name]?.[tool]?.state === 'installed'));
-      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, `Click a box to install the plugin in that tool. It runs at once, through the tool’s own command; there is no Apply all here.${anyInstalled ? ' Click a check to uninstall.' : ''}`)) : null;
+      const installable = someCan && entry.plugins.some(plugin => view.tools.some(tool => view.clis[tool] && !blocked(view, entry, tool) && entry.states[plugin.name]?.[tool]?.state !== 'installed'));
+      const how = someCan ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span.hint-body', {}, installable ? `Click a box to install the plugin in that tool. It runs at once, through the tool’s own command; there is no Apply all here.${anyInstalled ? ' Click a check to uninstall.' : ''}` : 'Click a check to uninstall. It runs at once, through the tool’s own command.')) : null;
       const refused = entry.plugins.filter(plugin => plugin.copilotRefuses);
       const refusal = refused.length && view.tools.includes('copilot-cli') && view.clis['copilot-cli'] ? h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'), h('span.hint-body', {}, `Copilot CLI can’t take this marketplace: ${refused[0].copilotRefuses}`)) : null;
       if (!cannot.length) return refusal ? h('div.market-hints', {}, how, refusal) : how;
       const orList = (items: string[]) => (items.length > 2 ? `${items.slice(0, -1).join(', ')} or ${items.at(-1)}` : items.join(' or '));
       return h('div.market-hints', {}, how, refusal, h('p.market-hint.market-hint-warn', {}, icon('circle-alert', 13, 'tone-warning'),
-        h('span.hint-body', {}, `Can’t install: the command-line tool${cannot.length === 1 ? '' : 's'} for ${orList(cannot.map(tool => names[tool])).replace(/ or /, ' and ')} ${cannot.length === 1 ? 'wasn’t' : 'weren’t'} found, so ${cannot.length === 1 ? 'its boxes are' : 'their boxes are'} unavailable. `,
+        h('span.hint-body', {}, `Can’t install: no command-line tool was found for ${orList(cannot.map(tool => names[tool]))}. `,
           button({ variant: 'link', size: 'micro', label: 'See Tools →', id: `market-tools-${index}`, onclick: () => showPage('tools') }))));
     })(),
     entry.plugins.length
@@ -190,7 +191,7 @@ function reports() {
 export function pluginsPage() {
   const view = state.plugins;
   if (!view) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
-  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: owner/repo, Git URL or folder (e.g. ~/my-marketplace)', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
+  const input = h('input.find-input', { id: 'marketplace-source', type: 'text', placeholder: 'Add a marketplace: owner/repo, Git URL or folder (for example, owner/plugins)', 'aria-label': 'Marketplace to add', spellcheck: 'false', value: state.marketDraft,
     oninput: (event: Event) => { state.marketDraft = (event.target as HTMLInputElement).value; const addButton = document.getElementById('add-marketplace') as HTMLButtonElement | null; if (addButton) addButton.disabled = !!state.busy || !state.marketDraft.trim(); },
     onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') add(); } }) as HTMLInputElement;
   const add = () => { const text = input.value.trim(); if (text) void addMarketplace(text); };
@@ -210,6 +211,6 @@ export function pluginsPage() {
     h('div.scroll.matrix', { id: 'plugins-scroll' },
       view.marketplaces.length
         ? view.marketplaces.map((entry, index) => market(view, entry, index))
-        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Add one above (for example, owner/plugins) or choose a folder; adding installs nothing. Ones you already added in Claude Code, Copilot CLI or Codex show up here by themselves.',
+        : emptyState('puzzle', 'No marketplaces yet', 'A marketplace is a catalog of plugins in a Git repository or folder. Adding one installs nothing. Marketplaces you added in Claude Code, Copilot CLI or Codex appear here automatically.',
           button({ variant: 'outline', icon: 'folder-plus', label: 'Choose folder…', id: 'empty-pick-folder', onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) }))));
 }

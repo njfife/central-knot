@@ -1015,3 +1015,17 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .cell-oneway-mark, .cell-pending-edit .cell-oneway-mark { color: var(--ink-soft); }
 .tip-mark { color: var(--ink-soft); }
 .ov-section-after { color: var(--ink-soft); }
+
+/* Round 9: skills chooser and Files view */
+.compare-separate { margin: 2px 0 0; font-size: 12.5px; color: var(--ink-soft); }
+.compare-separate .text-action { padding: 0 2px; margin: 0 -2px; font-size: 12.5px; }
+.compare-choices { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.detail-scroll > .details { padding-top: 12px; }
+.detail-scroll > .details .details-head:empty { display: none; }
+.detail-scroll .details-where-row { align-items: center; }
+.details-differs .compare-foot:has(.compare-foot-start:empty) { display: none; }
+
+/* Round 9: plugins */
+.plugins-page .plugin-details { margin-left: 16px; }
+.plugins-page .btn:disabled { opacity: 0.5; }
+.plugins-page #add-marketplace:disabled { border-color: var(--control-line); color: var(--ink-soft); }

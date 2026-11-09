@@ -162,7 +162,7 @@ export function skillsPage() {
       // Each tool's box above already names its folder; a card here only adds what it does not show.
       copies.some(extraFacts) && section('Files', h('div.stack', {}, copies.filter(extraFacts).map((copy, index) => fileCard(key, copy, index)))),
       notes.length > 0 && section('Notes', notes.map(note => h('p', {}, note))),
-      section('Contents', contents(key, copies)),
+      section('SKILL.md', contents(key, copies)),
     ];
   }, selectItem);
 }

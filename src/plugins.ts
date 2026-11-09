@@ -195,19 +195,19 @@ export function outcomes(tool: HarnessId, components: Components): Outcome[] {
   const list: Outcome[] = [];
   const add = (present: boolean | number, component: string, result: Outcome['result'], text: string) => { if (present) list.push({ component, result, text }); };
   if (tool === 'claude-cli') {
-    add(components.skills, 'Skills', 'works', 'work under their own names');
+    add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'works', 'work as they are');
     add(components.agents, 'Agents', 'works', 'work as they are');
     add(components.hooks, 'Hooks', 'works', 'run; a hook that fails does not stop the install');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else if (tool === 'copilot-cli') {
-    add(components.skills, 'Skills', 'works', 'work under their own names');
+    add(components.skills, 'Skills', 'works', 'keep their names');
     add(components.commands, 'Commands', 'limited', 'become skills');
-    add(components.agents, 'Agents', 'works', 'work, named plugin:agent');
+    add(components.agents, 'Agents', 'works', 'are called plugin:agent');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run; others are not tested yet');
     add(components.mcp, 'MCP servers', 'works', 'start as they are');
   } else {
-    add(components.skills, 'Skills', 'works', 'work, named plugin:skill');
+    add(components.skills, 'Skills', 'works', 'are called plugin:skill');
     add(components.commands, 'Commands', 'limited', 'are turned into skills when installed');
     add(components.agents, 'Agents', 'ignored', 'are ignored: copied, never offered');
     add(components.hooks, 'Hooks', 'limited', 'start-of-session hooks run after you approve them in Codex; others are not tested yet');
