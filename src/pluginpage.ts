@@ -1,13 +1,14 @@
 // One plugin's page: what it is and which version each tool has, where to install it, what it holds (each skill, command
 // and agent's file as written), what each tool does with it, and its README.
 import { rerender, state as app } from './app.ts';
-import { button, fileText, h, icon } from './dom.ts';
+import { button, fileBlocks, h, icon } from './dom.ts';
 import { brandMark } from './brand.ts';
+import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { allQueued, pluginKey, queued, toggleMany, type PluginOp } from './pluginplan.ts';
-import { installed, installedVersion, limitNote, missingTools, offeredVersion, removableTools, unavailable, versionDiffers } from './pluginstatus.ts';
-import { clearNotice, market, openLink } from './pluginstate.ts';
+import { installed, installedVersion, limitNote, marketplaceHas, missingTools, offeredVersion, removableTools, unavailable } from './pluginstatus.ts';
+import { clearNotice, market, openLink, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -20,11 +21,7 @@ const glyph: Record<Outcome['result'], Parameters<typeof icon>[0]> = { works: 'c
  */
 function outcomesBlock(view: PluginsView, plugin: PluginView, components: Components) {
   const byTool = Object.fromEntries(view.tools.map(tool => [tool, outcomes(tool, components)])) as Record<HarnessId, Outcome[]>;
-  const groups = new Map<string, HarnessId[]>();
-  for (const tool of view.tools) {
-    const key = JSON.stringify(byTool[tool]);
-    groups.set(key, [...(groups.get(key) ?? []), tool]);
-  }
+  const groups = groupBy(view.tools, tool => JSON.stringify(byTool[tool]));
   // A tool that prefixes names shows the real name a person types, e.g. document-tools:pdf-reader.
   const example = (kind: Outcome['names']) => `${plugin.name}:${kind === 'skill' ? components.skillNames?.[0] ?? 'skill' : 'agent'}`;
   const line = (outcome: Outcome) => h('span.plugin-outcome-item', {}, outcome.result === 'works' ? null : icon(glyph[outcome.result], 12, tone[outcome.result]),
@@ -38,7 +35,8 @@ function outcomesBlock(view: PluginsView, plugin: PluginView, components: Compon
 /** "Installed · 1.2.0". When the tool has another version than the marketplace offers, a second line says which. */
 function installedLine(version: string | undefined, offered: string | undefined) {
   const line = version ? `Installed · ${version}` : 'Installed';
-  return versionDiffers(version, offered) ? [line, h('span.plugin-version-differs', {}, icon('circle-alert', 12), `Marketplace has ${offered}`)] : line;
+  const other = marketplaceHas(version, offered);
+  return other ? [line, h('span.plugin-version-differs', {}, icon('circle-alert', 12), other)] : line;
 }
 
 /**
@@ -85,7 +83,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
 const partList = (owner: string, parts: { name: string; text: string; mono?: boolean }[]) => h('ul.plugin-parts', {}, parts.map(part => {
   const key = `${owner}\u0000${part.name}`;
   const open = market.opened.has(key);
-  const more = h('button.part-more', { type: 'button', onclick: () => { if (open) market.opened.delete(key); else market.opened.add(key); rerender(); } }, open ? 'Show less' : 'Show more');
+  const more = h('button.part-more', { type: 'button', onclick: () => toggleOpened(key) }, open ? 'Show less' : 'Show more');
   return h(`li${open ? '.clamped' : ''}`, {},
     h('code.plugin-name', {}, part.name),
     part.text ? h('span.plugin-part-body', {}, h(`span.plugin-part-what${part.mono ? '.mono' : ''}${open ? '.expanded' : ''}`, {}, part.text), more) : null);
@@ -102,10 +100,14 @@ function markClamped(): void {
 interface FileCopy { who: string; version?: string; text: string; marketplace: boolean }
 /**
  * A skill, command or agent as listed: where it sits in the plugin (`key`, the same in every copy, so two parts that share
- * a name stay apart), its name, what it says it does, and its file in each copy that has one.
+ * a name stay apart), its name, what it says it does, and its file in each copy that has it.
  */
 interface FilePart { key: string; name: string; description: string; copies: FileCopy[] }
 type FileKind = 'skills' | 'commands' | 'agents';
+/** Each kind of part with a file: its heading in "What it holds", and what its file is called above its text. */
+const fileKinds: Record<FileKind, { title: string; file: string }> = {
+  skills: { title: 'Skills', file: 'SKILL.md' }, commands: { title: 'Commands', file: 'Command file' }, agents: { title: 'Agents', file: 'Agent file' },
+};
 
 /** One kind of part across the marketplace's copy and each tool's installed copy, matched by place in the plugin, each copy with its version. */
 function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | undefined): FilePart[] {
@@ -114,9 +116,8 @@ function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | und
   const byKey = new Map<string, FilePart>();
   for (const { parts, ...holder } of sources) {
     for (const part of parts) {
-      const key = part.path ?? part.name;
-      if (!byKey.has(key)) byKey.set(key, { key, name: part.name, description: part.description, copies: [] });
-      if (part.text !== undefined) byKey.get(key)!.copies.push({ ...holder, text: part.text });
+      if (!byKey.has(part.path)) byKey.set(part.path, { key: part.path, name: part.name, description: part.description, copies: [] });
+      byKey.get(part.path)!.copies.push({ ...holder, text: part.text });
     }
   }
   return [...byKey.values()].sort((first, second) => first.name.localeCompare(second.name) || first.key.localeCompare(second.key));
@@ -125,21 +126,24 @@ function filePartsOf(kind: FileKind, detail: PluginDetail, offered: string | und
 /** Who holds one text, each with its version: "Marketplace (1.2.0), Codex (1.2.0) and Claude Code (1.1.0)". */
 const holdersLine = (holders: FileCopy[]) => andList(holders.map(holder => (holder.version ? `${holder.who} (${holder.version})` : holder.who)));
 
-/** The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's isn't known). */
+/**
+ * The tools whose copy of a part's file differs from the marketplace's, with their versions (none when the marketplace's
+ * isn't known). Line endings alone are no difference (see sameText).
+ */
 function differsIn(part: FilePart): FileCopy[] {
   const offered = part.copies.find(copy => copy.marketplace);
-  return offered ? part.copies.filter(copy => !copy.marketplace && copy.text !== offered.text) : [];
+  return offered ? part.copies.filter(copy => !copy.marketplace && sameText(copy.text) !== sameText(offered.text)) : [];
 }
 
-/** What a part's file is called above its text and in its row's tooltip. */
-const fileLabels: Record<FileKind, string> = { skills: 'SKILL.md', commands: 'Command file', agents: 'Agent file' };
+/** Two copies of a file have the same text when they differ only in line endings (a Windows Git checkout writes CRLF). */
+const sameText = (text: string) => text.replace(/\r\n/g, '\n');
 
 /**
  * The line above one text of a part's file: the file, then who holds that text ("SKILL.md · Claude Code (1.1.0)"). When
  * every copy has the same text (`distinct` is 1) and there is more than one copy, it says so ("SKILL.md · the same in …").
  */
 const fileCaption = (kind: FileKind, holders: FileCopy[], distinct: number) =>
-  `${fileLabels[kind]} · ${distinct === 1 && holders.length > 1 ? 'the same in ' : ''}${holdersLine(holders)}`;
+  `${fileKinds[kind].file} · ${distinct === 1 && holders.length > 1 ? 'the same in ' : ''}${holdersLine(holders)}`;
 
 /** Under a closed row's description: which tools' copies differ from the marketplace's, or nothing. */
 function differsNote(differs: FileCopy[]) {
@@ -147,31 +151,41 @@ function differsNote(differs: FileCopy[]) {
   return h('span.plugin-version-differs', {}, icon('circle-alert', 12), `${holdersLine(differs)} ${differs.length > 1 ? 'differ' : 'differs'} from the marketplace’s copy`);
 }
 
-/** An element id from a part's place in the plugin: "skills/pdf-reader" gives "skills-pdf-reader". */
-const idOf = (key: string) => key.replace(/[^\w-]+/g, '-');
+/**
+ * Element ids for parts, readable and unique on one page: "skills/pdf-reader" gives "skills-pdf-reader"; a second part
+ * that would read the same (commands/git/commit.md and commands/git-commit.md) gets "-2" after it.
+ */
+function partIds(prefix: string) {
+  const used = new Set<string>();
+  return (key: string) => {
+    const base = `${prefix}-${key.replace(/[^\w-]+/g, '-')}`;
+    let id = base;
+    for (let n = 2; used.has(id); n++) id = `${base}-${n}`;
+    used.add(id);
+    return id;
+  };
+}
 
 /**
  * One group of skills, commands or agents. A row opens its file as written, in the view the Skills page gives a
  * standalone SKILL.md, each text named by who holds it, and a text that differs from the marketplace's in the warning
  * tone. A closed row says which tools' copies differ. A description stays at two lines, since the file holds it whole.
- * `owner` (the plugin's key) keeps what is opened its own; `id` prefixes each part's element ids.
+ * `owner` (the plugin's key) keeps what is opened its own; `idFor` gives each part its element id.
  */
-function fileGroup(owner: string, id: string, title: string, kind: FileKind, parts: FilePart[]) {
+function fileGroup(owner: string, idFor: (key: string) => string, kind: FileKind, parts: FilePart[]) {
   if (!parts.length) return null;
-  return h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), h('ul.plugin-parts', {}, parts.map(part => {
+  return h('div.plugin-group', {}, h('h4', {}, `${fileKinds[kind].title} (${parts.length})`), h('ul.plugin-parts', {}, parts.map(part => {
     const opened = `${owner}\u0000${part.key}`;
     const open = market.opened.has(opened);
-    const partId = `${id}-${idOf(part.key)}`;
+    const id = idFor(part.key);
     const differs = differsIn(part);
-    const body = h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(differs));
-    if (!part.copies.length) return h('li', {}, h('code.plugin-name', {}, part.name), body);
-    const label = `${part.name}: ${fileLabels[kind]}`;
+    const label = `${part.name}: ${fileKinds[kind].file}`;
     const isOdd = (holders: FileCopy[]) => differs.length > 0 && !holders.some(holder => holder.marketplace);
     return h(`li${open ? '.open' : ''}`, {},
-      h('button.plugin-file-toggle', { type: 'button', id: partId, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${label}`,
-        onclick: () => { if (open) market.opened.delete(opened); else market.opened.add(opened); rerender(); } },
-        h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)), body),
-      open ? h('div.plugin-file', {}, fileText(`${partId}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd })) : null);
+      h('button.plugin-file-toggle', { type: 'button', id, 'aria-expanded': String(open), title: `${open ? 'Hide' : 'Show'} ${label}`, onclick: () => toggleOpened(opened) },
+        h('span.plugin-file-name', {}, icon(open ? 'chevron-down' : 'chevron-right', 13), h('code.plugin-name', {}, part.name)),
+        h('span.plugin-part-body', {}, part.description ? h('span.plugin-part-what', { title: part.description }, part.description) : null, differsNote(differs))),
+      open ? h('div.plugin-file', {}, fileBlocks(`${id}-text`, label, part.copies, (holders, distinct) => fileCaption(kind, holders, distinct), { named: true, warn: isOdd, same: sameText })) : null);
   })));
 }
 
@@ -183,12 +197,13 @@ function contentsBlock(owner: string, id: string, plugin: PluginView, detail: Pl
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
   if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
-  const skills = filePartsOf('skills', detail, offered), commands = filePartsOf('commands', detail, offered), agents = filePartsOf('agents', detail, offered);
-  const empty = !skills.length && !commands.length && !agents.length && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
+  const files = (['skills', 'commands', 'agents'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
+  const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
+  const idFor = partIds(id);
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem) : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
-    fileGroup(owner, id, 'Skills', 'skills', skills), fileGroup(owner, id, 'Commands', 'commands', commands), fileGroup(owner, id, 'Agents', 'agents', agents),
+    ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts)),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
     detail.mcpServers.length ? h('div.plugin-group', {}, h('h4', {}, `MCP servers (${detail.mcpServers.length})`), partList(`${owner}\u0000mcp`, detail.mcpServers.map(server => ({ name: server.name, text: server.runs, mono: true })))) : null,
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,

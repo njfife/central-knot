@@ -133,13 +133,21 @@ test('A plugin’s page and the marketplace’s About read their files; Remove t
     assert.match(await box.markets.readme(root) ?? '', /Our tools/);
     const detail = await box.markets.detail(root, 'pdf');
     assert.deepEqual([detail?.skills.map(skill => skill.name), detail?.readme?.trim()], [['pdf'], 'Reads PDFs.']);
-    // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own parts.
+    // Claude Code has an older release whose plugin.json kept its skill elsewhere: its copy is read as it lists its own
+    // parts, not as the marketplace's current entry does (which now names another folder).
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'pdf', source: './plugins/pdf', skills: ['./skills/pdf'] }] }));
     const copy = join(box.home, '.claude/plugins/cache/team/pdf/0.9.0');
     await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: ['./old'] }));
     await put(join(copy, 'old/SKILL.md'), '---\nname: pdf\ndescription: older\n---\n');
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'pdf@team': [{ scope: 'user', installPath: copy, version: '0.9.0' }] } }));
-    const installed = (await box.markets.detail(root, 'pdf'))?.installed?.['claude-cli'];
-    assert.deepEqual([installed?.version, installed?.skills.map(skill => skill.description)], ['0.9.0', ['older']]);
+    // Codex has it too, from a .codex-plugin/plugin.json that lists a folder of its own.
+    const codexCopy = join(box.home, '.codex/plugins/cache/team/pdf/1.0.0');
+    await put(join(codexCopy, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'pdf', skills: './codex-skills' }));
+    await put(join(codexCopy, 'codex-skills/pdf/SKILL.md'), '---\nname: pdf\ndescription: for codex\n---\n');
+    await put(join(box.home, '.codex/config.toml'), '[plugins."pdf@team"]\nenabled = true\n');
+    const installed = (await box.markets.detail(root, 'pdf'))?.installed;
+    assert.deepEqual([installed?.['claude-cli']?.version, installed?.['claude-cli']?.skills.map(skill => skill.description), installed?.['codex-cli']?.skills.map(skill => skill.description)],
+      ['0.9.0', ['older'], ['for codex']]);
     assert.equal(await box.markets.detail(root, 'missing'), null);
     const after = await box.markets.forget(root);
     assert.equal(after.marketplaces.length, 0);

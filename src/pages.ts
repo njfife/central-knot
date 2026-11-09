@@ -1,5 +1,5 @@
 import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
-import { button, emptyState, fileText, h, icon, pathText, section } from './dom.ts';
+import { button, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
@@ -140,7 +140,7 @@ function fileCard(key: string, { tool, skill }: Found, index: number) {
 
 /** One block per distinct content, named by the copies that hold it. */
 const contents = (key: string, copies: Found[]) =>
-  fileText(`content-${key}`, 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
+  fileBlocks(`content-${key}`, 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
 
 export function skillsPage() {
   const home = state.home;

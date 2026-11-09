@@ -6,7 +6,7 @@ import { realpathSync } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
-import { MANIFEST, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
+import { MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, sourceOf } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
@@ -327,23 +327,53 @@ export async function heldBy(context: PluginContext, tool: HarnessId, marketplac
 }
 
 /**
- * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says (Claude
- * Code's, or Codex's .codex-plugin one). Claude Code records "unknown" for a plugin that gives none.
+ * The version of a tool's installed copy: what the tool recorded, else what the copy's own plugin.json says. Claude Code
+ * records "unknown" for a plugin that gives none. Codex's "local" copy has no version in its folder name, so its
+ * .codex-plugin/plugin.json is read first, as Codex reads it (`codex`).
  */
-async function copyVersion(recorded: unknown, path: string): Promise<string | undefined> {
+async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
   const said = text(recorded);
   if (said && said !== 'unknown') return said;
-  return text((await pluginManifest(path))?.version) || text((await readJson(join(path, '.codex-plugin/plugin.json')))?.version) || undefined;
+  const manifests = codex ? [codexManifest(path), pluginManifest(path)] : [pluginManifest(path)];
+  for (const manifest of manifests) { const version = text((await manifest)?.version); if (version) return version; }
+  return undefined;
+}
+
+/** A semantic version's parts ("1.2.0-rc.1" gives [1, 2, 0] and ["rc", "1"]), or undefined when it isn't one. */
+function semver(version: string): { core: number[]; pre: string[] } | undefined {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(version);
+  return match ? { core: [Number(match[1]), Number(match[2]), Number(match[3])], pre: match[4]?.split('.') ?? [] } : undefined;
+}
+
+/**
+ * Orders two version folder names as Codex does: by semantic version when both are one (a release above its own
+ * pre-releases, pre-release parts compared numerically when numeric), else as plain text. Positive when `first` is higher.
+ */
+function compareVersions(first: string, second: string): number {
+  const [a, b] = [semver(first), semver(second)];
+  if (!a || !b) return first < second ? -1 : first > second ? 1 : 0;
+  for (let at = 0; at < 3; at++) if (a.core[at] !== b.core[at]) return a.core[at]! - b.core[at]!;
+  if (!a.pre.length || !b.pre.length) return b.pre.length - a.pre.length;
+  for (let at = 0; at < Math.max(a.pre.length, b.pre.length); at++) {
+    const [x, y] = [a.pre[at], b.pre[at]];
+    if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+    if (x === y) continue;
+    const [nx, ny] = [/^\d+$/.test(x) ? Number(x) : NaN, /^\d+$/.test(y) ? Number(y) : NaN];
+    if (!Number.isNaN(nx) && !Number.isNaN(ny)) return nx - ny;
+    if (!Number.isNaN(nx) || !Number.isNaN(ny)) return Number.isNaN(nx) ? 1 : -1;
+    return x < y ? -1 : 1;
+  }
+  return 0;
 }
 
 /**
  * The copy Codex loads from its cache folder for one plugin, as Codex chooses it: "local" (a local marketplace's copy)
- * when there is one, else the highest version (numbers compared as numbers). Only folders with files count.
+ * when there is one, else the highest version (see compareVersions). Only folders with files count.
  */
 async function codexCopy(cache: string): Promise<string | undefined> {
   const folders: string[] = [];
   for (const name of await readdir(cache).catch(() => [] as string[])) if (await hasFiles(join(cache, name))) folders.push(name);
-  return folders.includes('local') ? 'local' : folders.sort((first, second) => second.localeCompare(first, 'en', { numeric: true }))[0];
+  return folders.includes('local') ? 'local' : folders.sort((first, second) => compareVersions(second, first))[0];
 }
 
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
@@ -382,7 +412,7 @@ export async function installState(context: PluginContext, tool: HarnessId, mark
   const cache = join(root, 'plugins/cache', marketplace, plugin);
   const copy = await codexCopy(cache);
   if (!copy) return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
-  return { state: 'installed', path: join(cache, copy), version: await copyVersion(copy === 'local' ? undefined : copy, join(cache, copy)) };
+  return { state: 'installed', path: join(cache, copy), version: await copyVersion(copy === 'local' ? undefined : copy, join(cache, copy), true) };
 }
 
 // ---------- Install and uninstall ----------

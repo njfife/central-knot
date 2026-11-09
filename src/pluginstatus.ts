@@ -1,8 +1,8 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
 import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
-import { plural } from './model.ts';
-import { toolNames as names } from './words.ts';
+import { groupBy, plural } from './model.ts';
+import { andList, toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -101,6 +101,16 @@ export function installedVersion(entry: MarketplaceView, plugin: string, tool: H
 /** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
 export const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && !sameVersion(installed, offered);
 
+/** "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
+export const marketplaceHas = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);
+
 /** Tools whose installed copy is another version than `offered`, with that version. */
 export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined) =>
   view.tools.flatMap(tool => { const version = installedVersion(entry, plugin, tool); return versionDiffers(version, offered) ? [{ tool, version: version! }] : []; });
+
+/**
+ * The list row's line for tools on another version (see otherVersions), grouped by version: "Claude Code and Codex
+ * have 1.9.0, Copilot CLI has 1.8.0". A version never parts from the word before it when the line wraps.
+ */
+export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]) =>
+  [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', ');

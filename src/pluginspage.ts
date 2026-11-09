@@ -4,11 +4,11 @@
 import { rerender, showPage, state as app } from './app.ts';
 import { button, closeButton, emptyState, h, icon, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
-import { clockTime, groupBy, plural } from './model.ts';
+import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
 import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, stateOf, summaryOf, unavailable } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, refreshMarketplace, shownPlugins, undoOps } from './pluginstate.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
@@ -72,8 +72,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
       holds ? h('span.plugin-row-holds', {}, holds) : null,
       // On its own line under what it holds.
       others.length ? h('span.plugin-row-holds.plugin-version-differs', {}, icon('circle-alert', 12),
-        // Wraps between words like any text; a version never parts from the word before it.
-        h('span', {}, [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', '))) : null),
+        h('span', {}, otherVersionsLine(others))) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, offered)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }

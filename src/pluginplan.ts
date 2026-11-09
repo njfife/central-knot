@@ -36,8 +36,6 @@ export const failedFor = (tools: HarnessId[], message: string): ActionReport[] =
 /** One plugin in one marketplace: two marketplaces may both offer a plugin with the same name. */
 export const pluginKey = (source: string, plugin: string) => `${source}\u0000${plugin}`;
 const opKey = (op: Pick<PluginOp, 'source' | 'plugin' | 'tool'>) => `${pluginKey(op.source, op.plugin)}\u0000${op.tool}`;
-/** Whether a plugin key (or a key made from one) belongs to this marketplace. */
-export const forSource = (key: string, source: string) => key.startsWith(`${source}\u0000`);
 
 export const queued = (draft: PluginDraft, source: string, plugin: string, tool: HarnessId) => draft.get(opKey({ source, plugin, tool }))?.action;
 

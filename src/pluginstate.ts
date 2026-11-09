@@ -2,7 +2,7 @@
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
 import { announce, busy, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
-import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { resultLines, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
@@ -42,13 +42,19 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
-  /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open. */
+  /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open (see toggleOpened). */
   opened: new Set<string>(),
   /** What is typed in the add box, kept through loading and errors. */
   draftSource: '',
   /** The add box is open: always with no marketplaces yet, otherwise after "Add marketplace" is clicked. */
   addOpen: false,
 };
+
+/** Opens or closes one remembered part ("Show more", or a part's file) and redraws. */
+export function toggleOpened(key: string): void {
+  if (market.opened.has(key)) market.opened.delete(key); else market.opened.add(key);
+  rerender();
+}
 
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
@@ -97,6 +103,9 @@ function readShown(): void {
  */
 function showView(view: PluginsView | null | undefined, { replace = false } = {}): void {
   if (view || replace) market.view = view ?? undefined;
+  // A new view carries new install states, and a plugin's contents include each tool's installed copy: read them again.
+  // (A read still on its way is dropped when it lands: its placeholder is gone.)
+  if (view || replace) market.details.clear();
   prune(market.draft, market.view);
   settleNav();
   readShown();
@@ -132,11 +141,9 @@ export function browse(patch: Partial<typeof market.nav>): void {
 export const loadPlugins = (fresh = false) => act('reading', async () => {
   const view = await api().plugins(fresh);
   market.problem = undefined;
-  // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may
-  // have changed. A plugin's contents include each tool's installed copy, so they are read again with the install states.
+  // Refresh all reads every README again; a folder marketplace is read from disk every time, so its README may have changed.
   if (fresh) market.readmes.clear();
-  else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
-  market.details.clear();
+  else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
   showView(view, { replace: true });
   announce('');
 });
@@ -163,15 +170,9 @@ export const addMarketplace = (source: string) => act('adding', async () => {
   // Once added, focus leaves the add box (now gone), so the next key press doesn't land in an input that isn't there.
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 
-/** Forgets what was read for one marketplace (its README, its plugins' contents), so it is read again when shown. */
-function dropReads(source: string): void {
-  market.readmes.delete(source);
-  for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
-}
-
 export const refreshMarketplace = (source: string) => act('refreshing', async () => {
   const view = await api().refreshMarketplace(source);
-  dropReads(source);
+  market.readmes.delete(source);
   showView(view);
   const entry = market.view?.marketplaces.find(candidate => candidate.source === source);
   app.outcome = { page: 'plugins', item: entry?.name || undefined, text: `${entry ? marketTitle(entry) : 'Marketplace'} refreshed: ${plural(entry?.plugins.length ?? 0, 'plugin')}. Nothing was installed.` };
@@ -182,7 +183,7 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   const gone = market.view?.marketplaces.find(entry => entry.source === source);
   const name = gone ? marketTitle(gone) : undefined;
   const view = await api().forgetMarketplace(source);
-  dropReads(source);
+  market.readmes.delete(source);
   if (market.nav.source === source) market.nav = startNav();
   showView(view);
   const text = `${name || 'It'} was removed from this list. Tools that added it keep it, and nothing was uninstalled.`;
@@ -207,8 +208,6 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.working = undefined;
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
-    // What each tool holds changed, and a plugin's contents include each tool's installed copy: read them again.
-    market.details.clear();
     showView(await api().plugins().catch(() => null));
   }
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), true);

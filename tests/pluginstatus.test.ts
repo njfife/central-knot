@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, limitNote, missingTools, otherVersions, unavailable } from '../src/pluginstatus.ts';
+import { blocked, limitNote, missingTools, otherVersions, otherVersionsLine, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginsView } from '../src/types.ts';
 
@@ -28,6 +28,8 @@ test('Only a known version that names another release is a difference', () => {
   // A pre-release is another release; an unknown version on either side is not a difference.
   assert.deepEqual(otherVersions(view, states('1.2.0-beta', undefined), 'p', '1.2.0'), [{ tool: 'claude-cli', version: '1.2.0-beta' }]);
   assert.deepEqual(otherVersions(view, states('1.1.0'), 'p', undefined), []);
+  // The list row names tools by version, each version kept with the word before it.
+  assert.equal(otherVersionsLine(otherVersions(view, states('1.1.0', '1.1.0'), 'p', '1.2.0')), 'Claude Code and Codex have\u00a01.1.0');
 });
 
 test('A tool’s limits are named in a few words', () => {

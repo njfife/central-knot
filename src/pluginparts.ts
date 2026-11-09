@@ -5,7 +5,7 @@ import { h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, stateOf, unavailable, versionDiffers } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, marketplaceHas, stateOf, unavailable } from './pluginstatus.ts';
 import type { HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
@@ -43,7 +43,8 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
-    const version = status.version ? ` ${status.version}${versionDiffers(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
+    const other = marketplaceHas(status.version, offered);
+    const version = status.version ? ` ${status.version}${other ? ` (${other.toLowerCase()})` : ''}` : '';
     const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
@@ -64,7 +65,7 @@ const rendered = new Map<string, HTMLElement>();
  * A README as page content. Its opening title, a first paragraph that mostly repeats a description already on the page,
  * and what only repeats the parts the page lists (`parts`, see markdown.trimRepeats) are left out.
  */
-export function readme(body: string, name: string, descriptions: string[] = [], parts: NamedPart[] = []): HTMLElement {
+export function readme(body: string, name: string, descriptions: string[] = [], parts: Pick<NamedPart, 'name' | 'description'>[] = []): HTMLElement {
   const cacheKey = JSON.stringify([name, descriptions, parts, body]);
   const cached = rendered.get(cacheKey);
   if (cached) return cached;

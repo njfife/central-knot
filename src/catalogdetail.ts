@@ -33,8 +33,9 @@ async function readInside(root: string, path: string, limit = READ_LIMIT): Promi
   try {
     const file = await open(path, 'r');
     try {
-      const buffer = Buffer.alloc(limit + 1);
-      const { bytesRead } = await file.read(buffer, 0, limit + 1, 0);
+      // Sized to the file, so a small file under a large limit doesn't cost the whole limit.
+      const buffer = Buffer.alloc(Math.min((await file.stat()).size, limit) + 1);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
       return { text: buffer.subarray(0, Math.min(bytesRead, limit)).toString('utf8'), whole: bytesRead <= limit };
     } finally { await file.close(); }
   } catch { return undefined; }
@@ -115,6 +116,8 @@ function serverRuns(server: unknown): string {
 
 /** A plugin's own .claude-plugin/plugin.json as an object, or undefined when it has none. */
 export const pluginManifest = (folder: string, root = folder) => jsonInside(root, join(folder, '.claude-plugin/plugin.json'));
+/** A plugin's .codex-plugin/plugin.json, which Codex reads before Claude Code's when a plugin has both. */
+export const codexManifest = (folder: string) => jsonInside(folder, join(folder, '.codex-plugin/plugin.json'));
 
 /**
  * One plugin section (hooks, MCP servers, LSP servers): its default file in the plugin folder, merged with what the

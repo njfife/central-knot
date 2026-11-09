@@ -14,6 +14,10 @@ export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(sk
 /** Items grouped by a key, groups and items in the order first seen (Map.groupBy, which ES2023 lacks). */
 export function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
   const groups = new Map<K, T[]>();
-  for (const item of items) groups.set(key(item), [...(groups.get(key(item)) ?? []), item]);
+  for (const item of items) {
+    const at = key(item);
+    const group = groups.get(at);
+    if (group) group.push(item); else groups.set(at, [item]);
+  }
   return groups;
 }

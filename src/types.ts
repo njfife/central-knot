@@ -305,10 +305,10 @@ export interface MarketplaceView {
 }
 
 /**
- * One named part of a plugin (a skill, command or agent) with what it says it does; when read from its files, also its
- * whole file (SKILL.md or NAME.md) as written and where it sits in the plugin (`path`, the same in every copy of it).
+ * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as
+ * written, and where it sits in the plugin (`path`, the same in every copy of the plugin).
  */
-export interface NamedPart { name: string; description: string; text?: string; path?: string }
+export interface NamedPart { name: string; description: string; text: string; path: string }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
   skills: NamedPart[];
