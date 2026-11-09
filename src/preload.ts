@@ -13,6 +13,7 @@ const api: DesktopApi = {
   instructionVersion: (tool, id) => ipcRenderer.invoke('instructions:version', tool, id),
   applyMcp: (changes, home) => ipcRenderer.invoke('mcp:apply', changes, home),
   writeClaude: (names, home) => ipcRenderer.invoke('mcp:write-claude', names, home),
+  unwriteClaude: (written, home) => ipcRenderer.invoke('mcp:unwrite-claude', written, home),
   startHome: () => ipcRenderer.invoke('discovery:start'),
   applyAgents: (changes, home) => ipcRenderer.invoke('agents:apply', changes, home),
   setSync: on => ipcRenderer.invoke('sync:set', on),

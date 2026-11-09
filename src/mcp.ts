@@ -10,7 +10,7 @@ import { harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
 // ---------- Shapes ----------
@@ -342,6 +342,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const chosenNow = new Set<string>();
   // Servers this Apply all makes Managed: the entries it adds for them are told in History as 'added', so Undo can take them back.
   const newlyManaged = new Set<string>();
+  const claudeWritten: ClaudeWrite[] = [];
   for (const change of changes) {
     const slot = byName.get(change.key);
     if (!slot) continue;
@@ -446,6 +447,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const holds = new Map<HarnessId, string>();
     const addedHere: { tool: HarnessId; hash: string }[] = [];
     await keep(context, name, source.server, source);
+    const claudeBefore = slot['claude-cli']?.hash ?? null;
     for (const tool of live) {
       const here = slot[tool];
       if (here?.hash === source.hash) { holds.set(tool, source.hash); continue; }
@@ -464,6 +466,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       holds.set(tool, source.hash);
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       else if (newlyManaged.has(name)) addedHere.push({ tool, hash: source.hash });
+      if (tool === 'claude-cli') claudeWritten.push({ name, before: claudeBefore, after: source.hash });
       results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
@@ -534,7 +537,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (left.length !== item.displaced.length) { cleared = true; if (left.length) item.displaced = left; else delete item.displaced; }
   }
   if (cleared) await saveMcpRecord(context.home, record);
-  return { results, writes, notices, settling };
+  return { results, writes, notices, settling, claudeWritten: claudeWritten.length ? claudeWritten : undefined };
 }
 
 /** The version an MCP event's Undo or Restore puts back. */
@@ -554,6 +557,39 @@ function restorable(past: HistoryEvent): string | undefined {
  * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
  * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
  */
+/**
+ * Undo of Write to Claude Code, right after it: each entry goes back to what Claude Code held before (removed when it was new),
+ * and the server waits for Write again. All or nothing: an entry changed since stops it. Claude Code must be closed, as for Write.
+ */
+export async function undoClaudeWrite(context: ShareContext, written: ClaudeWrite[]): Promise<McpResult> {
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
+  const record = await readMcpRecord(context.home);
+  const entries = (await readTool(context, 'claude-cli')).entries;
+  for (const write of written) {
+    const entry = entries.find(candidate => candidate.name === write.name);
+    if (!entry || entry.hash !== write.after) return { stopped: `Claude Code’s ${write.name} changed since it was written, so nothing was undone.`, results: [], writes: 0 };
+    if (write.before && !(await kept(context, write.name, write.before))) return { stopped: `The earlier ${write.name} is no longer in Central Knot’s store, so it can’t be put back.`, results: [], writes: 0 };
+  }
+  const results: DestinationResult[] = [];
+  let writes = 0;
+  for (const write of written) {
+    const entry = entries.find(candidate => candidate.name === write.name)!;
+    const earlier = write.before ? await kept(context, write.name, write.before) : undefined;
+    const problem = await editEntry(context, 'claude-cli', write.name, entry.hash, earlier?.server);
+    if (problem) { results.push({ item: write.name, harness: 'claude-cli', outcome: 'held', message: problem }); continue; }
+    writes++;
+    const item = record.items[write.name];
+    if (item) {
+      const others = item.copies.filter(copy => copy.tool !== 'claude-cli');
+      item.copies = write.before ? [...others, { tool: 'claude-cli', hash: write.before, file: mcpFile(context, 'claude-cli') }] : others;
+    }
+    results.push({ item: write.name, harness: 'claude-cli', outcome: write.before ? 'written' : 'removed', message: write.before ? 'Claude Code has its earlier entry again.' : 'Removed from Claude Code again.' });
+  }
+  await saveMcpRecord(context.home, record);
+  return { results, writes };
+}
+
 async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
   const name = past.key.replace(/^mcp:/, '');

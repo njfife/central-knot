@@ -104,7 +104,7 @@ if (wanted('sync')) {
   await waitFor(a, `document.body.innerText.includes('Codex')&&!!document.querySelector('.sync-notice')`);
   await shot(a, 'edit-spread-notice', 'Outside the app, a line was added to standup\'s SKILL.md in Codex. A few seconds later, without clicking anything: the notice.');
   await a.click('#nav-history'); await shot(a, 'history-with-edit', 'Clicked "History".');
-  const undo = await a.run(`document.querySelector('.history-row button')?.id ?? ''`);
+  const undo = await a.run(`document.querySelector('.history-row button[id^="history-"]')?.id ?? ''`);
   if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo" on that edit.'); }
   await a.click('#nav-skills');
   await a.click('#sync-switch'); await shot(a, 'sync-off', 'Turned the Sync switch (status bar, bottom) off.');

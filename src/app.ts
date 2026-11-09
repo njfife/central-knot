@@ -1,4 +1,4 @@
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, PluginActionResult, PluginsView, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
@@ -492,7 +492,21 @@ api().onSyncChanged(async () => {
   refreshing = true;
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
   // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
-  try { const view = await api().refresh(); if (view) { state.home = view; announce(''); if (!state.outcome?.act) state.outcome = undefined; rerender(); } } finally { refreshing = false; }
+  try {
+    const view = await api().refresh();
+    if (view) {
+      state.home = view; announce('');
+      const outcome = state.outcome;
+      if (!outcome?.act) state.outcome = undefined;
+      else {
+        // A sync that touched an item this Undo covers: the Undo could stop halfway, so it moves to History, said plainly.
+        const covered = new Set([outcome.item, ...(outcome.items ?? [])].filter(Boolean).map(name => name!.toLowerCase()));
+        const touched = [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].filter(notice => covered.has(notice.item.toLowerCase()));
+        if (touched.length) state.outcome = { ...outcome, act: undefined, history: true, text: `${outcome.text} ${touched[0].item} changed since, so its Undo is in History.` };
+      }
+      rerender();
+    }
+  } finally { refreshing = false; }
 });
 
 // ---------- MCP servers ----------
@@ -551,6 +565,17 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Codeâ
   const view = await api().refresh();
   if (view) state.home = view;
   state.mcpResult = result;
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.` };
+  const written = result.claudeWritten ?? [];
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
+    act: written.length ? { label: 'Undo', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
+});
+
+const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the writeâ€¦', async () => {
+  const result = await api().unwriteClaude(written, state.home!.home);
+  const view = await api().refresh();
+  if (view) state.home = view;
+  const names = written.map(write => write.name);
+  state.outcome = result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` };
+  announce(result.stopped ?? state.outcome!.text, true);
 });

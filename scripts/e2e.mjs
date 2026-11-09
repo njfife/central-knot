@@ -421,6 +421,14 @@ async function practiceFlow() {
   await a.click('#mcp-write-claude');
   const claudeAfter = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
   same('Write now adds files to Claude Code and keeps its other settings', [claudeAfter.mcpServers.files?.command, claudeAfter.theme, claudeAfter.numStartups], ['npx', 'dark', 3]);
+  // Write has its own Undo: the entry comes out again (it was new), the rest of the file stays, and files waits for Write again.
+  check('Write offers Undo', await a.exists('#outcome-undo-write'), await a.text('.bands'));
+  await a.click('#outcome-undo-write');
+  const claudeUndone = JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8'));
+  same('Undo takes files back out of Claude Code and keeps its other settings', [claudeUndone.mcpServers?.files, claudeUndone.theme], [undefined, 'dark']);
+  check('and files waits for Write again', await a.exists('#mcp-write-claude'));
+  await a.click('#mcp-write-claude');
+  check('Write works again after Undo', JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8')).mcpServers.files?.command === 'npx');
   // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
   const copilotFile = join(practice, '.copilot/mcp-config.json');
   writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));

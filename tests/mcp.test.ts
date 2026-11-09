@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
+import { applyMcp, mcpView, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
@@ -196,5 +196,51 @@ test('Pi: a managed server reaches ~/.pi/agent/mcp.json in the mcpServers shape;
     assert.equal(pi.stream, undefined);
     const view = await mcpView(box.context, withPi);
     assert.match(view.servers.find(server => server.key === 'stream')!.cannot['pi-cli'] ?? '', /Pi has no SSE transport/);
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of Write to Claude Code removes a new entry, keeps the rest of the file, and the server waits for Write again', async () => {
+  const box = await sandbox();
+  try {
+    const original = claudeJson({});
+    await writeFile(join(box.home, '.claude.json'), original);
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://docs.example/mcp' } } }, null, 2));
+    await applyMcp(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
+    const wrote = await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
+    assert.equal(wrote.claudeWritten?.length, 1);
+    assert.equal(wrote.claudeWritten?.[0].before, null, 'it was new in Claude Code');
+    const undone = await undoClaudeWrite(box.context, wrote.claudeWritten!);
+    assert.equal(undone.stopped, undefined, undone.stopped ?? '');
+    const after = JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8'));
+    assert.equal(after.mcpServers?.docs, undefined, 'the entry is gone again');
+    assert.deepEqual(after.oauthAccount, { emailAddress: 'kept@example.com' }, 'the rest stays');
+    assert.deepEqual((await mcpView(box.context, tools)).claudePending, ['docs'], 'and it waits for Write again');
+  } finally { await box.cleanup(); }
+});
+
+test('Undo of Write to Claude Code puts back an older entry, and refuses when the entry changed since', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude.json'), claudeJson({ docs: { type: 'http', url: 'https://old.example/mcp' } }));
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'http', url: 'https://old.example/mcp' } } }, null, 2));
+    await applyMcp(box.context, tools, [{ key: 'docs', managed: true, off: [] }]);
+    const copilot = JSON.parse(await readFile(join(box.home, '.copilot/mcp-config.json'), 'utf8'));
+    copilot.mcpServers.docs.url = 'https://new.example/mcp';
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify(copilot, null, 2));
+    await applyMcp(box.context, tools, []);
+    const wrote = await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
+    assert.equal(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8')).mcpServers.docs.url, 'https://new.example/mcp');
+    const undone = await undoClaudeWrite(box.context, wrote.claudeWritten!);
+    assert.equal(undone.stopped, undefined, undone.stopped ?? '');
+    assert.equal(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8')).mcpServers.docs.url, 'https://old.example/mcp', 'the older entry is back');
+    assert.deepEqual((await mcpView(box.context, tools)).claudePending, ['docs']);
+    // Written again, then changed in Claude Code: Undo writes nothing.
+    const again = await applyMcp(box.context, tools, [], { claudeNow: ['docs'] });
+    const claude = JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8'));
+    claude.mcpServers.docs.url = 'https://edited-in-claude.example/mcp';
+    await writeFile(join(box.home, '.claude.json'), JSON.stringify(claude, null, 2));
+    const refused = await undoClaudeWrite(box.context, again.claudeWritten!);
+    assert.ok(refused.stopped);
+    assert.equal(JSON.parse(await readFile(join(box.home, '.claude.json'), 'utf8')).mcpServers.docs.url, 'https://edited-in-claude.example/mcp');
   } finally { await box.cleanup(); }
 });

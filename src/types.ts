@@ -66,6 +66,8 @@ export interface DesktopApi {
   history(): Promise<HistoryEvent[]>;
   applyMcp(changes: Change[], home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
+  /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
+  unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
   applyAgents(changes: Change[], home: string): Promise<McpResult>;
   /** The home last opened, else the practice copy. */
   startHome(): Promise<HomeView | null>;
@@ -274,7 +276,10 @@ export interface McpView {
   notices: SyncNotice[];
 }
 
-export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean }
+export interface McpResult { stopped?: string; results: DestinationResult[]; writes: number; notices?: SyncNotice[]; /** A deletion is inside its settle window: look again shortly. */ settling?: boolean;
+  /** What Write to Claude Code wrote, for its Undo: each entry's hash before (null when it was new) and after. */
+  claudeWritten?: ClaudeWrite[] }
+export interface ClaudeWrite { name: string; before: string | null; after: string }
 
 // ---------- Instructions ----------
 
