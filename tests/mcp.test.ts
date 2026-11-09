@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { applyMcp, mcpView, restoreMcp, undoClaudeWrite } from '../src/mcp.ts';
 import { readHistory } from '../src/manage.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const tools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
@@ -293,5 +293,27 @@ test('A damaged, unreadable or newer MCP record stops every write and is never r
     const resumed = await applyMcp(box.context, tools, []);
     assert.equal(resumed.stopped, undefined);
     assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /massive@2/, 'with the record back, the edit spreads');
+  } finally { await box.cleanup(); }
+});
+
+test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('a'));
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: ['claude-cli'] }]);
+    const generation = (await readRecord(box.home)).record!.generation;
+    await rm(join(box.base, 'settings.json'));
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { tool: { type: 'local', command: 'a', tools: ['*'] }, more: { type: 'local', command: 'm', tools: ['*'] } } }));
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const blocked = await applyMcp(box.context, tools, [{ key: 'more', managed: true, off: ['claude-cli'] }]);
+    assert.match(blocked.stopped ?? '', /no memory/);
+    assert.equal(blocked.writes, 0);
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const resumed = await applyMcp(box.context, tools, [{ key: 'more', managed: true, off: ['claude-cli'] }], { resume: true });
+    assert.equal(resumed.stopped, undefined);
+    assert.equal(resumed.writes, 1, JSON.stringify(resumed.results));
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /\[mcp_servers\.more\]/);
+    assert.equal((await readRecord(box.home)).record!.generation, generation);
+    assert.equal((await syncGate(box.context)).state, 'ready');
   } finally { await box.cleanup(); }
 });

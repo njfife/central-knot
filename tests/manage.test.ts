@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { storeDirectory, type ShareContext } from '../src/share.ts';
+import { storeDirectory, writeAccess, type ShareContext } from '../src/share.ts';
 import type { HarnessId, Snapshot } from '../src/types.ts';
 
 const both: HarnessId[] = ['claude-cli', 'copilot-cli'];
@@ -410,6 +410,27 @@ test('Write guard: the real home stays read-only however it is reached', { skip:
   } finally { await box.cleanup(); }
 });
 
+test('Write guard: every tool folder, the Claude Code MCP file and the files the app writes count as the real configuration', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    for (const folder of ['.claude', '.copilot', '.codex/agents', '.pi/agent', 'elsewhere']) await mkdir(join(realHome, folder), { recursive: true });
+    await writeFile(join(realHome, '.claude.json'), '{}\n');
+    await writeFile(join(realHome, '.claude/CLAUDE.md'), 'Real.\n');
+    const allowed = async (links: [string, string][]) => {
+      const home = await mkdtemp(join(box.base, 'sim-'));
+      for (const [path, target] of links) { await mkdir(join(home, path, '..'), { recursive: true }); await symlink(target, join(home, path)); }
+      return (await writeAccess({ home, mode: 'custom', read: read(home), build: 'test', settingsPath: join(box.base, 'settings.json'), realHome })).allowed;
+    };
+    assert.equal(await allowed([['.codex', join(realHome, '.codex')]]), false);
+    assert.equal(await allowed([['.pi', join(realHome, '.pi')]]), false);
+    assert.equal(await allowed([['.claude.json', join(realHome, '.claude.json')]]), false);
+    assert.equal(await allowed([['.codex/AGENTS.md', join(realHome, '.claude/CLAUDE.md')]]), false);
+    assert.equal(await allowed([['.codex/agents', join(realHome, '.codex/agents')]]), false);
+    assert.equal(await allowed([['.codex', join(realHome, 'elsewhere')]]), true);
+  } finally { await box.cleanup(); }
+});
+
 test('Real home: written only when allowed; a relative override stops it and an absent tool gets nothing', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
@@ -594,6 +615,18 @@ test('An edit in one tool spreads to the others, and the old copy is kept in His
     assert.equal((await applyChanges(fast(box), [])).harnessWrites, 0);
     assert.equal(await readFile(join(storeDirectory(box.home), 'history.json'), 'utf8'), before, 'a quiet pass adds nothing to History');
     assert.equal((await facts(box, 'pair')).copies['copilot-cli']!.hash, (await facts(box, 'pair')).copies['claude-cli']!.hash);
+  } finally { await box.cleanup(); }
+});
+
+test('Apply all that spreads an edit and adds a new copy marks only the spread as a replacement', async () => {
+  const box = await sandbox();
+  try {
+    await managedPair(box);
+    await writeFile(join(box.home, CLAUDE, 'pair/SKILL.md'), text('pair', 'Edited in Claude.'));
+    await skill(box.home, CLAUDE, 'fresh');
+    const result = await applyChanges(fast(box), [manage('fresh')]);
+    assert.deepEqual(result.results.filter(entry => entry.outcome === 'written').map(entry => [entry.item, entry.harness, entry.replaced]).sort(),
+      [['fresh', 'copilot-cli', undefined], ['pair', 'copilot-cli', true]]);
   } finally { await box.cleanup(); }
 });
 
@@ -934,7 +967,8 @@ test('R7: a copy that fell behind catches up once it can be written, and edits t
     await applyChanges(three(box), []);
     assert.equal((await readHistory(box.home)).length, count, 'a failed copy adds no History when retried');
     await chmod(join(box.home, CODEX), 0o755); await chmod(join(box.home, CODEX, 'foo'), 0o755);
-    await applyChanges(three(box), []);
+    const caught = await applyChanges(three(box), []);
+    assert.deepEqual(caught.results.filter(entry => entry.outcome === 'written').map(entry => [entry.harness, entry.replaced]), [['codex-cli', true]]);
     assert.equal(await readFile(join(box.home, CODEX, 'foo/SKILL.md'), 'utf8'), text('foo', 'Edit one.'), 'caught up');
     await writeFile(join(box.home, CODEX, 'foo/SKILL.md'), text('foo', 'Codex edit.'));
     await applyChanges(three(box), []);
