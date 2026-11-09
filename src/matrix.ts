@@ -29,7 +29,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
-  disabled: facts.disabled, switchProblem: facts.switchProblem, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
+  disabled: facts.disabled, switchProblem: facts.switchProblem, disableUnverified: facts.disableUnverified, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
 });
 
 /** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
@@ -56,7 +56,8 @@ type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
 type Resolution = Tool | 'separate';
 /** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
 interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string; /** Whether the skill was managed when this change was first made: a change made against an older state is dropped, never applied. */ seenManaged?: boolean;
-  /** Skills: every tool it ends up disabled in, once changed here. */ disabled?: Tool[]; /** Skills: tools whose copy is removed. */ remove?: Tool[] }
+  /** Skills: the switches clicked here, by tool (true: disable). Only these are sent, so a switch flipped elsewhere meanwhile stays. */ switches?: Partial<Record<Tool, boolean>>;
+  /** Skills: tools whose copy is removed. */ remove?: Tool[] }
 
 const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
@@ -92,7 +93,7 @@ const committedOf = (key: string) => committedList().find(skill => skill.key ===
 function effective(skill: SampleSkill): SampleSkill {
   const draft = view.draft.get(skill.key);
   if (!draft) return skill;
-  const next: SampleSkill = { ...skill, managed: draft.managed, off: draft.off, disabled: draft.disabled ?? skill.disabled, removing: draft.remove };
+  const next: SampleSkill = { ...skill, managed: draft.managed, off: draft.off, disabled: withSwitches(skill.disabled, draft.switches), removing: draft.remove };
   // MCP: turning Claude Code on for a server means a Write to Claude Code after Apply all, so its cell says so before.
   if (kind === 'mcp' && draft.managed && !draft.off.includes('claude-cli') && toolList().includes('claude-cli') && !skill.waits?.length) {
     const others = Object.entries(skill.copies).filter(([tool]) => tool !== 'claude-cli' && !draft.off.includes(tool)).map(([, copy]) => copy);
@@ -114,9 +115,9 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
   const base = committedOf(key);
   const before = view.draft.get(key);
   // A pending Disable or Remove stays through other changes to the same item, unless the change itself sets it.
-  const next: Draft = { disabled: before?.disabled, remove: before?.remove, ...change(effective(base), before), seenManaged: before?.seenManaged ?? base.managed };
+  const next: Draft = { switches: before?.switches, remove: before?.remove, ...change(effective(base), before), seenManaged: before?.seenManaged ?? base.managed };
   const sameSet = (first: Tool[] = [], second: Tool[] = []) => [...first].sort().join() === [...second].sort().join();
-  const same = !next.resolve && next.managed === base.managed && sameSet(next.off, base.off) && !next.remove?.length && sameSet(next.disabled ?? base.disabled, base.disabled);
+  const same = !next.resolve && next.managed === base.managed && sameSet(next.off, base.off) && !next.remove?.length && !Object.keys(next.switches ?? {}).length;
   if (same) view.draft.delete(key); else view.draft.set(key, next);
   announce(view.draft.size ? `${view.draft.size} ${view.draft.size === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.', true);
 }
@@ -137,18 +138,27 @@ function setTool(keys: string[], tool: Tool, on: boolean) {
   rerender();
 }
 
-/** Skills: disable or enable one tool's copy on Apply all, with that tool's own switch. */
+/** The tools a skill is disabled in, with the switches clicked here laid over what each tool has now. */
+const withSwitches = (now: Tool[] = [], switches: Draft['switches'] = {}) =>
+  toolList().filter(tool => switches[tool] ?? now.includes(tool));
+
+/** Skills: disable or enable one tool's copy on Apply all, with that tool's own switch. Clicking it back to how it is now drops it. */
 function setDisabledIn(key: string, tool: Tool, disabled: boolean) {
-  edit(key, (skill, draft) => ({ managed: skill.managed, off: skill.off, ...keepChoice(keepResolve(skill.managed, draft?.resolve), draft),
-    disabled: disabled ? [...new Set([...(skill.disabled ?? []), tool])] : (skill.disabled ?? []).filter(entry => entry !== tool) }));
+  edit(key, (skill, draft) => {
+    const switches = { ...draft?.switches };
+    if (disabled === !!committedOf(key).disabled?.includes(tool)) delete switches[tool]; else switches[tool] = disabled;
+    return { managed: skill.managed, off: skill.off, ...keepChoice(keepResolve(skill.managed, draft?.resolve), draft), switches };
+  });
   rerender();
 }
 
-/** Skills: the tools a draft disables or enables, compared with what each tool has now. Only those are sent, so a switch another tool flipped meanwhile stays. */
-function switchChanges(key: string, draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
-  if (!draft.disabled) return {};
-  const now = committedOf(key).disabled ?? [];
-  const disable = draft.disabled.filter(tool => !now.includes(tool)), enable = now.filter(tool => !draft.disabled!.includes(tool));
+/** Skills: whether this tool's switch is clicked to change on Apply all. */
+const switchQueued = (key: string, tool: Tool) => view.draft.get(key)?.switches?.[tool] !== undefined;
+
+/** Skills: the switches a draft changes, as Apply all sends them. */
+function switchChanges(draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
+  const clicked = Object.entries(draft.switches ?? {}) as [Tool, boolean][];
+  const disable = clicked.filter(([, off]) => off).map(([tool]) => tool), enable = clicked.filter(([, off]) => !off).map(([tool]) => tool);
   return { ...(disable.length ? { disable } : {}), ...(enable.length ? { enable } : {}) };
 }
 
@@ -186,7 +196,7 @@ function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
     const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
-      ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
+      ...switchChanges(draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
     const drafts = view.draft;
     if (kind === 'mcp') void applyMcpChanges(changes, () => drafts.clear());
     else if (kind === 'agents') void applyAgentsChanges(changes, () => drafts.clear());
@@ -251,7 +261,7 @@ function pendingSummary(count: number): string {
   const replaced = [...view.draft.keys()].reduce((total, key) => total + toolList().filter(tool => replacedOnApply(effective(committedOf(key)), tool)).length, 0);
   // Skills: copies that go, and switches that flip, on Apply all.
   const removed = next.reduce((total, skill) => total + (skill.removing?.length ?? 0), 0);
-  const flips = next.flatMap(skill => toolList().filter(tool => !skill.removing?.includes(tool) && !!skill.disabled?.includes(tool) !== !!committedOf(skill.key).disabled?.includes(tool)).map(tool => !!skill.disabled?.includes(tool)));
+  const flips = next.flatMap(skill => toolList().filter(tool => !skill.removing?.includes(tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   return `${count} ${count === 1 ? shortNoun[kind][0] : shortNoun[kind][1]} to change${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${replaced ? ` · ${replaced} ${replaced === 1 ? 'copy' : 'copies'} to replace` : ''}${removed ? ` · ${removed} to remove` : ''}${disabling ? ` · ${disabling} to disable` : ''}${enabling ? ` · ${enabling} to enable` : ''}`;
 }
@@ -269,10 +279,10 @@ function changeBar(bulk = true) {
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
   const label = resumeNeeded() ? 'Resume and apply all' : 'Apply all';
-  // Also Apply all's tooltip: on a narrow window the breakdown itself gives way.
+  // Also Apply all's tooltip, so it is said where the click happens.
   const summary = count ? pendingSummary(count) : '';
   if (count) return h('div.apply', {}, manageAll,
-    // The breakdown can outgrow a narrow toolbar: it then ends in an ellipsis, with all of it in the tooltip.
+    // On a narrow window the change bar takes its own toolbar line, so the breakdown always shows in full.
     h('span.apply-count.apply-quiet', { title: `${summary}. Nothing is written until Apply all.` }, summary),
     // A bulk Manage leaves differing items out; the bar still points at the one waiting for a choice.
     button({ variant: 'ghost', size: 'small', label: 'Discard', id: 'discard', onclick: () => { view.draft.clear(); announce('Changes discarded. Nothing was written.'); rerender(); } }),
@@ -341,7 +351,7 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const wasOn = base.managed && !base.off.includes(tool);
   // Disabled with the tool's own switch: the copy is there, and the cell keeps its state, with a corner mark.
   const disabled = !!skill.disabled?.includes(tool) && state !== 'cannot' && state !== 'absent';
-  const switching = disabled !== (!!base.disabled?.includes(tool) && cellOf(base, tool) !== 'absent');
+  const switching = disabled !== (!!base.disabled?.includes(tool) && cellOf(base, tool) !== 'absent') && switchQueued(skill.key, tool);
   const pending = state !== 'cannot' && (state !== cellOf(base, tool) || on !== wasOn || switching);
   const look = pending && state === 'synced' ? cellLook['will-sync'] : cellLook[state];
   const differs = state === 'differs' || state === 'present-differs';
@@ -404,9 +414,12 @@ const toolLine = (skill: SampleSkill, tool: Tool): string => {
 /** Skills: what Disable or Remove does to one tool's copy, now or on Apply all; '' when neither applies. */
 function switchLine(skill: SampleSkill, tool: Tool): string {
   if (skill.removing?.includes(tool)) return `Removed on Apply all; History keeps the copy${committedOf(skill.key).managed ? ', and Central Knot stops syncing it here' : ''}.`;
-  if (skill.switchProblem?.[tool]) return skill.switchProblem[tool]!;
+  const problem = skill.switchProblem?.[tool];
+  if (problem) return problem.file ? `${shownPath(problem.file)} ${problem.reason}` : problem.reason;
   const disabled = !!skill.disabled?.includes(tool);
   const was = !!committedOf(skill.key).disabled?.includes(tool);
+  // An older build: no new Disable, but a copy disabled there can still be enabled.
+  if (!disabled && !was && skill.disableUnverified?.[tool]) return skill.disableUnverified[tool]!;
   if (disabled && !was && skill.copies[tool] === undefined) return `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
   if (disabled && !was) return `Disabled on Apply all: the copy stays, and ${names[tool]} stops loading it.`;
   if (disabled) return committedOf(skill.key).managed ? `Disabled: still synced, but ${names[tool]} doesn’t load it.` : `Disabled: the copy stays here, and ${names[tool]} doesn’t load it.`;
@@ -431,15 +444,16 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   if (skill.removing?.includes(tool)) return h('span.details-tool-actions', {}, smallAction('Keep it', `remove-${key}-${tool}`, () => setRemoved(key, [tool], false)));
   const has = skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync';
   if (!has || skill.cannot?.[tool]) return null;
-  const problem = skill.switchProblem?.[tool];
   const disabled = !!skill.disabled?.includes(tool);
-  const pending = disabled !== !!committedOf(key).disabled?.includes(tool);
+  const pending = switchQueued(key, tool);
+  // No switch at all when its file can't be used, or (an older build) when it is enabled: only Enable is offered there.
+  const unavailable = !!skill.switchProblem?.[tool] || (!disabled && !pending && !!skill.disableUnverified?.[tool]);
   // Queued and restorable, so it is a quiet action, not a red one; a row without it keeps its place so the switches line up.
   const canRemove = skill.copies[tool] !== undefined && skill.writable?.[tool] !== false;
   const remove = canRemove ? smallAction('Remove', `remove-${key}-${tool}`, () => setRemoved(key, [tool], true), '.tool-remove') : h('span.tool-remove-slot', { 'aria-hidden': 'true' });
   if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
-    problem ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
+    unavailable ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
       : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, {}, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
         toggle(!disabled, `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, on => setDisabledIn(key, tool, !on), false, `enable-${key}-${tool}`)),
     remove);

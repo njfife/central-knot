@@ -322,9 +322,10 @@ export function tableEnd(text: string, table: TomlTable): number {
   return table.start + lines.slice(0, cut).join('').length;
 }
 
-/** The text with `body` added as a new table at the end, after one blank line. */
+/** The text with `body` added as a new table at the end, after one blank line, in the file's own line ends. */
 export function appendTomlTable(text: string, body: string): string {
-  return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text.trim() ? '\n' : ''}${body}`;
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  return `${text}${text && !text.endsWith('\n') ? eol : ''}${text.trim() ? eol : ''}${body.replace(/\r?\n/g, eol)}`;
 }
 
 /** The text without these tables' own lines (see tableEnd); `replacement` goes where the first of them was. */

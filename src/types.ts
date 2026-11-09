@@ -162,8 +162,10 @@ export interface SkillFacts {
   stopped?: HarnessId[];
   /** Skills: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
-  /** Skills: why Disable can't be used in a tool (its settings file can't be read or is in a form Central Knot doesn't edit). */
-  switchProblem?: Partial<Record<HarnessId, string>>;
+  /** Skills: why a tool's switch can't be used at all: its settings file (`file`) can't be read or is in a form Central Knot doesn't edit. */
+  switchProblem?: Partial<Record<HarnessId, { file?: string; reason: string }>>;
+  /** Skills: why a new Disable isn't offered in a tool (a build older than the one verified). Enable stays available. */
+  disableUnverified?: Partial<Record<HarnessId, string>>;
 }
 
 export interface ManageView {

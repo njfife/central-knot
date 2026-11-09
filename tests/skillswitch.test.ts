@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
-import { isDisabled, readSwitchFile, setDisabled, switchPath } from '../src/skillswitch.ts';
+import { isDisabled, readSwitchFile, setDisabled, switchPath, unverifiedBuild } from '../src/skillswitch.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 
@@ -63,6 +63,15 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     const { previous } = await setDisabled(box.context, 'claude-cli', target, true);
     await setDisabled(box.context, 'claude-cli', target, false, previous);
     assert.equal(await readFile(claude, 'utf8'), '{ "skillOverrides": { "alpha": "name-only" } }\n');
+    // Pi: its folder form and a ~/ path name the same copy; Enable takes out only the exclusion, not a + include the person wrote.
+    const pi = switchPath(box.context, 'pi-cli');
+    await writeFile(pi, '{ "skills": ["-~/.pi/agent/skills/alpha", "+skills/alpha/SKILL.md"] }\n');
+    const piTarget = { folder: 'alpha', name: 'alpha', skillFile: join(box.home, '.pi/agent/skills/alpha/SKILL.md') };
+    assert.equal(isDisabled(box.context, await readSwitchFile(box.context, 'pi-cli'), piTarget), true);
+    await setDisabled(box.context, 'pi-cli', piTarget, false);
+    assert.deepEqual(JSON.parse(await readFile(pi, 'utf8')).skills, ['+skills/alpha/SKILL.md']);
+    // A new Disable is offered from the build where each switch was seen working; an unknown build is not held back.
+    assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, false]);
   } finally { await box.cleanup(); }
 });
 
@@ -82,6 +91,13 @@ test('Codex: a name rule is overruled by a path rule, the person’s own rule ke
     assert.equal(await readFile(file, 'utf8'), own.replace('enabled = true', 'enabled = false'));
     await setDisabled(box.context, 'codex-cli', target, false);
     assert.equal(await readFile(file, 'utf8'), own);
+    // Even one with nothing but an inline comment is theirs; and Windows line ends stay Windows line ends.
+    for (const theirs of [`[[skills.config]]\npath = ${JSON.stringify(target.skillFile)}\nenabled = true # mine\n`, 'a = 1\r\n']) {
+      await writeFile(file, theirs);
+      await setDisabled(box.context, 'codex-cli', target, true);
+      await setDisabled(box.context, 'codex-cli', target, false);
+      assert.equal(await readFile(file, 'utf8'), theirs);
+    }
     // A rule Central Knot added, with a table added after it meanwhile: Enable takes out only the rule.
     await writeFile(file, 'a = 1\n');
     await setDisabled(box.context, 'codex-cli', target, true);
@@ -89,7 +105,7 @@ test('Codex: a name rule is overruled by a path rule, the person’s own rule ke
     await setDisabled(box.context, 'codex-cli', target, false);
     assert.equal(await readFile(file, 'utf8'), 'a = 1\n\n[mcp_servers.x]\ncommand = "x"\n');
     await writeFile(file, 'skills = { config = [] }\n');
-    assert.match((await readSwitchFile(box.context, 'codex-cli')).problem ?? '', /form Central Knot doesn’t edit\.$/);
+    assert.match((await readSwitchFile(box.context, 'codex-cli')).problem?.reason ?? '', /form Central Knot doesn’t edit\.$/);
     await assert.rejects(setDisabled(box.context, 'codex-cli', target, true));
     assert.equal(await readFile(file, 'utf8'), 'skills = { config = [] }\n');
   } finally { await box.cleanup(); }
@@ -99,6 +115,12 @@ test('Managed and disabled in one tool: the copy arrives there switched off, kee
   const box = await sandbox(['claude-cli', 'codex-cli']);
   try {
     await skill(box.home, 'claude-cli', 'notes');
+    // A Disable that can't happen (Codex's skill rules in a form not edited here) changes nothing at all, so no copy arrives enabled.
+    await writeFile(join(box.home, '.codex/config.toml'), 'skills = { config = [] }\n');
+    const held = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
+    assert.ok(held.results.some(entry => entry.outcome === 'held' && /Nothing was changed/.test(entry.message)), JSON.stringify(held));
+    assert.deepEqual([(await manageView(box.context)).skills.find(item => item.key === 'notes')!.managed, held.harnessWrites], [false, 0]);
+    await rm(join(box.home, '.codex/config.toml'));
     const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
     assert.ok(result.results.some(entry => entry.outcome === 'switched' && entry.harness === 'codex-cli'), JSON.stringify(result));
     const copy = join(box.home, '.codex/skills/notes/SKILL.md');
@@ -144,11 +166,16 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     assert.equal(await readFile(join(box.home, '.copilot/skills/loose/SKILL.md'), 'utf8'), text('loose'));
     const kept = (await manageView(box.context)).skills.find(item => item.key === 'kept')!;
     assert.deepEqual([kept.managed, kept.off, !!kept.copies['copilot-cli']], [true, [], true]);
+    await applyChanges(box.context, []);
     // A removal that doesn't happen (the copy was edited just then) keeps the copy, and it keeps syncing.
     const copilotKept = join(box.home, '.copilot/skills/kept/SKILL.md');
     const editing = { ...box.context, fault: (step: string) => { if (step === 'before-remove') writeFileSync(copilotKept, text('kept', 'Edited just now.')); } };
     const held = await applyChanges(editing, [{ key: 'kept', managed: true, off: [], remove: ['copilot-cli'], seenManaged: true }]);
     assert.ok(held.results.some(entry => entry.outcome === 'held' && /changed just now/.test(entry.message)), JSON.stringify(held));
     assert.deepEqual([(await manageView(box.context)).skills.find(item => item.key === 'kept')!.off, await readFile(copilotKept, 'utf8')], [[], text('kept', 'Edited just now.')]);
+    // …as an ordinary edit, which spreads.
+    await applyChanges(box.context, []);
+    await applyChanges(box.context, []);
+    assert.equal(await readFile(join(box.home, '.claude/skills/kept/SKILL.md'), 'utf8'), text('kept', 'Edited just now.'));
   } finally { await box.cleanup(); }
 });

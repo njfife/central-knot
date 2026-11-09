@@ -1,7 +1,8 @@
 // Disabling a standalone skill in one tool with that tool's own switch (capability data, Appendix B; ENB-01, ENB-02).
 // The copy stays where it is and keeps receiving updates; the tool just doesn't load it. Each tool keeps its switch in its own
-// user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from a list or map
-// that Enable leaves empty, which goes with its last entry.
+// user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from two things: the
+// JSON list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout), and a list or map Enable
+// leaves empty goes with its last entry.
 //   Claude Code  settings.json   "skillOverrides": { "<folder>": "off" }   (keyed by folder: Claude names a skill after it)
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
@@ -10,30 +11,37 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { harnesses, toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
-import { appendTomlTable, readTomlTables, removeTomlTables, setJsonMember, tomlValue, type TomlTable } from './textedit.ts';
+import { appendTomlTable, readTomlTables, removeTomlTables, setJsonMember, tableEnd, tomlValue, type TomlTable } from './textedit.ts';
 import type { HarnessId } from './types.ts';
 import { record, withoutBom } from './values.ts';
 
 /** One tool's copy of a skill, as its switch names it. */
 export interface SwitchTarget { folder: string; name: string; /** Absolute path to the copy's SKILL.md (where it is, or where it will be written). */ skillFile: string }
 
+/** Why a switch can't be used: the file it lives in (shown to the person as they know it) and what is wrong with it. */
+export interface SwitchProblem { file?: string; reason: string }
+export const problemText = (problem: SwitchProblem) => (problem.file ? `${problem.file} ${problem.reason}` : problem.reason);
+
 /** One tool's switch file, read and parsed once: its text ('' when there is none yet), or why it can't be used. */
-export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: string; parsed?: Parsed }
+export interface SwitchFile { tool: HarnessId; path: string; text: string; exists: boolean; problem?: SwitchProblem; parsed?: ParsedSwitches }
 
 /**
  * The lowest build of each tool where its switch was seen working (Appendix B, V-20). Below it, no new Disable is offered
- * (ENB-01, DET-03); a copy already disabled still shows as disabled. An unknown build (no CLI found) is not held back: the
- * settings file is the tool's documented one either way.
+ * (ENB-01, DET-03), while a copy already disabled shows as disabled and can be enabled again. An unknown build (no CLI found,
+ * say only a desktop app) is not held back: the settings file is the tool's documented one either way.
  */
 const VERIFIED_FROM: Record<HarnessId, string> = { 'claude-cli': '2.1.311', 'copilot-cli': '1.0.107', 'codex-cli': '0.142.3', 'pi-cli': '1.5.0' };
 
-/** Why Disable isn't offered for this build of a tool, if it isn't. */
+/** Why a new Disable isn't offered for this build of a tool, if it isn't. */
 export function unverifiedBuild(tool: HarnessId, version: string | undefined): string | undefined {
   if (!version) return undefined;
-  const parts = (value: string) => value.split(/[.+-]/).slice(0, 3).map(Number);
-  const [have, floor] = [parts(version), parts(VERIFIED_FROM[tool])];
-  const first = have.findIndex((part, index) => part !== floor[index]);
-  return first >= 0 && have[first] < floor[first] ? `Disable is verified from version ${VERIFIED_FROM[tool]}; this is ${version}. Update it to use Disable here.` : undefined;
+  const numbers = (value: string) => value.split(/[.+-]/).slice(0, 3).map(Number);
+  const [have, floor] = [numbers(version), numbers(VERIFIED_FROM[tool])];
+  for (let index = 0; index < 3; index++) {
+    if (have[index] > floor[index]) return undefined;
+    if (have[index] < floor[index]) return `Disable is verified from version ${VERIFIED_FROM[tool]}; this is ${version}. Update it to use Disable here.`;
+  }
+  return undefined;
 }
 
 /** The file that holds a tool's skill switches. */
@@ -42,16 +50,14 @@ export const switchPath = (context: ShareContext, tool: HarnessId) => join(toolC
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
   const path = switchPath(context, tool);
-  // Said in the tool's own row, so the file is named as the person knows it (~/…) and the tool is "here".
-  const shown = path.startsWith(context.home + sep) ? `~${path.slice(context.home.length)}` : path;
   let text: string;
   try { text = await readFile(path, 'utf8'); } catch (error) {
-    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: `${shown} can’t be read.` };
+    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false, parsed: parse(tool, '') } : { tool, path, text: '', exists: true, problem: { file: path, reason: 'can’t be read.' } };
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const why = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}`;
-    return { tool, path, text, exists: true, problem: `${shown} ${why}.` };
+    const reason = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit.' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
+    return { tool, path, text, exists: true, problem: { file: path, reason } };
   }
 }
 
@@ -68,7 +74,7 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  */
 export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string): Promise<{ changed: boolean; previous?: string }> {
   const file = await readSwitchFile(context, tool);
-  if (!file.parsed) throw failure(file.problem!);
+  if (!file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
   await writeFileChecked(file.path, withSwitch(context, file, target, disabled, restore), file.exists ? file.text : undefined);
@@ -84,13 +90,14 @@ const failure = (message: string) => Object.assign(new Error(message), { code: '
 // ---------- Each tool's form ----------
 
 interface CodexRule { table: TomlTable; path?: unknown; name?: unknown; enabled?: unknown }
-type Parsed = { json: Record<string, unknown> } | { rules: CodexRule[] };
+/** A switch file parsed: JSON settings, or Codex's skill rules. */
+export type ParsedSwitches = { json: Record<string, unknown> } | { rules: CodexRule[] };
 
 const formError = () => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM' });
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /** A tool's settings, parsed. Throws when the text isn't the tool's format. */
-function parse(tool: HarnessId, text: string): Parsed {
+function parse(tool: HarnessId, text: string): ParsedSwitches {
   if (tool === 'codex-cli') return { rules: codexRules(text) };
   if (!text.trim()) return { json: {} };
   const json = record(JSON.parse(withoutBom(text)));
@@ -137,7 +144,7 @@ function piEntryNames(entry: unknown, forms: Set<string>, home: string, signs = 
 }
 
 /** Whether the parsed settings turn this copy off, and (Claude Code) what its override held otherwise. */
-function stateIn(context: ShareContext, tool: HarnessId, parsed: Parsed, target: SwitchTarget): { disabled: boolean; previous?: string } {
+function stateIn(context: ShareContext, tool: HarnessId, parsed: ParsedSwitches, target: SwitchTarget): { disabled: boolean; previous?: string } {
   if ('rules' in parsed) return { disabled: parsed.rules.filter(rule => rule.path === target.skillFile || rule.name === target.name).at(-1)?.enabled === false };
   const { json } = parsed;
   if (tool === 'claude-cli') { const value = record(json.skillOverrides)?.[target.folder]; return { disabled: value === 'off', previous: typeof value === 'string' && value !== 'off' ? value : undefined }; }
@@ -165,30 +172,34 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     return bom + putList('disabledSkills', disabled ? [...others, target.name] : others);
   }
   const { written, all } = piForms(target, toolConfigRoot(context, file.tool));
-  const others = list(json.skills).filter(entry => !piEntryNames(entry, all, context.home));
+  // Only this copy's exclusions go; a `+` include the person wrote stays (an exclusion wins over it while disabled).
+  const others = list(json.skills).filter(entry => !piEntryNames(entry, all, context.home, /^[-!]/));
   return bom + putList('skills', disabled ? [...others, `-${written}`] : others);
 }
 
 /**
- * Codex: a rule Central Knot added (just this copy's path and `enabled`, no comments) is added or removed whole. A rule the
- * person wrote for this path keeps its comments and other keys: only its `enabled` value changes. When a later name rule still
- * decides, a path rule for this copy is added at the end, since the last matching rule wins.
+ * Codex: the rule Central Knot writes is exactly a header, this copy's path and `enabled`, and only a rule in exactly that form is
+ * added or taken out whole. Any other rule for this path is the person's (a comment anywhere, another key): it keeps every byte but
+ * its `enabled` value. When a later name rule still decides, a path rule for this copy is added at the end, since the last
+ * matching rule wins. A file with Windows line ends gets them in what is added too.
  */
 function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarget, disabled: boolean): string {
-  // Ours to take out: a bare rule for this path saying the opposite of what is wanted now.
-  const added = (rule: CodexRule) => rule.table.entries.length === 2 && rule.enabled === disabled && !/^\s*#/m.test(text.slice(rule.table.start, rule.table.end));
-  const ours = codexRules(text).filter(rule => rule.path === target.skillFile && added(rule));
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const ourRule = (enabled: boolean) => ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${enabled}`].join(eol);
+  // Ours to take out: a rule in exactly our form that says the opposite of what is wanted now (`enabled = disabled`).
+  const isOurs = (rule: CodexRule) => text.slice(rule.table.start, tableEnd(text, rule.table)).trimEnd() === ourRule(disabled);
+  const ours = codexRules(text).filter(rule => rule.path === target.skillFile && isOurs(rule));
   let out = removeTomlTables(text, ours.map(rule => rule.table));
   // A removed rule at the end of the file takes the blank line before it too; one in the middle took its own after it.
-  if (ours.some(rule => rule.table.end === text.length)) out = out.replace(/\n\n$/, '\n');
+  if (ours.some(rule => tableEnd(text, rule.table) === text.length)) out = out.replace(/(\r?\n)\r?\n$/, '$1');
   // The person's own rules for this path, from the last, so earlier offsets stay right.
   for (const rule of codexRules(out).filter(candidate => candidate.path === target.skillFile).reverse()) {
     const entry = rule.table.entries.find(candidate => candidate.key === 'enabled');
     const value = `enabled = ${!disabled}`;
     const headerEnd = out.indexOf('\n', rule.table.start) + 1;
     out = entry ? out.slice(0, entry.start) + entry.raw.replace(/enabled\s*=\s*(?:true|false)/, value) + out.slice(entry.end)
-      : `${out.slice(0, headerEnd)}${value}\n${out.slice(headerEnd)}`;
+      : `${out.slice(0, headerEnd)}${value}${eol}${out.slice(headerEnd)}`;
   }
   if (stateIn(context, 'codex-cli', { rules: codexRules(out) }, target).disabled === disabled) return out;
-  return appendTomlTable(out, `[[skills.config]]\npath = ${tomlValue(target.skillFile)}\nenabled = ${!disabled}\n`);
+  return appendTomlTable(out, `${ourRule(!disabled)}${eol}`);
 }
