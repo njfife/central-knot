@@ -253,13 +253,14 @@ function connectForm(allowed: boolean) {
   const ready = () => !state.busy && allowed && !!repo.draftUrl.trim();
   const go = () => { if (ready()) void connect(); };
   const refresh = () => { const control = document.getElementById('repo-connect') as HTMLButtonElement | null; if (control) control.disabled = !ready(); };
-  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: string) => h('div.repo-field', {},
+  const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: Node) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
     h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);
+  const sshHint = h('span', {}, 'The address you’d give git clone. SSH works too: ', h('span.mono', {}, 'git@gitlab.com:you/agent-config.git'));
   return h('div.repo-connect', {},
-    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, 'The address you’d give git clone. SSH works too: git@gitlab.com:you/agent-config.git'),
+    field('repo-url', 'Repo address', 'https://github.com/you/agent-config.git', repo.draftUrl, text => { repo.draftUrl = text; }, undefined, sshHint),
     field('repo-branch', 'Branch', 'The repo’s default branch', repo.draftBranch, text => { repo.draftBranch = text; }, 'optional'),
     h('div.repo-connect-actions', {}, button({ variant: 'primary', size: 'small', icon: 'git-branch', label: 'Connect', id: 'repo-connect', disabled: !ready(), onclick: go }),
       h('span.repo-connect-note', {}, 'Connecting changes nothing in your tools. You choose when to Pull or Push.')));

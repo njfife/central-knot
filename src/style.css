@@ -1391,7 +1391,6 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-side-note > svg { flex: none; align-self: center; }
 .repo-activity { color: var(--ink); }
 .repo-activity-part { white-space: nowrap; }
-.repo-activity-part + .repo-activity-part { margin-left: 4px; }
 .repo-stuck-count { margin-left: 8px; font-weight: 500; color: var(--warning); text-transform: none; letter-spacing: 0; }
 .repo-stale { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-stale > svg { flex: none; align-self: center; }
@@ -1400,6 +1399,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-change-removed { color: var(--danger); }
 .repo-change-held { color: var(--ink-soft); }
 .repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-field-below .mono { font-size: 11.5px; white-space: nowrap; }
 .band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; border-color: currentColor; color: inherit; flex: none; }
 .repo-row-held .repo-row-name { color: var(--ink-soft); }
 .repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
