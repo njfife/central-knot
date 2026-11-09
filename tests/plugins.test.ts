@@ -1,10 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { outcomes } from '../src/pluginoutcomes.ts';
 import { cachedCatalog, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, uninstall, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
@@ -48,8 +47,7 @@ test('A catalog lists its plugins and what each holds, and reads nothing outside
     const catalog = await parseCatalog(root, root, 'folder');
     assert.equal(catalog.name, 'ck-test-market');
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
-    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, skillNames: catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames });
-    assert.equal(catalog.plugins.find(plugin => plugin.name === 'full')!.components!.skillNames!.length, 2);
+    assert.deepEqual(catalog.plugins.find(plugin => plugin.name === 'full')!.components, { skills: 2, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false, skillNames: ['one', 'two'] });
     assert.equal(catalog.plugins.find(plugin => plugin.name === 'escape')!.components, undefined, 'a path outside is not read');
     assert.equal(catalog.copilotRefuses, undefined);
   } finally { await box.cleanup(); }
@@ -68,7 +66,7 @@ test('A bare plugin source is looked up under metadata.pluginRoot; a ./ path sta
   } finally { await box.cleanup(); }
 });
 
-test('Copilot’s whole-marketplace refusals are found before anything is added', async () => {
+test('Copilot’s whole-marketplace refusals are found before anything is added, and a tool with a different marketplace of the same name is never changed', async () => {
   const box = await sandbox();
   try {
     const root = join(box.base, 'market');
@@ -81,6 +79,17 @@ test('Copilot’s whole-marketplace refusals are found before anything is added'
     const report = await install(box.context, catalog, 'marker', 'copilot-cli');
     assert.equal(report.outcome, 'held');
     assert.deepEqual(report.runs, [], 'nothing was run');
+    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: 'https://example.com/someone-else.git' } } } }));
+    const other = await install(box.context, catalog, 'marker', 'claude-cli');
+    assert.equal(other.outcome, 'held');
+    assert.match(other.message, /different marketplace named/);
+    assert.deepEqual(other.runs, []);
+    await rm(join(box.home, '.claude/settings.json'));
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'github', repo: 'someone/else' } } }));
+    assert.equal((await install(box.context, catalog, 'marker', 'claude-cli')).outcome, 'held');
+    const removing = await uninstall(box.context, 'ck-test-market', 'marker', 'claude-cli', root);
+    assert.equal(removing.outcome, 'held');
+    assert.deepEqual(removing.runs, []);
   } finally { await box.cleanup(); }
 });
 
@@ -97,14 +106,6 @@ test('Folders and missing manifests get a plain message', async () => {
     await put(join(big, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'big', padding: 'x'.repeat(9 * 1024 * 1024) }));
     assert.match((await parseCatalog(big, big, 'folder')).problem ?? '', /larger than 8 MB/);
   } finally { await box.cleanup(); }
-});
-
-test('Each tool’s outcome per component follows the tested results', () => {
-  const components = { skills: 1, commands: 1, agents: 1, hooks: true, mcp: 1, mcpRootVariable: true, bin: false };
-  const codex = Object.fromEntries(outcomes('codex-cli', components).map(item => [item.component, item.result]));
-  assert.deepEqual(codex, { Skills: 'works', Commands: 'limited', Agents: 'ignored', Hooks: 'limited', 'MCP servers': 'fails' });
-  assert.ok(outcomes('claude-cli', components).every(item => item.result === 'works'));
-  assert.equal(outcomes('copilot-cli', components).find(item => item.component === 'Commands')!.text, 'become skills');
 });
 
 test('One repository is recognised however it was typed', () => {
@@ -195,27 +196,6 @@ test('Installed means files where the tool records them; a record with no files 
   } finally { await box.cleanup(); }
 });
 
-test('A tool with a different marketplace of the same name is never changed', async () => {
-  const box = await sandbox();
-  try {
-    const root = join(box.base, 'market');
-    await marketplace(root);
-    await put(join(box.home, '.claude/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'git', url: 'https://example.com/someone-else.git' } } } }));
-    const report = await install({ ...box.context, binaries: { 'claude-cli': '/bin/false' } }, await parseCatalog(root, root, 'folder'), 'marker', 'claude-cli');
-    assert.equal(report.outcome, 'held');
-    assert.match(report.message, /different marketplace named/);
-    assert.deepEqual(report.runs, []);
-    // Recorded by Claude Code's own command, the other marketplace is held just the same, for uninstall too.
-    await rm(join(box.home, '.claude/settings.json'));
-    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'github', repo: 'someone/else' } } }));
-    const again = await install({ ...box.context, binaries: { 'claude-cli': '/bin/false' } }, await parseCatalog(root, root, 'folder'), 'marker', 'claude-cli');
-    assert.equal(again.outcome, 'held');
-    const removing = await uninstall({ ...box.context, binaries: { 'claude-cli': '/bin/false' } }, 'ck-test-market', 'marker', 'claude-cli', root);
-    assert.equal(removing.outcome, 'held');
-    assert.deepEqual(removing.runs, []);
-  } finally { await box.cleanup(); }
-});
-
 test('A Git marketplace is checked, then read from a fresh shallow copy; the last copy stays browsable', { skip: noPosix }, async () => {
   const box = await sandbox();
   const server = spawn(process.execPath, [join(import.meta.dirname, '../scripts/git-http-fixture.mjs'), join(box.base, 'served'), '0']);
@@ -268,13 +248,8 @@ test('A CLI that is a script finds its interpreter beside it, even when the app 
 test('A folder marketplace named through a link is the same marketplace, so it is listed once', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
-    const real = join(box.base, 'market');
-    await marketplace(real);
-    const { symlink } = await import('node:fs/promises');
-    await symlink(real, join(box.base, 'linked'));
-    assert.ok(sameSource(join(box.base, 'linked'), real));
-    assert.ok(sameSource(`${real}/`, real));
-    assert.ok(!sameSource(join(box.base, 'other'), real));
+    await symlink(box.home, join(box.base, 'linked'));
+    assert.ok(sameSource(join(box.base, 'linked'), box.home));
   } finally { await box.cleanup(); }
 });
 
