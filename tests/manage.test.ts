@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView } from '../src/manage.ts';
-import { storeDirectory, type ShareContext } from '../src/share.ts';
+import { storeDirectory, writeAccess, type ShareContext } from '../src/share.ts';
 import type { HarnessId, Snapshot } from '../src/types.ts';
 
 const both: HarnessId[] = ['claude-cli', 'copilot-cli'];
@@ -407,6 +407,27 @@ test('Write guard: the real home stays read-only however it is reached', { skip:
       await symlink(join(realHome, name), join(linkedRoot, name));
       await attempt(linkedRoot, 'custom');
     }
+  } finally { await box.cleanup(); }
+});
+
+test('Write guard: every tool folder, the Claude Code MCP file and the files the app writes count as the real configuration', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const realHome = join(box.base, 'real');
+    for (const folder of ['.claude', '.copilot', '.codex/agents', '.pi/agent', 'elsewhere']) await mkdir(join(realHome, folder), { recursive: true });
+    await writeFile(join(realHome, '.claude.json'), '{}\n');
+    await writeFile(join(realHome, '.claude/CLAUDE.md'), 'Real.\n');
+    const allowed = async (links: [string, string][]) => {
+      const home = await mkdtemp(join(box.base, 'sim-'));
+      for (const [path, target] of links) { await mkdir(join(home, path, '..'), { recursive: true }); await symlink(target, join(home, path)); }
+      return (await writeAccess({ home, mode: 'custom', read: read(home), build: 'test', settingsPath: join(box.base, 'settings.json'), realHome })).allowed;
+    };
+    assert.equal(await allowed([['.codex', join(realHome, '.codex')]]), false);
+    assert.equal(await allowed([['.pi', join(realHome, '.pi')]]), false);
+    assert.equal(await allowed([['.claude.json', join(realHome, '.claude.json')]]), false);
+    assert.equal(await allowed([['.codex/AGENTS.md', join(realHome, '.claude/CLAUDE.md')]]), false);
+    assert.equal(await allowed([['.codex/agents', join(realHome, '.codex/agents')]]), false);
+    assert.equal(await allowed([['.codex', join(realHome, 'elsewhere')]]), true);
   } finally { await box.cleanup(); }
 });
 
