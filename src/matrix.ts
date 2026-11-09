@@ -244,7 +244,9 @@ function changeBar(bulk = true) {
   const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
   // Under the Copies differ filter a harness's page shows only items that need a copy choice, which Manage leaves out:
   // the button would act on rows not shown, so it waits until the filter changes.
-  const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
+  // On a harness's page, once changes are queued the toolbar holds them (count, Discard, Apply all) and Manage steps aside,
+  // so the bar keeps one line and the table does not move.
+  const manageAll = bulk && variant !== 'c' && ready.length && !(focus && view.filter === 'attention') && !(focus && count) ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? 'One skill needs' : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
   const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
   // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
   const choiceNote: HTMLElement | null = null;
@@ -626,7 +628,7 @@ function row(skill: SampleSkill) {
       h('div.ov-name', { role: 'cell', title: skill.description },
         h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); openRow(skill.key); } },
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
-        h('span.ov-name-text', {}, skill.name ?? skill.key),
+        h('span.ov-name-text', { title: skill.name ?? skill.key }, skill.name ?? skill.key),
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
@@ -749,7 +751,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
     h('div.tool-menu-row', {},
       brandMark(shown, 16), h('span.tool-menu-name', {}, names[shown]),
       idle ? h('span.tool-menu-count', {}, plan.synced.length ? 'Has them all' : 'Nothing to add') : null,
-      button({ variant: count ? 'outline' : 'ghost', size: 'small', label, name: `${copies ? 'Add' : 'Manage'} ${count} ${names[from]} skills in ${names[to]}`, id: `menu-add-${from}-${to}`, disabled: !count,
+      idle ? null : button({ variant: count ? 'outline' : 'ghost', size: 'small', label, name: `${copies ? 'Add' : 'Manage'} ${count} ${names[from]} skills in ${names[to]}`, id: `menu-add-${from}-${to}`, disabled: !count,
         onclick: () => { send(from, to, list, conflicts); view.toolMenu = undefined; rerender(); } })),
     h('div.add-groups', {},
       addGroup('absent', false, plan.fresh.length, 'new: will be copied', `New in ${names[to]}: a copy is written there on Apply all.\n${skillNames(plan.fresh)}`, '', plan.fresh.map(skill => skill.name ?? skill.key)),
@@ -778,9 +780,17 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   const noun = (n: number) => (n === 1 ? nouns[kind][0].toLowerCase() : nouns[kind][1].toLowerCase());
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
-    // On a harness's own page its menu brings things in: each other tool's items, added here.
-    tool === focus ? h('p.tool-menu-label', {}, `Add to ${names[tool]} from…`) : h('p.tool-menu-label', {}, `Add ${names[tool]}’s ${kind === 'mcp' ? 'MCP servers' : nouns[kind][1].toLowerCase()} to…`),
-    tool === focus ? others(tool).map(source => addRow(source, tool, list, source)) : others(tool).map(target => addRow(tool, target, list)),
+    ...(() => {
+      // Each row: from → to. On a harness's own page its menu brings things in (each other tool's items, added here), and
+      // another tool's menu offers only its row into that harness, so every Add on the page points one way.
+      const pairs = tool === focus ? others(tool).map(source => [source, tool] as const) : others(tool).filter(target => !focus || target === focus).map(target => [tool, target] as const);
+      const live = pairs.filter(([from, to]) => { const plan = planAdd(from, to, list); return plan.fresh.length + plan.same.length + plan.resume.length + plan.differ.length + plan.skip.length + plan.blocked.length > 0; });
+      const what = kind === 'mcp' ? 'MCP servers' : nouns[kind][1].toLowerCase();
+      // Nothing to add anywhere: one plain line, not a heading over rows of disabled buttons.
+      if (!live.length) return [h('p.tool-menu-empty', {}, tool === focus ? `The other tools have no ${what} that ${names[tool]} doesn’t already have.` : `${names[tool]} has no ${what} to add${focus ? ` to ${names[focus]}` : ''}.`)];
+      const label = tool === focus ? `Add to ${names[tool]} from…` : focus ? `Add ${names[tool]}’s ${what} to ${names[focus]}` : `Add ${names[tool]}’s ${what} to…`;
+      return [h('p.tool-menu-label', {}, label), live.map(([from, to]) => addRow(from, to, list, tool === focus ? from : to))];
+    })(),
     h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.'),
     // Stopping only exists once something syncs to this tool; before that, the foot would be a dead control.
     !syncingHere.length ? null : h('div.tool-menu-stop', {},
@@ -877,7 +887,8 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
           : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
         // Items only other tools have, turned on here: told on their own section, so the counts add up.
-        becoming ? h('span.ov-section-after', {}, `· ${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
+        becoming ? h('span.ov-section-after', {}, `· ${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`)
+          : role === 'away' ? h('span.ov-section-after', {}, `· tick a ${names[focus!]} box to add one here`) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
@@ -1242,12 +1253,12 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
     notices(),
     h('div.scroll.matrix', {},
       variant === 'c' ? shownStrip(shown) : null,
-      withToolCount(h('div.ov', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they sync` },
+      withToolCount(h('div.ov', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they sync`, 'data-tools': String(toolList().length) },
         h('div.ov-row.ov-head', { role: 'row' },
           h('div.ov-name', { role: 'columnheader' }, nouns[kind][0]),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
-          h('div.ov-fill')),
+          h('div.ov-fill', {}, focus ? h('span.ov-desc.ov-desc-head', {}, 'Description') : null)),
         section('managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
         section('unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
         // Items only other tools have: their box in this tool's column adds them here (see setTool).

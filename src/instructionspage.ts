@@ -128,7 +128,8 @@ const open = new Set<string>();
 const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && !!state.outcome.instruction?.saved && state.outcome.instruction.path === file.path;
 
 /** One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. */
-export function instructionCard(file: InstructionFile) {
+/** `titled`: false on a harness's page, where the header already names the tool, so the card leads with the file's path. */
+export function instructionCard(file: InstructionFile, { titled = true } = {}) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
@@ -137,7 +138,7 @@ export function instructionCard(file: InstructionFile) {
   const lockedWhy = readOnly ? 'Saving is off in this home.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
   const preview = file.text.replace(/\n$/, '').split('\n');
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
-    h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
+    h('header.ins-head', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool])] : null, pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
       savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
@@ -187,5 +188,5 @@ export function instructionsPage() {
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? files.map(instructionCard) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
+      files.length ? files.map(file => instructionCard(file)) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }

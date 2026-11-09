@@ -94,10 +94,11 @@ function instructionCount(tool: HarnessId): Count {
   const read = instructionReadState();
   if (read === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
   if (!state.instructions) return { value: '…', faint: true };
+  // A file, not a number: its name and length, or that there is none yet.
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
-  if (!file.exists) return { value: '0', note: 'no file yet', faint: true };
-  return { value: '1', note: `${fileName(file.path)} · ${file.text.trim() ? plural(lineCount(file.text), 'line') : 'empty'}` };
+  if (!file.exists) return { value: '', note: 'no file yet' };
+  return { value: '', note: `${fileName(file.path)} · ${file.text.trim() ? plural(lineCount(file.text), 'line') : 'empty'}` };
 }
 
 function pluginCount(tool: HarnessId): Count {
@@ -160,23 +161,26 @@ function everyHarness(home: HomeView) {
         h('span', {}, 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.',
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' This is the practice copy, so installed apps aren’t looked for; ' : ' This is a folder, not this computer, so installed apps aren’t looked for; ',
             button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows them with their versions.'])),
-      h('div.harness-cards', {}, listed(home).map(snapshot => summaryCard(snapshot, home)))));
+      h('div.harness-cards', { 'data-count': String(listed(home).length) }, listed(home).map(snapshot => summaryCard(snapshot, home)))));
 }
 
 // ---------- One harness ----------
 
 /** The tabs, each kind with its count. While an action runs they stay put, so its result lands on the tab it was started from. */
 function tabs(home: HomeView, tool: HarnessId) {
-  const count = (tab: HarnessTab) => {
-    if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? plugins.installed.length : undefined; }
-    return isKind(tab) && supports(home, tab, tool) ? tally(home, tab, tool).total : undefined;
+  // A count, a dash where the tool has none of its own (as on its card), or nothing (Instructions, About, still reading).
+  const count = (tab: HarnessTab): number | '—' | undefined => {
+    if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? plugins.installed.length : plugins.state === 'none' ? '—' : undefined; }
+    if (!isKind(tab)) return undefined;
+    return supports(home, tab, tool) ? tally(home, tab, tool).total : '—';
   };
+  const elsewhere = (tab: HarnessTab) => (isKind(tab) && supports(home, tab, tool) ? kindView(home, tab).facts.filter(item => item.copies[tool] === undefined).length : 0);
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },
     TABS.map(tab => {
       const shown = count(tab);
       return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
-        title: shown === undefined ? undefined : `${shown} in ${names[tool]}`,
+        title: shown === undefined ? undefined : shown === '—' ? `${names[tool]} has none of its own` : `${shown} in ${names[tool]}${elsewhere(tab) ? ` · ${elsewhere(tab)} only in other tools` : ''}`,
         onclick: () => { state.harnessTab = tab; state.outcome = undefined; announce(''); rerender(); },
       }, tabLabel(tab), shown === undefined ? null : h('span.harness-tab-count', {}, String(shown)));
     }));
@@ -214,7 +218,7 @@ function instructionsTab(tool: HarnessId) {
   const body = !state.instructions ? instructionsNotRead()
     : !file ? h('p.empty', {}, `${names[tool]} has no instruction file Central Knot reads.`)
       : [h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
-        button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file)];
+        button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file, { titled: false })];
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
@@ -258,14 +262,14 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
   const ins = instructionOf(tool);
   return h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, h('div.card.harness-about', {},
     h('div.harness-about-column', {},
-      section('Detection', h('dl.facts', {},
+      section('This harness', h('dl.facts', {},
         ...fact('Status', detectionLine(snapshot, home)),
         ...(home.mode === 'actual' && snapshot.detection !== 'Installed' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
-        ...fact('Read by', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))))),
+        ...fact('Read by', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))),
+        ...fact('Config folder', path(snapshot.root)))),
       issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue))))),
     h('div.harness-about-column', {},
       section('Files and folders', h('dl.facts', {},
-        ...fact('Config folder', path(snapshot.root)),
         ...[...roots].flatMap(([root, label], index) => fact(index === 0 ? 'Skills folder' : label, path(root))),
         ...(!roots.size && disclosed?.to && !disclosed.blocked ? fact('Skills folder', h('span.harness-path', {}, path(disclosed.to), h('span.tone-faint', {}, '(empty; new skills go here)'))) : []),
         ...(disclosed && roots.size && !(disclosed.to && roots.has(disclosed.to)) ? fact('New skills go to', disclosed.blocked ? h('span', {}, h('span.tone-warning', {}, 'Nowhere. '), disclosed.blocked) : path(disclosed.to)) : []),
