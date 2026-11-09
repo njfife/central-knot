@@ -24,7 +24,7 @@ export interface PluginContext {
   binaries: Partial<Record<HarnessId, string>>;
   overrides?: Partial<Record<HarnessId, string>>;
   timeoutMs?: number;
-  /** Reads shared within one view, so each tool's records (and a live folder's catalog) are read once, not once per plugin. */
+  /** Reads shared within one read-only view (each tool's records and a live folder's catalog read once). Never set for an install or uninstall, which read again after their command. */
   reads?: Map<string, Promise<unknown>>;
 }
 
