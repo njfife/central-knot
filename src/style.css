@@ -1186,3 +1186,10 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .plugins-page #add-marketplace:disabled { opacity: 1; background: transparent; border: 1px solid var(--control-line); color: var(--ink-faint); }
 .plugin-outcome-row .plugin-name { line-height: inherit; }
 .empty-actions { display: flex; flex-direction: column; align-items: center; }
+
+/* Round 13: empty states centre in the content column, not the whole pane */
+.page > .empty, .page > .scroll > .empty { max-width: 904px; }
+
+.ins-mark { border-right: 1px solid var(--line); margin-right: 6px; text-align: center; }
+.ins-line { grid-template-columns: 18px minmax(0, 1fr); }
+.plugin-outcome-row { align-items: center; }

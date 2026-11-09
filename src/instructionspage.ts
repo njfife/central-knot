@@ -52,9 +52,13 @@ function editor(file: InstructionFile) {
       if (!r && !a) { index++; continue; }
       altered += Math.min(r, a); removed += r - Math.min(r, a); added += a - Math.min(r, a);
     }
-    const changed = added + removed + altered;
+    // An edit that only adds or removes the final line break is still a change, and says so.
+    const onlyBreak = !(added + removed + altered) && edit.text !== file.text;
+    const changed = added + removed + altered + (onlyBreak ? 1 : 0);
     const counts = [altered ? `${plural(altered, 'line')} changed` : '', added ? `${plural(added, 'line')} added` : '', removed ? `${plural(removed, 'line')} removed` : ''].filter(Boolean).join(', ');
     const title = !changed ? 'Nothing changed.'
+      : onlyBreak ? `Review before saving ${name}: the final line break is ${edit.text.endsWith('\n') ? 'added' : 'removed'}.`
+      : !file.exists ? `Review before creating ${name}: ${counts}.`
       : edit.restoring ? `Going back to an earlier version of ${name}: ${counts}.`
       : `Review before saving ${name}: ${counts}.`;
     const empties = changed && file.text.trim() && !edit.text.trim();
@@ -70,7 +74,11 @@ function editor(file: InstructionFile) {
       h('div.ins-actions', { id: `ins-actions-${file.tool}` },
         button({ variant: 'primary', size: 'small', label: edit.restoring ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
         button({ variant: 'ghost', size: 'small', label: edit.restoring ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => { if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit'; rerender(); } }),
-        edit.restoring ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.stage = 'edit'; edit.confirmDiscard = true; rerender(); } })));
+        edit.restoring ? null : edit.confirmDiscard
+          ? h('span.ins-confirm', {}, h('span.ins-confirm-text', {}, `Discard your changes to ${name}?`),
+            button({ variant: 'outline', size: 'small', label: 'Discard', id: `ins-review-discard-yes-${file.tool}`, onclick: () => { state.instructionEdit = undefined; rerender(); } }),
+            button({ variant: 'ghost', size: 'small', label: 'Keep reviewing', id: `ins-review-keep-${file.tool}`, onclick: () => { edit.confirmDiscard = false; rerender(); } }))
+          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: `Write what ${names[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
@@ -123,7 +131,7 @@ function card(file: InstructionFile) {
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool]), pathText(shownPath(file.path), file.path),
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
-      savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved just now'),
+      savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === file.text }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
@@ -144,7 +152,7 @@ function card(file: InstructionFile) {
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
         h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
-        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || !!state.instructionEdit, attrs: state.instructionEdit ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
+        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== file.text), attrs: lockedWhy || editing ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 
 export function instructionsPage() {
@@ -155,6 +163,6 @@ export function instructionsPage() {
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   return h('div.page', {}, done || preview ? h('div.bands', {}, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept. Automatic sync leaves these files alone.'),
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
       files.length ? files.map(card) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }
