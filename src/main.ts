@@ -164,13 +164,14 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     if (!current) return;
     const result = await switchProfile(context(), id);
     // What could not be switched is told on the page, like a background pass's failures.
-    for (const entry of [...result.results.filter(item => item.outcome === 'failed' || item.outcome === 'held'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
+    for (const entry of [...result.results.filter(item => item.outcome === 'failed'), ...(result.stopped ? [{ item: 'Profile', outcome: 'failed' as const, message: result.stopped }] : [])]) pendingResults.push(entry);
     lastProfiles = await readProfiles(current.home);
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
-  return { label: `Profile: ${activeProfileName() ?? 'None'}`, submenu: [
+  return { label: activeProfileName() ? `Profile: ${activeProfileName()}` : 'Profile: No profile', submenu: [
     { label: 'No profile', type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
-    ...lastProfiles.profiles.map(profile => ({ label: profile.name, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable, click: () => choose(profile.id) })),
+    // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
+    ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
   ] };

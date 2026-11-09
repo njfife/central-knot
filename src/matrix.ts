@@ -38,6 +38,12 @@ type Kind = 'skills' | 'mcp' | 'agents';
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
 let kind: Kind = 'skills';
+/** The profile in use, when a profile switch turned this item off in this tool (Profiles: `held`); else undefined. */
+const heldByProfile = (key: string, tool: Tool) => {
+  const profiles = state.home?.profiles;
+  if (kind === 'agents' || !profiles?.held[`${kind === 'mcp' ? 'mcp' : 'skill'}:${key}`]?.includes(tool as HarnessId)) return undefined;
+  return profiles.profiles.find(profile => profile.id === profiles.active)?.name ?? 'an earlier switch';
+};
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
@@ -334,14 +340,16 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   const oneWay = !!skill.limits?.[tool] && on;
   const limited = oneWay ? ', one-way (with limits)' : '';
   const becomesSource = kind === 'agents' && pending && on && oneWaySource(skill) === tool && !committedOf(skill.key).managed;
-  const disabledNote = disabled ? `; disabled in ${names[tool]}` : switching ? `; enabled in ${names[tool]}` : '';
+  // Turned off by a profile switch (not by hand): said, and marked apart, so turning it back on here is not a surprise later.
+  const byProfile = disabled && !switching && heldByProfile(skill.key, tool);
+  const disabledNote = byProfile ? `; off in ${names[tool]} by a profile (${byProfile})` : disabled ? `; disabled in ${names[tool]}` : switching ? `; enabled in ${names[tool]}` : '';
   const text = skill.cannot?.[tool] ?? (becomesSource ? `${names[tool]}: becomes the source on Apply all; edits made in ${names[tool]} go to ${andList(Object.keys(skill.limits ?? {}).filter(entry => !skill.off.includes(entry as Tool)).map(entry => names[entry as Tool]))}` : null) ?? `${names[tool]}: ${state === 'will-sync' && skill.copies[tool] === undefined ? 'Gets a new copy on Apply all' : replaces ? 'Its copy is replaced on Apply all (kept in History)' : look.label}${limited}${disabledNote}${pending ? ' (not applied yet)' : ''}`;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
     h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}${disabled ? '.cell-disabled' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'glyph-fill' : '') : null,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
-      disabled ? h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null,
+      disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null,
       on && kind === 'agents' && skill.managed && oneWaySource(skill) === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
 }
 

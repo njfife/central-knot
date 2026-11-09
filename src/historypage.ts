@@ -57,7 +57,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   const where = switched.flips.length ? ` in ${list(switched.flips.map(flip => flip.tool))}` : '';
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? 'No profile';
-  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? 'No profile'}; back to ${to}: ${counts}${where}.`, action: 'Undo' };
+  if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? 'No profile'}; back to ${to}: ${counts}${where}.`, action: 'Redo' };
   return { glyph: 'sliders-horizontal', text: `Switched${switched.fromName ? ` from ${switched.fromName}` : ''} to ${to}: ${counts}${where}.`, action: 'Undo' };
 }
 
@@ -79,7 +79,7 @@ const day = (iso: string) => {
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
-const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Turn each switch it changed back, where it is still as it left it, and make ${event.profile?.fromName ?? 'No profile'} the profile again`
+const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Back to ${event.profile?.fromName ?? 'No profile'}: each switch this changed goes back, where it is still as this left it`
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${list(event.losers.map(loser => loser.tool))}`
   : event.kind === 'added' ? `Remove the copies Apply all added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
@@ -99,7 +99,7 @@ function actions(event: HistoryEvent, action?: string) {
   const touched = event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   const scope = !touched.length || touched.length >= presentCount() ? 'in all tools' : `in ${touched.map(who).join(' and ')}`;
   const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice' : action;
-  const label = event.kind === 'profile' ? 'Undo switch' : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
+  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;

@@ -1352,6 +1352,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-disabled.cell-on { background: transparent; border-color: var(--control-line); }
 .cell-disabled-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
 .cell-disabled-mark svg { width: 11px; height: 11px; }
+.cell-disabled-mark.cell-disabled-profile { color: var(--warning); }
 .legend-cell .cell-disabled-mark { top: -4px; right: -4px; width: 10px; height: 10px; }
 .legend-cell .cell-disabled-mark svg { width: 8px; height: 8px; }
 .cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
@@ -1373,9 +1374,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .profile-in-use { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border-radius: 4px; font-size: 11px; line-height: 14px; font-weight: 500; background: var(--picked); color: var(--accent-ink); }
 .profile-header .pane-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-header .pane-title p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.profile-actions { flex: none; gap: 8px; }
+.profile-header { flex-wrap: wrap; row-gap: 8px; }
+.profile-header .pane-title { flex: 1 1 220px; }
+.profile-actions { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 0; }
 .profile-actions .btn.text-danger { color: var(--danger); }
-.profile-confirm { font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
+.profile-confirm { font-size: 12px; line-height: 16px; color: var(--ink); }
 .profile-back { display: none; }
 .one-pane.page-profiles .profile-back { display: inline-flex; }
 .profile-name-input { width: min(100%, 360px); height: 28px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); color: var(--ink); font: 600 14px/20px var(--sans); user-select: text; cursor: text; }
@@ -1383,7 +1386,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 .pf-scroll { display: flex; flex-direction: column; }
 .pf-table { --pf-col: 96px; display: flex; flex-direction: column; min-width: calc(240px + var(--pf-tools) * var(--pf-col)); }
-.pf-row { display: grid; grid-template-columns: minmax(240px, 880px) repeat(var(--pf-tools), var(--pf-col)) minmax(0, 1fr); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--line); }
+.pf-row { display: grid; grid-template-columns: minmax(240px, 1fr) repeat(var(--pf-tools), var(--pf-col)); align-items: center; min-height: 37px; box-shadow: inset 0 -1px 0 var(--line); }
 .pf-row:not(.pf-head):hover { background: var(--hover); }
 .pf-head { position: sticky; top: 0; z-index: 2; background: var(--surface); min-height: 40px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
 .pf-head .pf-name { padding-left: 16px; }
@@ -1391,7 +1394,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-head-name { white-space: nowrap; }
 .pf-name { min-width: 0; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
 .pf-name-text { flex: 0 1 auto; min-width: 48px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pf-desc { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-desc { flex: 1 1 0; min-width: 0; max-width: 80ch; font-size: 12px; line-height: 16px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pf-tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 6px; color: var(--ink-soft); }
 .pf-tick:hover { background: var(--press); color: var(--ink); }
 .pf-tick .tick-box { margin: 0; }
@@ -1402,13 +1405,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .pf-row:not(.pf-head) .pf-cell::before { content: ''; position: absolute; width: 28px; height: 28px; border-radius: 6px; }
 .pf-cell-pending::before { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .pf-dot { width: 9px; height: 9px; border-radius: 999px; background: var(--ink); }
+.pf-dot-accent { background: var(--accent-ink); }
 .pf-section { display: flex; align-items: center; height: 33px; padding: 0 16px; background: var(--chrome); box-shadow: inset 0 -1px 0 var(--line), inset 0 1px 0 var(--line); position: sticky; top: 40px; z-index: 1; }
 .pf-section-label { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 16px; }
 .pf-section-count { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .pf-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 16px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .pf-legend > span { display: inline-flex; align-items: center; gap: 6px; }
-.pf-legend-ring { position: relative; width: 16px; height: 16px; }
-.pf-legend-ring::before { content: ''; position: absolute; inset: 0; border-radius: 4px; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.pf-legend-mark { position: relative; width: 20px; height: 20px; display: grid; place-items: center; }
+.pf-legend-mark.pf-cell-pending::before { content: ''; position: absolute; inset: 0; border-radius: 5px; }
 .pf-none { padding: 24px 16px; color: var(--ink-soft); }
 .pf-how { list-style: none; margin: 0; padding: 16px 16px 8px; display: flex; flex-direction: column; gap: 10px; max-width: 72ch; }
 .pf-how li { display: flex; align-items: flex-start; gap: 10px; color: var(--ink-soft); }
@@ -1421,6 +1425,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .status-profile:hover:not(:disabled) { background: var(--hover); }
 .status-profile:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .status-profile .icon { color: var(--accent-ink); flex: none; }
+.status-profile .status-profile-chevron { color: var(--ink-soft); }
 .pf-menu { position: absolute; bottom: calc(100% + 6px); left: -10px; z-index: 20; min-width: 200px; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--overlay, 0 10px 15px -3px rgb(0 0 0 / 10%), 0 4px 6px -4px rgb(0 0 0 / 10%)); }
 .pf-menu-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; font-size: 13px; line-height: 20px; color: var(--ink); white-space: nowrap; }
 .pf-menu-item:hover:not(:disabled), .pf-menu-item:focus-visible { background: var(--hover); }
@@ -1432,3 +1437,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Profiles: their pane header and toolbars span the pane (the Skills files view caps its own) */
 .profiles-split .detail-column .pane-header, .profiles-split .detail-column > .bands { max-width: none; }
 .profiles-split .toolbar-end { border-left: 0; padding-left: 0; }
+
+/* A narrow status bar keeps the home, the profile in use and the sync switch whole: the write note goes icon-only (its words stay on
+   hover) and the sync switch drops its idle note. */
+@media (max-width: 1180px) { .status-write .status-clip, .sync-note { display: none; } }

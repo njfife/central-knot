@@ -238,8 +238,8 @@ async function practiceFlow() {
   check('ticking only edits the profile', JSON.stringify(readSwitches()) === JSON.stringify(switchesBefore));
   await a.click('#profile-switch');
   const [claudeSwitches, copilotSwitches, codexSwitches] = readSwitches();
-  same('the switch turns the rest off in each tool’s own settings', [JSON.parse(claudeSwitches).skillOverrides?.standup, JSON.parse(claudeSwitches).deniedMcpServers, JSON.parse(copilotSwitches).disabledMcpServers, codexSwitches.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n')],
-    ['off', [{ serverName: 'docs' }], ['files'], true]);
+  same('the switch turns the rest off in each tool’s own settings, and leaves notes (ticked) on', [JSON.parse(claudeSwitches).skillOverrides?.notes ?? 'on', (JSON.parse(copilotSwitches).disabledSkills ?? []).includes('notes'), JSON.parse(claudeSwitches).skillOverrides?.standup, JSON.parse(claudeSwitches).deniedMcpServers, JSON.parse(copilotSwitches).disabledMcpServers, codexSwitches.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n')],
+    ['on', false, 'off', [{ serverName: 'docs' }], ['files'], true]);
   same('nothing is moved: copies and MCP entries stay', [existsSync(join(practice, '.claude/skills/standup/SKILL.md')), readFileSync(join(practice, '.claude.json'), 'utf8') === claudeJsonBefore], [true, true]);
   same('the status bar names the profile in use', (await a.text('#status-profile'))?.trim(), 'Incident');
   await a.click('#outcome-undo');

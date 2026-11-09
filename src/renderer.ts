@@ -123,12 +123,12 @@ function renderStatus() {
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
     // The profile in use is always in sight, right after the home, and one click away from switching.
     profileStatus() ?? '',
-    write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
+    write ? h(`span.status-item.status-write${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
     // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one.
     state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))
     : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
       title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'On · starts when something is managed') : 'Off')) : '',
+      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? 'On' : 'Off', state.home.syncOn && !anyManaged() ? h('span.sync-note', {}, ' · starts when something is managed') : null)) : '',
   );
   region('status-version').textContent = packageInfo.version;
   // The result band already says what just happened; the status bar does not say it twice.

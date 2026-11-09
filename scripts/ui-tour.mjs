@@ -41,6 +41,7 @@ async function launch() {
     run, send, settle,
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
+    press: async key => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: { ArrowDown: 40, ArrowUp: 38, Escape: 27, Enter: 13 }[key] }); await settle(); },
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
     quit: () => { socket.close(); child.kill('SIGKILL'); },
   };
@@ -231,11 +232,16 @@ if (wanted('profiles')) {
   await a.click('#profile-switch');
   const claudeSettings = readFileSync(join(practice, '.claude/settings.json'), 'utf8');
   await shot(a, 'incident-switched', `Clicked "Switch to Incident". Claude Code's settings.json now holds:\n\n\`\`\`json\n${claudeSettings}\`\`\`\n`);
+  await a.click('#pf-skill\\:review'); await shot(a, 'incident-drift', 'Ticked review in Incident, the profile in use: the subtitle says what Apply would change, nothing is written yet.');
+  await a.click('#pf-skill\\:review');
+  await a.click('#profile-delete'); await shot(a, 'delete-in-use', 'Clicked Delete on Incident, which is in use: it says why not, inline.');
+  await a.click('#profile-delete-cancel');
   await a.click('#profile-new'); await name('Development');
   await a.click('#profile-from-now'); await shot(a, 'development-from-now', 'Made a second profile, "Development", and clicked "Start from what\'s on now".');
   await a.click('#pf-skill\\:standup');
   await shot(a, 'development-edited', 'Ticked standup too.');
-  await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu.');
+  await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu, with focus on the profile in use.');
+  await a.press('ArrowDown'); await shot(a, 'status-menu-keys', 'Pressed the Down arrow key: focus moves to Development (Up, Down, Home and End move; Escape closes).');
   await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Development')).click()`); await a.settle();
   await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
   await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
@@ -256,8 +262,16 @@ if (wanted('profiles')) {
       await shot(a, `size-${width}-${theme}`, `Incident open on the Profiles page at ${width}×${height}, ${theme}.`);
     }
   }
-  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  // The narrowest window with a profile that is not in use: its header while renaming, and while confirming Delete.
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
+  if (await a.has('#profile-back')) await a.click('#profile-back');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
+  await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'At 860×560, opened Development (not in use) and clicked Rename.');
+  await a.press('Escape');
+  await a.click('#profile-delete'); await shot(a, 'size-860-delete-confirm', 'At 860×560, clicked Delete on Development: the confirmation wraps under the title.');
+  await a.click('#profile-delete-cancel');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
 }
 
 // ---------- Instructions ----------
