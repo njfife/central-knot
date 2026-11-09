@@ -1,4 +1,4 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
+import { announce, loadHome, rerender, selectItem, shownPath, showPage, startHome, state, syncNow } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
@@ -29,7 +29,7 @@ const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here ye
 /** Shown before any home has been read, or when reading failed. */
 function notRead() {
   if (state.busy) return reading();
-  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome(state.lastMode ?? 'fixture') })));
+  return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void (state.lastMode ? loadHome(state.lastMode) : startHome()) })));
 }
 
 const remembered = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
