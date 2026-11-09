@@ -1235,3 +1235,11 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .legend-switch { background: var(--accent); border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); }
 .legend-switch > .switch-knob { background: #fff; }
 .details-footnote { padding-left: 0; color: var(--ink-soft); }
+
+/* Round 18: one inset amber notice for every "waits for Claude Code" state; room inside it */
+.band-write-now { background: transparent; }
+.sync-notice.notice-stacked { padding: 10px 38px 10px 12px; border-radius: 6px; background: color-mix(in oklab, var(--warning) 7%, var(--surface)); }
+.sync-notice.notice-stacked > .notice-dismiss { top: 8px; right: 8px; }
+.notice-name { text-decoration: none; }
+.notice-name:hover { text-decoration: underline; }
+.details-definition-hint { grid-column: 1 / -1; color: var(--ink-faint); font-size: 12px; margin-top: 4px; }

@@ -453,7 +453,7 @@ async function practiceFlow() {
   check('release-notes reached Claude Code from Codex', readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Group them as Added, Changed and Fixed.'));
   check('code-reviewer reached Codex as TOML', readFileSync(join(practice, '.codex/agents/code-reviewer.toml'), 'utf8').includes('developer_instructions = """'));
   await a.click('#open-code-reviewer');
-  check('the details name the limits', /Tools \(.*model \(.*stay in Claude Code only/.test(await a.text('.details') ?? ''), await a.text('.details'));
+  check('the details name the limits', /Tools \(.*model \(.*aren’t copied/.test(await a.text('.details') ?? ''), await a.text('.details'));
   await a.shot('practice-agents');
   // One-way edge: an edit in a receiving tool stays there and stops updating; its amber box queues the source's copy again.
   const codexAgent = join(practice, '.codex/agents/code-reviewer.toml');

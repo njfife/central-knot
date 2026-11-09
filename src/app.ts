@@ -155,7 +155,7 @@ const readSummary = (view: HomeView) => {
   const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
   // "Nothing changed" means nothing was written; a copy that stopped updating is still news, so it is said.
   const stopped = (view.agents?.servers ?? []).filter(server => server.managed && server.stopped?.length).map(server => `${server.name}’s ${server.stopped!.length === 1 ? 'copy in one tool' : 'copies in some tools'}`);
-  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? 'Nothing was written.' : 'Nothing changed.'}`;
+  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? '' : 'Nothing changed.'}`;
 };
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
@@ -570,7 +570,7 @@ export const writeClaudeNow = (names: string[]) => busy('Writing to Claude Code�
   if (view) state.home = view;
   state.mcpResult = result;
   const written = result.claudeWritten ?? [];
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to Claude Code’s practice settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
+  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
     act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
   announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
 });
