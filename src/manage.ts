@@ -7,9 +7,9 @@ import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
-  remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
+  remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
 export const presentTools = (snapshots: Snapshot[]) => snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => snapshot.harness);
@@ -178,6 +178,9 @@ export async function appendHistory(context: ShareContext, events: HistoryEvent[
   if (events.length) await saveHistory(context, [...await readHistory(context), ...events]);
 }
 
+/** The item's deletion, unless it has been managed again since: a re-shared item keeps its old deletion record, which no longer stands. */
+const standingDeletion = (item: RecordItem) => (item.state !== 'shared' ? item.deleted : undefined);
+
 /** The oldest moment History keeps (STO-04): the days chosen in Settings back from now. */
 const historyCutoff = (context: ShareContext) => clock(context) - (context.historyDays ?? defaultHistoryDays) * DAY_MS;
 
@@ -199,12 +202,15 @@ export async function readHistory(context: ShareContext): Promise<HistoryEvent[]
  * so a stale replica still can't bring the item back. A copy still marked 'removing' is that stale replica: removing it needs
  * only its hash, not the stored content.
  */
-async function pruneStore(context: ShareContext, record: SyncRecord, events: HistoryEvent[]) {
+async function pruneStore(context: ShareContext, events: HistoryEvent[]) {
+  const { record } = await readRecord(context.home);
+  if (!record) return;
   const keep = new Map<string, Set<string>>();
   const hold = (key: string, hash?: string) => { if (!hash) return; let set = keep.get(key); if (!set) { set = new Set(); keep.set(key, set); } set.add(hash); };
   const cutoff = historyCutoff(context);
   for (const [key, item] of Object.entries(record.items)) {
-    const expired = item.state !== 'shared' && !!item.deleted && Date.parse(item.deleted.at) < cutoff;
+    const deletion = standingDeletion(item);
+    const expired = !!deletion && Date.parse(deletion.at) < cutoff;
     if (!expired) { hold(key, item.hash); hold(key, item.deleted?.hash); }
     hold(key, item.use?.hash);
     for (const copy of item.copies) if (!expired || copy.status !== 'removing') hold(key, copy.hash);
@@ -226,29 +232,35 @@ async function pruneStore(context: ShareContext, record: SyncRecord, events: His
   }
 }
 
+/** Writes History. History that cannot be read, or is not History, is moved aside, never overwritten: it may be recoverable by hand. */
+async function writeHistory(home: string, events: HistoryEvent[]) {
+  let sound = true;
+  try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
+  if (!sound) await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined);
+  await writeDurably(historyPath(home), `${JSON.stringify({ events }, null, 2)}\n`);
+}
+
 /**
  * Every History write (skills, MCP servers, agents, deletes and restores) goes through here. `events` come from readHistory, so
  * they are already inside the window. After writing, the store frees what only expired History and deletions kept, so any
  * home's next History write applies a window shortened elsewhere. That cleanup runs only in a home this build syncs and may write.
  */
 async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
-  const home = context.home;
-  // History that cannot be read, or is not History, is moved aside, never overwritten: it may be recoverable by hand.
-  let sound = true;
-  try { sound = Array.isArray(JSON.parse(await readFile(historyPath(home), 'utf8'))?.events); } catch (error) { sound = errorCode(error) === 'ENOENT'; }
-  if (!sound) await rename(historyPath(home), join(storeDirectory(home), `history.unreadable-${Date.now()}.json`)).catch(() => undefined);
-  await writeDurably(historyPath(home), `${JSON.stringify({ events }, null, 2)}\n`);
-  if (!(await writeAccess(context)).allowed || (await syncGate(context)).state !== 'ready') return;
-  const { record } = await readRecord(home);
-  if (record) await pruneStore(context, record, events);
+  await writeHistory(context.home, events);
+  if (await syncsHere(context)) await pruneStore(context, events);
 }
 
 /**
  * Applies a shortened window to this home at once (Settings): History loses what is now older, and the store frees what only
- * that kept. Only a home this build syncs and may write; a preview-only home, or another home, follows at its next History write.
+ * that kept. Only a home this build syncs and may write ('done'); a preview-only home, or another build's, keeps it until its
+ * next History write there ('later').
  */
-export async function pruneHistory(context: ShareContext) {
-  if ((await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready') await saveHistory(context, await readHistory(context));
+export async function pruneHistory(context: ShareContext): Promise<Exclude<HistoryPrune, 'failed'>> {
+  if (!(await syncsHere(context))) return 'later';
+  const events = await readHistory(context);
+  await writeHistory(context.home, events);
+  await pruneStore(context, events);
+  return 'done';
 }
 
 const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
@@ -860,9 +872,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   for (const left of carried) {
     const item = record.items[left.key];
     if (!item || named(left.key, left.hash)) continue;
-    const gone = item.state !== 'shared' && item.deleted;
+    const gone = standingDeletion(item);
     event(gone
-      ? { key: left.key, item: item.name, kind: 'deleted', winner: { tool: item.deleted!.tool, hash: item.deleted!.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: item.deleted!.hash }
+      ? { key: left.key, item: item.name, kind: 'deleted', winner: { tool: gone.tool, hash: gone.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: gone.hash }
       : { key: left.key, item: item.name, kind: 'edit', winner: { tool: left.tool, hash: item.hash }, losers: [{ tool: left.tool, hash: left.hash }], orderProved: false, previous: left.hash });
   }
   await save();

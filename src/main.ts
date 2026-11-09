@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
-import { syncGate, writeAccess, type ShareContext } from './share.ts';
+import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
@@ -17,7 +17,7 @@ import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HistoryDays, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ShownLog, Snapshot } from './types.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -71,8 +71,7 @@ function context(): ShareContext {
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
-    // Read when History is written or pruned, not when the pass began: a pass under way follows a window changed meanwhile.
-    get historyDays() { return historyDays(); },
+    historyDays: historyDays(),
   };
 }
 
@@ -131,8 +130,8 @@ const appearances: Appearance[] = ['system', 'light', 'dark'];
 const appearance = (): Appearance => appSettings.appearance && appearances.includes(appSettings.appearance) ? appSettings.appearance : 'system';
 const isHistoryDays = (value: unknown): value is HistoryDays => historyDayChoices.includes(value as HistoryDays);
 const historyDays = (): HistoryDays => isHistoryDays(appSettings.historyDays) ? appSettings.historyDays : defaultHistoryDays;
-/** The newest History window asked for, so one overtaken while it waited in the queue knows it. */
-let historyAsked = 0;
+/** Counts History window changes asked for: a queued one whose number is no longer the latest was overtaken and does nothing. */
+let historyRequests = 0;
 const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
@@ -291,7 +290,7 @@ let otherSettling = false;
 /** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
 async function pass(explicit = false): Promise<ApplyResult | undefined> {
   const shared = context();
-  if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return undefined;
+  if (!(await syncsHere(shared))) return undefined;
   const result = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (syncOn || explicit) {
@@ -572,18 +571,20 @@ app.whenReady().then(async () => {
   handleNow('settings:open-sign-in', openSignInSettings);
   // Every window change takes its turn in the queue, in the order asked, so none runs beside a sync pass or another change.
   // Whether it is shorter (and so prunes) is decided against the saved window when its turn comes, and one a newer request
-  // overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads
-  // the saved window either way, so a prune that can't finish is only logged.
-  handleNow('settings:history-days', async days => {
+  // overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads the
+  // saved window either way, so a prune that fails is logged and reported, never undoes the saved window.
+  handleNow('settings:history-days', async (days): Promise<HistoryWindowSaved> => {
     if (!isHistoryDays(days)) throw new Error('Invalid history days.');
-    const asked = ++historyAsked;
-    await queued(async () => {
-      if (asked !== historyAsked) return;
+    const asked = ++historyRequests;
+    const pruned = await queued(async (): Promise<HistoryPrune | undefined> => {
+      if (asked !== historyRequests) return undefined;
       const shorter = days < historyDays();
       await saveAppSettings({ historyDays: days });
-      if (shorter && current) await pruneHistory(context()).catch(error => logFailure('history prune', error));
+      if (!shorter) return undefined;
+      if (!current) return 'later';
+      return pruneHistory(context()).catch(error => { logFailure('history prune', error); return 'failed' as const; });
     });
-    return preferences();
+    return { settings: preferences(), pruned };
   });
   handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {

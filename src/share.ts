@@ -339,6 +339,11 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   return { state: 'ready' };
 }
 
+/** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */
+export async function syncsHere(context: ShareContext): Promise<boolean> {
+  return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
+}
+
 /** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */
 export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   if (context.mode === 'actual') {

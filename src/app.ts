@@ -23,6 +23,7 @@ export const state = {
   agentsResult: undefined as McpResult | undefined,
   /** What sync did on its own, newest last, read when the History page opens. */
   history: undefined as HistoryEvent[] | undefined,
+  /** How long History keeps things, for History's intro; read with History when the page opens. */
   historyDays: undefined as HistoryDays | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
@@ -209,9 +210,13 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
-/** History, and how long it is kept (said in its intro; unsaid if the settings can't be read). */
+/**
+ * History, and how long it is kept (said in its intro; unsaid if the settings can't be read). The window is read after History:
+ * a window change waits in main's queue just as the History read does, so read in this order the caption describes the events.
+ */
 export const loadHistory = () => busy('Reading History…', async () => {
-  const [history, settings] = await Promise.all([api().history(), api().getSettings().catch(() => undefined)]);
+  const history = await api().history();
+  const settings = await api().getSettings().catch(() => undefined);
   state.history = history;
   state.historyDays = settings?.historyDays;
   announce('');

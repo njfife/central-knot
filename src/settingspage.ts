@@ -4,17 +4,17 @@ import { announce, rerender } from './app.ts';
 import { button, h, icon, toggle, trayName } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
-import type { AppPreferences, Appearance, HistoryDays, SignInPlace } from './types.ts';
+import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, SignInPlace } from './types.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
 
 /**
  * A line beneath a row: a note on what its last action did, why it failed, that the system ignored it (attention), or how the
- * system has the setting now (system), with an `action` that takes the person there; or that the row's change is still under way
- * (progress). `about` is the row's value it describes, as `shownIn`.
+ * system has the setting now (system), with an `action` that takes the person there; that the row's change is still under way
+ * (progress), or what it did that can't be seen in the row (done). `about` is the row's value it describes, as `shownIn`.
  */
-interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 'system' | 'progress'; action?: { label: string; run: () => void }; about?: string }
+interface RowMessage { text: string; tone: 'note' | 'failure' | 'attention' | 'system' | 'progress' | 'done'; action?: { label: string; run: () => void }; about?: string }
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
@@ -30,18 +30,25 @@ let shortening: HistoryDays | undefined;
 /** A window change main is still carrying out (it may wait for a sync pass): until it's done the row can't start another. */
 let updatingHistory = false;
 
-/** Answers from main can cross (a save, then a re-read on focus): only the newest request's answer is shown. */
-let latest = 0;
+/**
+ * Answers from main can cross (a save, then the re-read main asks for after saving): requests are numbered, and the newest
+ * answer shown so far is remembered, so an answer older than it is never shown over it.
+ */
+let requested = 0;
+let shownAnswer = 0;
 
 /**
- * Shows main's answer unless a newer request has started since, and returns it either way; a rejected answer propagates to the
- * caller. An answer that matches the page leaves it alone: rebuilding it when the window is focused would swallow the click
- * that focused it. A row's message that the answer settles goes with it.
+ * Shows main's answer unless a newer one is already showing, and returns it either way; a rejected answer propagates to the
+ * caller. An answer arriving before a newer request's is shown at once: a row's message is weighed against what the page shows,
+ * so the page must not lag behind the save it reports on. An answer that matches the page leaves it alone: rebuilding it when
+ * the window is focused would swallow the click that focused it. A row's message that the answer settles goes with it.
  */
 async function showNewest(answer: Promise<AppPreferences>): Promise<AppPreferences> {
-  const mine = ++latest;
+  const mine = ++requested;
   const settings = await answer;
-  if (mine !== latest || JSON.stringify(settings) === JSON.stringify(current)) return settings;
+  if (mine < shownAnswer) return settings;
+  shownAnswer = mine;
+  if (JSON.stringify(settings) === JSON.stringify(current)) return settings;
   current = settings;
   for (const [row, message] of messages) if (settled(row, message)) messages.delete(row);
   rerender();
@@ -168,24 +175,31 @@ const shortenQuestion = (days: HistoryDays) =>
   `History from before ${removedBefore(days)} will be removed and can’t be restored. Your other homes remove it too, the next time they record a change.`;
 
 /**
+ * What a shorter window did to older History, as main reports it. Only 'done' says anything was removed; otherwise the window is
+ * saved and History already shows only what it covers, but the older History is still in this home's files.
+ */
+const pruneNotes: Record<HistoryPrune, (before: string) => Pick<RowMessage, 'text' | 'tone'>> = {
+  done: before => ({ text: `History before ${before} was removed.`, tone: 'done' }),
+  later: before => ({ text: `Saved. History before ${before} is removed from this home the next time it records a change.`, tone: 'done' }),
+  failed: before => ({ text: `Saved, but History before ${before} couldn’t be removed. Central Knot tries again the next time this home records a change; the log file says why.`, tone: 'failure' }),
+};
+
+/**
  * Saves the window. Main may first wait for a sync pass, so meanwhile the row says it is updating and can't start another
- * change (the other rows still can). After a shorter window it says from when History was removed.
+ * change (the other rows still can). After a shorter window it says what became of the older History.
  */
 async function keepHistoryFor(days: HistoryDays) {
   const kept = current ? `History is still kept for ${current.historyDays} days.` : '';
-  const shorter = !!current && days < current.historyDays;
   const before = removedBefore(days);
   shortening = undefined;
   updatingHistory = true;
   rerender();
   announce('Updating history…', true);
   try {
-    // Only when main saved this very window: a newer request that overtook it in main's queue removed nothing on its behalf.
-    await save('history', () => window.centralKnot.setHistoryDays(days), kept, saved => {
-      if (!shorter || saved.historyDays !== days) return undefined;
-      announce(`History before ${before} was removed.`, true);
-      return { text: `History before ${before} was removed.`, tone: 'note', about: shownIn('history', saved) };
-    });
+    // Main reports nothing pruned for a longer window, or for a request a newer one overtook in its queue.
+    let pruned: HistoryPrune | undefined;
+    const change = async () => { const answer = await window.centralKnot.setHistoryDays(days); pruned = answer.pruned; return answer.settings; };
+    await save('history', change, kept, saved => pruned && { ...pruneNotes[pruned](before), about: shownIn('history', saved) });
   } finally {
     updatingHistory = false;
     rerender();
@@ -221,7 +235,7 @@ const showLog = () => act('log', async () => {
 
 const messageLook: Record<RowMessage['tone'], { glyph: IconName; role: 'status' | 'alert' }> = {
   note: { glyph: 'folder-open', role: 'status' }, failure: { glyph: 'circle-alert', role: 'alert' },
-  attention: { glyph: 'info', role: 'status' }, system: { glyph: 'info', role: 'status' }, progress: { glyph: 'clock', role: 'status' },
+  attention: { glyph: 'info', role: 'status' }, system: { glyph: 'info', role: 'status' }, progress: { glyph: 'clock', role: 'status' }, done: { glyph: 'check', role: 'status' },
 };
 /**
  * One line beneath a row, its action after the text. `id` (from the row) also names the action, so focus on it survives a

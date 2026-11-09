@@ -1031,7 +1031,7 @@ test('R12: a History file of the wrong shape is moved aside; R13: History keeps 
     assert.ok(record!.items.gone.deleted, 'the deletion record stays');
     assert.ok((await storeOf('pair')).includes(record!.items.pair.hash), 'the current revision stays');
 
-    await pruneHistory(timed(7));
+    assert.equal(await pruneHistory(timed(7)), 'done', 'a home this build syncs is pruned at once');
     assert.deepEqual(await kept(7), ['five']);
     assert.ok(JSON.parse(await readFile(file, 'utf8')).events.every((entry: { key: string }) => !['sixty', 'twenty'].includes(entry.key)), 'History’s file was rewritten, not just read shorter');
 

@@ -27,6 +27,9 @@
   --picked: #edf1fc;
   --danger: #b91c1c;
   --danger-tint: #fef0f0;
+  /* The strong danger fill behind white text (a destructive button), the same in both themes as the reference gives it. */
+  --danger-strong: #dc2626;
+  --danger-strong-hover: #b91c1c;
   --warning: #b45309;
   --warning-tint: #fef7eb;
   --success: #047857;
@@ -161,9 +164,9 @@ ul { list-style: none; }
 .btn.square { padding: 0; aspect-ratio: 1; }
 .btn.primary { background: var(--accent); color: #fff; box-shadow: var(--lift); }
 .btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
-/* Destructive: the strong danger fill in both themes, as the reference gives it, so white text keeps its contrast. */
-.btn.danger { background: #dc2626; color: #fff; box-shadow: var(--lift); }
-.btn.danger:hover:not(:disabled) { background: #b91c1c; }
+/* Destructive: the strong danger fill, not --danger, which dark mode lightens past white text's contrast. */
+.btn.danger { background: var(--danger-strong); color: #fff; box-shadow: var(--lift); }
+.btn.danger:hover:not(:disabled) { background: var(--danger-strong-hover); }
 .btn.secondary { background: var(--hover); }
 .btn.secondary:hover:not(:disabled) { background: var(--press); }
 .btn.outline { background: var(--surface); border-color: var(--control-line); box-shadow: var(--lift); }
@@ -1364,7 +1367,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
    words, never the row's far end; where they don't fit beside them they wrap to the notice's left edge, as a stacked row's control does. */
 .setting-confirm { grid-column: 1 / -1; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: -4px; }
 .setting-confirm > .icon { align-self: flex-start; margin-top: 2px; }
-.setting-confirm-text { flex: 1 1 320px; min-width: 0; max-width: 72ch; }
+.setting-confirm-text { flex: 1 1 200px; min-width: 0; max-width: 72ch; }
 .setting-confirm-actions { display: flex; gap: 8px; }
 /* The system ignored the person's change: it reads apart from the hints and needs them, without alarm. */
 .setting-attention { color: var(--ink); }

@@ -613,23 +613,30 @@ async function practiceFlow() {
   await a.click('#history-shorten-cancel');
   same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
   // A window change waits its turn behind whatever main is doing (here a held queue standing in for a long sync pass). Meanwhile
-  // the row says so and takes no other change, and other rows still work. A newer request that arrives meanwhile wins: the
-  // confirmed shorter window it overtook neither saves nor removes anything.
+  // the row says so and takes no other change, and other rows still work. Newer requests that arrive meanwhile win: the
+  // confirmed shorter window they overtook neither saves nor removes anything, and main reports nothing pruned for it. History
+  // opened while they wait shows the window that won with the events it covers, never the window from before.
   if (a.main) {
     const main = await a.main();
     const held = await holdQueue(main, a);
     await keepFor(a, 7);
     await a.click('#history-shorten');
-    await a.run(`void (window.ckLonger = window.centralKnot.setHistoryDays(90).then(saved => (window.ckLongerDone = true, saved)))`);
+    await a.run(`void (window.ckOvertaken = window.centralKnot.setHistoryDays(7))`);
+    await a.run(`void (window.ckNewest = window.centralKnot.setHistoryDays(30).then(saved => (window.ckNewestDone = true, saved)))`);
     await a.click('#appearance-light');
     const during = [await a.run(`document.querySelector('#history-days').disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten'),
-      await a.run(`window.ckLongerDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+      await a.run(`window.ckNewestDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+    // Not a.click: it waits for the page to be idle, and History's read waits behind the held queue.
+    await a.run(`document.querySelector('#nav-history').click()`);
     await held.release();
-    await a.run('window.ckLonger');
+    const [overtaken, newest] = [await a.run('window.ckOvertaken'), await a.run('window.ckNewest')];
     await a.settle();
-    same('while main is busy the row says it is updating and takes no other change; the newest request wins and the overtaken shorter one removes nothing',
-      [during, savedSettings().historyDays, agedOnFile(), await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`), await a.exists('#setting-history-message')],
-      [[true, 'Updating history…', false, false, 90, true], 90, ['aged-60', 'aged-20', 'aged-5'], '90', false, false]);
+    const listedMeanwhile = await a.text('#history-scroll') ?? '';
+    same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
+      [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
+      [[true, 'Updating history…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days (Settings).']);
+    await a.click('#nav-settings');
+    same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
     main.close();
   }
@@ -759,9 +766,16 @@ async function realHomeFlow() {
     writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
     const before = readFileSync(previewHistory, 'utf8');
     const restarted = (await a.run('window.centralKnot.getSettings()')).historyDays;
-    await a.run(`window.centralKnot.setHistoryDays(30).then(() => window.centralKnot.setHistoryDays(7))`);
-    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window',
-      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).length], [7, true, 0]);
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    await a.click('#nav-settings');
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
+    const previewNote = await a.text('#setting-history-message') ?? '';
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says the older History goes later rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).length, (await a.run('window.centralKnot.getSettings()')).historyDays,
+        previewNote.replace(/before .+ is/, 'before … is')],
+      [7, true, 0, 7, 'Saved. History before … is removed from this home the next time it records a change.']);
     await a.run('window.centralKnot.setHistoryDays(30)');
     rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();

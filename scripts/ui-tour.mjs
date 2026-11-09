@@ -229,6 +229,14 @@ if (wanted('settings')) {
   await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
   // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
   const DAY = 24 * 60 * 60 * 1000;
+  // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time it records a change.
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says older History goes the next time this home records a change, not that it was removed.');
+  await keepFor(a, 30);
+  // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
+  await a.click('#nav-skills');
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  await a.click('#nav-settings');
   mkdirSync(join(practice, '.central-knot'), { recursive: true });
   writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
     { id: 'tour-25', at: new Date(Date.now() - 25 * DAY).toISOString(), key: 'standup', item: 'standup', kind: 'deleted', winner: { tool: 'copilot-cli', hash: 'a'.repeat(64) }, losers: [], orderProved: true, previous: 'a'.repeat(64) },
@@ -255,10 +263,18 @@ if (wanted('settings')) {
     await held.release(); main.close();
   }
   await wait(300); await a.settle();
-  await shot(a, 'settings-history-shortened', 'Shortened to 7 days: saved, the select shows it, and the row says from when History was removed.');
+  await shot(a, 'settings-history-shortened', 'Shortened to 7 days: saved, the select shows it, and the row says (with a check) from when History was removed.');
   await a.theme('light'); await shot(a, 'settings-history-shortened-light', 'The same, light.'); await a.theme('dark');
   await a.click('#nav-history'); await shot(a, 'history-after-shorten', 'History after shortening to 7 days: only the change from 3 days ago is left, and the intro says how long History keeps changes.');
-  await a.click('#nav-settings'); await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
+  await a.click('#nav-settings'); await keepFor(a, 30);
+  // A shorten whose removal fails (the home's History folder made read-only): the window is saved anyway, and the row says what didn't happen.
+  const store = join(practice, '.central-knot');
+  chmodSync(store, 0o555);
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-prune-failed', 'Shortened to 7 days with the home’s History folder read-only: the window is saved (the select shows 7), and the row says the older History couldn’t be removed yet and that the log says why.');
+  await a.theme('light'); await shot(a, 'settings-history-prune-failed-light', 'The same, light.'); await a.theme('dark');
+  chmodSync(store, 0o755);
+  await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
   // A wide row's hover: pointing at the hint lights the whole row, out to its button.
   await size(1728, 1117);
   const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
