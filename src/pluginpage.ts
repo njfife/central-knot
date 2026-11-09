@@ -132,5 +132,5 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
     installPanel(view, entry, plugin, marketIndex, components),
     contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
     components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null,
-    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts.map(part => part.name)))) : null);
+    detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null);
 }

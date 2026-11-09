@@ -115,13 +115,19 @@ const copying = new Map<string, Promise<string | undefined>>();
  * complete. Returns a problem to show (why Git failed, in words a person can act on: MKT-05), or undefined when the copy
  * is in place. A copy of the same target already being made is shared, not started again.
  */
-function shallowClone(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
-  const pending = copying.get(target) ?? cloneInto(context, url, target, ref, sha).finally(() => copying.delete(target));
+function shallowClone(context: PluginContext, url: string, target: string, want: CloneWant = {}): Promise<string | undefined> {
+  const pending = copying.get(target) ?? cloneInto(context, url, target, want).finally(() => copying.delete(target));
   copying.set(target, pending);
   return pending;
 }
 
-async function cloneInto(context: PluginContext, url: string, target: string, ref?: string, sha?: string): Promise<string | undefined> {
+/**
+ * What a copy must be: on a branch or tag (`ref`), at a pinned commit (`sha`), and passing `check` (given the new copy's
+ * folder, it returns a problem or undefined). A copy that fails any of them never replaces the one already there.
+ */
+interface CloneWant { ref?: string; sha?: string; check?: (folder: string) => Promise<string | undefined> }
+
+async function cloneInto(context: PluginContext, url: string, target: string, { ref, sha, check }: CloneWant): Promise<string | undefined> {
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   await dropStages(target);
@@ -137,6 +143,8 @@ async function cloneInto(context: PluginContext, url: string, target: string, re
     const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']) : fetched;
     if (checked.code !== 0) { await rm(stage, { recursive: true, force: true }); return `The commit it names (${sha.slice(0, 12)}) could not be read.`; }
   }
+  const refused = check ? await check(stage) : undefined;
+  if (refused) { await rm(stage, { recursive: true, force: true }); return refused; }
   await rm(target, { recursive: true, force: true });
   await rename(stage, target);
   return undefined;
@@ -154,7 +162,7 @@ export const remoteCopyFolder = (context: PluginContext, remote: { url: string; 
 export async function readRemotePlugin(context: PluginContext, remote: { url: string; path: string; ref?: string; sha?: string }): Promise<{ folder: string; root: string } | { problem: string }> {
   const root = remoteCopyFolder(context, remote);
   if (!(await stat(root).then(() => true, () => false))) {
-    const problem = await shallowClone(context, remote.url, root, remote.ref, remote.sha);
+    const problem = await shallowClone(context, remote.url, root, { ref: remote.ref, sha: remote.sha });
     if (problem) return { problem };
   }
   const folder = resolve(root, remote.path || '.');
@@ -167,7 +175,8 @@ export async function readCatalog(context: PluginContext, source: string): Promi
   let root = source;
   if (kind === 'git') {
     const target = catalogFolder(context, source);
-    const problem = await shallowClone(context, fetchUrl(source), target);
+    // A fetched copy that isn't a readable marketplace never replaces the last good one, which stays browsable.
+    const problem = await shallowClone(context, fetchUrl(source), target, { check: async folder => (await parseCatalog(folder, source, kind, { counts: false })).problem });
     if (problem) return { name: '', source, kind, fetchedAt: new Date().toISOString(), plugins: [], problem };
     root = target;
   }

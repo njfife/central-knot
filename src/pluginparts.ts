@@ -6,7 +6,7 @@ import { markdown } from './markdown.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
 import { PREVIEW_ONLY, cantUninstall, stateOf, unavailable } from './pluginstatus.ts';
-import type { HarnessId, MarketplaceView, PluginView, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
 /** The name a plugin is shown by: its display name when the catalog gives one. */
@@ -60,13 +60,13 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 const rendered = new Map<string, HTMLElement>();
 /**
  * A README as page content. Its opening title, a first paragraph that mostly repeats a description already on the page,
- * and lists that only name parts the page already lists (`partNames`) are left out.
+ * and what only repeats the parts the page lists (`parts`, see markdown.trimRepeats) are left out.
  */
-export function readme(body: string, name: string, descriptions: string[] = [], partNames: string[] = []): HTMLElement {
-  const cacheKey = JSON.stringify([name, descriptions, partNames, body]);
+export function readme(body: string, name: string, descriptions: string[] = [], parts: NamedPart[] = []): HTMLElement {
+  const cacheKey = JSON.stringify([name, descriptions, parts, body]);
   const cached = rendered.get(cacheKey);
   if (cached) return cached;
-  const node = markdown(body, openLink, { skipTitle: name, skipLead: descriptions.filter(Boolean), skipListsOf: partNames });
+  const node = markdown(body, openLink, { skipTitle: name, skipLead: descriptions.filter(Boolean), skipParts: parts });
   if (rendered.size > 40) rendered.clear();
   rendered.set(cacheKey, node);
   return node;

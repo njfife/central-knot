@@ -61,16 +61,24 @@ test('A heading line of thousands of spaces is read at once, and closing #s are 
 
 test('A list that only names parts already on the page is left out, with a heading it alone filled', () => {
   const source = '## Skills\n\n- `pdf-reader`: reads PDFs\n- **sheet-tidy** — tidies sheets\n\n## Setup\n\n- Run pdf-reader on a file\n- Then sheet-tidy it\n\n## More\n\nIncludes:\n\n- pdf-reader\n- sheet-tidy\n';
-  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['pdf-reader', 'sheet-tidy'] });
+  const blocks = trimRepeats(parseMarkdown(source), { skipParts: [{ name: 'pdf-reader', description: 'Reads PDFs' }, { name: 'sheet-tidy', description: 'Tidies sheets' }] });
   assert.deepEqual(blocks.map(block => block.kind), ['heading', 'list', 'heading', 'paragraph']);
   assert.equal(text((blocks[0] as Extract<Block, { kind: 'heading' }>).content), 'Setup');
 });
 
-test('Under a Skills heading, a skill’s own sub-section is left out; other sections stay', () => {
-  const source = '## What it does\n\nApps.\n\n## Skills\n\n### spark-app-template\n\nActivated when…\n\n- Tech stack\n- Design\n\n### pdf-reader\n\nUse it like this:\n\n```\npdf read x\n```\n\n## Stack variations\n\nA table.\n';
-  const blocks = trimRepeats(parseMarkdown(source), { skipListsOf: ['spark-app-template', 'pdf-reader'] });
-  // A part's prose repeats the page; its usage example (code) is kept with its heading.
-  assert.deepEqual(blocks.map(block => block.kind === 'heading' ? text(block.content) : block.kind), ['What it does', 'paragraph', 'Skills', 'pdf-reader', 'paragraph', 'code', 'Stack variations', 'paragraph']);
+test('Under a Skills heading, a skill’s paragraph that repeats its description goes; setup steps and examples stay', () => {
+  const source = [
+    '## What it does', '', 'Apps.', '',
+    '## Skills', '', '### spark-app-template', '', 'Use when the user wants to create a new web application or dashboard.', '',
+    '### pdf-reader', '', 'Reads PDF files and pulls out text.', '', 'Before first use, install Poppler and restart the tool.', '', '```', 'pdf read x', '```', '',
+    '## Stack variations', '', 'A table.', '',
+  ].join('\n');
+  const blocks = trimRepeats(parseMarkdown(source), { skipParts: [
+    { name: 'spark-app-template', description: 'Comprehensive guidance. Use when the user wants to create a new web application, dashboard, or interface.' },
+    { name: 'pdf-reader', description: 'Reads PDF files and pulls out text and tables.' },
+  ] });
+  const shown = blocks.map(block => block.kind === 'heading' ? text(block.content) : block.kind === 'paragraph' ? text(block.content) : block.kind);
+  assert.deepEqual(shown, ['What it does', 'Apps.', 'Skills', 'pdf-reader', 'Before first use, install Poppler and restart the tool.', 'code', 'Stack variations', 'A table.']);
 });
 
 test('Common README shapes read right: badges, code in emphasis, a fence in a list, setext headings, escapes', () => {

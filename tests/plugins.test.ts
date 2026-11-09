@@ -233,6 +233,13 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     assert.equal(catalog.kind, 'git');
     assert.deepEqual(catalog.plugins.map(plugin => plugin.name), ['escape', 'full', 'marker']);
     assert.equal((await readdir(join(box.context.dataDir, 'catalogs'))).length, 1, 'one copy, no leftovers');
+    // A fetch that brings a broken marketplace.json is refused, and the last good copy stays.
+    await writeFile(join(root, '.claude-plugin/marketplace.json'), '{ broken');
+    git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qam', 'broken'], root);
+    git(['push', '-q', join(box.base, 'served/market.git'), 'HEAD'], root);
+    assert.match((await readCatalog(box.context, url)).problem ?? '', /could not be read as JSON/);
+    assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the good copy was kept');
+    assert.equal((await readdir(join(box.context.dataDir, 'catalogs'))).length, 1, 'and no stage was left');
     server.kill();
     // One clone, no separate access check: its failure is classified in words a person can act on.
     assert.match((await readCatalog(box.context, url)).problem ?? '', /Can’t reach the marketplace/);

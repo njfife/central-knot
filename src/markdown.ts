@@ -23,8 +23,8 @@ export interface MarkdownOptions {
   skipTitle?: string;
   /** Leave out a first paragraph that mostly repeats one of these (a description already on the page). */
   skipLead?: string[];
-  /** Names already listed on the page (a plugin's skills, commands, agents): a list naming only these is left out. */
-  skipListsOf?: string[];
+  /** Parts the page already lists with their descriptions (a plugin's skills, commands, agents): see trimRepeats. */
+  skipParts?: { name: string; description: string }[];
 }
 
 const MAX_QUOTE_DEPTH = 6;
@@ -203,34 +203,35 @@ const isHeadingAtMost = (block: Block, level: number) => block.kind === 'heading
 const PARTS_HEADING = /^(?:included |available |the )?(?:skills?|commands?|agents?|slash commands)$/i;
 
 /**
- * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and what only names the
- * parts in `skipListsOf` again. That is a list of two or more items that each start with a part's name ("pdf-reader:
- * reads PDFs"), and, under a heading such as "Skills", a part's own sub-section (its heading is the part's name) unless
- * it holds code or a table. A heading left with nothing under it goes too.
+ * Leaves out what only repeats the page around the README: an opening title, a lead paragraph, and what only says
+ * again what the page lists about the parts in `skipParts`. That is a list of two or more items that each start with a
+ * part's name ("pdf-reader: reads PDFs"), and, under a heading such as "Skills", a paragraph in a part's own sub-section
+ * (its heading is the part's name) that mostly repeats that part's description. Anything else in that sub-section (setup
+ * steps, examples, tables) stays. A heading left with nothing under it goes too.
  */
 export function trimRepeats(blocks: Block[], options: MarkdownOptions = {}): Block[] {
   let rest = blocks;
   if (options.skipTitle && rest[0]?.kind === 'heading' && same(plainText(rest[0].content), options.skipTitle)) rest = rest.slice(1);
   const lead = rest[0]?.kind === 'paragraph' ? plainText(rest[0].content) : '';
   if (lead && options.skipLead?.some(text => repeats(lead, text))) rest = rest.slice(1);
-  const listed = (options.skipListsOf ?? []).filter(name => name.length >= 3);
-  if (!listed.length) return rest;
+  const parts = (options.skipParts ?? []).filter(part => part.name.length >= 3);
+  if (!parts.length) return rest;
   const kept: Block[] = [];
   let partsLevel: number | undefined;
-  for (let at = 0; at < rest.length; at++) {
-    const block = rest[at]!;
+  let inPart: { level: number; description: string } | undefined;
+  for (const block of rest) {
     if (block.kind === 'heading') {
       const title = plainText(block.content).trim();
+      if (inPart && block.level <= inPart.level) inPart = undefined;
       if (partsLevel !== undefined && block.level <= partsLevel) partsLevel = undefined;
       if (PARTS_HEADING.test(title)) partsLevel = block.level;
-      else if (partsLevel !== undefined && listed.some(name => same(title, name))) {
-        let end = at + 1;
-        while (end < rest.length && !isHeadingAtMost(rest[end]!, block.level)) end++;
-        // Prose about the part repeats what the page lists; code or a table (usage examples, options) is kept.
-        if (!rest.slice(at + 1, end).some(inner => inner.kind === 'code' || inner.kind === 'table')) { at = end - 1; continue; }
+      else if (partsLevel !== undefined) {
+        const part = parts.find(candidate => same(title, candidate.name));
+        if (part) inPart = { level: block.level, description: part.description };
       }
     }
-    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => listed.some(name => leadsWith(plainText(item), name)))) continue;
+    if (inPart && block.kind === 'paragraph' && repeats(plainText(block.content), inPart.description)) continue;
+    if (block.kind === 'list' && block.items.length >= 2 && block.items.every(item => parts.some(part => leadsWith(plainText(item), part.name)))) continue;
     kept.push(block);
   }
   // From the end, so a heading emptied by one below it goes as well.
