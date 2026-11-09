@@ -1035,6 +1035,18 @@ test('A copy kept in a tool switched off does not end a removal another tool sti
   } finally { await box.cleanup(); }
 });
 
+test('Delete everywhere removes the copy of a tool whose skills folder was away when that folder returns (DEL-02)', async () => {
+  const box = await sandbox();
+  try {
+    await managedThree(box);
+    await rename(join(box.home, CODEX), join(box.base, 'codex-away'));
+    await deleteEverywhere(three(box), 'foo');
+    await rename(join(box.base, 'codex-away'), join(box.home, CODEX));
+    await settleAndPass(box);
+    assert.deepEqual(await readdir(join(box.home, CODEX)), []);
+  } finally { await box.cleanup(); }
+});
+
 test('R11: a linked skill folder is followed when its source is edited', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
