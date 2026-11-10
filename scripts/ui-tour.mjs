@@ -103,7 +103,20 @@ async function addMarketplace(a, source) {
 }
 
 let a = await launch();
-const practice = await a.run(`document.querySelector('.status-home').title`);
+let practice = await a.run(`document.querySelector('.status-home').title`);
+/**
+ * Starts the app again on a clean slate for a section that needs one: new app data, an empty HOME (no stand-in CLIs) and,
+ * with the new launch, a new Practice copy. Before any section has run, the first launch is already clean.
+ */
+async function fresh() {
+  if (!feature) return;
+  a.quit();
+  await wait(500);
+  for (const folder of [join(scratch, 'data'), HOME]) rmSync(folder, { recursive: true, force: true });
+  mkdirSync(HOME, { recursive: true });
+  a = await launch();
+  practice = await a.run(`document.querySelector('.status-home').title`);
+}
 
 // ---------- First run, homes and navigation ----------
 if (wanted('shell')) {
@@ -116,7 +129,9 @@ if (wanted('shell')) {
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
   if (await a.has('#sidebar-toggle')) { await a.click('#sidebar-toggle'); await shot(a, 'sidebar-collapsed', 'Clicked the sidebar toggle (top left) to collapse the sidebar.'); await a.click('#sidebar-toggle'); }
-  await a.click('#home-actual'); await a.click('#nav-skills'); await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" at the bottom left. (In this tour the "real home" is an empty throwaway folder on Linux, where real writes are not allowed: it shows the preview-only state.)');
+  // The tour's "real home" is an empty throwaway folder: with no tool found there (Linux), the sidebar has no Skills.
+  await a.click('#home-actual'); if (await a.has('#nav-skills')) await a.click('#nav-skills');
+  await shot(a, 'this-macs-home', 'Clicked "This Mac\'s home" ("This computer\'s home" off macOS) at the bottom left. (In this tour the "real home" is an empty throwaway folder: only tools installed on this machine are found there.)');
   await a.click('#home-fixture'); await a.click('#nav-overview'); await shot(a, 'back-to-practice', 'Clicked "Practice copy" to go back, then "Overview".');
 }
 
@@ -272,7 +287,8 @@ if (wanted('plugins')) {
 // ---------- Profiles ----------
 if (wanted('profiles')) {
   begin('profiles');
-  const name = async text => { await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle(); };
+  // The name field saves and closes on blur, which a window losing focus (macOS) also causes: reopened with Rename then.
+  const name = async text => { if (!(await a.has('#profile-name'))) await a.click('#profile-rename'); await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle(); };
   await a.click('#nav-profiles'); await shot(a, 'empty', 'Clicked "Profiles" in the sidebar before any profile exists.');
   await a.click('#profile-new'); await shot(a, 'new-naming', 'Clicked "New profile": a profile is made and its name field is ready to type in.');
   await name('Incident');
@@ -344,6 +360,7 @@ if (wanted('profiles')) {
 
 // ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
 if (wanted('plugin-skills')) {
+  await fresh();
   begin('plugin-skills');
   const market = join(scratch, 'market');
   if (!existsSync(market)) writeMarket(market);
@@ -405,6 +422,7 @@ if (wanted('plugin-skills')) {
 
 // ---------- Plugin versions and skill text ----------
 if (wanted('plugin-versions')) {
+  await fresh();
   begin('plugin-versions');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   const market = join(scratch, 'market');
@@ -458,6 +476,7 @@ if (wanted('plugin-versions')) {
 
 // ---------- A plugin's parts in tools without plugins ----------
 if (wanted('parts')) {
+  await fresh();
   begin('parts');
   // Pi is in the home (it takes no plugins), and no tool's CLI is on this tour's PATH, so Codex and Copilot CLI can't
   // take plugins here either: each can take a plugin's parts instead.
@@ -627,7 +646,7 @@ async function everyPage(tag) {
   const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
   await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
-  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-harnesses`, `Harnesses ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
 
@@ -639,6 +658,7 @@ async function editMcpOutside() {
 }
 
 if (wanted('sizes')) {
+  await fresh();
   begin('sizes');
   // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
   cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
@@ -733,18 +753,18 @@ async function toolViews(tag, home) {
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
   await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
-  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-harnesses`, `${home}: Harnesses.`);
 }
 
 if (wanted('missing')) {
   begin('missing');
   await a.click('#home-fixture');
   await toolViews('before', 'The practice copy, with every tool');
-  // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
+  // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Harnesses.
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
   await a.click('#home-actual'); await a.click('#nav-harnesses');
-  await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
-  await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
+  await shot(a, 'this-mac-harnesses', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
+  await a.size(2560, 1440); await shot(a, 'this-mac-harnesses-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
   const folder = join(scratch, 'two-tools');
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true });
   a.quit();
@@ -755,7 +775,7 @@ if (wanted('missing')) {
   await toolViews('after', 'A folder with only Claude Code and Codex');
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
-  await a.click('#nav-harnesses'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-harnesses'); await shot(a, 'after-2560-harnesses', 'The same folder\'s Harnesses at 2560×1440: two cards, two columns.');
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
   await a.size(1280, 800);
   await a.size(860, 560);
@@ -769,7 +789,7 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
-  await a.click('#nav-harnesses'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-harnesses'); await shot(a, 'pi-only-harnesses', 'The same folder\'s Harnesses: Pi\'s card names only what Pi can hold (skills and MCP servers).');
   await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
@@ -778,16 +798,17 @@ if (wanted('missing')) {
   await wait(500);
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
   a = await launch();
-  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
-  await a.click('#nav-harnesses'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Harnesses and Settings, and the Overview says no tools were found, with Choose another home….');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-harnesses', 'Its Harnesses page: the same sentence and action, in the same place.');
   await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
-  await a.click('#nav-harnesses'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-860-harnesses', 'Its Harnesses page at 860×560.');
   await a.size(1280, 800);
 }
 
 // ---------- Settings ----------
 if (wanted('settings')) {
+  await fresh();
   begin('settings');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   await a.click('#nav-settings');
@@ -1063,6 +1084,7 @@ if (wanted('scroll')) {
 
 // ---------- Harnesses ----------
 if (wanted('harnesses')) {
+  await fresh();
   begin('harnesses');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.settle(); };
   const sizes = async (name, caption) => {
@@ -1093,9 +1115,9 @@ if (wanted('harnesses')) {
   for (const id of ['#ins-back-claude-cli', '#ins-cancel-claude-cli', '#ins-discard-claude-cli']) if (await a.has(id)) await a.click(id);
   await a.click('#ins-edit-claude-cli');
   await size(2560, 1440); await shot(a, 'claude-instructions-editing-2560', 'Editing at 2560×1440: the editor keeps a reading measure.'); await size(1280, 800); if (await a.has('#ins-cancel-claude-cli')) await a.click('#ins-cancel-claude-cli');
-  // With the Plugins tour run first, install document-tools again so this tab has something to show.
+  // With the Plugins tour in this run, install document-tools from team-tools so this tab has something to show.
   if (wanted('plugins')) {
-    await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
+    await ensureMarket(); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
     if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
     await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
   }
