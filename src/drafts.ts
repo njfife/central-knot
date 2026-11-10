@@ -3,7 +3,7 @@ import type { HarnessId } from './types.ts';
 
 /**
  * The one instruction file being edited: the text so far, and `from`, the file as it was opened (its home, path and
- * text), kept apart from the page's list of files so the draft is still known if that file's tool leaves the home.
+ * text: for an edit of a tool that gets the base, its own text only), kept apart from the page's list of files so the draft is still known if that file's tool leaves the home.
  * `hash` is what a save checks the file against; it moves on when the file changed outside and the draft is kept.
  */
 export interface InstructionDraft {
@@ -12,7 +12,9 @@ export interface InstructionDraft {
   text: string;
   hash: string;
   stage: 'edit' | 'review';
+  /** A whole file to put back: an earlier version, or (`takeOut`) the file without its base block. */
   restoring?: boolean;
+  takeOut?: boolean;
   confirmDiscard?: boolean;
   conflict?: boolean;
   fullDiff?: boolean;

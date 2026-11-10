@@ -1245,6 +1245,39 @@ span.ins-confirm { margin-top: 0; }
 /* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */
 .keep-together { white-space: nowrap; }
 
+/* Base instructions: one card above the tools, and a marked strip on each tool card that gets them. */
+.base-card { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.base-tools { border: 0; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.base-tools legend { padding: 0; margin-bottom: 4px; font-size: 12.5px; color: var(--ink-soft); }
+.base-tools .tick-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.base-file { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--ink-faint); }
+.base-subhead { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
+.base-plan, .base-tool-list { display: flex; flex-direction: column; gap: 6px; }
+.base-plan-row, .base-tool { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--line); }
+.base-plan-row:first-child, .base-tool:first-child { border-top: 0; }
+.base-plan-line, .base-tool-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; min-width: 0; }
+.base-plan-says { color: var(--ink-soft); flex: 1 1 260px; min-width: 0; }
+.base-state { margin-left: 16px; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-soft); }
+.base-edited { color: var(--ink); }
+.base-choice { display: flex; flex-direction: column; gap: 6px; padding-left: 22px; }
+.base-choice .ins-actions { margin-top: 0; }
+.base-strip { display: flex; flex-direction: column; gap: 6px; padding: 6px 10px; border: 1px dashed color-mix(in oklab, var(--accent) 40%, var(--line)); border-radius: 8px; }
+.base-strip-line { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-soft); }
+.base-strip-line > span { flex: 1; min-width: 0; }
+.base-strip-line strong { color: var(--ink); font-weight: 600; }
+.base-copy { background: transparent; border-style: dashed; }
+.base-legend { margin: 0; display: flex; gap: 14px; font-size: 12px; color: var(--ink-soft); }
+.base-legend-removed { color: var(--danger, #f85149); }
+.base-legend-added { color: var(--success, #3fb950); }
+.base-explain { margin: 0; font-size: 12.5px; color: var(--ink-soft); max-width: 90ch; }
+.base-pill-warn { color: var(--ink); border-color: color-mix(in oklab, var(--warning, #d29922) 60%, transparent); }
+.base-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px 24px; align-items: start; }
+.base-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A wide base card puts the tools beside the text. */
+@container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* Marker comments and code read as typed: no ligatures turning <!-- into an arrow. */
+.ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+
 /* Disable and Remove, per tool (skills). A disabled copy keeps its cell's state, outlined instead of filled, with a corner mark. */
 .cell-disabled { position: relative; }
 /* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */

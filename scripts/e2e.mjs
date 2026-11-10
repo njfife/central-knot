@@ -1011,6 +1011,43 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // Base instructions (INS-03, INS-04): written once, kept after each chosen tool's own text, an edit there kept for a choice, undone.
+  const baseClaude0 = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8'), baseCodex0 = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
+  await a.click('#base-write');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = '- Shared by every tool.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  check('typing the first base enables Review at once', await a.run(`!document.querySelector('#base-review').disabled`));
+  await a.click('#base-tool-copilot-cli');
+  await a.click('#base-review');
+  check('the base review says what happens to each chosen file', (await a.text('.base-plan')).includes('CLAUDE.md') && (await a.text('.base-plan')).includes('AGENTS.md') && !(await a.text('.base-plan')).includes('copilot-instructions'), await a.text('#base-card'));
+  await a.click('#base-save');
+  const baseClaude1 = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8'), baseCodex1 = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
+  check('Save adds the base after each chosen tool’s own text, which is unchanged', baseClaude1.startsWith(baseClaude0) && baseClaude1.includes('- Shared by every tool.') && baseCodex1.startsWith(baseCodex0) && baseCodex1.includes('- Shared by every tool.'), baseClaude1);
+  check('an unchosen tool is not written', !existsSync(join(practice, '.copilot/copilot-instructions.md')));
+  // A tool's own instructions edited afterwards: its base block and the other files stay as they are.
+  await a.click('#ins-edit-claude-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Own line after the base.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#ins-review-claude-cli'); await a.click('#ins-save-claude-cli');
+  const ownEdited = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8');
+  check('editing a tool’s own text keeps its base block after it, unchanged', ownEdited === baseClaude1.replace('\n\n<!-- Central Knot', '\n- Own line after the base.\n\n<!-- Central Knot') && readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8') === baseCodex1, ownEdited);
+  await a.click('#outcome-undo-instruction');
+  writeFileSync(join(practice, '.codex/AGENTS.md'), baseCodex1.replace('- Shared by every tool.', '- Shared, edited in Codex.'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
+  check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
+  await a.click('#base-usecopy-codex-cli');
+  await a.click('#base-save');
+  check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
+  await a.click('#outcome-undo-base');
+  check('Undo puts Claude Code back', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude1);
+  await a.click('#base-edit'); await a.click('#base-stop'); await a.click('#base-back');
+  check('going back from "Stop sharing" keeps the ticks', await a.run(`document.querySelector('#base-tool-claude-cli').checked && document.querySelector('#base-tool-codex-cli').checked`));
+  await a.run(`document.querySelector('#base-tool-claude-cli').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle();
+  check('Esc on a tool box cancels the untouched base editor', !(await a.exists('#base-text')));
+  await a.click('#base-edit');
+  await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
+  await a.click('#base-review'); await a.click('#base-save');
+  const codexAfter = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
+  check('Taking every tool off restores Claude Code’s own text and leaves Codex’s hand-edited copy where it is', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude0 && codexAfter.startsWith(baseCodex0) && codexAfter.includes('- Shared, edited in Codex.'), codexAfter);
   // A card's edit, review and discard-confirm rows wrap by its width: nothing spills out around the cards' column breakpoints.
   await a.click('#ins-edit-copilot-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);

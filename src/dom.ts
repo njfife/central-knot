@@ -76,6 +76,9 @@ export const pathText = (text: string, full = text): HTMLElement => {
     h('span.middle-head', {}, cut > 0 ? text.slice(0, cut) : text), cut > 0 ? h('span.middle-tail', {}, text.slice(cut)) : null);
 };
 
+/** A disabled control's reason, as its tooltip and its accessible description. */
+export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
+
 /** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
 export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
   return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
