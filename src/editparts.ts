@@ -1,6 +1,6 @@
 // The editing pieces the Instructions page's tool cards and its Base instructions card share: diffs with a legend, change
 // counts, previews, earlier-version lists, the discard question and the keyboard hint.
-import { rerender } from './app.ts';
+import { machine, rerender } from './app.ts';
 import { lineDiff, folded } from './diff.ts';
 import { button, h, icon } from './dom.ts';
 import { plural } from './model.ts';
@@ -24,7 +24,7 @@ const ago = (at: string) => {
 };
 
 /** The editors' keyboard hint, once there is something to review. */
-export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+export const keys = `Esc to cancel · ${machine.modifierKey}+Enter to review`;
 
 /** Esc inside an editor clicks its Cancel button (`cancelId`) wherever focus is in it; while the discard question is open (no
  *  Cancel shown), it answers Keep editing (`keepId`). */

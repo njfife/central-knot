@@ -1,34 +1,38 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
-import { loadPlugins, market } from './pluginstate.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { loadHome, readAgain, startHome, rerender, selectItem, setRenderer, setSync, showPage, state, type Page } from './app.ts';
-import { button, h, icon } from './dom.ts';
+import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
+import { kindNouns, type HomeKind } from './presence.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import type { HomeMode, ManageView } from './types.ts';
+import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-/** The real home is named for the machine it is on. */
-export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
-const MATRIX_MINIMUM = 760;
+/** Each page's title, in the header and the sidebar: a kind's page by its kind's title (presence.ts kindNouns). */
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, history: 'History', tools: 'Tools', settings: 'Settings' };
+/** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
+const RAIL_BELOW = 968;
+/** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
+const DOCK_FROM = 1200;
 
-/** Window width decides the frame: rail or sidebar, one pane or two. */
-function applyLayout() {
-  const width = window.innerWidth;
-  const rail = state.sidebar ? state.sidebar === 'rail' : width < MATRIX_MINIMUM + 208;
-  const contentWidth = width - (rail ? 56 : 208);
-  const classes = document.body.classList;
-  classes.toggle('rail', rail);
-  classes.toggle('one-pane', contentWidth < 960);
-  classes.toggle('page-skills', state.page === 'skills');
-  return { rail, shape: [...classes].filter(name => ['rail', 'one-pane'].includes(name)).join() };
+/**
+ * The window decides the frame: the sidebar or its rail, and whether the content is wide enough to dock details (state.wide).
+ * Inside the content area, style.css adapts to the content's own width (narrow tables, stacked two-pane pages) and
+ * fitBars shortens a bar only when it overflows, so a resize redraws only when one of these two changes.
+ */
+function applyLayout(): { rail: boolean; wide: boolean } {
+  const rail = state.sidebar ? state.sidebar === 'rail' : window.innerWidth < RAIL_BELOW;
+  document.body.classList.toggle('rail', rail);
+  const wide = document.getElementById('main')!.clientWidth >= DOCK_FROM;
+  state.wide = wide;
+  return { rail, wide };
 }
 
+/** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. */
 function navRow(page: Page, label: string, glyph: IconName, count?: number) {
   const current = state.page === page;
   return h('button.nav-row', {
@@ -39,7 +43,6 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
-const practiceNoteOpen = () => { try { return localStorage.getItem('ck-practice-banner-dismissed') !== '1'; } catch { return true; } };
 const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents?.servers ?? [])].some(fact => fact.managed);
 const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents?.notices ?? [] : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
@@ -62,19 +65,24 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 }
 
 function renderSidebar() {
-  region('nav').replaceChildren(
-    navRow('overview', 'Overview', 'layout-grid'),
-    navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : state.home?.manage.skills.length),
-    navRow('mcp', 'MCP servers', 'plug', designMode ? undefined : state.home?.mcp.servers.length),
-    navRow('agents', 'Agents', 'bot', designMode ? undefined : state.home?.agents?.servers.length),
-    navRow('instructions', 'Instructions', 'pencil-line'),
-    navRow('plugins', 'Plugins', 'puzzle'),
-    h('div.nav-divider', { role: 'separator' }),
-    navRow('history', 'History', 'history'),
-    navRow('tools', 'Tools', 'boxes'),
-    navRow('settings', 'Settings', 'settings'),
-  );
-  // This computer's home first: it is where a released app works. Only dev builds have the Practice copy.
+  const home = state.home;
+  // A kind no tool here can hold has no row (app.ts absentKinds).
+  const absent = absentKinds();
+  const row = (page: HomeKind, ...rest: [IconName, number?]) => (absent.includes(page) ? null : navRow(page, titles[page], ...rest));
+  region('nav').replaceChildren(...[
+    navRow('overview', titles.overview, 'layout-grid'),
+    row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
+    row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
+    row('agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
+    row('instructions', 'pencil-line'),
+    row('plugins', 'puzzle'),
+    !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
+    navRow('history', titles.history, 'history'),
+    navRow('tools', titles.tools, 'boxes'),
+    navRow('settings', titles.settings, 'settings'),
+  ].filter((entry): entry is HTMLElement => !!entry));
+  // The homes: the Practice copy where this build offers it (dev builds and tests; a released build doesn't), then this
+  // computer's home, then a folder.
   region('homes').replaceChildren(...[
     h('p.homes-title', {}, 'Home'),
     state.home?.practice ? homeRow('fixture', 'Practice copy', 'flask-conical') : null,
@@ -92,45 +100,63 @@ function renderHeader(rail: boolean) {
     // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
     // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
     h('h1.page-title', {}, titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
-      onclick: () => { try { localStorage.removeItem('ck-practice-banner-dismissed'); } catch { /* shows anyway */ } showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
-    // On Plugins, one marketplace (or none) already has its own Refresh; "Refresh all" appears once there are several.
-    // Settings are the app's own: there is nothing in the home to read again there.
-    h('div.header-end', {}, state.page === 'settings' || (state.page === 'plugins' && (market.view?.marketplaces.length ?? 0) < 2) ? null : button({ icon: 'refresh-cw', label: state.page === 'plugins' ? 'Refresh all' : 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
-      onclick: () => void readAgain().then(() => { if (state.page === 'plugins') void loadPlugins(true); }) })),
+      onclick: () => { setPracticeNote(true); showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
+    // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
+    h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
+      onclick: () => void readAgain() })),
   );
 }
 
 function renderPage() {
-  document.body.classList.remove('has-item');
-  // Pages whose content fills the window take the header and bands with them (core resizing rule).
-  document.body.classList.toggle('page-wide', state.page === 'instructions');
   region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : toolsPage());
 }
 
-function writeFact(manage: ManageView): { glyph: IconName; text: string; tone: string } {
+/** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */
+function writeFact(manage: ManageView): { glyph: IconName; text: string; short?: string; tone: string } {
   if (manage.gate.state === 'stopped') return { glyph: 'circle-alert', text: 'Writing is stopped', tone: 'tone-danger' };
   if (!manage.access.allowed) return { glyph: 'lock', text: 'Preview only', tone: '' };
   if (state.home?.mode === 'actual') return { glyph: 'pencil-line', text: 'Writes to your real tools', tone: '' };
-  return { glyph: 'pencil-line', text: state.home?.mode === 'fixture' ? 'Changes stay here' : 'Changes write only inside this folder', tone: '' };
+  if (state.home?.mode === 'fixture') return { glyph: 'pencil-line', text: 'Changes stay here', tone: '' };
+  return { glyph: 'pencil-line', text: 'Changes write only inside this folder', short: 'Writes here only', tone: '' };
+}
+
+/**
+ * The Automatic sync switch, the same one the menus carry. A preview-only home keeps it, disabled and grey, so it is
+ * recognisably the same setting. With sync on and nothing managed yet it reads "On · nothing managed"; its tooltip says
+ * sync starts once something is.
+ */
+function syncSwitch(home: HomeView) {
+  const label = h('span.sync-label', {}, 'Automatic sync');
+  // With no tools there is nothing to sync: the switch is shown, not offered.
+  if (!home.manage.tools.length) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: 'No tools were found in this home, so there is nothing to sync.' },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Nothing to sync'));
+  }
+  if (!home.manage.access.allowed) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.manage.access.reason ?? 'Preview only: nothing is written here' },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
+  }
+  const idle = home.syncOn && !anyManaged();
+  const title = idle ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.'
+    : home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.'
+    : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.';
+  return h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy, title, onclick: () => void setSync(!home.syncOn) },
+    label, h(`span.sync-track${home.syncOn ? '.on' : ''}${idle ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, !home.syncOn ? 'Off' : idle ? 'On · nothing managed' : 'On'));
 }
 
 function renderStatus() {
-  const write = state.home && writeFact(state.home.manage);
+  const home = state.home;
+  const write = home && writeFact(home.manage);
   region('status-facts').replaceChildren(
-    state.home
-      ? h('span.status-item.status-home', { title: state.home.home }, icon(state.home.mode === 'fixture' ? 'flask-conical' : state.home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, state.home.label)))
+    home
+      ? h('span.status-item.status-home', { title: home.home }, icon(home.mode === 'fixture' ? 'flask-conical' : home.mode === 'actual' ? 'laptop' : 'folder-open', 14), h('span', {}, h('span', { id: 'home-label' }, home.label)))
       : h('span.status-item.status-home', {}, icon('eye', 14), state.busy ? 'Reading…' : 'No home read'),
-    write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14), h('span.status-clip', {}, write.text)) : '',
-    // Preview only keeps the same switch, disabled and grey, so the setting is recognisably the same one.
-    state.home && !state.home.manage.access.allowed ? h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: state.home.manage.access.reason ?? 'Preview only: nothing is written here' }, h('span.sync-label', {}, 'Automatic sync'), h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'))
-    : state.home ? h('button.status-item.sync-switch', { type: 'button', id: 'sync-switch', role: 'switch', 'aria-checked': String(state.home.syncOn), 'aria-label': 'Automatic sync', disabled: !!state.busy,
-      title: state.home.syncOn && !anyManaged() ? 'Automatic sync is on: it starts once you manage something. Click to turn it off.' : state.home.syncOn ? 'Automatic sync is on: an edit to a managed item spreads to the other tools on its own, even with this window closed. Click to turn it off.' : 'Automatic sync is off: edits wait until you turn it on or use Sync once. Click to turn it on.',
-      onclick: () => void setSync(!state.home!.syncOn) }, h('span.sync-label', {}, 'Automatic sync'), h(`span.sync-track${state.home.syncOn ? '.on' : ''}${state.home.syncOn && !anyManaged() ? '.idle' : ''}`, { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, state.home.syncOn ? (anyManaged() ? 'On' : 'On · starts when something is managed') : 'Off')) : '',
+    write ? h(`span.status-item${write.tone ? `.${write.tone}` : ''}`, { title: write.text }, icon(write.glyph, 14),
+      h('span.status-clip.fact-long', {}, write.text), write.short ? h('span.status-clip.fact-short', {}, write.short) : null) : '',
+    home ? syncSwitch(home) : '',
   );
   region('status-version').textContent = packageInfo.version;
-  // The result band already says what just happened; the status bar does not say it twice.
-  const said = document.getElementById('announcement');
-  said?.classList.toggle('visually-hidden', (!!state.outcome && state.outcome.page === state.page) || said.dataset.quiet === 'true');
+  paintStatusMessage();
 }
 
 const remembered = () => [...document.querySelectorAll<HTMLElement>('.scroll[id]')].map(node => [node.id, node.scrollTop] as const);
@@ -142,27 +168,38 @@ function render() {
   renderSidebar();
   renderHeader(rail);
   renderPage();
-  applyLayout();
+  // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
+  runAfterLayout();
   renderStatus();
+  fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
   if (focused) document.getElementById(focused)?.focus();
   if (state.home) document.body.dataset.ready = 'true';
 }
 
 setRenderer(render);
+// The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
+region('message-mark').replaceChildren(icon('info', 14));
 
-// Overlay scrollbars reserve nothing, so scrolled content keeps the last 16 clear itself.
+// The width a scroll area's scrollbar takes (0 for overlay scrollbars): padded scroll areas give it back from their
+// right padding (style.css --scrollbar), so their content ends where the header's and the tables' do.
 const probe = h('div.scroll', {});
 document.body.append(probe);
-if (probe.offsetWidth === probe.clientWidth) document.documentElement.style.setProperty('--overlay-gutter', '16px');
+document.documentElement.style.setProperty('--scrollbar', `${probe.offsetWidth - probe.clientWidth}px`);
 probe.remove();
 
-let lastShape = '';
+let narrowWindow = window.innerWidth < RAIL_BELOW;
 window.addEventListener('resize', () => {
-  const { shape } = applyLayout();
-  if (shape !== lastShape) render();
-  lastShape = shape;
+  // A toggled shape holds at the size it was chosen; crossing the breakpoint hands the choice back to the window.
+  if ((window.innerWidth < RAIL_BELOW) !== narrowWindow) { narrowWindow = !narrowWindow; state.sidebar = undefined; }
+  const before = { rail: document.body.classList.contains('rail'), wide: state.wide };
+  const { rail, wide } = applyLayout();
+  if (rail !== before.rail || wide !== before.wide) render();
 });
+
+// Bars refit whenever the content area changes width (a resize, the sidebar's shape) and once the fonts have loaded.
+new ResizeObserver(() => { fitBars(); runAfterLayout(); }).observe(document.getElementById('main')!);
+void document.fonts.ready.then(() => { fitBars(); runAfterLayout(); });
 
 document.addEventListener('keydown', event => {
   const typing = event.target instanceof HTMLInputElement && event.target.type === 'text';
@@ -170,10 +207,8 @@ document.addEventListener('keydown', event => {
     const find = document.getElementById('find') ?? document.getElementById('skills-find');
     if (find) { event.preventDefault(); find.focus(); }
   }
-  if (event.key === 'Escape') {
-    if (typing) return; // Escape in a find box clears it; see the Overview.
-    if (state.page === 'skills' && document.body.classList.contains('one-pane') && state.item) selectItem(undefined);
-  }
+  // Escape leaves the Files and contents view for the table, except in a text box, where it clears the box (matrix.ts).
+  if (event.key === 'Escape' && !typing && state.page === 'skills' && state.skillsView === 'files') showSkillsTable();
 });
 
 void startHome();

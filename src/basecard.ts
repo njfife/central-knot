@@ -153,7 +153,7 @@ function reviewWords(edit: BaseEdit, writes: InstructionFile[], putBackFile: str
     : edit.text === before ? 'Review: the base instructions stay the same; the tools that get them change.'
     : `Review the base instructions: ${counts}.`;
   // Started from a tool's own text: the result says where that text went.
-  const source = kind === 'own' ? state.instructions?.find(file => file.tool === edit.source!.tool) : undefined;
+  const source = kind === 'own' ? state.instructions.data?.find(file => file.tool === edit.source!.tool) : undefined;
   return { title, save, done: (written: string) => saved('Base instructions saved')(written) + (source ? ` ${fileName(source.path)}’s instructions are now the base.` : '') };
 }
 
@@ -224,10 +224,10 @@ export function baseCard(files: InstructionFile[]) {
   if (!base) return null;
   const edit = state.baseEdit;
   const readOnly = savingOff();
-  const toolEdit = state.instructionEdit;
-  const toolFile = toolEdit && files.find(file => file.tool === toolEdit.tool);
-  const toolDirty = toolDraftTyped();
-  const lockedWhy = readOnly ? 'Saving is off in this home.' : toolDirty ? `Finish or cancel the ${fileName(toolFile!.path)} edit first.` : undefined;
+  // A tool's typed draft locks the base too; one whose tool left this home (no card) waits in the band above to be copied or discarded.
+  const toolDraft = toolDraftTyped() ? state.instructionEdit : undefined;
+  const lockedWhy = readOnly ? 'Saving is off in this home.' : !toolDraft ? undefined
+    : files.some(file => file.tool === toolDraft.tool) ? `Finish or cancel the ${fileName(toolDraft.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
   const locked = !!state.busy || !!lockedWhy;
   const lockAttrs = lockAttrsFor(lockedWhy);
   const chosen = files.filter(file => file.base?.chosen && isFirstReader(file, files));
@@ -285,7 +285,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   const lines = lineCount(base.copy);
   const said = !base.chosen ? 'not on the base list; left as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file' : 'an older version';
   // Edited or behind: the choice is on the Base instructions card, on the row of the first tool reading this file; this goes there.
-  const row = (state.instructions ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
+  const row = (state.instructions.data ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
   const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-diff-${row}` : 'base-update') : undefined;
   // The choice lives on the resting Base instructions card, which an open base editor replaces.
   const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : lockedWhy;

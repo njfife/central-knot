@@ -64,7 +64,7 @@ test('N5 MCP old deletion Restore must not overwrite newly managed server',()=>b
   await applyMcp(b.context,tools.slice(1),managed('docs'));
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),'{"mcpServers":{}}');
   await applyMcp(b.context,tools.slice(1),[],{settleMs:0});
-  const event=(await readHistory(b.home)).find(e=>e.kind==='deleted')!;
+  const event=(await readHistory(b.context)).find(e=>e.kind==='deleted')!;
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('UNRELATED'));
   await applyMcp(b.context,tools.slice(1),managed('docs'));
   await restoreMcp(b.context,tools.slice(1),event.id);
@@ -79,7 +79,7 @@ test('N8b MCP deletion made in Codex: Restore keeps Codex enabled=false (DEL-03)
   await applyMcp(b.context,tools.slice(1),[]);
   await fs.writeFile(codex,'[mcp_servers.other]\ncommand = "true"\n');
   await applyMcp(b.context,tools.slice(1),[],{settleMs:0});
-  await restoreMcp(b.context,tools.slice(1),(await readHistory(b.home)).find(e=>e.kind==='deleted')!.id);
+  await restoreMcp(b.context,tools.slice(1),(await readHistory(b.context)).find(e=>e.kind==='deleted')!.id);
   assert.match(await fs.readFile(codex,'utf8'),/enabled\s*=\s*false/);
 }));
 
@@ -96,7 +96,7 @@ test('N11 interrupted agents conflict must recover loser through History on rest
   const modulePath='../src/agents.ts?restart=astra5';
   const restarted=await import(modulePath);
   await restarted.applyAgents(b.context,tools,[]);
-  assert.ok((await readHistory(b.home)).some(e=>e.losers.some(l=>l.tool==='claude-cli')),'displaced edit has no history or restore after restart');
+  assert.ok((await readHistory(b.context)).some(e=>e.losers.some(l=>l.tool==='claude-cli')),'displaced edit has no history or restore after restart');
 }));
 
 test('C1 MCP Restore ownership gate holds',()=>box(async b=>{
@@ -104,7 +104,7 @@ test('C1 MCP Restore ownership gate holds',()=>box(async b=>{
   await applyMcp(b.context,tools.slice(1),managed('docs'));
   await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('EDIT'));
   await applyMcp(b.context,tools.slice(1),[]);
-  const event=(await readHistory(b.home)).find(e=>e.kind==='edit')!;
+  const event=(await readHistory(b.context)).find(e=>e.kind==='edit')!;
   const {record}=await readRecord(b.home);record!.owner='other';await saveRecord(b.home,record!);
   assert.equal((await restoreMcp(b.context,tools.slice(1),event.id)).writes,0);
   assert.equal(await command(b.context,'copilot-cli'),'EDIT');

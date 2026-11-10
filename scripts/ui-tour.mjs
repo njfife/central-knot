@@ -1,12 +1,16 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
+// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
+// sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
+// (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -17,32 +21,58 @@ const command = flag('--electron') ? join(root, 'node_modules/electron/dist', re
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
+// On Linux the file manager is a stand-in that opens nothing.
+mkdirSync(join(scratch, 'bin'));
+writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
+chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
 async function launch() {
   const port = 9300 + Math.floor(Math.random() * 400);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise(done => { socket.onopen = done; });
-  const pending = new Map();
-  let id = 0;
-  socket.onmessage = message => { const data = JSON.parse(message.data); if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); } };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
-  const run = async expression => { const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text); return reply.result.result.value; };
+  const page = await connect(target.webSocketDebuggerUrl);
+  const { send, run } = page;
   const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
-  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  const viewport = { width: 1280, height: 800 };
+  /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
+  const size = async (width, height) => {
+    Object.assign(viewport, { width, height });
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+    await run(`window.dispatchEvent(new Event('resize'))`);
+    await settle();
+  };
+  await size(1280, 800);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
   await settle();
   return {
-    run, send, settle,
+    run, send, settle, size, viewport, inspect,
+    main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
-    quit: () => { socket.close(); child.kill('SIGKILL'); },
+    quit: () => { page.close(); child.kill('SIGKILL'); },
+  };
+}
+
+/**
+ * One request from the page slowed or made to fail until `restore`, through the main process's debugger (development
+ * runs only, cdp.mjs), so the tour can show a page reading again, or a read that failed. Null in a packaged run.
+ */
+async function requestHandles(a) {
+  if (!a.main) return null;
+  const main = await a.main();
+  const handlers = 'electron.ipcMain._invokeHandlers';
+  return {
+    slow: (channel, ms) => main.run(`(() => { const real = ${handlers}.get(${JSON.stringify(channel)}); globalThis.ckAside = real; ${handlers}.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${ms})).then(() => real(...args))); return true; })()`),
+    fail: channel => main.run(`(() => { globalThis.ckAside = ${handlers}.get(${JSON.stringify(channel)}); ${handlers}.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the tour.'); }); return true; })()`),
+    restore: channel => main.run(`(() => { ${handlers}.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close: main.close,
   };
 }
 
@@ -50,10 +80,11 @@ let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
 const wanted = name => !only || only.includes(name);
-async function shot(a, name, caption) {
+/** Takes a screenshot. `pointer`: where the mouse rests for it (to show a hover); by default out of the way, in the corner. */
+async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2 }) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 798 });
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
   await wait(120);
   const reply = await a.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
@@ -63,7 +94,7 @@ async function shot(a, name, caption) {
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
 
-const a = await launch();
+let a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
 
 // ---------- First run, homes and navigation ----------
@@ -130,7 +161,8 @@ if (wanted('mcp')) {
   edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`);
   await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
-  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
   if (await a.has('#open-files')) { if (first) await a.click(`#${first}`); await a.click('#open-files'); await shot(a, 'mcp-waiting-details', 'Opened the files server\'s details while it waits for Write to Claude Code.'); }
 }
@@ -192,7 +224,409 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
-  await a.click('#ins-cancel-copilot-cli');
+  // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
+  await a.size(1240, 800);
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain; the headers line up.');
+  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
+  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await a.size(1280, 800);
+  await a.click('#ins-edit-copilot-cli');
+  // A draft whose tool leaves the home: kept, and offered to copy or discard.
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.copilot'), join(practice, '.copilot-away'));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
+  await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
+  await a.click('#ins-orphan-discard');
+  renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
+  await a.click('#header-refresh');
+}
+
+// ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
+/** Adds the fixture marketplace once, so the Plugins pages have something to show. */
+async function ensureMarket() {
+  await a.click('#nav-plugins');
+  await waitFor(a, `!!document.querySelector('.market-list, #marketplace-source')`);
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  if (await a.has('.market-list')) return;
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await waitFor(a, `!!document.querySelector('.market-list')`, 30000);
+}
+
+/** One shot of each page at the current size; `tag` names the size in the file names. */
+async function everyPage(tag) {
+  const at = `at ${a.viewport.width}×${a.viewport.height}`;
+  await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
+  await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
+  if (first) {
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${first}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The skill's details did not open ${at}.`);
+    await shot(a, `${tag}-skills-details`, `Opened notes's details ${at} (beside the table from 1200px of content).`);
+    const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
+    if (files) {
+      await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`);
+      // Where each copy is: open from the start in a wide pane, in its column beside the file; stacked, below the file.
+      if (await a.has('.details-paths:not([open]) summary')) { await a.click('.details-paths:not([open]) summary'); await shot(a, `${tag}-skills-files-where`, `Clicked "Where each copy is", below the file, ${at}: then Delete everywhere….`); }
+      else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
+      const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
+      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-pending`, `Turned Managed for it in the Files view: the change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+      await a.click('#skills-table');
+    }
+    if (await a.has('.ov-row.open')) await a.click(`#${first}`);
+  }
+  // The last column's menu: the one most likely to run past the window's edge.
+  const head = await a.run(`[...document.querySelectorAll('.tool-head-button')].at(-1)?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the last tool column's menu ${at}.`); await a.click(`#${head}`); }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#use-draft-copilot-cli')) { await a.click('#use-draft-copilot-cli'); await shot(a, `${tag}-skills-choice`, `Chose Copilot CLI's copy of draft, whose copies differ: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#separate-draft')) { await a.click('#separate-draft'); await shot(a, `${tag}-skills-separate`, `Chose to keep draft's differing copies separate: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
+  const off = await a.run(`document.querySelector('.ov-row[data-key] .cell-button.cell-on:not([disabled])')?.id ?? ''`);
+  if (off) { await a.click(`#${off}`); await shot(a, `${tag}-skills-pending-removal`, `Clicked a synced box: it stops syncing on Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+  if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
+  const server = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (server) {
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${server}`);
+    if (await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`)) await shot(a, `${tag}-mcp-details`, `Opened the first MCP server's details ${at} (docked beside the table from 1200px of content).`);
+    if (await a.has('.ov-row.open')) await a.click(`#${server}`);
+  }
+  await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
+  const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (agent) {
+    // An earlier step may have left the row open: a click would close it, so it is clicked only while closed.
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${agent}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The agent's details did not open ${at}.`);
+    await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at} (beside the table from 1200px of content).`);
+    await a.click(`#${agent}`);
+  }
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `Instructions ${at}.`);
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `Plugins, the marketplace's list ${at}.`);
+  if (await a.has('[id^="popen-0-"]')) {
+    await a.click('[id^="popen-0-"]'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted')`);
+    await shot(a, `${tag}-plugin-page`, `A plugin's page ${at}.`); await a.click('#plugin-back');
+  }
+  await a.click('#nav-history');
+  // The pointer over the second row, so its full-width hover shows.
+  const hovered = await a.run(`(() => { const row = document.querySelectorAll('.history-row')[1]?.getBoundingClientRect(); return row ? [row.left + row.width / 2, row.top + row.height / 2] : null; })()`);
+  const pointer = hovered ? { x: hovered[0], y: hovered[1] } : undefined;
+  if (pointer) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
+  const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
+  await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
+}
+
+/** An edit to Copilot CLI's MCP settings made outside the app, so the MCP page shows its notice and actions. */
+async function editMcpOutside() {
+  edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
+  await a.click('#nav-mcp');
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
+}
+
+if (wanted('sizes')) {
+  begin('sizes');
+  // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
+  cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
+  // A skill whose copies differ, so a copy choice can be shown waiting for Apply all.
+  for (const [tool, body] of [['.claude', 'Claude Code’s draft.'], ['.copilot', 'Copilot CLI’s draft.']]) {
+    mkdirSync(join(practice, tool, 'skills/draft'), { recursive: true });
+    writeFileSync(join(practice, tool, 'skills/draft/SKILL.md'), `---\nname: draft\ndescription: Turn notes into a first draft.\n---\n\n${body}\n`);
+  }
+  await a.click('#nav-skills'); await a.click('#header-refresh');
+  await editMcpOutside();
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.size(width, height);
+    if (width === 860) {
+      // An edit made outside the app while the Overview is open: the rail marks Skills with a dot until it is seen.
+      await a.click('#nav-overview');
+      edit(join(practice, '.codex/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex for the rail.\n'));
+      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Codex) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
+    }
+    await everyPage(`${width}`);
+    // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
+    if (width >= 1728) { await a.click('#sidebar-toggle'); await everyPage(`${width}-rail`); await a.click('#sidebar-toggle'); }
+    // Pi's mark as the window shows it at 100% zoom, on an Overview card and in the table's header.
+    if (width === 1280) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await a.click('#nav-overview'); await shot(a, '1280-overview-1x', 'The Overview at 1280×800 at 100% zoom (one screen pixel per pixel), where the tools\' small marks, Pi\'s among them, are drawn at 12px.');
+      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: the tool marks in the column headers.');
+      await a.size(width, height);
+    }
+    // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
+    if (width === 860) {
+      await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
+      // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
+      await a.click('#nav-skills');
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+      if (box) {
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
+        await a.click('#sidebar-toggle');
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-sidebar-open-status-message', 'The same with the sidebar open: with too little room for the message, a mark stands in, the message its tooltip.');
+        await a.click('#sidebar-toggle');
+      }
+    }
+  }
+  await a.theme('light');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
+  await a.theme('dark');
+  // Reading again, and a read again that failed: a page keeps what it showed, and says so in a quiet band.
+  const main = await requestHandles(a);
+  if (main) {
+    await a.size(1728, 1117);
+    await ensureMarket();
+    await main.slow('plugins:view', 4000);
+    await a.click('#header-refresh');
+    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugins at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
+    await main.restore('plugins:view');
+    await waitFor(a, `!document.querySelector('.rereading')`, 8000);
+    await a.click('#nav-history');
+    await main.fail('history:list');
+    await a.click('#nav-history');
+    if (await waitFor(a, `!!document.querySelector('.reread-failed')`, 3000)) await shot(a, '1728-history-reread-failed', 'Opened History again while its read was made to fail: the last read stays on screen, and a quiet band says it could not read again.');
+    await main.restore('history:list');
+    await a.click('#nav-history');
+    main.close();
+  }
+  // A marketplace with a long name and long facts, with a change waiting, at the smallest window.
+  await a.size(860, 560);
+  await ensureMarket();
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace'); await waitFor(a, `document.querySelectorAll('.market-item').length > 1`, 30000);
+  const box = await a.run(`document.querySelector('.plugin-row .cell-button:not([disabled])')?.id ?? ''`);
+  if (box) await a.click(`#${box}`);
+  await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, and chose one install, at 860×560.');
+  await a.click('#sidebar-toggle'); await shot(a, '860-sidebar-open-long-marketplace', 'The same with the sidebar open: the change waiting for Apply all keeps the toolbar\'s right end.'); await a.click('#sidebar-toggle');
+  await a.size(1280, 800); await shot(a, '1280-long-marketplace', 'The same at 1280×800: the facts that don\'t fit beside the name drop whole.');
+  if (await a.has('#plugins-discard')) await a.click('#plugins-discard');
+  await a.click('#market-tab-about'); await shot(a, '1280-long-marketplace-about', 'Its About tab: every fact, where it comes from, and Remove.');
+  if (await a.has('[id^="forget-"]')) await a.click('[id^="forget-"]');
+  await a.size(1280, 800);
+}
+
+// ---------- A home with only some tools ----------
+// Copilot CLI's column, its header menu entry, its Plugins box and its Instructions card, shown first in the practice copy
+// and then gone in a folder that holds only Claude Code's and Codex's folders. A folder home looks for no installed apps,
+// so this holds on any machine. The app starts again with that folder remembered, as choosing one opens a system dialog.
+/** The views where a tool can appear as an option, each shot once; `tag` says which home. */
+async function toolViews(tag, home) {
+  await a.click('#nav-skills');
+  const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+}
+
+if (wanted('missing')) {
+  begin('missing');
+  await a.click('#home-fixture');
+  await toolViews('before', 'The practice copy, with every tool');
+  // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
+  await a.click('#home-actual'); await a.click('#nav-tools');
+  await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
+  await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
+  const folder = join(scratch, 'two-tools');
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await toolViews('after', 'A folder with only Claude Code and Codex');
+  await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
+  await a.size(2560, 1440);
+  await a.click('#nav-tools'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
+  await a.size(1280, 800);
+  await a.size(860, 560);
+  await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
+  await a.size(1280, 800);
+  // A folder whose only tool is Pi, which takes no plugins: the Plugins page says so instead of drawing an empty table.
+  const piOnly = join(scratch, 'pi-only');
+  cpSync(join(root, 'fixtures/home/.claude/skills/notes'), join(piOnly, '.pi/agent/skills/notes'), { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
+  a = await launch();
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
+  await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
+  // A folder with no tools at all: every page stays, each saying so.
+  const empty = join(scratch, 'no-tools');
+  mkdirSync(empty, { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
+  a = await launch();
+  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
+  await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
+  await a.size(1280, 800);
+}
+
+// ---------- Settings ----------
+if (wanted('settings')) {
+  begin('settings');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await a.click('#nav-settings');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark. Start at sign-in is off and disabled in this dev build, its reason in the hint’s place.`);
+    await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
+  }
+  await size(860, 560); await a.theme('dark');
+  // Keyboard: the chosen card is the group's one Tab stop; the right arrow moves to Light and chooses it, with the focus ring.
+  await a.run(`document.querySelector('#appearance-system').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle(); await shot(a, 'settings-keyboard', 'Focused the System card (the group\'s Tab stop) and pressed the right arrow: Light is chosen, and the focus ring moved with it.');
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle();
+  // A save that fails: the settings file is made read-only, then Light is clicked.
+  const file = join(scratch, 'data/app-settings.json');
+  chmodSync(file, 0o444);
+  await a.click('#appearance-light'); await shot(a, 'settings-save-failed-dark', 'Pressed the right arrow again (Dark), then made the settings file read-only and clicked Light: the row says in plain words what happened and what to do, and Dark stays chosen.');
+  await a.theme('light'); await shot(a, 'settings-save-failed-light', 'The same, light (the system appearance is light; the app is still set to Dark).');
+  chmodSync(file, 0o644);
+  // The tour's clicks don't move focus as a real click would: let the keyboard focus go so no card keeps its ring.
+  await a.run(`document.activeElement?.blur()`);
+  await a.click('#appearance-system');
+  await a.theme('dark'); await a.click('#show-log');
+  await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
+  await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
+  // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
+  // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time it records a change.
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History goes the next time this home records a change, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
+  await keepFor(a, 30);
+  // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
+  await a.click('#nav-skills');
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  await a.click('#nav-settings');
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
+    { id: 'tour-25', at: new Date(Date.now() - 25 * DAY).toISOString(), key: 'standup', item: 'standup', kind: 'deleted', winner: { tool: 'copilot-cli', hash: 'a'.repeat(64) }, losers: [], orderProved: true, previous: 'a'.repeat(64) },
+    { id: 'tour-12', at: new Date(Date.now() - 12 * DAY).toISOString(), key: 'review', item: 'review', kind: 'chosen', winner: { tool: 'copilot-cli', hash: 'b'.repeat(64) }, losers: [{ tool: 'claude-cli', hash: 'c'.repeat(64) }], orderProved: true },
+    { id: 'tour-3', at: new Date(Date.now() - 3 * DAY).toISOString(), key: 'release-notes', item: 'release-notes', kind: 'edit', winner: { tool: 'claude-cli', hash: 'd'.repeat(64) }, losers: [{ tool: 'copilot-cli', hash: 'e'.repeat(64) }], orderProved: true, previous: 'e'.repeat(64) },
+  ] }));
+  await a.click('#nav-history'); await shot(a, 'history-before-shorten', 'History before the window changes: kept for 30 days (the default), it lists changes from 3, 12 and 25 days ago.');
+  await a.click('#nav-settings');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  await shot(a, 'settings-history-select', 'The Keep history for select, focused (7, 30 or 90 days; 30 by default). Its menu is the system’s own, which a screenshot can’t catch.');
+  await keepFor(a, 7);
+  await shot(a, 'settings-history-confirm-dark', 'Chose 7 days: a shorter window removes History, so the row asks first, naming the local date and time it will cut from. The select still shows the saved 30 days.');
+  await a.theme('light'); await shot(a, 'settings-history-confirm-light', 'The same, light.'); await a.theme('dark');
+  // Keyboard focus on each of the question's buttons, both themes: the danger button's ring sits outside its red fill.
+  for (const [id, name] of [['history-shorten', 'shorten'], ['history-shorten-cancel', 'keep']]) {
+    await a.run(`document.querySelector('#${id}').focus()`);
+    await shot(a, `settings-history-focus-${name}-dark`, `Keyboard focus on "${name === 'shorten' ? 'Shorten to 7 days' : 'Keep 30 days'}", dark.`);
+    await a.theme('light'); await shot(a, `settings-history-focus-${name}-light`, 'The same, light, on the pale danger notice.'); await a.theme('dark');
+  }
+  await a.run(`document.activeElement?.blur()`);
+  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question is as wide as its words and buttons, not a band across the row.');
+  await size(2560, 1440); await shot(a, 'settings-history-confirm-2560', 'The same at 2560×1440: still only as wide as its content.'); await size(860, 560);
+  await a.click('#history-shorten-cancel'); await shot(a, 'settings-history-cancelled', 'Clicked "Keep 30 days" (Cancel): the question goes, nothing is saved (still 30 days), and the focus is back on the select.');
+  await keepFor(a, 7);
+  // Main carries out the change in its turn, after any sync pass: held here so the row's waiting state can be seen.
+  const main = a.main && await a.main();
+  const held = main && await holdQueue(main, a);
+  await a.click('#history-shorten');
+  if (held) {
+    await shot(a, 'settings-history-updating', 'Clicked "Shorten to 7 days" while main is busy (held, as a long sync pass would): the row says History is updating, and its select takes no other change until main is done.');
+    await held.release(); main.close();
+  }
+  await wait(300); await a.settle();
+  await shot(a, 'settings-history-shortened', 'Shortened to 7 days: saved, the select shows it, and the row says (with a check) from when History was removed.');
+  await a.theme('light'); await shot(a, 'settings-history-shortened-light', 'The same, light.'); await a.theme('dark');
+  await a.click('#nav-history'); await shot(a, 'history-after-shorten', 'History after shortening to 7 days: only the change from 3 days ago is left, and the intro says how long History keeps changes.');
+  await a.click('#nav-settings'); await keepFor(a, 30);
+  // A shorten whose removal fails (the home's History folder made read-only): the window is saved anyway, and the row says what didn't happen.
+  const store = join(practice, '.central-knot');
+  chmodSync(store, 0o555);
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-prune-failed', 'Shortened to 7 days with the home’s History folder read-only: the window is saved (the select shows 7). The row says in red that the older History couldn’t be removed; what happens next and where to look follow in the hint colour.');
+  await a.theme('light'); await shot(a, 'settings-history-prune-failed-light', 'The same, light.'); await a.theme('dark');
+  chmodSync(store, 0o755);
+  await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
+  // A wide row's hover: pointing at the hint lights the whole row, out to its button.
+  await size(1728, 1117);
+  const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
+  await shot(a, 'settings-row-hover-1728', 'At 1728×1117, the pointer on the Log file hint: the whole row lights up, tying the text to its button far to the right.', hint);
+  await size(860, 560);
+  // The narrowest row: no real window reaches it (the window is at least 860 wide and has no zoom), so this emulates a
+  // 573-px-wide page (860 at 150% zoom) with the sidebar open, to show the control moving under its text.
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 573, height: 373, deviceScaleFactor: 3, mobile: false }); await a.settle();
+  const railed = await a.has('.rail');
+  if (railed) await a.click('#sidebar-toggle');
+  await shot(a, 'settings-narrow-stacked', 'Emulated: a 573×373 page (860×560 at 150% zoom, which the app does not offer) with the sidebar open, so each row is under 512px: the controls sit under their text, left-aligned.');
+  await keepFor(a, 7); await a.run(`document.querySelector('#setting-history').scrollIntoView({ block: 'start' })`);
+  await shot(a, 'settings-narrow-question', 'The same stacked layout with the shorten question open: its buttons wrap under the words and start at the left, like the select above them.');
+  await a.click('#history-shorten-cancel'); await a.run(`document.activeElement?.blur()`);
+  if (railed) await a.click('#sidebar-toggle');
+  await size(860, 560);
+  // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,
+  // so main stands in as an installed app with the system's login-item answer (see standIn), and the window is refocused so the
+  // page reads it again, as it does when someone comes back from System Settings.
+  if (a.main && process.platform === 'linux') {
+    // Opened afresh, so the earlier rows' notes are gone.
+    await a.click('#nav-skills'); await a.click('#nav-settings');
+    const main = await a.main();
+    await standIn(main, 'win32');
+    const system = async (platform, login) => { await main.run(`(ck.as(${JSON.stringify(platform)}), ck.login = ${JSON.stringify(login)})`); await refocus(main); await a.settle(); };
+    const both = async (name, caption) => { await shot(a, `${name}-dark`, caption); await a.theme('light'); await shot(a, `${name}-light`, 'The same, light.'); await a.theme('dark'); };
+    const press = async (key, code, keyCode, modifiers = 0) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, modifiers }); await a.settle(); };
+    await system('win32', { on: true, enabled: true });
+    await shot(a, 'settings-sign-in-on', 'Stand-in system: an installed app on Windows, starting at sign-in. The switch is on and the hint says what it does.');
+    // Keyboard focus: from the Appearance cards, Shift+Tab goes back to the switch.
+    await a.run(`document.querySelector('#appearance-system').focus()`);
+    await press('Tab', 'Tab', 9, 8);
+    await both('settings-sign-in-focused', `Focused the Appearance cards and pressed Shift+Tab: the switch has the focus ring, outside its track (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.run(`document.activeElement?.blur()`);
+    await system('win32', { on: true, enabled: false });
+    await both('settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Startup apps (perhaps on purpose). Off; the hint still says what it does, and beneath it a calm grey line says where it was turned off, with Open Startup apps right after the text.');
+    // Keyboard focus on the line's action: Tab from the switch goes to it.
+    await a.run(`document.querySelector('#start-at-sign-in').focus()`);
+    await press('Tab', 'Tab', 9);
+    await a.theme('light');
+    await shot(a, 'settings-sign-in-action-focused-light', `Light. Focused the switch and pressed Tab: Open Startup apps has the focus ring (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.theme('dark');
+    await a.run(`document.activeElement?.blur()`);
+    await system('win32', { on: false, enabled: true, ignore: true });
+    await a.click('#start-at-sign-in');
+    await both('settings-sign-in-unchanged', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says in amber that the system didn’t change it, with Open Startup apps.');
+    // macOS: the hint names the menu bar once the page knows it runs on a Mac, so it is reloaded as one (main names the Login Items).
+    const agent = await a.run('navigator.userAgent');
+    const reloadAs = async userAgent => { await a.send('Emulation.setUserAgentOverride', { userAgent }); await a.send('Page.reload'); await wait(1500); await a.settle(); await a.click('#nav-settings'); };
+    await system('darwin', { on: true, status: 'requires-approval' });
+    await reloadAs(agent.replace(/\(X11;[^)]*\)/, '(Macintosh; Intel Mac OS X 10_15_7)'));
+    await both('settings-sign-in-approval', 'Stand-in system: an installed app on macOS whose login item is off in Login Items (waiting for approval, or turned off there on purpose: macOS reports both alike). The switch shows Off, the system’s answer; the hint stays, and beneath it a calm grey line, true either way, with Open Login Items. (With main standing in as an installed app, the sidebar leaves out the Practice copy, as a released app does.)');
+    // Back to this Linux dev run: the row is off and disabled again, with its reason.
+    await main.run(`ck.restore()`);
+    await reloadAs(agent);
+    main.close();
+  }
+  await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await size(1280, 800);
 }
 
 // ---------- Base instructions ----------
