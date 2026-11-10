@@ -174,6 +174,10 @@ test('Git access failures are told apart, an ambiguous one says so, and an unkno
     [128, 'git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.', 'sign-in', /credentials that already work/],
     [128, 'remote: Repository not found.\nfatal: repository \'https://github.com/a/b.git/\' not found', 'no-access', /No access, or no repository there: the server doesn’t say which/],
     [128, 'fatal: \'/srv/x\' does not appear to be a git repository', 'no-access', /Check the address/],
+    // A port or folder in the address that looks like an HTTP status is not one.
+    [128, 'remote: Repository not found.\nfatal: repository \'http://127.0.0.1:34015/missing.git/\' not found', 'no-access', /No access/],
+    [128, 'fatal: \'/tmp/ck-repo-a403bc/config.git\' does not appear to be a git repository', 'no-access', /No access/],
+    [128, 'fatal: unable to access \'https://x/a.git/\': The requested URL returned error: 403', 'sign-in', /Sign-in needed/],
     [1, 'something new happened', 'unclassified', /^something new happened$/],
   ];
   for (const [code, output, state, words] of samples) {
