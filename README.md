@@ -48,7 +48,7 @@ Copies are written only into each tool's own folder, byte-exact with file modes,
 - **Automatic sync** (status bar switch, on by default): a managed item edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing skill edits are decided by the newest action, or the fixed order Copilot, Claude Code, Codex, Pi when the order can't be proved. Competing MCP server and agent edits always use that fixed order. Each outcome shows a notice with Undo or Restore.
 - With Automatic sync off, edits and deletions are noted as waiting, and **Sync once** spreads them once.
 - A folder or file that can't be read, is half-written or was reset is held, never read as a deletion. Every write checks the file first and never overwrites a save made meanwhile.
-- Closing the window keeps Central Knot syncing. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
+- Closing the window keeps Central Knot syncing. On a Mac it then leaves the Dock and runs from its menu bar icon alone, until the window is opened again. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
 
 ### Instructions
 

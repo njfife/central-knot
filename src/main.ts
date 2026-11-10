@@ -785,7 +785,8 @@ function createWindow(show: boolean) {
 const primary = smoke || app.requestSingleInstanceLock();
 if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
-app.on('activate', showWindow);
+// Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
+app.on('activate', () => { log('opened again'); showWindow(); });
 app.on('before-quit', () => { quitting = true; });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });

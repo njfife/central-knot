@@ -746,3 +746,17 @@ Nathan asked that what is managed come first, then what some tool has, and that 
 **Validation.** 358 unit tests. Linux e2e 409/409 on the branch with next at 31278c4 merged in; unit tests again with next at 5f06ab1. Reviews: Opus 5.5 (8 for what was asked, 8 for code) and Fable 5.2 (7 and 8) on the first commit; their findings are in the list above. Astra could not run (ChatGPT usage limit). On macOS 26.6.2, a packaged ad hoc build on the real home through Computer Use: Skills Managed 1 then Unmanaged 44; MCP servers Unmanaged 2 then Disabled everywhere 1; claude-plugins-official (317 plugins) lists its 4 installed first; nothing cut off at about 900 by 600.
 
 **Not done.** A whole plugin turned off in every tool still counts as installed on the Plugins page: its switch is read (`installedPlugins`) but not yet carried to that page. The marketplaces list keeps its order. Mac packaged e2e was not run on this branch.
+
+## Mac: a closed window leaves the Dock, November 10, 2026
+
+Nathan asked that closing the app on a Mac leave it running in the top right (the menu bar), not in the Dock as well.
+
+- Closing the window now takes Central Knot out of the Dock and the ⌘Tab list; its menu bar icon stays. Opening it again (the icon's Open Central Knot, Settings…, or opening the app from Finder, Spotlight or Launchpad) brings the Dock icon back with the window, in front.
+- A minimised window and a hidden one (⌘H) keep the Dock icon. A start at sign-in with no window shows the menu bar icon only.
+- The first close's "still running" dialog shows while the Dock icon is still there; the icon goes once it is answered.
+- Electron drops a request to leave the Dock made within a second of the icon's return, so it is asked again until it holds (`leaveDock` in `src/main.ts`).
+- The log now has a line, "opened again", each time the system asks a running Central Knot to open.
+- Windows and Linux are unchanged.
+
+**Validation.** 358 unit tests. Linux e2e 409/409. On macOS 26.6.2, an ad hoc packaged build with its own home: the system reports the app as a Dock app with its window open and as a menu-bar-only app after the window is gone, and as a Dock app, frontmost and focused, after it is opened again. In a development run, with a real window close asked from the main process: the same, plus a close within a second of reopening (the Dock icon left within a second), minimise and ⌘H (the icon stayed). The Mac e2e checks the Dock state before and after its window goes.
+
