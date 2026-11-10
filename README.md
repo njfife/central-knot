@@ -8,7 +8,7 @@ Download the signed Mac build (Apple silicon) from the [GitHub releases](https:/
 
 A released build opens on **This Mac's home**: your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
-Real-home writes happen only on macOS. If something looks wrong, Settings → **Show log file** opens Central Knot's own log.
+Real-home writes happen only on macOS. If something looks wrong, Settings → **Show log file** opens Central Knot's own log: each plugin change with what it came to and why, and each item an Apply all couldn't change.
 
 ## The pages
 
@@ -61,7 +61,7 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 - **Marketplaces**: add one by Git URL, `owner/repo` or folder. A Git address is checked (`git ls-remote`) before it is added. Claude-format and Codex marketplaces (including `.agents/plugins/marketplace.json`) are read.
 - Each plugin shows its parts (skills, MCP servers, agents and more), what each tool gets from them, its skill text, and each tool's installed version next to the marketplace's.
 - **Install and uninstall** run through each tool's own plugin commands, and count only when that tool's own record shows the result. Nothing runs until **Apply all**.
-- **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes.
+- **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes. Under **What it holds**, each part has a switch per such tool, so you can put in only the ones you want; a part turned off stays out when the parts are updated. Claude Code has no switch for one skill of a plugin, so with the plugin not installed there, the same switches put single skills into Claude Code as separate items.
 - **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
 - **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
