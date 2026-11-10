@@ -249,8 +249,14 @@ function fieldText(value: unknown): string {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line || '(empty)';
 }
 
-/** The agents each tool has through its installed plugins, by key: such a tool gets no file of its own beside the plugin's. */
-const agentsThroughPlugins = (context: ShareContext, tools: HarnessId[]) => throughPlugins(context, tools, 'agent', keyOf);
+/**
+ * The agents each tool has through its installed plugins, by key: such a tool gets no file of its own beside the
+ * plugin's. Only an agent Central Knot installed elsewhere as that plugin's part counts: a name alone could be another agent.
+ */
+async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, Map<string, ThroughPlugin>>> {
+  const all = await throughPlugins(context, tools, 'agent', keyOf);
+  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts ? [[key, plugin] as const] : [])))]));
+}
 
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(isAgentTool);

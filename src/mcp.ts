@@ -301,8 +301,14 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
   return here.hash !== item.hash && copy?.hash === here.hash;
 }
 
-/** The servers each tool has through its installed plugins, by name: such a tool gets no entry of its own beside the plugin's. */
-const serversThroughPlugins = (context: ShareContext, tools: HarnessId[]) => throughPlugins(context, tools, 'mcp', name => name);
+/**
+ * The servers each tool has through its installed plugins, by name: such a tool gets no entry of its own beside the
+ * plugin's. Only a server Central Knot installed elsewhere as that plugin's part counts: a name alone could be another server.
+ */
+async function serversThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, Map<string, ThroughPlugin>>> {
+  const all = await throughPlugins(context, tools, 'mcp', name => name);
+  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([name, { asParts, text: _text, ...plugin }]) => (asParts ? [[name, plugin] as const] : [])))]));
+}
 
 export async function mcpView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => mcpTools.includes(tool));

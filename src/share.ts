@@ -5,7 +5,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, 
 import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
 import { instructionFiles } from './instructions.ts';
 import { mcpFile } from './mcp.ts';
-import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import type { HarnessId, HistoryDays, HomeMode, PartsInstall, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 /** A text's SHA-256, hex: what Central Knot names content by. */
@@ -49,6 +49,15 @@ export interface RecordItem { name: string; hash: string; state: 'shared' | 'don
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
+/** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
+export const partsRecordPath = (home: string) => join(storeDirectory(home), 'plugin-parts.json');
+/** Every plugin's parts on record, by plugin and tool; none when there is no record or it can't be read. */
+export async function readParts(home: string): Promise<PartsInstall[]> {
+  try {
+    const parsed = JSON.parse(await readFile(partsRecordPath(home), 'utf8'));
+    return Array.isArray(parsed?.installs) ? parsed.installs : [];
+  } catch { return []; }
+}
 const recordPath = (home: string) => join(storeDirectory(home), 'sync.json');
 
 export function itemKey(folder: string): string { return folder.normalize('NFC').toLowerCase(); }

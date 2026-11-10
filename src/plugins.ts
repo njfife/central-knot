@@ -11,9 +11,9 @@ import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, parseObject, pluginCon
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
-import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
+import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
 import { takesPlugins, type PluginTool } from './presence.ts';
-import { errorCode, writeFileChecked } from './share.ts';
+import { errorCode, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
@@ -500,7 +500,7 @@ export async function installedPlugins(context: PluginContext, tool: PluginTool)
 }
 
 /** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
-export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string }
+export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
 
 /**
  * What each of a tool's installed plugins gives it, by name: its skills in every tool, and its agents and MCP servers
@@ -523,30 +523,42 @@ export async function pluginParts(context: PluginContext, tool: PluginTool): Pro
     }
     const state = await installState(context, tool, marketplace, plugin, entry);
     if (state.state !== 'installed') continue;
-    const contents = tool === 'codex-cli' ? undefined : await pluginContents(state.path, entry ?? {}, state.path, tool === 'copilot-cli' ? { skillsListReplaces: true } : { atMarketplaceRoot });
+    // Read as that tool reads its copy (see pluginContents).
+    const contents = await pluginContents(state.path, entry ?? {}, state.path, tool === 'codex-cli' ? { codex: await codexManifest(state.path) } : tool === 'copilot-cli' ? { skillsListReplaces: true } : { atMarketplaceRoot });
     const source = await registeredSource(context, tool, marketplace);
     const from = { plugin, marketplace, ...(source ? { source } : {}), ...(state.version ? { version: state.version } : {}) };
-    const add = (kind: PartKind, name: string, isOff = false) => given.push({ kind, name, ...from, ...(off || isOff ? { off: true as const } : {}) });
-    for (const skill of state.skills ?? contents?.skills.map(part => part.name) ?? []) add('skill', skill, state.skillsOff?.some(entry => entry.skill === skill));
-    for (const agent of contents?.agents ?? []) add('agent', agent.name);
-    for (const server of contents?.mcpServers ?? []) add('mcp', server.name);
+    const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });
+    for (const skill of contents.skills) add('skill', skill.name, { off: state.skillsOff?.some(entry => entry.skill === skill.name), text: skill.text });
+    if (tool === 'codex-cli') continue;
+    for (const agent of contents.agents) add('agent', agent.name);
+    for (const server of contents.mcpServers) add('mcp', server.name);
   }
   return given;
 }
 
+/** What a tool has through a plugin, as the pages ask: `asParts`, the item is on record as that plugin's part in some tool; a skill comes with its SKILL.md. */
+export type GivenByPlugin = ThroughPlugin & { asParts: boolean; text?: string };
+
 /**
  * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
- * (`keyOf` its name). A name two plugins hold goes by the first listed. Read once where `home` carries `reads` (one pass
- * or one view), since the Skills, MCP servers and Agents pages all ask.
+ * (`keyOf` its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when it is
+ * `asParts` (Central Knot installed it elsewhere as that plugin's part) or, for a skill, when its SKILL.md is the same.
+ * A name two plugins hold goes by the one it is a part of, else the first listed. Read once where `home` carries `reads`
+ * (one pass or one view), since the Skills, MCP servers and Agents pages all ask.
  */
-export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind, keyOf: (name: string) => string): Promise<Map<HarnessId, Map<string, ThroughPlugin>>> {
+export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind, keyOf: (name: string) => string): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
   const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
-  const found = new Map<HarnessId, Map<string, ThroughPlugin>>();
+  const found = new Map<HarnessId, Map<string, GivenByPlugin>>();
+  const installs = await once(context, 'plugin-parts-record', () => readParts(home.home));
   for (const tool of tools.filter(takesPlugins)) {
     // Records that can't be read give nothing: the tool then shows what its own folders hold, as before.
     const parts = await once(context, `plugin-parts:${tool}`, () => pluginParts(context, tool).catch((): PluginPart[] => []));
-    const byKey = new Map<string, ThroughPlugin>();
-    for (const { kind: partKind, name, ...plugin } of parts) if (partKind === kind && !byKey.has(keyOf(name))) byKey.set(keyOf(name), plugin);
+    const byKey = new Map<string, GivenByPlugin>();
+    for (const { kind: partKind, name, ...plugin } of parts) {
+      if (partKind !== kind) continue;
+      const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
+      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, asParts });
+    }
     if (byKey.size) found.set(tool, byKey);
   }
   return found;
