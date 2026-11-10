@@ -193,8 +193,8 @@ test('A desktop app with no CLI makes its tool present, with the app’s version
     await writeFile(join(copilot, 'Contents/Resources/copilot-sdk/cliVersion.d.ts'), 'export declare const COPILOT_CLI_VERSION = "1.0.102-0.unstable.r41779900948.gf482387";\n');
     const app2 = await discover({ home: setup.home, mode: 'actual', harness: 'copilot-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'copilot') });
     assert.deepEqual([app2.detection, app2.app?.version, app2.app?.carriedVersion], ['App only', '1.1.35', '1.0.102-0.unstable.r41779900948.gf482387']);
-    // No app and no CLI: not found.
-    assert.equal((await discover({ home: setup.home, mode: 'actual', harness: 'codex-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'codex') })).detection, 'Not found');
+    // No app and no CLI: not found. (Only this home's folders: the computer running the test may have the real app.)
+    assert.equal((await discover({ home: setup.home, mode: 'actual', harness: 'codex-cli', runProbes: true, binaries: [], apps: appCandidates(setup.home, 'codex').filter(candidate => candidate.app.startsWith(setup.home)) })).detection, 'Not found');
   } finally { await setup.cleanup(); }
 });
 
