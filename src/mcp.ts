@@ -12,8 +12,11 @@ import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
-import { mcpSwitchFacts, readMcpSwitches } from './mcpswitch.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
+import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
+import { switchFailure } from './skillswitch.ts';
+import { toolName } from './words.ts';
+import { ALREADY_AS_IT_WAS } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SwitchRecord, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
 // ---------- Shapes ----------
@@ -380,6 +383,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   // Servers this Apply all makes Managed: the entries it adds for them are told in History as 'added', so Undo can take them back.
   const newlyManaged = new Set<string>();
   const claudeWritten: ClaudeWrite[] = [];
+  // Changes taken (not refused): the only ones whose Disable and Enable are carried out, after the sync below.
+  const taken: Change[] = [];
   for (const change of changes) {
     const slot = byName.get(change.key);
     if (!slot) continue;
@@ -394,6 +399,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     else delete item.deleted;
     if (change.use && change.use !== 'separate' && slot[change.use]) { item.hash = slot[change.use]!.hash; item.copies = item.copies.filter(copy => copy.status === 'removing'); chosenNow.add(change.key); }
     record.items[change.key] = item;
+    taken.push(change);
   }
   const now = options.now ?? Date.now();
   for (const [name, item] of Object.entries(record.items)) {
@@ -555,6 +561,12 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       results.push({ item: name, harness: copy.tool, outcome: 'removed', message: 'Removed now, finishing an earlier deletion.' });
     }
   }
+  // Disable and Enable, explicit only, after the sync above: an entry written just now can be turned off too. Each tool's own
+  // switch, and only the tools the change names; one 'switched' event per server, for Undo.
+  for (const change of taken) {
+    const switched = await flipMcpSwitches(context, change.key, present, [...(change.disable ?? []).map(tool => [tool, true] as const), ...(change.enable ?? []).map(tool => [tool, false] as const)], results);
+    if (switched.length) event({ key: `mcp:${change.key}`, item: change.key, kind: 'switched', switched, losers: [], orderProved: true });
+  }
   // Displaced entries no event of this pass names (left by a pass that stopped part-way) get their own History entry.
   const named = (name: string, hash: string) => events.some(made => made.key === `mcp:${name}` && (made.previous === hash || made.winner?.hash === hash || made.losers.some(loser => loser.hash === hash)));
   for (const left of carried) {
@@ -575,6 +587,47 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   }
   if (cleared) await saveMcpRecord(context.home, record);
   return { results, writes, notices, settling, claudeWritten: claudeWritten.length ? claudeWritten : undefined };
+}
+
+/**
+ * Turns one server off or on in the tools named, each with its own switch (mcpswitch.ts). Says what happened in `results` and
+ * returns the switches that changed: a tool that already had it that way is left out, so Undo flips back only what this did.
+ */
+async function flipMcpSwitches(context: ShareContext, name: string, present: HarnessId[], flips: (readonly [HarnessId, boolean])[], results: DestinationResult[]): Promise<SwitchRecord[]> {
+  const switched: SwitchRecord[] = [];
+  for (const [tool, disabled] of flips) {
+    if (!present.includes(tool)) continue;
+    try { if (!(await setMcpDisabled(context, tool, name, disabled))) continue; }
+    catch (error) {
+      results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${toolName(tool)}: ${switchFailure(error)}` });
+      continue;
+    }
+    switched.push({ tool, disabled });
+    results.push({ item: name, harness: tool, outcome: 'switched', disabled, message: disabled ? `Disabled in ${toolName(tool)}: its entry stays, and ${toolName(tool)} doesn’t start it from its next session.` : `Enabled again in ${toolName(tool)} from its next session.` });
+  }
+  return switched;
+}
+
+/**
+ * Undo of a server's Disable or Enable: each switch the event changed goes back. A tool already back as it was needs nothing. A
+ * new 'switched' event records what was flipped, and its own Undo flips it again (as for a skill's, manage.ts undoSwitched).
+ */
+async function undoSwitchedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
+  const name = past.key.replace(/^mcp:/, '');
+  const results: DestinationResult[] = [];
+  const asked = past.switched ?? [];
+  const back = await flipMcpSwitches(context, name, asked.map(entry => entry.tool), asked.map(entry => [entry.tool, !entry.disabled] as const), results);
+  const failed = results.filter(result => result.outcome === 'failed');
+  if (failed.length && !back.length) return { stopped: failed[0].message, results, writes: 0 };
+  for (const entry of asked) {
+    if (!results.some(result => result.harness === entry.tool)) results.push({ item: name, harness: entry.tool, outcome: 'stayed', message: `${toolName(entry.tool)} has it ${entry.disabled ? 'enabled' : 'disabled'} already.` });
+  }
+  // Done once nothing is left to retry. The new event exists only when something flipped, so "Undo again" always has one to use.
+  const id = back.length ? randomUUID() : undefined;
+  if (!failed.length) past.undoneBy = id ?? ALREADY_AS_IT_WAS;
+  await replaceHistory(context, [...history, ...(id ? [{ id, at: new Date().toISOString(), key: past.key, item: name, kind: 'switched' as const, switched: back, losers: [], orderProved: true }] : [])]);
+  return { results, writes: 0 };
 }
 
 /** The version an MCP event's Undo or Restore puts back. */
@@ -667,6 +720,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
+  if (past?.kind === 'switched') return undoSwitchedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');
   const hash = past && restorable(past);
   if (!past || !name || !hash) return { stopped: 'That change can’t be restored.', results: [], writes: 0 };
