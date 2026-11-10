@@ -115,7 +115,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)),
         // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
         view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null))), allButton), view.tools.length),
-    // Cowork has no box: with Claude desktop here, one line says where its plugins are kept instead.
+    // Cowork has no box: with Claude desktop here, one line says which plugins it uses instead.
     hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
 }
 

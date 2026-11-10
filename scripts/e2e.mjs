@@ -2017,8 +2017,8 @@ async function fewToolsFlow() {
   await a.click('#nav-harnesses');
   const desktopCard = await a.text('#harness-claude-cli');
   check('its card names the app, its version, its Code tab’s version and no CLI', desktopCard.includes('Claude desktop 4.16336.0 (Code tab 2.1.317) · no CLI found'), desktopCard);
-  // Cowork comes with Claude desktop and is no tool here: the card says where its plugins are kept (capability-data section 7).
-  check('with Claude desktop here, the card says Cowork’s plugins are in the Claude account', /Cowork—?its plugins are in your Claude account/.test(desktopCard), desktopCard);
+  // Cowork comes with Claude desktop and is no tool here: the card says which plugins it uses (capability-data section 7).
+  check('with Claude desktop here, the card says Cowork uses the Claude account’s plugins', /Cowork—?uses the plugins in your Claude account/.test(desktopCard), desktopCard);
   await fitsAtMinimum(a, 'Harnesses with Claude desktop and its Cowork line');
   // Once the Code tab's own Claude Code is there, plugins install through it (PLG-04): the box says so, and never calls it the CLI.
   const codeTab = join(home, 'Library/Application Support/Claude/claude-code/2.1.317/e6736b2d954d/claude.app/Contents/MacOS/claude');
@@ -2049,7 +2049,7 @@ async function fewToolsFlow() {
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
   check('with only Claude desktop, the plugin box names its route, its Code tab, and offers no parts instead', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
-  check('and says once that Cowork takes its plugins from the Claude account, with no box for it', box.includes('Cowork in Claude desktop takes its plugins from your Claude account') && !(await a.exists('[id$="-claude-cowork"]')), box);
+  check('and says once that Cowork uses the Claude account’s plugins, with no box for it', box.includes('Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there.') && !(await a.exists('[id$="-claude-cowork"]')), box);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
   // In the Practice copy (a real home is preview only off macOS) the install runs through that copy and its record counts.
@@ -2073,9 +2073,9 @@ async function realHomeFlow() {
   await a.click('#nav-harnesses');
   const tools = await a.text('#harnesses-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
-  // Cowork comes with Claude desktop: Claude Code's card says where its plugins are kept exactly when that app was found.
+  // Cowork comes with Claude desktop: Claude Code's card says which plugins it uses exactly when that app was found.
   const claudeCard = await a.text('#harness-claude-cli');
-  same('Claude Code’s card speaks of Cowork only where Claude desktop is here', claudeCard.includes('Coworkits plugins are in your Claude account') || claudeCard.includes('Cowork—its plugins are in your Claude account'), claudeCard.includes('Claude desktop'));
+  same('Claude Code’s card speaks of Cowork only where Claude desktop is here', /Cowork—?uses the plugins in your Claude account/.test(claudeCard), claudeCard.includes('Claude desktop'));
   await a.click('#harness-codex-cli');
   await a.click('#harness-tab-about');
   const codexAbout = await a.text('#harness-body');

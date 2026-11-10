@@ -6,8 +6,8 @@ export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code
 
 /** What is said about Cowork where Claude desktop is here (presence.ts, hasCowork): on Claude Code's card, and on a plugin's page. */
 export const coworkWords = {
-  card: 'its plugins are in your Claude account',
-  plugin: 'Cowork in Claude desktop takes its plugins from your Claude account, not from this computer, so Central Knot can’t install there. To use this plugin in Cowork, add it in Claude desktop under Customize › Plugins.',
+  card: 'uses the plugins in your Claude account',
+  plugin: 'Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there. You add plugins to Cowork in Claude desktop, under Customize › Plugins.',
 };
 
 /** Sorts tool ids into the order the app lists tools everywhere (columns, notes, results). */

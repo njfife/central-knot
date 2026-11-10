@@ -158,7 +158,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const body = [head, status, h('span.harness-counts', {},
     h('span.harness-count-group', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool)))),
     h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
-      // Cowork comes with Claude desktop and is no tool here: its plugins live in the Claude account, said once on Claude Code's card.
+      // Cowork comes with Claude desktop and is no tool here: it uses the Claude account's plugins, said once on Claude Code's card.
       tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null))];
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
