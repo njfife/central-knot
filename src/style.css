@@ -870,6 +870,30 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .memory-text { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 10px 29px; }
 .memory-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; font-size: 12px; color: var(--ink-soft); }
 .memory-meta > .path-text { flex: 0 1 auto; min-width: 0; }
+/* Memory's top line, above the list so it stays in view: where ticked memories go, how much is ticked; it wraps by the width. */
+.memory-send { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 8px 16px; min-width: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+.memory-send-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; font-size: 12.5px; }
+.memory-send-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.memory-send-group > strong { font-weight: 600; }
+.memory-ticked { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+.memory-send-note { margin: 0; font-size: 12px; color: var(--ink-soft); }
+/* A row with its tick box: the box, then the row that opens. */
+.memory-line { display: flex; align-items: flex-start; gap: 2px; min-width: 0; }
+.memory-line > .memory-toggle, .memory-line > .ins-readers { flex: 1; min-width: 0; }
+.memory-line > .ins-readers { margin-top: 3px; }
+.memory-tick > .tick { position: relative; flex: none; display: grid; place-items: center; width: 24px; height: 24px; margin-top: 3px; border-radius: 6px; color: var(--ink-soft); cursor: pointer; }
+.memory-tick > .tick:hover { background: var(--press); color: var(--ink); }
+.memory-tick .tick-box { margin: 0; }
+.memory-tick > .tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.memory-tick > .tick:has(.hidden-input:checked) { color: var(--ink); }
+.memory-sent { flex: 0 1 auto; min-width: 0; font-size: 12px; color: var(--ink-soft); }
+/* The review a send button opens, at the top of the list. */
+.memory-review { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+.memory-review-title { margin: 0; font-size: 13.5px; font-weight: 600; }
+.memory-review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.memory-review-list > li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; min-width: 0; }
+.memory-review-list .memory-what { flex: 0 1 auto; white-space: normal; overflow: visible; }
+.memory-path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 /* A card's actions, and a discard confirmation, wrap by the card's width rather than spill out of it. */
 .ins-actions, .ins-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 4px; min-width: 0; }
 span.ins-confirm { margin-top: 0; }

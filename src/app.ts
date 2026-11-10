@@ -1,5 +1,6 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
+import { forgetMemoryPicks } from './memorypicks.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, MemoryView, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
@@ -234,6 +235,7 @@ function accept(view: HomeView) {
   resetPageData(state.instructions);
   resetPageData(state.history);
   resetPageData(state.memory);
+  forgetMemoryPicks();
   resetMarket();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });

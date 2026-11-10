@@ -1593,6 +1593,43 @@ async function practiceFlow() {
   await a.click(`#${weather}`);
   check('and the project', !(await a.exists(`#${weather} + .memory-open`)));
   same('the Memory page wrote nothing', memoryFiles(), memoryBefore);
+  // Ticks, the top line and Codex's memory: two ticked memories go into the practice copy's Codex inbox as new notes.
+  const sendLine = async () => await a.text('#memory-send') ?? '';
+  const codexDisabled = () => a.run(`document.querySelector('#memory-send-codex-cli').disabled`);
+  check('the top line offers Codex, greyed until something is ticked', (await sendLine()).includes('Tick what your other tools should know, then send it to') && (await sendLine()).includes('Codex keeps it in its own memory.') && await codexDisabled(), await sendLine());
+  await a.click('#memory-codex-tick');
+  check('with only Codex’s own summary ticked, Codex is greyed with its reason', await codexDisabled() && (await a.text('#memory-send-why')) === 'Codex already has this.', await sendLine());
+  await a.click('#memory-codex-tick');
+  await a.click(`#${weather}`);
+  const tickOf = title => a.run(`[...document.querySelectorAll('.memory-note')].find(row => row.querySelector('.memory-title')?.textContent === ${JSON.stringify(title)})?.querySelector('input[type=checkbox]')?.id`);
+  const picked = ['Small pull requests', 'Forecast cache'];
+  for (const title of picked) await a.click(`#${await tickOf(title)}`);
+  check('the top line counts what is ticked and offers Clear', /^2 ticked · \d+ lines\s*Clear$/.test(await a.text('#memory-ticked') ?? '') && !(await codexDisabled()), await a.text('#memory-ticked'));
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('memory-ticked-1280x800'); await fullSize(a); }
+  await a.click('#memory-send-codex-cli');
+  if (shots) { await sizeTo(a, 1280, 800); await a.shot('memory-review-1280x800'); await sizeTo(a, 860, 560); await a.shot('memory-review-860x560'); await fullSize(a); }
+  same('Codex opens its review under the top line, listing the two', [await a.text('#memory-review-title'), await a.all('#memory-review .memory-review-list .memory-title')], ['Send 2 memories to Codex’s memory', picked]);
+  check('the review says where they go and that it can’t be undone here', /Each one goes in as a note in .*extensions\/ad_hoc\/notes\. Codex takes notes in by itself.*tell Codex to forget it\./.test(await a.text('#memory-review') ?? ''), await a.text('#memory-review'));
+  await fitsAtMinimum(a, 'Memory with the send review open');
+  await sizeTo(a, 2560, 1440);
+  same('nothing cut off at 2560×1440 with the send review open', await a.run(CUT_OFF), []);
+  await fullSize(a);
+  await a.click('#memory-review-send');
+  for (let tries = 0; tries < 40 && !(await a.exists('#memory-result')); tries++) await wait(100);
+  same('the result says what was sent, with no Undo', [await a.text('#memory-result .band-text'), await a.exists('#memory-result .btn')], ['Sent 2 memories to Codex. Codex takes them in the next time it updates its memory, in its own words.', false]);
+  const notesFolder = join(practice, '.codex/memories/extensions/ad_hoc/notes');
+  const written = existsSync(notesFolder) ? readdirSync(notesFolder).sort() : [];
+  check('two new notes in the practice copy’s Codex inbox, named as Codex names them', written.length === 2 && written.every(name => /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/.test(name)) && written.some(name => name.endsWith('-small-pull-requests.md')) && written.some(name => name.endsWith('-forecast-cache.md')), written);
+  same('each starts by saying where it came from', written.map(name => readFileSync(join(notesFolder, name), 'utf8').split('\n')[0].replace(/file [^)]+/, 'file …')),
+    written.map(() => 'Remember this. Central Knot carried it over from Claude Code\'s memory (project Users-sam-code-weather-app, file …) because the user asked.'));
+  const rowOf = title => a.run(`[...document.querySelectorAll('.memory-note')].find(row => row.querySelector('.memory-title')?.textContent === ${JSON.stringify(title)})?.textContent`);
+  check('the sent rows say so', (await Promise.all(picked.map(rowOf))).every(text => text?.includes('Sent to Codex today.')), await Promise.all(picked.map(rowOf)));
+  same('the ticks stay after sending', await a.run(`[...document.querySelectorAll('#memory-scroll input[type=checkbox]:checked')].length`), 2);
+  check('Codex’s card says how to find what it took from notes', (await a.text('#memory-scroll') ?? '').includes('What Codex took from notes is marked [ad-hoc note].'));
+  await a.click('#memory-clear');
+  check('Clear clears the ticks', await a.run(`document.querySelectorAll('#memory-scroll input[type=checkbox]:checked').length`) === 0 && !(await a.exists('#memory-ticked')) && await codexDisabled());
+  await a.click('#memory-result-dismiss');
+  await a.click(`#${weather}`);
   await a.click('#nav-skills');
   // Full screen: nothing on the Overview, History, Memory or Plugins is cut off at 2560×1440.
   await sizeTo(a, 2560, 1440);
