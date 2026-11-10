@@ -1669,15 +1669,24 @@ async function updateFlow() {
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    // Check now from the keyboard: the button is disabled under the focus while it checks, and takes the focus back.
+    const focused = () => a.run(`document.activeElement?.id ?? ''`);
+    const press = id => a.run(`(document.getElementById('${id}').focus(), document.getElementById('${id}').click(), true)`);
+    await press('check-updates');
+    for (let i = 0; i < 40 && await focused() !== 'check-updates'; i++) await wait(250);
+    same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
+    same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
+    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32]);
     // Something chosen and not applied holds the restart.
     await a.click('#nav-skills');
     await a.click('#manage-all');
     await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
-    await a.click('#update-button');
+    await press('update-button');
     for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
     const labels = await a.run('window.ckLabels');
     check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);
     same('changes waiting for Apply all hold the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
+    same('the button, disabled while it worked, takes the focus back', await focused(), 'update-button');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
@@ -1697,10 +1706,15 @@ async function updateFlow() {
     same('with a link to the release notes', [await a.run(`document.getElementById('said-link').hidden`), await a.text('#said-link')], [false, 'Release notes']);
     same('the status bar names the new build', await a.text('#status-end'), 'Central Knot 0.5.0 preview 5');
     check('the record is cleared once said', !JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update);
+    // The status bar's note goes at the first page switch; Settings keeps saying it for the whole launch, with the release notes.
+    await a.click('#nav-skills');
+    same('the note leaves the status bar with the page', await a.run(`document.getElementById('announcement').dataset.text`), '');
     await a.click('#nav-settings');
+    const updatedLine = async () => [await a.text('#setting-updates-notice .setting-message-text'), await a.text('#setting-updates-notice-action')];
+    check('Settings says the launch came from an update, with the release notes', /^Updated to 0\.5\.0 preview 5(, the newest release)?\.$/.test((await updatedLine())[0] ?? '') && (await updatedLine())[1] === 'Release notes', await updatedLine());
     await a.click('#check-updates');
-    for (let i = 0; i < 40 && !/Up to date/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('Check now: up to date', (await a.text('#setting-updates') ?? '').includes('Up to date.'), await a.text('#setting-updates'));
+    for (let i = 0; i < 40 && !/newest release/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
+    same('Check now: nothing newer, and the note stays', await updatedLine(), ['Updated to 0.5.0 preview 5, the newest release.', 'Release notes']);
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.
     writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
@@ -1711,9 +1725,14 @@ async function updateFlow() {
     // An interrupted download says so and offers the update again.
     await a.click('#check-updates');
     for (let i = 0; i < 40 && !(await a.exists('#update-button')); i++) await wait(250);
-    await a.click('#update-button');
-    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('an interrupted download is said, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.'), await a.text('#setting-updates'));
+    // Started from the status bar on another page: said there, and still said in Settings afterwards.
+    await a.click('#nav-skills');
+    await a.run(`(document.getElementById('update-button').focus(), document.getElementById('update-button').click(), true)`);
+    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('an interrupted download is said in the status bar', await a.run(`document.getElementById('announcement').dataset.text`), 'The download didn’t finish. Central Knot wasn’t changed. Try again.');
+    same('and the button takes the focus back', await a.run(`document.activeElement?.id ?? ''`), 'update-button');
+    await a.click('#nav-settings');
+    check('an interrupted download is still said in Settings, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.') && await a.text('#setting-updates-notice-action') === 'Open the release page', await a.text('#setting-updates'));
     same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
     await a.quit();

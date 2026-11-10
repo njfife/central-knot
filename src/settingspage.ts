@@ -304,15 +304,15 @@ function updatesRow(): HTMLElement | null {
   const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every few hours.' : ''}`;
   // A restart held for unsaved work says so here too, not only on the button.
   const held = view.step === 'ready' && view.available ? unsavedWork() : undefined;
-  const status = held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const } : updateStatus(view);
+  const { page: about, ...status } = (held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const, page: view.available!.page } : updateStatus(view)) ?? {};
   const page = view.available?.page;
-  const notice: RowMessage | undefined = status && { ...status, action: page && !view.reason ? { label: status.tone === 'failure' ? 'Open the release page' : 'Release notes', run: () => void window.centralKnot.openExternal(page) } : undefined };
+  const notice: RowMessage | undefined = 'text' in status ? { ...status, action: about && !view.reason ? { label: status.tone === 'failure' ? 'Open the release page' : 'Release notes', run: () => void window.centralKnot.openExternal(about) } : undefined } : undefined;
   const why = view.reason && messageLine({ text: view.reason.text, tone: 'attention', action: { label: page ? `Open ${tagWords(view.available!.tag)}’s page` : 'Open the releases page', run: () => void window.centralKnot.openExternal(page ?? releasesPage) } },
     { id: 'setting-updates-reason', announce: false });
   return settingRow('updates', 'Updates', hint,
     h('div.setting-actions', {},
       updateControl('setting-update', 'setting'),
-      checks ? button({ variant: 'outline', size: 'small', label: 'Check now', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': 'setting-updates-hint' } }) : null),
+      checks ? button({ variant: 'outline', label: 'Check now', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': 'setting-updates-hint' } }) : null),
     notice, why || undefined);
 }
 
