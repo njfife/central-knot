@@ -115,6 +115,26 @@ test('Copilot’s whole-marketplace refusals are found before anything is added,
   } finally { await box.cleanup(); }
 });
 
+test('A Codex marketplace (.agents/plugins/marketplace.json, local sources) is read as Codex reads it, and only Codex is offered its plugins', async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'openai-bundled');
+    await put(join(root, '.agents/plugins/marketplace.json'), JSON.stringify({ name: 'openai-bundled', plugins: [{ name: 'latex', source: { source: 'local', path: './plugins/latex' }, category: 'Education' }] }));
+    await put(join(root, 'plugins/latex/.codex-plugin/plugin.json'), JSON.stringify({ name: 'latex', version: '0.2.8' }));
+    await put(join(root, 'plugins/latex/skills/latex-compile/SKILL.md'), '---\nname: latex-compile\ndescription: Compile.\n---\nB\n');
+    const catalog = await parseCatalog(root, root, 'folder');
+    assert.equal(catalog.problem, undefined);
+    const [latex] = catalog.plugins;
+    assert.equal(latex!.folder, join(root, 'plugins/latex'));
+    assert.equal(latex!.version, '0.2.8');
+    assert.equal(latex!.components?.skills, 1);
+    assert.match(catalog.codexOnly ?? '', /Only Codex/);
+    const report = await install(box.context, catalog, 'latex', 'claude-cli');
+    assert.equal(report.outcome, 'held');
+    assert.deepEqual(report.runs, [], 'nothing was run');
+  } finally { await box.cleanup(); }
+});
+
 test('Folders and missing manifests get a plain message', async () => {
   const box = await sandbox();
   try {

@@ -16,6 +16,8 @@ const MANIFEST_LIMIT = 8 * 1024 * 1024;
 export const PLUGIN_ONLY = /\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|user_config\.)/;
 /** Where a marketplace describes itself, relative to its root. */
 export const MANIFEST = '.claude-plugin/marketplace.json';
+/** Where Codex's own marketplaces (such as the ones ChatGPT desktop adds) describe themselves; only Codex reads this one. */
+export const CODEX_MANIFEST = '.agents/plugins/marketplace.json';
 
 /** True when `path` names something inside `root`, after both are resolved through links. A missing path is not inside. */
 export async function inside(root: string, path: string): Promise<boolean> {
@@ -55,13 +57,17 @@ export const parseObject = (raw: string) => { try { return record(JSON.parse(raw
 /** A JSON object from a file inside `root`, or undefined when it is missing, outside, too large to be whole, or not an object. */
 const jsonInside = async (root: string, path: string) => { const read = await readInside(root, path); return read?.whole ? parseObject(read.text) : undefined; };
 
-/** The marketplace.json in `root` as an object, or the problem that kept it from being read. */
-export async function readManifest(root: string): Promise<{ manifest: Record<string, unknown> } | { problem: string }> {
-  const read = await readInside(root, join(root, MANIFEST), MANIFEST_LIMIT);
-  if (!read) return { problem: 'There is no marketplace here: no .claude-plugin/marketplace.json.' };
+/**
+ * The marketplace.json in `root` as an object, or the problem that kept it from being read. Without Claude Code's
+ * .claude-plugin one, Codex's .agents/plugins one is read, and `codexOnly` says so.
+ */
+export async function readManifest(root: string): Promise<{ manifest: Record<string, unknown>; codexOnly: boolean } | { problem: string }> {
+  const claude = await readInside(root, join(root, MANIFEST), MANIFEST_LIMIT);
+  const read = claude ?? await readInside(root, join(root, CODEX_MANIFEST), MANIFEST_LIMIT);
+  if (!read) return { problem: `There is no marketplace here: no ${MANIFEST} or ${CODEX_MANIFEST}.` };
   if (!read.whole) return { problem: `Its marketplace.json is larger than ${MANIFEST_LIMIT / 1024 / 1024} MB, so it isn’t read.` };
   const manifest = parseObject(read.text);
-  return manifest ? { manifest } : { problem: 'Its marketplace.json could not be read as JSON.' };
+  return manifest ? { manifest, codexOnly: !claude } : { problem: 'Its marketplace.json could not be read as JSON.' };
 }
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
 /** Whether something is at this path, readable or not: a file that is there but can't be read is not absent. */

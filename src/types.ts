@@ -340,6 +340,8 @@ export interface Catalog {
   description?: string;
   /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
   copilotRefuses?: string;
+  /** Why only Codex can take this marketplace's plugins (it is in Codex's own format), if so. */
+  codexOnly?: string;
 }
 
 /**
@@ -403,6 +405,8 @@ export interface MarketplaceView {
   sourceLabel: string;
   /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
   copilotRefuses?: string;
+  /** Why only Codex can take this marketplace's plugins (it is in Codex's own format), if so. */
+  codexOnly?: string;
   /** Plugins whose parts are in tools that can't take the plugin itself, by plugin and tool. */
   parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
 }

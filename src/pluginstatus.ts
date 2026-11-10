@@ -21,10 +21,11 @@ export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.'
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
-/** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
+/** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
+  if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
 
@@ -103,7 +104,7 @@ export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: Harnes
   if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
   // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
-  return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
+  return (tool === 'copilot-cli' && entry.copilotRefuses) || (tool !== 'codex-cli' && entry.codexOnly) ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
 }
 
 /**

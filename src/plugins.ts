@@ -7,7 +7,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
 import { configRoot, harnesses } from './harnesses.ts';
-import { MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
+import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
@@ -220,7 +220,7 @@ export async function readCatalog(context: PluginContext, source: string): Promi
 export async function cachedCatalog(context: PluginContext, source: string): Promise<Catalog | undefined> {
   if (isFolder(source)) return undefined;
   const target = catalogFolder(context, source);
-  const fetched = await stat(join(target, MANIFEST)).catch(() => undefined);
+  const fetched = await stat(join(target, MANIFEST)).catch(() => stat(join(target, CODEX_MANIFEST))).catch(() => undefined);
   if (!fetched) return undefined;
   return { ...(await parseCatalog(target, source, 'git')), fetchedAt: fetched.mtime.toISOString() };
 }
@@ -238,7 +238,7 @@ function copilotRefusal(name: string, where: unknown): string | undefined {
  * One marketplace.json entry as a plugin the page can show, or undefined when its name isn't one the tools accept. A
  * plugin stored in the marketplace (a string `source`) gets its folder and counts; one kept elsewhere gets where it lives.
  */
-async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean): Promise<CatalogPlugin | undefined> {
+async function catalogEntry(item: Record<string, unknown>, root: string, pluginRoot: string, counts: boolean, codex: boolean): Promise<CatalogPlugin | undefined> {
   if (typeof item.name !== 'string' || !SAFE_NAME.test(item.name)) return undefined;
   const author = text(item.author) || text(record(item.author)?.name);
   const words = [...(strings(item.keywords) ?? []), ...(strings(item.tags) ?? [])];
@@ -247,8 +247,11 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     category: text(item.category) || undefined, author: author || undefined, homepage: isHttps(item.homepage) ? item.homepage : undefined,
     license: text(item.license) || undefined, keywords: words.length ? [...new Set(words)] : undefined, from: sourceOf(item.source), remote: remoteOf(item.source), entry: item,
   };
-  if (typeof item.source === 'string') {
-    const where = item.source;
+  // Codex's own marketplaces name a plugin kept in them as { "source": "local", "path": "./plugins/name" }.
+  const local = codex && record(item.source)?.source === 'local' ? text(record(item.source)?.path) : '';
+  if (local) plugin.from = undefined;
+  if (typeof item.source === 'string' || local) {
+    const where = local || String(item.source);
     // marketplace.json's metadata.pluginRoot is the folder a bare name ("formatter") is looked up in; a path that says
     // where it starts ("./plugins/formatter", "../shared") is taken from the marketplace's root as written.
     const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
@@ -256,10 +259,12 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     if (await inside(root, folder)) {
       plugin.folder = folder;
       plugin.isMarketplaceRoot = resolve(folder) === resolve(root) || undefined;
-      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot }) : undefined;
+      // A Codex marketplace's plugin is read as Codex reads it, by its .codex-plugin manifest.
+      const codexOwn = codex ? await codexManifest(folder) : undefined;
+      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot, codex: codexOwn }) : undefined;
       if (contents) plugin.components = componentsFrom(contents);
       // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
-      const fromFiles = contents ? contents.version : text((await pluginManifest(folder, root))?.version);
+      const fromFiles = contents ? contents.version : text((codexOwn ?? await pluginManifest(folder, root))?.version);
       if (fromFiles) plugin.version = fromFiles;
     }
   }
@@ -295,10 +300,11 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   if (!SAFE_NAME.test(name)) return failed(`Its name (“${name.slice(0, 60)}”) isn’t one the tools accept.`);
   const metadata = record(manifest.metadata);
   const entries = (Array.isArray(manifest.plugins) ? manifest.plugins : []).map(record).filter((item): item is Record<string, unknown> => !!item);
-  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts))).filter((plugin): plugin is CatalogPlugin => !!plugin);
-  const copilotRefuses = entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
+  const plugins = (await eachLimited(entries, READS_AT_ONCE, item => catalogEntry(item, root, text(metadata?.pluginRoot), counts, read.codexOnly))).filter((plugin): plugin is CatalogPlugin => !!plugin);
+  const copilotRefuses = read.codexOnly ? undefined : entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
+  const codexOnly = read.codexOnly ? `Only Codex reads this marketplace: it has Codex’s ${CODEX_MANIFEST}, not ${MANIFEST}.` : undefined;
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
-    copilotRefuses, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
+    copilotRefuses, codexOnly, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
 }
 
 // ---------- What each tool has ----------
@@ -615,10 +621,8 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
 export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
   const runs: NativeRun[] = [];
   const name = toolNames[tool];
-  if (tool === 'copilot-cli') {
-    const refusal = catalog.copilotRefuses;
-    if (refusal) return { tool, outcome: 'held', message: `${refusal} Nothing was added to Copilot CLI.`, runs };
-  }
+  const refusal = tool === 'codex-cli' ? undefined : catalog.codexOnly ?? (tool === 'copilot-cli' ? catalog.copilotRefuses : undefined);
+  if (refusal) return { tool, outcome: 'held', message: `${refusal} Nothing was added to ${name}.`, runs };
   // Held first: a same-named plugin installed from the other marketplace is not this one "already installed".
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, catalog.name, held), runs };

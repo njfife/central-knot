@@ -236,7 +236,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
       for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'No longer in this marketplace. Its parts can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
       if (!catalog) return { ...base, name: recordedName ?? '', problem: problem ?? read?.problem, plugins: shown, parts };
-      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, plugins: shown, states: await statesFor(ctx, tools.filter(takesPlugins), catalog, source), parts };
+      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states: await statesFor(ctx, tools.filter(takesPlugins), catalog, source), parts };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
