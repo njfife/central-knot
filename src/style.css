@@ -1370,11 +1370,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .base-strip-line > span { flex: 1; min-width: 0; }
 .base-strip-line strong { color: var(--ink); font-weight: 600; }
 .base-copy { background: transparent; border-style: dashed; }
-/* Instructions fill the window: the base card spans it, and tool cards sit side by side once there is room for two. */
-.cards-scroll.ins-scroll { max-width: none; display: grid; align-content: start; grid-template-columns: repeat(auto-fill, minmax(min(100%, 640px), 1fr)); align-items: start; }
-.ins-scroll > .tools-note, .ins-scroll > .base-card, .ins-scroll > .empty-state { grid-column: 1 / -1; }
-#instructions-scroll.ins-scroll > .ins-card { max-width: none; min-width: 0; }
-.ins-scroll .ins-readers, .ins-scroll .ins-empty, .ins-scroll .ins-note, .ins-scroll .tools-note { max-width: 90ch; }
+/* Tool cards sit side by side once two fit (640px each) and share each row; a card alone on the last row takes the whole row. */
+.cards-scroll.ins-scroll { max-width: none; display: flex; flex-direction: row; flex-wrap: wrap; align-content: flex-start; align-items: flex-start; }
+#instructions-scroll.ins-scroll > .ins-card { max-width: none; min-width: 0; flex: 1 1 min(100%, 640px); }
+/* The note and the base card each take a whole row (the note keeps a reading measure by padding, so nothing sits beside it). */
+#instructions-scroll.ins-scroll > .tools-note, #instructions-scroll.ins-scroll > .base-card, #instructions-scroll.ins-scroll > .empty-state { flex: 1 1 100%; max-width: none; }
+#instructions-scroll.ins-scroll > .tools-note { padding-right: max(0px, calc(100% - 100ch)); box-sizing: border-box; }
+.ins-scroll .ins-readers, .ins-scroll .ins-empty, .ins-scroll .ins-note { max-width: 90ch; }
 .ins-preview, .ins-diff, .ins-text { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
 body.page-wide #header { padding-right: 16px; }
 body.page-wide .page > .bands > .band { padding-right: 16px; }

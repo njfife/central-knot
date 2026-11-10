@@ -55,13 +55,14 @@ function editor(file: InstructionFile) {
       edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${name} changed outside Central Knot. Your draft is kept; this review now compares it with the file as it is now.`)) : null,
       legend(`${name} now`, edit.wholeFile && !edit.takeOut ? 'the earlier version' : 'after saving'),
       diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }),
-      h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-        button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.wholeFile ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
-        button({ variant: 'ghost', size: 'small', label: edit.wholeFile ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
-        edit.wholeFile ? null : edit.confirmDiscard
-          ? discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
-            { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` })
-          : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
+      // While the discard question is open it is the only decision on screen.
+      edit.confirmDiscard
+        ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-review-discard-yes-${file.tool}`, keep: `ins-review-keep-${file.tool}` }, 'Keep reviewing',
+          { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-save-${file.tool}` }))
+        : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
+          button({ variant: 'primary', size: 'small', label: edit.takeOut ? 'Take the block out' : edit.wholeFile ? 'Restore this version' : file.exists ? `Save ${name}` : `Create ${name}`, id: `ins-save-${file.tool}`, disabled: !!state.busy || !changed, onclick: () => void saveInstructionText(file, edit.text) }),
+          button({ variant: 'ghost', size: 'small', label: edit.wholeFile ? 'Cancel' : 'Back to editing', id: `ins-back-${file.tool}`, onclick: () => leaveReview(file.tool) }),
+          edit.wholeFile ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
     placeholder: file.base ? `Write what only ${toolNames[file.tool]} should know (the base instructions stay after it). For example:\n# Only for ${toolNames[file.tool]}\n- …`
