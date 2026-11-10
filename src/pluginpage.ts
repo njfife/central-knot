@@ -8,7 +8,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { NO_SKILL_SWITCH, cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, offeredVersion, pageOfPart, partWords, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsWhy, removableTools, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
+import { NO_SKILL_SWITCH, cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, offeredVersion, pageOfPart, partWords, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsWhy, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartPlan, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -127,6 +127,9 @@ function partNames(parts: Pick<PartPlan, 'kind' | 'name'>[], linked = false): (s
   });
 }
 
+/** Parts the plan would put in that aren't among those installed: ones left out before, whose place is free now. */
+const newParts = (parts: PartsState, plan: PartPlan[] | undefined) => (plan ?? []).filter(part => !part.why && !parts.items.some(item => samePart(item, part)));
+
 /**
  * One tool's line in a plugin's parts table, in words: what Apply all will do (`pending`), what is there and from which
  * version, that the plugin has changed since, or what can go in and what can't (`plan`, undefined while it is read:
@@ -141,7 +144,10 @@ function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, 
   const limited = (plan ?? []).filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
   // With parts there, what an update would leave out (removed by you, changed since, the folder) is said under them.
   if (parts?.changed) return [h('span.plugin-outcome-item', {}, icon('refresh-cw', 12, 'tone-warning'), `Out of date. ${changedWords(parts)}.`), h('span.plugin-outcome-item', {}, 'Installed: ', ...partNames(parts.items, true)), ...limited, ...missing];
-  if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true)), ...limited, ...missing];
+  // A part left out earlier (its name was taken) that can go in now: Update parts adds it.
+  const addable = parts ? newParts(parts, plan) : [];
+  const adds = addable.length ? [h('span.plugin-outcome-item', {}, icon('plus', 12, 'tone-accent'), 'Can go in now: ', ...partNames(addable))] : [];
+  if (parts) return [h('span.plugin-outcome-item', {}, `Installed${parts.version ? ` from ${versionWord(parts.version)}` : ''}: `, ...partNames(parts.items, true)), ...adds, ...limited, ...missing];
   if (!plan) return [h('span.plugin-outcome-item', {}, reading ? 'Reading its parts…' : 'Its files couldn’t be read.')];
   return [h('span.plugin-outcome-item', {}, ...(going.length ? ['Can go in: ', ...partNames(going)] : ['Nothing in it can go in here.'])), ...limited, ...missing];
 }
@@ -164,7 +170,8 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const chosen = (tool: HarnessId) => queued(market.draft, entry.source, plugin.name, tool);
   // The buttons choose for the tools not chosen yet; the boxes take a choice back.
   const open = tools.filter(tool => !chosen(tool));
-  const changed = open.filter(tool => partsIn(tool)?.changed);
+  // Out of date, or with a part left out before that can go in now: Update parts brings either in.
+  const changed = open.filter(tool => { const parts = partsIn(tool); return !!parts && (!!parts.changed || newParts(parts, plans?.[tool]).length > 0); });
   const without = open.filter(tool => !partsIn(tool));
   const holding = open.filter(tool => partsIn(tool));
   const choose = (batch: PluginOp[], label: string, id: string, variant: 'outline' | 'ghost', glyph?: Parameters<typeof icon>[0]) => button({ variant, size: 'small', id, disabled: !!app.busy, icon: glyph,
