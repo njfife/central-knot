@@ -1,7 +1,7 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
-import { toolNames } from './words.ts';
+import { sentence, toolNames } from './words.ts';
 import { changedProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
@@ -27,7 +27,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'switched': {
       const turned = (disabled: boolean) => list((event.switched ?? []).filter(entry => entry.disabled === disabled).map(entry => entry.tool));
       const text = [turned(true) && `disabled in ${turned(true)}`, turned(false) && `enabled in ${turned(false)}`].filter(Boolean).join('; ');
-      return { glyph: 'circle-off', text: `${text.charAt(0).toUpperCase()}${text.slice(1)}, with ${(event.switched ?? []).length === 1 ? 'that tool’s' : 'each tool’s'} own switch.`, action: 'Undo' };
+      return { glyph: 'circle-off', text: `${sentence(text)}, with ${(event.switched ?? []).length === 1 ? 'that tool’s' : 'each tool’s'} own switch.`, action: 'Undo' };
     }
     case 'profile': return profileSwitch(event);
     case 'removed': return { glyph: 'trash-2', text: `Removed from ${list(event.losers.map(loser => loser.tool))}; Central Knot kept the ${event.losers.length === 1 ? 'copy' : 'copies'}.`, action: 'Restore' };

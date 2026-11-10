@@ -2,16 +2,19 @@
 // The list shows each profile and which one is in use; the open profile shows every item with a box (in the profile or not) and,
 // per tool, whether it is on now and what a switch would change. Ticking only edits the profile; tools change on Switch.
 import { deleteProfileDef, NONE, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile, whyReadOnly } from './app.ts';
-import { brandMark, outcomeBand } from './matrix.ts';
+import { brandMark, outcomeBand, problemsBand } from './matrix.ts';
 import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
-import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type SwitchItem, type SwitchPlan } from './profileplan.ts';
+import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan } from './profileplan.ts';
 import { andList, toolName } from './words.ts';
 import { plural } from './model.ts';
 import type { HarnessId, Profile } from './types.ts';
 
 let find = '';
+/** Whether the status bar's profile menu is open. */
+let menuOpen = false;
 
 const onePane = () => document.body.classList.contains('one-pane');
+/** A column per tool with skills or MCP servers: a tool that has only MCP servers still has switches to show. */
 const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.manage.tools, ...home.mcp.tools])]; };
 const items = (): SwitchItem[] => switchItems(state.home!.manage, state.home!.mcp);
 const profiles = () => state.home!.profiles;
@@ -48,6 +51,7 @@ function listRow({ id, name, count, active, selected }: { id: string; name: stri
     active ? h('span.badge.badge-picked', { title: `${name} is in use` }, icon('check', 12), 'In use') : null);
 }
 
+/** The list column: New profile, then No profile and each profile, with `open` shown as selected. */
 function listColumn(open: string | undefined) {
   const view = profiles();
   const all = items();
@@ -137,13 +141,13 @@ function itemRow(item: SwitchItem, view: TableView) {
  * A kind's rows (skills, or MCP servers) under a heading with a tick box for all of them. With Find in use, `list` is only the
  * rows shown, so the heading's count and tick-all are about those.
  */
-function tableSection(title: string, list: SwitchItem[], view: TableView) {
+function tableSection(kind: ItemKind, title: string, list: SwitchItem[], view: TableView) {
   if (!list.length) return null;
   const profile = view.profile;
   const inside = profile ? list.filter(item => profile.items.includes(item.id)).length : 0;
   const all = !!profile && inside === list.length;
   const ids = new Set(list.map(item => item.id));
-  const tickAll = profile ? tick(profile, { id: `pf-all-${title}`, checked: all, mixed: inside > 0, label: `${title}: all in ${profile.name}`, help: `${all ? 'Leave every one' : 'Put every one'}${find ? ' shown' : ''} ${all ? 'out of' : 'in'} ${profile.name}`,
+  const tickAll = profile ? tick(profile, { id: `pf-all-${kind}`, checked: all, mixed: inside > 0, label: `${title}: all in ${profile.name}`, help: `${all ? 'Leave every one' : 'Put every one'}${find ? ' shown' : ''} ${all ? 'out of' : 'in'} ${profile.name}`,
     itemsAfterClick: all ? profile.items.filter(entry => !ids.has(entry)) : [...new Set([...profile.items, ...ids])] }) : null;
   return [h('div.pf-section', { role: 'row' }, h('span.pf-section-label', { role: 'cell' }, tickAll, h('strong', {}, title), h('span.pf-section-count', {}, profile ? `${inside} of ${list.length} ticked` : String(list.length)))),
     ...list.map(item => itemRow(item, view))];
@@ -155,7 +159,7 @@ function table(list: SwitchItem[], options: Pick<TableView, 'profile' | 'plan' |
   const head = h('div.pf-row.pf-head', { role: 'row' }, h('span.pf-name', { role: 'columnheader' }, view.profile ? 'In profile' : 'Item'),
     tools().map(tool => h('span.pf-cell.pf-head-cell', { role: 'columnheader', 'data-col': tool }, brandMark(tool, 14), h('span.pf-head-name', {}, toolName(tool)))));
   const grid = h(`div.pf-table${view.profile ? '.pf-table-profile' : ''}`, { role: 'table', 'aria-label': view.profile ? `What ${view.profile.name} has on` : 'Turned off by profiles' }, head,
-    tableSection('Skills', list.filter(item => item.kind === 'skill'), view), tableSection('MCP servers', list.filter(item => item.kind === 'mcp'), view));
+    tableSection('skill', 'Skills', list.filter(item => item.kind === 'skill'), view), tableSection('mcp', 'MCP servers', list.filter(item => item.kind === 'mcp'), view));
   grid.style.setProperty('--pf-tools', String(tools().length));
   const legend = h('div.legend.pf-legend', { 'aria-label': 'Key' }, (Object.keys(looks) as Look[]).filter(look => view.seen.has(look)).map(look =>
     h('span.legend-item', {}, h(`span.pf-legend-mark${pending(look) ? '.pf-cell-pending' : ''}`, { 'aria-hidden': 'true' }, looks[look].mark()), pending(look) ? `${looks[look].key} ${view.action}` : looks[look].key)));
@@ -297,6 +301,11 @@ function headerActions(profile: Profile, active: boolean, primary: HTMLElement |
     danger(button({ variant: 'ghost', size: 'small', label: 'Delete', id: 'profile-delete', disabled: !canEditProfiles(), onclick: () => { profileState.confirmDelete = profile.id; rerender(); document.getElementById(active ? 'profile-delete-cancel' : 'profile-delete-confirm')?.focus(); } }))];
 }
 
+/**
+ * The open profile: its header (what Switch or Apply would change, Rename, Delete), the setup step while nothing is in it, Find,
+ * and the table. An empty profile not in use previews no switch (it would turn everything off), so its first step is choosing what
+ * it has; the profile in use previews Apply when the tools no longer match it.
+ */
 function profileDetail(profile: Profile) {
   const view = profiles();
   const all = items();
@@ -345,9 +354,14 @@ export function profilesPage(): HTMLElement {
   const home = state.home;
   if (!home) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
   const view = home.profiles;
+  const readOnly = whyReadOnly(home);
+  // What couldn't be done since the last read, told here too: sync's failures, or a menu bar switch that couldn't start or whose
+  // switches all failed.
+  const problems = home.manage.caughtUp.filter(result => result.outcome === 'failed' || result.outcome === 'held');
   const bands = [outcomeBand(),
     view.problem ? h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', { title: view.problem }, view.problem)) : null,
-    whyReadOnly(home) ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${whyReadOnly(home)} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
+    problems.length ? problemsBand(problems) : null,
+    readOnly ? h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, `${readOnly} Profiles can be looked at, not changed.`)) : null].filter(Boolean);
   // No profiles at all, and nothing a profile still holds off: the start page. With holds left (a profile deleted after a switch
   // that couldn't finish), No profile stays reachable, so they can still be turned back on.
   if (!profilesInUse(view)) {
@@ -396,7 +410,6 @@ function menuChoice(choice: { id: string | null; name: string; inUse: boolean; d
 }
 
 /** The status bar's profile item: the one in use, and a menu to switch in one click. */
-let menuOpen = false;
 export function profileStatus(): HTMLElement | null {
   const home = state.home;
   if (!home || !profilesInUse(home.profiles)) return null;

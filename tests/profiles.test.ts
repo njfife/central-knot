@@ -177,6 +177,11 @@ test('A switch and its own Undo cancel out: undoing the switch before them goes 
     const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
     await undoProfileSwitch(box.context, first.id);
     assert.deepEqual(await readProfiles(box.home), { profiles: [{ id: dev, name: 'Development', items: ['skill:dev'] }, { id: pager, name: 'Pager', items: ['skill:pager'] }], offByProfile: {} });
+    // A switch whose earlier profile was deleted since isn't undone: the tools would match a profile that no longer exists.
+    await switchProfile(box.context, dev);
+    const toPager = (await switchProfile(box.context, pager)).event!;
+    await deleteProfile(box.context, dev);
+    assert.match((await undoProfileSwitch(box.context, toPager)).stopped ?? '', /^Development was deleted since/);
   } finally { await box.cleanup(); }
 });
 

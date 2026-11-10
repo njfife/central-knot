@@ -12,7 +12,7 @@ import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { notTaken, switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
-import { strings } from './values.ts';
+import { onlyAllowed, record, strings } from './values.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
@@ -26,8 +26,8 @@ const profilesOf = (raw: unknown): Profile[] => (Array.isArray(raw) ? raw : [])
   .map(profile => ({ id: profile.id, name: profile.name, items: strings(profile.items) ?? [] }));
 
 /** What profiles hold off, per item, as the file says: tools Central Knot doesn't know are dropped, and so is an item left with none. */
-const holdsOf = (raw: unknown): Record<string, HarnessId[]> => Object.fromEntries(Object.entries(raw && typeof raw === 'object' ? raw : {})
-  .map(([id, tools]) => [id, (strings(tools) ?? []).filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId))] as const)
+const holdsOf = (raw: unknown): Record<string, HarnessId[]> => Object.fromEntries(Object.entries(record(raw) ?? {})
+  .map(([id, tools]) => [id, onlyAllowed(tools, harnessIds)] as const)
   .filter(([, tools]) => tools.length));
 
 /** The home's profiles. A file that can't be read is reported, never overwritten: the person's profiles may still be in it. */
@@ -38,6 +38,8 @@ export async function readProfiles(home: string): Promise<ProfilesView> {
   }
   try {
     const parsed = JSON.parse(text) as Partial<ProfilesFile>;
+    // Written by a newer Central Knot: read as it is, it could lose what that version keeps, so it is left alone.
+    if (typeof parsed.formatVersion === 'number' && parsed.formatVersion > 1) return { profiles: [], offByProfile: {}, problem: `${profilesPath(home)} was saved by a newer Central Knot, so profiles can’t be used here. Nothing in it was changed.` };
     const profiles = profilesOf(parsed.profiles);
     const offByProfile = holdsOf(parsed.offByProfile);
     const active = profiles.some(profile => profile.id === parsed.active) ? parsed.active : undefined;
@@ -140,11 +142,11 @@ export async function switchFilesStamp(context: ShareContext): Promise<string> {
   return (await Promise.all(files.map(file => stat(file).then(info => `${file}:${info.mtimeMs}`, () => `${file}:-`)))).join('|');
 }
 
-/** How many items the tools no longer match the profile in use on, and every item, read fresh (for the menus when the page hasn't read). */
-export async function driftNow(context: ShareContext): Promise<{ drift: number; items: SwitchItem[] }> {
-  const view = await readProfiles(context.home);
+/** How many items the tools no longer match the profile in use on, with every item and the profiles, read fresh (for the menus when the page hasn't read). */
+export async function driftNow(context: ShareContext): Promise<{ drift: number; items: SwitchItem[]; profiles: ProfilesView }> {
+  const profiles = await readProfiles(context.home);
   const { items } = await readHome(context);
-  return { drift: view.problem ? 0 : driftOf(items, view), items };
+  return { drift: profiles.problem ? 0 : driftOf(items, profiles), items, profiles };
 }
 
 /**
@@ -299,20 +301,25 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile) return stopped('That switch can’t be undone.');
   if (past.undoneBy) return stopped('That switch was already undone.');
+  // Undoing this switch would make the profile before it the one in use again: if that profile was deleted since, the tools would
+  // be put back to match a profile that no longer exists.
+  const chose = choseProfileInUse(history, past);
+  const from = past.profile.from;
+  if (chose && from && !profiles.profiles.some(profile => profile.id === from)) return stopped(`${past.profile.fromName ?? 'The profile before it'} was deleted since, so this switch can’t be undone. Switch to another profile, or to No profile, instead.`);
   const home = await readHome(context);
   const { back, foundOn, results } = whatGoesBack(history, past, home.items);
   const { done, results: flipped } = await flipAll(context, home, back);
   results.push(...flipped);
   const before = profiles.active;
-  if (choseProfileInUse(history, past)) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
+  if (chose) profiles.active = from;
+  // Nothing went back, the profile in use is the same, and something couldn't change: nothing is saved, History included, so the
+  // Undo can be tried again once that is fixed.
+  const couldNot = results.find(result => result.outcome === 'failed' || result.outcome === 'held');
+  if (!done.length && before === profiles.active && couldNot) return { stopped: `Nothing was undone: ${couldNot.message}`, results, flips: [] };
   const holds = releaseHolds(offAfterFlips(profiles.offByProfile, done), foundOn);
   // Back to No profile: holds on what is gone let go, as a switch to No profile would, so none is left that nothing could clear.
   profiles.offByProfile = profiles.active ? holds : holdsOnWhatIsHere(holds, home.items);
   await saveProfiles(context.home, profiles);
-  // Nothing went back, the profile in use is the same, and something couldn't change: the switch stays as it is in History, so
-  // its Undo can be tried again once that is fixed.
-  const couldNot = results.find(result => result.outcome === 'failed' || result.outcome === 'held');
-  if (!done.length && before === profiles.active && couldNot) return { stopped: `Nothing was undone: ${couldNot.message}`, results, flips: [] };
   const undo = switchEvent(context, profiles, before, done);
   past.undoneBy = undo.id;
   await replaceHistory(context, [...history, undo]);

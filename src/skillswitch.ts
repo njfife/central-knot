@@ -49,6 +49,7 @@ export const switchPath = (context: ShareContext, tool: HarnessId) => join(rootO
 
 /** Reads a tool's switch file. A file that can't be read, or isn't the JSON or TOML expected, is reported and never written. */
 export async function readSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
+  // The check asks about an empty target only to see whether the file is in a form Central Knot edits.
   return readSettingsFile(switchPath(context, tool), text => switchState(context, tool, text, { folder: '', name: '', skillFile: '' }), `Disable can’t be used in ${harnesses[tool].name}`);
 }
 

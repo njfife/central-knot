@@ -1,7 +1,7 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, ProfileEdit, ProfileFlip, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
-import { andList, toolName, toolNames as namedTools } from './words.ts';
+import { andList, sentence, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { activeProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 
@@ -239,12 +239,13 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const view = await api().refresh();
   if (view) state.home = view;
   state.history = await api().history();
-  state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => toolName(entry.harness ?? '') ?? entry.harness ?? ''))].filter(Boolean);
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
+  // A profile switch's band tells what could not change itself; only a stop goes to the Skills page's problems band too.
+  state.applied = past?.kind === 'profile' && !result.stopped ? undefined : result;
   if (past?.kind === 'profile') {
     if (!result.stopped) undoOutcome(result, undoneBy);
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
@@ -556,7 +557,6 @@ const couldNotChange = (entry: DestinationResult) => entry.outcome === 'failed' 
 /** What flips changed, in words; with none, whether nothing needed it (`nothing`) or the switches it needed couldn't change. */
 const changedWords = (result: { flips?: ProfileFlip[]; results: DestinationResult[] }, nothing: string) =>
   flipSummary(result.flips ?? []) || (result.results.some(couldNotChange) ? 'no switch changed' : nothing);
-const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /** The Profiles page's id for No profile, in the list and in `profileState.open`. */
 export const NONE = 'none';

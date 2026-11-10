@@ -10,6 +10,7 @@ import { mcpFile } from './mcp.ts';
 import type { ShareContext } from './share.ts';
 import { list, parseJson, readSettingsFile, switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
+import { record } from './values.ts';
 import type { HarnessId } from './types.ts';
 
 /**
@@ -22,17 +23,14 @@ export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
 
 /** Each tool's MCP switch file as read ('' when there is none yet), or why it can't be used. */
 export async function readMcpSwitches(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, SwitchFile>> {
+  // The check asks about a server named '' only to see whether the file parses as the tool's form.
   return new Map(await Promise.all(tools.map(async tool => [tool, await readSettingsFile(mcpSwitchPath(context, tool), text => mcpDisabled(tool, text, ''), `servers can’t be turned off in ${harnesses[tool].name}`)] as const)));
 }
 
-const deniesByName = (entry: unknown, name: string) => !!entry && typeof entry === 'object' && (entry as Record<string, unknown>).serverName === name;
+const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName === name;
 
 /** Pi: the server's own entry in mcp.json's `mcpServers`, if it is there as an object. */
-function piEntry(text: string, name: string): Record<string, unknown> | undefined {
-  const servers = parseJson(text).mcpServers;
-  const entry = servers && typeof servers === 'object' ? (servers as Record<string, unknown>)[name] : undefined;
-  return entry && typeof entry === 'object' && !Array.isArray(entry) ? entry as Record<string, unknown> : undefined;
-}
+const piEntry = (text: string, name: string) => record(record(parseJson(text).mcpServers)?.[name]);
 
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
 const codexTable = (text: string, name: string) => readTomlTables(text).find(table => !table.array && table.path.length === 2 && table.path[0] === 'mcp_servers' && table.path[1] === name);
@@ -47,7 +45,10 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
   }
 }
 
-/** The text with this server turned on or off in the tool. Only the switch changes; every other byte stays. */
+/**
+ * The text with this server turned on or off in the tool. Only the switch changes; every other byte stays, except that an explicit
+ * Codex `enabled` line (with any comment on it) is replaced by `enabled = false`, or removed to turn the server on: on is the default.
+ */
 export function withMcpSwitch(tool: HarnessId, text: string, name: string, disabled: boolean): string {
   if (mcpDisabled(tool, text, name) === disabled) return text;
   switch (tool) {

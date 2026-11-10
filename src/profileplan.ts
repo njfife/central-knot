@@ -41,11 +41,12 @@ export function standing(history: HistoryEvent[], undoing?: HistoryEvent): Histo
  */
 export function changedSince(history: HistoryEvent[], past: HistoryEvent): (flip: Pick<ProfileFlip, 'item' | 'tool'>) => boolean {
   const later = history.slice(history.indexOf(past) + 1);
+  const at = (item: string, tool: HarnessId) => `${item}|${tool}`;
   const touched = new Set([
-    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => `${itemId('skill', entry.key)}|${tool}`)),
-    ...standing(later).filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => `${flip.item}|${flip.tool}`) ?? []),
+    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => at(itemId('skill', entry.key), tool))),
+    ...standing(later).filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => at(flip.item, flip.tool)) ?? []),
   ]);
-  return flip => touched.has(`${flip.item}|${flip.tool}`);
+  return flip => touched.has(at(flip.item, flip.tool));
 }
 
 /** Whether a profile event changed which profile is in use: an Apply (the same profile again) did not. */
@@ -87,6 +88,7 @@ export interface SwitchItem {
   blockedFile: Partial<Record<HarnessId, string>>;
 }
 
+/** One skill's or server's facts as an item: on or off per tool with a copy; a tool whose switch can't be read counts as on, and is blocked. */
 function toItem(kind: ItemKind, facts: SkillFacts): SwitchItem {
   const tools: SwitchItem['tools'] = {};
   const blocked: SwitchItem['blocked'] = {};
@@ -134,7 +136,7 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
       }
     } else {
       // Off already, by an earlier switch: still held. Off by hand: left alone, and never held.
-      keep.push(...before.filter(tool => item.tools[tool] === 'off' && !item.blocked[tool]));
+      keep.push(...before.filter(tool => item.tools[tool] === 'off'));
       for (const [tool, now] of Object.entries(item.tools) as [HarnessId, 'on' | 'off'][]) {
         if (now !== 'on') continue;
         // Can't be read: reported, unless a profile turned it off already (then it is held, as above).
@@ -175,8 +177,8 @@ export const offAfterFailures = (planned: Record<string, HarnessId[]>, failed: P
 export const releaseHolds = (offByProfile: Record<string, HarnessId[]>, released: Pick<ProfileFlip, 'item' | 'tool'>[]) => offAfterFlips(offByProfile, released.map(entry => ({ ...entry, disabled: false })));
 
 /**
- * Holds on what is here, as No profile keeps them: an item or a tool's copy that is gone lets go, a tool whose switch can't be
- * read keeps its hold until it can be checked.
+ * `offByProfile` without holds on what is gone: an item, or a tool's copy, that the home no longer has lets go (as No profile does).
+ * Every other hold stays, including one on a tool whose switch can't be read now.
  */
 export const holdsOnWhatIsHere = (offByProfile: Record<string, HarnessId[]>, items: SwitchItem[]) => Object.fromEntries(Object.entries(offByProfile)
   .map(([id, tools]) => { const item = items.find(entry => entry.id === id); return [id, item ? tools.filter(tool => item.tools[tool] || item.blocked[tool]) : []] as const; })

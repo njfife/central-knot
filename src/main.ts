@@ -167,29 +167,33 @@ function statusLine() {
 /** The active profile's name, or undefined for No profile. */
 const activeProfileName = () => activeProfile(lastProfiles)?.name;
 /**
+ * A choice in the Profile menu. The profile in use, already matching, needs nothing: an empty switch's band would replace the last
+ * one's Undo (the menu is only drawn again, since a radio item ticks itself when clicked). The drift it goes by is the background's
+ * last look, at most one poll old. Otherwise it switches: a switch that couldn't start, or that changed nothing (every flip failed),
+ * waits on the page with sync's results; one that changed something goes to the page's band with Undo. Its own writes are stamped,
+ * as a page read stamps them, so the background never takes them for a change made in a tool.
+ */
+function switchFromMenu(id: string | null) {
+  if (id === (lastProfiles.active ?? null) && !lastDrift) { refreshTray(); return; }
+  void fromTray(async () => {
+    if (!current) return;
+    const result = await switchProfile(context(), id);
+    if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
+    else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
+    else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
+    lastStamp = await switchFilesStamp(context()).catch(() => lastStamp);
+    const fresh = await driftNow(context());
+    lastItems = fresh.items;
+    followProfiles(fresh.profiles, fresh.drift);
+  });
+}
+
+/**
  * Profile: one click switches, from the menu bar or the app menu. The label says which is in use; each profile is a radio item.
  * Before any profile exists (and nothing is held off by one), "Profiles…" opens the page that makes one.
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!profilesInUse(lastProfiles)) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  /**
-   * A choice in the Profile menu. The profile in use, already matching, needs nothing: an empty switch's band would replace the
-   * last one's Undo. Otherwise it switches: a switch that couldn't start, or that changed nothing (every flip failed), waits on the
-   * page with sync's results; one that changed something goes to the page's band with Undo.
-   */
-  const switchFromMenu = (id: string | null) => {
-    if (id === (lastProfiles.active ?? null) && !lastDrift) { refreshTray(); return; }
-    void fromTray(async () => {
-      if (!current) return;
-      const result = await switchProfile(context(), id);
-      if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
-      else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
-      else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
-      const fresh = await driftNow(context());
-      lastItems = fresh.items;
-      followProfiles(await readProfiles(current.home), fresh.drift);
-    });
-  };
   const usable = homeWritable && !!current;
   const drift = lastDrift ? ` (${plural(lastDrift, 'item')} to apply)` : '';
   return { label: `Profile: ${activeProfileName() ?? NO_PROFILE}${drift}`, submenu: [
@@ -378,21 +382,21 @@ async function profilesSaved(): Promise<ProfilesView> {
 
 /**
  * A switch turned in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: while profiles are
- * in play, the background looks at the switch files on its own. When one changed since the page read them, or the pass wrote
- * something (an item may have come or gone), drift is worked out again: the menus follow it, and the page reads again (its marks
+ * in play, the background looks at the switch files on its own. When one changed since the page read them, or something else
+ * changed (the pass wrote, or a file event: an item may have come or gone), drift is worked out again: the menus follow it, and the page reads again (its marks
  * show each switch). Codex's config.toml and Pi's mcp.json hold MCP entries too, so an MCP edit there counts.
  */
-async function lookAtSwitchFiles(passWrote: boolean) {
+async function lookAtSwitchFiles(somethingChanged: boolean) {
   if (!profilesInUse(lastProfiles)) return;
   const stamp = await switchFilesStamp(context()).catch(() => '');
   const switched = stamp !== lastStamp;
-  if (!switched && !passWrote) return;
+  if (!switched && !somethingChanged) return;
   lastStamp = stamp;
   const fresh = await driftNow(context()).catch(() => undefined);
   if (fresh) lastItems = fresh.items;
   const drift = fresh?.drift ?? lastDrift;
   const drifted = drift !== lastDrift;
-  followProfiles(lastProfiles, drift);
+  followProfiles(fresh?.profiles ?? lastProfiles, drift);
   if ((switched || drifted) && !window.isDestroyed()) window.webContents.send('sync:changed');
 }
 
@@ -403,7 +407,8 @@ function background() {
     const fromEvent = touched;
     touched = false;
     const result = await pass();
-    await lookAtSwitchFiles(!!(result?.harnessWrites || mcpChanged));
+    // A file event can be a new item (a skill or server added in a tool), which changes drift without any write.
+    await lookAtSwitchFiles(!!(result?.harnessWrites || mcpChanged || fromEvent));
     // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
     if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
     // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.

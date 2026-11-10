@@ -8,7 +8,7 @@ import { whyReadOnly, convertAgent, flashRequests, applyAgentsChanges, applyMana
 import { button, closeButton, emptyState, findInput, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
+import type { Change, DestinationResult, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth } from './addplan.ts';
 
@@ -414,6 +414,10 @@ function toolControls(skill: SampleSkill, tool: Tool) {
         toggle(!disabled, `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, on => setDisabledIn(key, tool, !on), false, `enable-${key}-${tool}`)),
     remove);
 }
+
+/** What could not be done, item by item (the first four, then how many more), as a warning band. */
+export const problemsBand = (problems: DestinationResult[]) => h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
+  h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : '')));
 
 /** Names shown as names, so a server called "files" does not read as a word in the sentence. */
 const nameList = (items: string[]) => items.flatMap((item, index) => [index ? (index === items.length - 1 ? ' and ' : ', ') : '', h('strong.item-name', {}, item)]).filter(part => part !== '');
@@ -1045,16 +1049,14 @@ function notices() {
   // Skills that cannot go somewhere, or whose copies differ, already show that in their row; the band is for failures.
   const problems = applied ? applied.results.filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/^Copies differ\./.test(result.message))) : [];
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
-  else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
+  else if (problems.length) bands.push(problemsBand(problems));
   // What sync did on its own (CON-02): each notice names the item, the winning action and where, says whether the order was proved,
   // and offers its Undo, Restore or Delete everywhere right there.
   const syncNotices = toldNotices().filter(notice => !state.dismissed.has(notice.history || notice.item));
   if (syncNotices.length) bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, syncNotices.slice(0, 6).map(notice => syncNotice(notice)),
     syncNotices.length > 6 ? h('p.sync-notice', {}, `and ${syncNotices.length - 6} more in `, smallAction('History', 'notices-history', () => showPage('history'))) : null), dismissNotices(syncNotices)));
   const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written' && result.outcome !== 'removed');
-  if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
+  if (caughtProblems.length) bands.push(problemsBand(caughtProblems));
   // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
   const told = new Set(syncNotices.map(notice => notice.item));
   const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
