@@ -53,7 +53,12 @@ const errorText = (error: unknown) => String(error instanceof Error ? error.mess
 /** What the last failed read said, so a good read clears only that. */
 let lastReadFailure: string | undefined;
 
-/** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
+/**
+ * Reads the repo's view; `check` then asks the repo for its latest commit (a fetch), showing the view meanwhile. Loads may overlap
+ * (page open, Refresh, a change elsewhere): the newest wins (`loads`), a check already running is joined rather than started again
+ * (`inFlight`), and a check an overtaken load asked for is done by the newest (`wantCheck`). A failed read keeps the last view and
+ * says why (`lastReadFailure`).
+ */
 export async function loadRepo(check = false): Promise<void> {
   const turn = ++loads;
   wantCheck ||= check;
@@ -401,13 +406,10 @@ function connectedPage(view: ConnectedRepoView) {
       stateLine(view, counts),
       h('span.toolbar-spacer'),
       // While the question is open it stands in for this button, so the button steps aside rather than sit there dimmed.
-      repo.confirmDisconnect ? null : button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled: locked, onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-cancel')?.focus(); } })),
+      repo.confirmDisconnect ? null : disconnectButton(locked)),
     h('div.bands', {},
       view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)),
-      repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
-        h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
-        button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
-        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: cancelDisconnect })) : null,
+      disconnectQuestion(),
       problemBand(view.problem && !repo.problem && !repo.checking ? view.problem : undefined),
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
@@ -431,6 +433,16 @@ function connectedPage(view: ConnectedRepoView) {
             note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined })),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
+
+/** Disconnect…: asks first, in place (disconnectQuestion), with focus on Cancel. */
+const disconnectButton = (disabled: boolean) => button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled,
+  onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-cancel')?.focus(); } });
+
+/** The question Disconnect… asks, while it is open. */
+const disconnectQuestion = () => (repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
+  h('span.band-text', {}, 'Disconnect? Your tools and the repo stay as they are.'),
+  button({ variant: 'outline', size: 'small', label: 'Disconnect', id: 'repo-disconnect-confirm', disabled: !!state.busy, onclick: () => void disconnect() }),
+  button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'repo-disconnect-cancel', onclick: cancelDisconnect })) : null);
 
 /** What stopped the last action (dismissable), or why the repo couldn't be reached (with Try again). */
 function problemBand(unreachable: string | undefined) {
@@ -474,9 +486,10 @@ function connectForm(allowed: boolean) {
 
 export function repoPage(): HTMLElement {
   const view = repo.view;
-  // Never read (it failed the first time): the reason, and Disconnect, which needs no reading, as a way out.
-  if (!view) return h('div.page.repo-page', {}, h('div.bands', {}, problemBand(undefined)), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading…' : 'The repo could not be read.'),
-    state.busy ? null : button({ variant: 'outline', size: 'small', icon: 'unplug', label: 'Disconnect', id: 'repo-disconnect-unread', onclick: () => void disconnect() })));
+  // Not read yet: said so. Never read because reading failed: the reason, and Disconnect (which needs no reading) as a way out.
+  if (!view && !lastReadFailure) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
+  if (!view) return h('div.page.repo-page', {}, h('div.bands', {}, disconnectQuestion(), problemBand(undefined)),
+    h('div.scroll', {}, h('p.empty', {}, 'The repo could not be read.'), repo.confirmDisconnect ? null : disconnectButton(!!state.busy)));
   if (view.connected) return connectedPage(view);
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
