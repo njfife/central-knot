@@ -23,7 +23,7 @@ export interface FeedHost {
   appVersion: string;
   fetch(url: string, init?: { signal?: AbortSignal }): Promise<Response>;
   /** Plugins a tool on this computer has installed from the marketplace: one a new release no longer packs is carried over. */
-  keep(): Promise<string[]>;
+  keep(marketplace: string): Promise<string[]>;
   /** Runs the swap in the app's queue, so it never lands in the middle of an install or a sync pass. */
   turn<T>(work: () => Promise<T>): Promise<T>;
 }
@@ -83,7 +83,7 @@ export async function checkFeed(host: FeedHost): Promise<FeedCheck> {
     await mkdir(join(host.dataDir, 'bundled'), { recursive: true });
     try { await download(host, release, file); } catch (error) { return failed(`Newer plugins${date ? ` (${date})` : ''} are published, but they couldn’t be downloaded: ${whyNot(error)}. The ones here stay in use.`); }
     const use = release;
-    const { problem } = await host.turn(async () => activateRelease(host.dataDir, use, file, await host.keep()));
+    const { problem } = await host.turn(async () => activateRelease(host.dataDir, use, file, await host.keep(use.marketplace)));
     if (problem) return failed(`Newer plugins${date ? ` (${date})` : ''} are published, but they couldn’t be used. ${problem} The ones here stay in use.`);
     return { outcome: 'updated', message: `Now has the plugins published${date ? ` on ${date}` : ''}.`, active: await activeBundle(host.dataDir) };
   } finally { await rm(file, { force: true }); }

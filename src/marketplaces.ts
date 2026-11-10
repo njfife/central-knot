@@ -13,7 +13,7 @@ import { installParts, partsCurrent, planParts, readParts, removeParts, undoPart
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, notCarried, partsTools } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, noLongerOffered, notCarried, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -381,6 +381,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // A plugin the build's marketplace lists but carries no files for is not installed from it.
     const carried = carriedAs(source), left = carried?.unpackaged.find(item => item.name === plugin);
     if (carried && left) return { reports: failedFor(tools, notCarried(carried.app, left.reason)) };
+    // One it no longer offers, kept for the tools that have it, goes into no other tool.
+    if (carried?.kept?.includes(plugin) && run === use.install) return { reports: failedFor(tools, noLongerOffered(carried.displayName || catalog.name)) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {

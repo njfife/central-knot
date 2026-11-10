@@ -76,15 +76,15 @@ export function readCustomBuildSync(folder: string): CustomBuild | undefined {
 }
 
 /**
- * What a custom build says about itself in Settings: what it is, that it doesn't update itself, and that its marketplace
- * changes only with a new build. Neither its own updates nor new marketplace content without a build exist yet, and the
- * app says so rather than leaving it unsaid (ORG-06).
+ * What a custom build says about itself in Settings: what it is, that it doesn't update itself (a custom build has no
+ * updates of its own yet, and the app says so rather than leaving it unsaid: ORG-06), and whether its marketplace gets
+ * newer plugins from a feed or only with a new build.
  */
 export function aboutBuild(build: CustomBuild, version: string, market?: { name: string; date: string }): string[] {
   return [
     `${build.name} is a custom build of ${PRODUCT} ${version}, with its own settings.`,
     `It doesn’t update itself: for a newer one, ask whoever gave you ${build.name}.`,
-    ...(market ? [`Its ${market.name} marketplace ${market.date ? `is as of ${market.date} and ` : ''}changes only with a new ${build.name}.`] : []),
+    ...(market ? [`Its ${market.name} marketplace ${market.date ? `is as of ${market.date}` : 'comes with it'}${build.feed ? '; newer plugins arrive by themselves' : ` and changes only with a new ${build.name}`}.`] : []),
   ];
 }
 
@@ -276,11 +276,11 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
  * that is as new or newer stays (`kept` says so when it is newer): an app update never takes a bundle's content back (ORG-05). `problem` says why the carried
  * release could not be used; whatever was in use before is still returned.
  */
-export async function openBundle(dataDir: string, carried: string, keep: () => Promise<string[]> = async () => []): Promise<{ active?: ActiveBundle; problem?: string; /** The carried release was not put in use, and why. */ kept?: string }> {
+export async function openBundle(dataDir: string, carried: string, keep: (marketplace: string) => Promise<string[]> = async () => []): Promise<{ active?: ActiveBundle; problem?: string; /** The carried release was not put in use, and why. */ kept?: string }> {
   const active = await activeBundle(dataDir);
   const release = await readRelease(join(carried, RELEASE_FILE));
   if (!release) return { active, problem: 'The marketplace this build carries has no manifest that can be read.' };
   if (active && active.release.marketplace === release.marketplace && active.release.sequence >= release.sequence) return { active, ...(active.release.sequence > release.sequence ? { kept: `the content in use (sequence ${active.release.sequence}) is newer than the release this app carries (sequence ${release.sequence}), so it stays` } : {}) };
-  const { problem } = await activateRelease(dataDir, release, join(carried, release.archive), active ? await keep() : []);
+  const { problem } = await activateRelease(dataDir, release, join(carried, release.archive), active ? await keep(release.marketplace) : []);
   return problem ? { active, problem: `The marketplace this build carries could not be unpacked. ${problem}` } : { active: await activeBundle(dataDir) };
 }

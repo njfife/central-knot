@@ -24,8 +24,18 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 /** Why a plugin a bundled build's marketplace lists can't be installed from it: the build carries no files for it (`reason`: why it couldn't be packed). */
 export const notCarried = (app: string, reason: string) => `${app} doesn’t include this plugin’s files, so it can’t be installed from here. ${reason}`;
 
-/** Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's and the build has no files for it. */
-export const whyNotCarried = (entry: MarketplaceView, plugin: string) => { const left = entry.bundled?.unpackaged.find(item => item.name === plugin); return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`; };
+/** Why a plugin a bundled build's marketplace no longer offers is still listed: a tool here has it installed, and it stays until uninstalled there. */
+export const noLongerOffered = (market: string) => `${market} no longer offers this plugin. It stays in the tools that have it until it is uninstalled there.`;
+
+/**
+ * Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's: the build has
+ * no files for it, or the marketplace no longer offers it and it is kept only for the tools that have it.
+ */
+export const whyNotCarried = (entry: MarketplaceView, plugin: string): string | undefined => {
+  if (entry.bundled?.kept?.includes(plugin)) return noLongerOffered(entry.bundled.displayName || entry.name);
+  const left = entry.bundled?.unpackaged.find(item => item.name === plugin);
+  return left && `${notCarried(entry.bundled!.app, left.reason)}${entry.owner ? ` Ask ${entry.owner} if you need it.` : ''}`;
+};
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {

@@ -1,6 +1,6 @@
 import { onlyAllowed, record, strings } from './values.ts';
 import { execFile } from 'node:child_process';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
@@ -10,7 +10,9 @@ import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
-import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
+import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
+import { installedPlugins } from './plugins.ts';
+import { checkFeed, type FeedCheck } from './bundlefeed.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
@@ -530,6 +532,47 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   return made;
 }
 
+/**
+ * The plugins of a marketplace that a tool in this computer's own home has installed. A release of the carried
+ * marketplace that no longer packs one of them carries it over, so it keeps working there until it is uninstalled.
+ */
+async function carriedInstalled(marketplace: string): Promise<string[]> {
+  const context = { home: homedir(), dataDir: join(app.getPath('userData'), 'plugins'), binaries: {}, overrides: Object.fromEntries(harnessIds.map(id => [id, process.env[harnesses[id].configEnv]])) };
+  const found = await Promise.all(pluginTools.map(tool => installedPlugins(context, tool).catch(() => [])));
+  return [...new Set(found.flat().filter(plugin => plugin.marketplace === marketplace && plugin.state.state !== 'not-installed').map(plugin => plugin.plugin))];
+}
+
+// ---------- A bundled build's feed of newer plugins (ORG-05; bundlefeed.ts) ----------
+
+const FEED_FIRST_MS = 5_000, FEED_EVERY_MS = 4 * 60 * 60_000, FEED_RETRY_MS = 15 * 60_000;
+/** The last look at the feed, for the marketplace's About tab. */
+let feedSeen: { checked: number; outcome: FeedCheck['outcome']; message: string } | undefined;
+let feedTimer: NodeJS.Timeout | undefined;
+let feedLook: Promise<void> | undefined;
+/**
+ * Looks at the feed: shortly after the app opens, every few hours while it runs (window closed too), sooner again after a
+ * look that failed, and when asked on the About tab. One look at a time. Newer plugins are put in use in the app's queue;
+ * the page then reads the marketplace again and the status bar says what arrived.
+ */
+function lookAtFeed(): Promise<void> {
+  const feed = custom?.feed;
+  if (!feed || smoke) return Promise.resolve();
+  feedLook ??= (async () => {
+    clearTimeout(feedTimer);
+    const result = await checkFeed({ feed, dataDir: app.getPath('userData'), appVersion: app.getVersion(), fetch: (url, init) => net.fetch(url, init), keep: carriedInstalled, turn: queued })
+      .catch((error): FeedCheck => ({ outcome: 'failed', message: `Couldn’t check for newer plugins: ${error instanceof Error ? error.message : String(error)}` }));
+    feedSeen = { checked: Date.now(), outcome: result.outcome, message: result.message };
+    log(`feed: ${result.outcome}: ${result.message}`);
+    if (result.outcome === 'updated' && result.active) {
+      bundle = result.active;
+      send('sync:changed');
+      send('said', `${custom?.marketplace?.displayName ?? bundle.release.marketplace} ${result.message.charAt(0).toLowerCase()}${result.message.slice(1)}`);
+    }
+    feedTimer = setTimeout(() => void lookAtFeed(), result.outcome === 'failed' ? FEED_RETRY_MS : FEED_EVERY_MS);
+  })().finally(() => { feedLook = undefined; });
+  return feedLook;
+}
+
 /** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
 let carriedMarket: ReturnType<typeof registerMarketplaces> | undefined;
 /**
@@ -905,12 +948,13 @@ app.whenReady().then(async () => {
   // A bundled build unpacks the marketplace it carries before the window asks for it. What was in use stays if that fails.
   if (custom?.marketplace && !smoke) {
     const began = Date.now();
-    const opened = await openBundle(app.getPath('userData'), join(__dirname, CARRIED_FOLDER));
+    const opened = await openBundle(app.getPath('userData'), join(__dirname, CARRIED_FOLDER), carriedInstalled);
     bundle = opened.active;
     if (opened.kept) log(`bundle: ${opened.kept}`);
     if (opened.problem) log(`bundle: ${opened.problem}`);
     else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
   }
+  if (custom?.feed) feedTimer = setTimeout(() => void lookAtFeed(), FEED_FIRST_MS);
   applyAppearance();
   await firstSignIn();
   makeTray();
@@ -952,6 +996,8 @@ app.whenReady().then(async () => {
   handleNow('updates:check', () => updater?.check() ?? noUpdates());
   handleNow('updates:install', () => updater?.install() ?? noUpdates());
   handleNow('updates:restart', async () => { await updater?.restart(); });
+  // Asked on the marketplace's About tab; the page reads the Plugins view again when it answers.
+  handleNow('bundle:check-feed', () => lookAtFeed());
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
@@ -975,7 +1021,11 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
-    bundled: () => (bundle && custom ? { source: bundle.folder, view: { app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`, release: releaseDate(bundle.release), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged } } : undefined),
+    bundled: () => (bundle && custom ? { source: bundle.folder, view: {
+      app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`,
+      release: releaseDate(bundle.release), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged, kept: bundle.release.kept,
+      ...(custom.feed ? { feed: feedSeen ? { checked: new Date(feedSeen.checked).toISOString(), outcome: feedSeen.outcome, message: feedSeen.message } : {} } : {}),
+    } } : undefined),
   });
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
   handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
