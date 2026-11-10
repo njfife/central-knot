@@ -263,18 +263,32 @@ function showWindow() {
  * icon's return, so leaving is asked again until it holds or a window is back.
  */
 let leavingDock: NodeJS.Timeout | undefined;
+let menuBarOnly = false;
+let joiningDock = false;
 const dock = () => (process.platform === 'darwin' ? app.dock : undefined);
-function leaveDock(tries = 10) {
+function leaveDock() {
+  if (!tray || quitting) return;
+  menuBarOnly = true;
+  askToLeaveDock();
+}
+function askToLeaveDock(tries = 10) {
   clearTimeout(leavingDock);
-  if (!tray || quitting || (window && !window.isDestroyed() && window.isVisible())) return;
+  if (!menuBarOnly || quitting) return;
   dock()?.hide();
-  if (tries > 0 && dock()?.isVisible()) leavingDock = setTimeout(() => leaveDock(tries - 1), 400);
+  if (tries > 0 && dock()?.isVisible()) leavingDock = setTimeout(() => askToLeaveDock(tries - 1), 400);
 }
 function joinDock() {
   clearTimeout(leavingDock);
-  if (!dock() || dock()?.isVisible()) return;
-  // macOS hands the front to the Dock while the icon is added, so the window is brought forward again once it is there.
-  void dock()?.show().then(() => { if (window && !window.isDestroyed() && window.isVisible()) { app.focus({ steal: true }); window.focus(); } });
+  menuBarOnly = false;
+  if (joiningDock || !dock() || dock()?.isVisible()) return;
+  joiningDock = true;
+  // macOS hands the front to the Dock while the icon is added, so the window is brought forward again once it is there. A
+  // window closed meanwhile leaves the Dock again.
+  void dock()?.show().then(() => {
+    joiningDock = false;
+    if (menuBarOnly) askToLeaveDock();
+    else if (window && !window.isDestroyed() && window.isVisible()) { app.focus({ steal: true }); window.focus(); }
+  });
 }
 /** One status line for both menus: where, and any news. */
 function statusLine() {
