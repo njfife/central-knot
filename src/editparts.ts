@@ -26,6 +26,21 @@ const ago = (at: string) => {
 /** The editors' keyboard hint, once there is something to review. */
 export const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
 
+/** Esc inside an editor clicks its Cancel button (`cancelId`), wherever focus is in it. */
+export const escapeTo = (cancelId: string) => (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') return;
+  const cancel = document.getElementById(cancelId);
+  if (!cancel) return;
+  event.preventDefault(); cancel.click();
+};
+
+/** Redraws, then puts focus and the caret back in the text box `id` at `at`. */
+export const keepCaret = (id: string, at: number, redraw: () => void) => {
+  redraw();
+  const area = document.getElementById(id) as HTMLTextAreaElement | null;
+  area?.focus(); area?.setSelectionRange(at, at);
+};
+
 /** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control. */
 export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }) {
   const then = (step: { run: () => void; focus: string }) => () => { step.run(); rerender(); document.getElementById(step.focus)?.focus(); };

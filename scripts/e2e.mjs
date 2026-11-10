@@ -568,6 +568,10 @@ async function practiceFlow() {
   check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
   await a.click('#outcome-undo-base');
   check('Undo puts Claude Code back', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8') === baseClaude1);
+  await a.click('#base-edit'); await a.click('#base-stop'); await a.click('#base-back');
+  check('going back from "Stop sharing" keeps the ticks', await a.run(`document.querySelector('#base-tool-claude-cli').checked && document.querySelector('#base-tool-codex-cli').checked`));
+  await a.run(`document.querySelector('#base-tool-claude-cli').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle();
+  check('Esc on a tool box cancels the untouched base editor', !(await a.exists('#base-text')));
   await a.click('#base-edit');
   await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
   await a.click('#base-review'); await a.click('#base-save');

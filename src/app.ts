@@ -18,6 +18,8 @@ export interface BaseEdit {
   confirmDiscard?: boolean; fullDiff?: boolean;
   /** Why the review is shown again: the base or a file changed since it was last shown. */
   conflict?: string;
+  /** The ticks before "Stop sharing with every tool…" emptied them, put back if the person goes back to editing. */
+  ticksBeforeStop?: HarnessId[];
 }
 
 /** The text a tool's editor works on: its own instructions, without the base block when it gets the base. */
@@ -344,6 +346,7 @@ export const saveInstructionText = (file: InstructionFile, own: string) => busy(
 
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
+  focusAfterBusy = `ins-edit-${file.tool}`;
   // Like putting back a version: the base copy it held is judged again against the base texts Central Knot kept.
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home, true);
   await readInstructions();
@@ -509,6 +512,7 @@ export const applyBaseChange = (request: Omit<BaseApply, 'expected'>, done: (wri
 });
 
 const undoBaseChange = (undo: BaseUndo) => busy('Undoing…', async () => {
+  focusAfterBusy = 'base-edit';
   // Said for what this undo puts back: the base only if the save changed it (Put back and Update change files alone).
   const baseMoves = undo.text !== state.base?.text || undo.list.tools.join() !== state.base?.tools.join();
   const result = await api().undoBase(undo, state.home!.home);

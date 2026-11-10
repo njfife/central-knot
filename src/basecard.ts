@@ -5,7 +5,7 @@ import { applyBaseChange, savingOff, startTakeOut, baseDraftTyped, baseSaveDoesS
 import { baseAction, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
-import { changeCounts, diffView, discardConfirm, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
 import { brandMark } from './matrix.ts';
 import { fileName, lineCount, toolList, toolNames } from './words.ts';
 import { plural } from './model.ts';
@@ -30,9 +30,12 @@ const startedInReview = (edit: BaseEdit) => !!edit.source && edit.source.kind !=
 /** Leaves the review: back to the editor, or closed when the review started on the card (an edited copy, an earlier version). */
 function closeOrBack(edit: BaseEdit) {
   const closes = startedInReview(edit);
-  if (closes) state.baseEdit = undefined; else Object.assign(edit, { stage: 'edit', conflict: undefined });
+  // Back from "Stop sharing": the ticks as they were before it.
+  if (edit.ticksBeforeStop) Object.assign(edit, { tools: edit.ticksBeforeStop, ticksBeforeStop: undefined });
+  if (closes) state.baseEdit = undefined; else Object.assign(edit, { stage: 'edit', conflict: undefined, confirmDiscard: false });
   rerender();
-  const from = edit.source?.kind === 'copy' ? `base-usecopy-${edit.source.tool}` : edit.source?.kind === 'putBack' ? `base-restore-${edit.source.tool}` : 'base-edit';
+  const kind = edit.source?.kind;
+  const from = kind === 'copy' ? `base-usecopy-${edit.source!.tool}` : kind === 'putBack' ? `base-restore-${edit.source!.tool}` : kind === 'update' ? 'base-update' : 'base-edit';
   document.getElementById(closes ? from : 'base-text')?.focus();
 }
 
@@ -65,7 +68,9 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
   if (copy === undefined && file.base?.leftPlain) return says('Its plain copy of the base goes back into the base block, so it isn’t there twice.');
   if (action === 'adopt') return says(sameBase(own, edit.text) ? `Its ${plural(lineCount(own), 'line')} move into the base block, so ${toolNames[file.tool]} reads the same as now. The file as it was stays under Earlier versions.`
-    : `${name} will hold only the base: its ${plural(lineCount(own), 'line')} move into it, with your edits. The file as it was stays under Earlier versions.`);
+    : lineDiff(own, edit.text).some(line => line.kind === 'removed')
+      ? `${name} will hold only the base: its ${plural(lineCount(own), 'line')} move into it with your edits, so lines you took out of the draft leave the file. The file as it was stays under Earlier versions.`
+      : `Its ${plural(lineCount(own), 'line')} move into the base block, with what you added. The file as it was stays under Earlier versions.`);
   // Its own text already says what the base says (as when the base started from another tool with the same file): it stays, so
   // the tool reads it twice until that own text is removed on its card.
   if (copy === undefined && own.trim() && sameBase(own, edit.text)) return says(`Added after its own ${plural(lineCount(own), 'line')}, which already say the same, so ${toolNames[file.tool]} reads them twice. Remove its own copy on its card after saving if you don’t want that.`);
@@ -82,7 +87,10 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
   const area = h('textarea.ins-text', { id: 'base-text', spellcheck: 'false', 'aria-label': 'Edit the base instructions',
     placeholder: 'Write what every tool should know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them',
     oninput: (event: Event) => {
-      edit.text = (event.target as HTMLTextAreaElement).value; edit.confirmDiscard = false;
+      const target = event.target as HTMLTextAreaElement;
+      edit.text = target.value;
+      // Typing answers an open discard question with "keep editing": it goes, and the caret stays where it was.
+      if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret('base-text', target.selectionStart, rerender); return; }
       // Said as you type, without redrawing the editor.
       const review = document.getElementById('base-review') as HTMLButtonElement | null;
       if (review) review.disabled = !reviewable();
@@ -90,13 +98,13 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
       if (line) line.textContent = hint();
     },
     onkeydown: (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); document.getElementById('base-cancel')?.click(); }
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && reviewable()) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById('base-save')?.focus(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
   area.rows = Math.min(30, Math.max(6, lineCount(edit.text) + 3));
   const from = edit.source?.tool ? files.find(file => file.tool === edit.source!.tool) : undefined;
-  return h('div.ins-editor', {},
+  // Esc anywhere in the editor (the text, a tool box, a button) is Cancel.
+  return h('div.ins-editor', { onkeydown: escapeTo('base-cancel') },
     from && edit.source?.kind === 'own' ? h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, `${fileName(from.path)}’s instructions move into the base: ${toolNames[from.tool]} still reads them, now from the base block, and the tools you choose get them too. A line meant only for ${toolNames[from.tool]} can go back into its own instructions after saving.`)) : null,
     area,
     h('fieldset.base-tools', {}, h('legend', {}, 'Tools that get them, after each tool’s own instructions. Review changes shows what unticking one does to its file.'),
@@ -121,7 +129,7 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
         } }),
         h('span.ins-locked', { id: 'base-hint' }, hint()),
         state.base?.tools.length ? button({ variant: 'link', size: 'micro', label: 'Stop sharing with every tool…', id: 'base-stop', attrs: { title: 'Review what stopping does to each tool’s file; each tool’s own instructions stay' },
-          onclick: () => { Object.assign(edit, { tools: [], stage: 'review', confirmDiscard: false }); rerender(); document.getElementById('base-save')?.focus(); } }) : null));
+          onclick: () => { Object.assign(edit, { ticksBeforeStop: edit.tools, tools: [], stage: 'review', confirmDiscard: false }); rerender(); document.getElementById('base-save')?.focus(); } }) : null));
 }
 
 /** A review's headline, its Save label, and the result sentence once saved (given the files written), for where the draft came from. */
@@ -144,7 +152,9 @@ function reviewWords(edit: BaseEdit, writes: InstructionFile[], putBackFile: str
   const title = !before.trim() ? `Review the base instructions: ${plural(lineCount(edit.text), 'line')}.`
     : edit.text === before ? 'Review: the base instructions stay the same; the tools that get them change.'
     : `Review the base instructions: ${counts}.`;
-  return { title, save, done: saved('Base instructions saved') };
+  // Started from a tool's own text: the result says where that text went.
+  const source = kind === 'own' ? state.instructions?.find(file => file.tool === edit.source!.tool) : undefined;
+  return { title, save, done: (written: string) => saved('Base instructions saved')(written) + (source ? ` ${fileName(source.path)}’s instructions are now the base.` : '') };
 }
 
 function reviewView(files: InstructionFile[], edit: BaseEdit) {
@@ -277,10 +287,12 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   const said = !base.chosen ? 'not on the base list; left as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file' : 'an older version';
   // Edited or behind: the choice is on the Base instructions card, on the row of the first tool reading this file; this goes there.
   const row = (state.instructions ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
-  const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-restore-${row}` : 'base-update') : undefined;
+  const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-diff-${row}` : 'base-update') : undefined;
+  // The choice lives on the resting Base instructions card, which an open base editor replaces.
+  const goWhy = state.baseEdit ? 'Finish or cancel the base instructions edit first.' : undefined;
   return h('div.base-strip', {},
     h('div.base-strip-line', {}, icon('layers', 13, 'tone-muted'), h('span', {}, h('strong', {}, 'Then the base instructions'), ` · ${plural(lines, 'line')}, ${said}`),
-      goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, onclick: () => { const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus(); } }) : null,
+      goTo ? button({ variant: 'link', size: 'micro', label: base.state === 'edited' ? 'Choose what to do…' : 'Update…', id: `ins-base-go-${file.tool}`, disabled: !!goWhy, attrs: lockAttrsFor(goWhy), onclick: () => { const target = document.getElementById(goTo); target?.scrollIntoView({ block: 'center' }); target?.focus(); } }) : null,
       // Not on the list any more: its block (an edited copy the list change left) can be taken out here, after a review.
       !base.chosen ? button({ variant: 'link', size: 'micro', label: 'Take the block out…', id: `ins-base-out-${file.tool}`, disabled: !!state.busy || !!lockedWhy, attrs: lockAttrsFor(lockedWhy), onclick: () => startTakeOut(file) }) : null,
       button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide' : 'Show', id: `ins-base-${file.tool}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),

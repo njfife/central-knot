@@ -3,7 +3,7 @@
 // deletion is an Undo of a base save removing a file that save created, while unchanged).
 import { baseDraftTyped, savingOff, loadInstructionVersion, ownText, toolDraftTyped, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { baseCard, baseStrip } from './basecard.ts';
-import { changeCounts, diffView, discardConfirm, keys, legend, previewBlock, versionsList } from './editparts.ts';
+import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
 import { fileName, lineCount, toolNames } from './words.ts';
 import { button, emptyState, h, icon, lockAttrs, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
@@ -16,7 +16,7 @@ export { lineDiff } from './diff.ts';
 function leaveReview(tool: string) {
   const edit = state.instructionEdit;
   if (!edit) return;
-  if (edit.wholeFile) state.instructionEdit = undefined; else edit.stage = 'edit';
+  if (edit.wholeFile) state.instructionEdit = undefined; else Object.assign(edit, { stage: 'edit', confirmDiscard: false });
   rerender();
   document.getElementById(edit.wholeFile ? `ins-edit-${tool}` : `ins-text-${tool}`)?.focus();
 }
@@ -64,9 +64,12 @@ function editor(file: InstructionFile) {
           : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: `ins-review-discard-${file.tool}`, onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById(`ins-review-keep-${file.tool}`)?.focus(); } })));
   }
   const area = h('textarea.ins-text', { id: `ins-text-${file.tool}`, spellcheck: 'false', 'aria-label': `Edit ${name}`,
-    placeholder: `Write what ${toolNames[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
+    placeholder: file.base ? `Write what only ${toolNames[file.tool]} should know (the base instructions stay after it). For example:\n# Only for ${toolNames[file.tool]}\n- …`
+      : `Write what ${toolNames[file.tool]} should always know, in Markdown. For example:\n# How I like to work\n- Explain changes before making them`,
     oninput: (event: Event) => {
-      edit.text = (event.target as HTMLTextAreaElement).value; edit.confirmDiscard = false;
+      const target = event.target as HTMLTextAreaElement;
+      edit.text = target.value;
+      if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret(`ins-text-${file.tool}`, target.selectionStart, rerender); return; }
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
       const changed = edit.text !== original;
       const review = document.getElementById(`ins-review-${file.tool}`) as HTMLButtonElement | null;
@@ -76,7 +79,6 @@ function editor(file: InstructionFile) {
       if (hint) hint.textContent = changed ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.';
     },
     onkeydown: (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); document.getElementById(`ins-cancel-${file.tool}`)?.click(); }
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== original) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
@@ -90,7 +92,7 @@ function editor(file: InstructionFile) {
       button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
       button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = dirty(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
       h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
-  return h('div.ins-editor', {},
+  return h('div.ins-editor', { onkeydown: escapeTo(`ins-cancel-${file.tool}`) },
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     file.base ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
     area, actions);
