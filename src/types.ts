@@ -531,6 +531,37 @@ export interface McpResult { stopped?: string; results: DestinationResult[]; wri
   claudeWritten?: ClaudeWrite[] }
 export interface ClaudeWrite { name: string; before: string | null; after: string }
 
+// ---------- Memory ----------
+
+/** One file of a tool's memory, read only. */
+export interface MemoryNote {
+  path: string;
+  /** The file's name, `feedback_small_prs.md`. */
+  file: string;
+  title: string;
+  description?: string;
+  /** What Claude Code filed it as (`user`, `feedback`, `project`, `reference`), when it says. */
+  kind?: string;
+  /** The file's modification time. */
+  at: string;
+  /** The text after its settings lines, as it is. */
+  text: string;
+  /** Of `text`, so a later send can tell it changed since it was shown. */
+  hash: string;
+  /** Where it came from, in words: "Claude Code's memory (project app, file notes.md)". */
+  origin: string;
+  /** The project's MEMORY.md, the index Claude Code loads first. */
+  index?: true;
+  /** It could not be read. */
+  unreadable?: true;
+}
+/** One Claude Code project's memory folder. */
+export interface MemoryProject { folder: string; /** The project folder's name, shortened for display. */ label: string; /** Its newest file's time. */ newest: string; notes: MemoryNote[] }
+/** Codex's memory: the folder Codex uses, whether its memory is on, and its summary when there is one. */
+export interface CodexMemory { folder: string; on: boolean; summary?: { path: string; text: string; at: string } }
+/** What the Memory page shows: only the tools in this home have a part. */
+export interface MemoryView { claude?: MemoryProject[]; codex?: CodexMemory; copilot: boolean }
+
 // ---------- Instructions ----------
 
 /** One tool's personal instruction file, as the editor shows it (INS-01, INS-02). */

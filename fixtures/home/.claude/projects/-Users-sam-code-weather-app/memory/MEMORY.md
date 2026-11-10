@@ -1,0 +1,3 @@
+- [Small pull requests](feedback_small_prs.md) — one change per pull request, with its tests
+- [Who Sam is](user_role.md) — works on the weather app, prefers plain words
+- [Forecast cache](project_forecast_cache.md) — forecasts are kept for ten minutes

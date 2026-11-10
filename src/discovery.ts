@@ -103,10 +103,10 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
 }
 
 const OPENING = /^﻿?---[ \t]*\r?\n/;
-const FRONTMATTER = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
+export const FRONTMATTER = /^﻿?---[ \t]*\r?\n(?:([\s\S]*?)\r?\n)?---[ \t]*(?:\r?\n|$)/;
 
 /** The metadata fields, or null when there is no frontmatter. Throws when it cannot be read. */
-function frontmatter(content: string): Record<string, unknown> | null {
+export function frontmatter(content: string): Record<string, unknown> | null {
   if (!OPENING.test(content)) return null;
   const match = content.match(FRONTMATTER);
   if (!match) throw new Error('Unclosed YAML frontmatter.');
