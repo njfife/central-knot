@@ -152,7 +152,7 @@ afterLayout(markWrappedStatus);
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
   if (noTools()) return '';
-  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents?.servers.length) return ' Nothing found in this home yet.';
+  if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents.servers.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : '';
 }
@@ -166,7 +166,7 @@ export function overviewPage() {
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
   const empty = noTools();
-  const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...(home.agents?.servers ?? [])].some(fact => fact.managed);
+  const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...home.agents.servers].some(fact => fact.managed);
   const done = outcomeBand();
   return h('div.page', {},
     done ? h('div.bands', {}, done) : null,
@@ -176,10 +176,10 @@ export function overviewPage() {
       empty ? noToolsLead('overview-choose-home') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
-      empty ? null : h('div.kind-cards', { 'data-count': String(3 - absent.filter(kind => kind === 'mcp' || kind === 'agents').length) },
+      empty ? null : h('div.kind-cards', { 'data-count': String(heldKinds(home).length) },
         kindCard('skills', 'wand-sparkles', pick(home.manage.skills), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
-        absent.includes('agents') ? null : kindCard('agents', 'bot', pick(home.agents?.servers ?? []), home.agents.tools)),
+        absent.includes('agents') ? null : kindCard('agents', 'bot', pick(home.agents.servers), home.agents.tools)),
       h('div.overview-more', {},
         absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
@@ -206,7 +206,7 @@ export function mcpPage() {
 
 export function agentsPage() {
   if (!state.home) return notRead();
-  if (!state.home.agents?.servers.length) return emptyKindPage('agents', 'agents-empty');
+  if (!state.home.agents.servers.length) return emptyKindPage('agents', 'agents-empty');
   return designOverview('agents');
 }
 

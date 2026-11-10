@@ -645,7 +645,7 @@ const practiceAvailable = () => smoke || process.argv.includes('--practice-copy'
 
 /**
  * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
- * Dev builds and tests start on the Practice copy instead, so a development run never syncs this machine's real tools.
+ * Dev builds and tests fall back to the Practice copy instead, so a development run doesn't sync this machine's real tools unasked.
  */
 async function startHome(): Promise<HomeView | null> {
   // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.

@@ -303,6 +303,9 @@ function readFound(view: HomeView, from?: string): string {
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped || caught ? '' : ' Nothing changed.'}`;
 }
 
+/** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
+const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
 
@@ -318,14 +321,12 @@ export function heldKindNames(count: 'all' | 'one' = 'all'): string {
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
-  const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);
-  // An empty home (no tools, or nothing in them) says only that it opened; the page says the rest.
-  tell({ page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`) + leftText,
+  tell({ page: state.page, carry: true, text: openedText(view) + leftText,
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined });
 }));
 
@@ -336,9 +337,8 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
   const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
   if (!view) { announce(''); return; }
   accept(view);
-  const nothing = !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   if (practiceNote) announce(readSummary(view), true);
-  else tell({ page: state.page, carry: true, text: nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}` });
+  else tell({ page: state.page, carry: true, text: openedText(view) });
 });
 
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */

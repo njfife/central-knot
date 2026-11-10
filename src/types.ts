@@ -116,8 +116,7 @@ export interface DesktopApi {
   instructionBase(): Promise<BaseView | null>;
   applyBase(request: BaseApply, home: string): Promise<BaseResult>;
   undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
-  /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
-  /** Marketplaces and installs; `readId` (a view's) reuses the read that view was built from, when it is the latest. */
+  /** Marketplaces and installs; `fresh` fetches every Git marketplace again, and `readId` (a view's) reuses the read that view was built from, when it is the latest. */
   plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
