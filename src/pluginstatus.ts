@@ -8,7 +8,7 @@ import { takesPlugins } from './presence.ts';
 
 /**
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
- * Copilot CLI when their plugin route is blocked here, Claude Code only with no CLI (its desktop app alone, say).
+ * Copilot CLI when their plugin route is blocked here, Claude Code only with no plugin route at all (its desktop app alone, before its Code tab is there).
  */
 export const partsTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 
@@ -21,12 +21,12 @@ export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.'
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
-/** Why a tool can't take this marketplace's plugins, if it can't: no CLI (perhaps only its desktop app), a Codex-only marketplace, or Copilot refusing it. */
+/** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   const app = view.desktopOnly?.[tool];
-  // Plugins install only through the tool's own CLI: the copy a desktop app carries is no install route (CD §3, PLG-04).
-  if (!view.clis[tool]) return app ? `Only ${app} was found here. ${cliMissing(tool)}, and plugins install only through it.` : noCli(tool);
+  // Plugins install through the tool's own CLI or, with none, the copy its desktop app carries (PLG-04): here, neither is.
+  if (!view.clis[tool]) return app ? `Only ${app} was found here, and the copy of ${names[tool]} it carries isn’t there yet (the app adds it once it has run). ${cliMissing(tool)} either.` : noCli(tool);
   if (entry.codexOnly && tool !== 'codex-cli') return entry.codexOnly;
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }

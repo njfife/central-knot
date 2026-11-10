@@ -37,18 +37,36 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
   });
 }
 
-/** The first desktop app found among the candidates, with its version and the version of what it carries, where readable. Never runs the app. */
+const runnable = (path: string) => access(path, constants.X_OK).then(() => path, () => undefined);
+
+/**
+ * The first desktop app found among the candidates, with its version, the version of what it carries and that copy's
+ * binary, where they can be read. Never runs the app. Claude desktop's copy is the newest Code tab version with a binary
+ * in one of its build folders; the Copilot app's is the runtime unpacked for the version it names.
+ */
 export async function findApp(candidates: AppCandidate[], timeoutMs?: number): Promise<DesktopApp | undefined> {
   for (const candidate of candidates) {
     try { if (!(await stat(candidate.app)).isDirectory()) continue; } catch { continue; }
     const plist = await readFile(join(candidate.app, 'Contents/Info.plist'), 'utf8').catch(() => '');
     const version = plist.match(/<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/)?.[1]?.trim();
     const { carried } = candidate;
-    let carriedVersion: string | undefined;
-    if ('folders' in carried) carriedVersion = (await readdir(carried.folders).catch(() => [] as string[])).filter(name => VERSION.exec(name)?.[0] === name).sort((first, second) => compareVersions(second, first))[0];
-    else if ('file' in carried) carriedVersion = (await readFile(carried.file, 'utf8').catch(() => '')).match(VERSION)?.[0];
-    else carriedVersion = (await probeVersion(carried.binary, timeoutMs)).version;
-    return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}) };
+    let carriedVersion: string | undefined, binary: string | undefined;
+    if ('folders' in carried) {
+      const versions = (await readdir(carried.folders).catch(() => [] as string[])).filter(name => VERSION.exec(name)?.[0] === name).sort((first, second) => compareVersions(second, first));
+      carriedVersion = versions[0];
+      for (const each of versions) {
+        const builds = await readdir(join(carried.folders, each)).catch(() => [] as string[]);
+        for (const build of builds.sort()) binary ??= await runnable(join(carried.folders, each, build, carried.binary));
+        if (binary) { carriedVersion = each; break; }
+      }
+    } else if ('file' in carried) {
+      carriedVersion = (await readFile(carried.file, 'utf8').catch(() => '')).match(VERSION)?.[0];
+      if (carriedVersion) binary = await runnable(join(carried.runtimes, `copilot-sdk-runtime-${carriedVersion}`, carried.binary));
+    } else {
+      carriedVersion = (await probeVersion(carried.binary, timeoutMs)).version;
+      if (carriedVersion) binary = carried.binary;
+    }
+    return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}), ...(binary ? { binary } : {}) };
   }
   return undefined;
 }

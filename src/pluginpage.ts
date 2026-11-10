@@ -105,7 +105,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     // The tools from the left under the heading, each in a column of capped width, and the button for all of them at the
     // right end; a box too narrow for that puts them in a row that wraps (settlePluginTools).
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
-      h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool))))), allButton), view.tools.length));
+      h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)),
+        // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
+        view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null))), allButton), view.tools.length));
 }
 
 /** What stays with the plugin in any tool without it: the parts that are never installed on their own. */

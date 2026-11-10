@@ -16,16 +16,18 @@ export function executableCandidates(home: string, searchPath: string, binary = 
 }
 
 /**
- * Where a tool's desktop app may be, and where the version of the tool it carries is written (CD §2): Claude desktop keeps
- * each Code tab build in a folder named by its version, the GitHub Copilot app names its runtime's version in a file, and
- * ChatGPT desktop carries a Codex that answers --version. The app is found, never run, and never counts as the CLI (CD §3).
+ * Where a tool's desktop app may be, where the version of the tool it carries is written, and where that copy of the tool
+ * is (CD §2): Claude desktop keeps each Code tab build in a folder named by its version (`<version>/<build>/claude.app`),
+ * the GitHub Copilot app names its runtime's version in a file and unpacks that runtime, a whole Copilot CLI, into the
+ * user's caches by that version, and ChatGPT desktop carries a Codex that answers --version. The app is found, never run,
+ * and never counts as the CLI (CD §3); its copy of the tool runs plugin commands only when there is no CLI (PLG-04).
  */
-export interface AppCandidate { name: string; app: string; carries: string; carried: { folders: string } | { file: string } | { binary: string } }
+export interface AppCandidate { name: string; app: string; carries: string; carried: { folders: string; binary: string } | { file: string; runtimes: string; binary: string } | { binary: string } }
 
 export function appCandidates(home: string, binary: string): AppCandidate[] {
   const where = [join(home, 'Applications'), '/Applications'];
-  if (binary === 'claude') return where.map(apps => ({ name: 'Claude desktop', app: join(apps, 'Claude.app'), carries: 'Code tab', carried: { folders: join(home, 'Library/Application Support/Claude/claude-code') } }));
-  if (binary === 'copilot') return where.map(apps => ({ name: 'GitHub Copilot app', app: join(apps, 'GitHub Copilot.app'), carries: 'Copilot runtime', carried: { file: join(apps, 'GitHub Copilot.app/Contents/Resources/copilot-sdk/cliVersion.d.ts') } }));
+  if (binary === 'claude') return where.map(apps => ({ name: 'Claude desktop', app: join(apps, 'Claude.app'), carries: 'Code tab', carried: { folders: join(home, 'Library/Application Support/Claude/claude-code'), binary: 'claude.app/Contents/MacOS/claude' } }));
+  if (binary === 'copilot') return where.map(apps => ({ name: 'GitHub Copilot app', app: join(apps, 'GitHub Copilot.app'), carries: 'Copilot runtime', carried: { file: join(apps, 'GitHub Copilot.app/Contents/Resources/copilot-sdk/cliVersion.d.ts'), runtimes: join(home, 'Library/Caches/github-copilot-sdk/cli'), binary: 'copilot' } }));
   if (binary === 'codex') return where.map(apps => ({ name: 'ChatGPT desktop', app: join(apps, 'ChatGPT.app'), carries: 'Codex', carried: { binary: join(apps, 'ChatGPT.app/Contents/Resources/codex-cli/bin/codex') } }));
   return [];
 }

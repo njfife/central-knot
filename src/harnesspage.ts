@@ -8,6 +8,7 @@ import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
 import { brandMark } from './brand.ts';
+import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
 import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
@@ -76,7 +77,7 @@ const detectionLine = (snapshot: Snapshot, home: HomeView) => {
  * A desktop app with its version and the version of what it carries: "Claude desktop 4.16336.0 (Code tab 2.1.317)". A
  * pre-release keeps only its first word: "1.0.102-0.unstable.r41779900948.gf482387" reads "1.0.102-unstable".
  */
-const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${app.carriedVersion.replace(/^(\d+\.\d+\.\d+)-(?:\d+\.)?([A-Za-z]+)[.\w-]*$/, '$1-$2')})` : ''}`;
+const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${shortBuild(app.carriedVersion)})` : ''}`;
 
 // ---------- Every harness ----------
 

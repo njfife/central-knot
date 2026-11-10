@@ -6,16 +6,19 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
-import { executableCandidates } from './platform.ts';
+import { appCandidates, executableCandidates } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
-import { probeVersion } from './discovery.ts';
+import { findApp, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, heldReason, partsTools } from './pluginstatus.ts';
-import { isFolder, isHttps, onlyAllowed } from './values.ts';
+import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
+
+/** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
+export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${app.name}’s ${app.carries}${answered ? ` ${shortBuild(answered)}` : ''}`;
 
 /** What the marketplace feature needs from the app around it. */
 export interface MarketplaceHost {
@@ -37,7 +40,7 @@ export interface MarketplaceHost {
 }
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
-  findClis(): Promise<Partial<Record<HarnessId, string>>>;
+  findClis(): Promise<Routes>;
   checkAccess: typeof engine.checkAccess;
   readCatalog: typeof engine.readCatalog;
   readRemotePlugin: typeof engine.readRemotePlugin;
@@ -47,19 +50,27 @@ export interface MarketplaceEngine {
   setSkill: typeof engine.setSkill;
 }
 
+/** The binary each tool's plugin commands run with, and for those that are a desktop app's own copy, which app carries it. */
+export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Partial<Record<HarnessId, DesktopApp>> }
+
 /**
- * A tool's own CLI, never the copy a desktop app carries (CD §3), from the same candidate list version probes use. Searched in
- * this computer's own home, not the home on screen: a Practice copy or backup has no CLIs of its own, and the CLIs found
- * here are pointed at the home on screen when they run.
+ * Each tool's plugin route: its own CLI, from the same candidate list version probes use; with no CLI, the copy of the tool
+ * its desktop app carries (Claude desktop's Code tab, the GitHub Copilot app's runtime, ChatGPT desktop's Codex), which runs
+ * the same commands (PLG-04, proved in V-01). That copy never counts as a CLI install (CD §3). Searched in this computer's
+ * own home, not the home on screen: a Practice copy or backup has no tools of its own, and the ones found here are pointed
+ * at the home on screen when they run.
  */
-async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
-  const found: Partial<Record<HarnessId, string>> = {};
+async function findClis(): Promise<Routes> {
+  const routes: Routes = { binaries: {}, apps: {} };
   for (const tool of pluginTools) {
     for (const candidate of executableCandidates(homedir(), process.env.PATH ?? '', harnesses[tool].binary)) {
-      try { await access(candidate, constants.X_OK); found[tool] = candidate; break; } catch { /* next */ }
+      try { await access(candidate, constants.X_OK); routes.binaries[tool] = candidate; break; } catch { /* next */ }
     }
+    if (routes.binaries[tool]) continue;
+    const app = await findApp(appCandidates(homedir(), harnesses[tool].binary));
+    if (app?.binary) { routes.binaries[tool] = app.binary; routes.apps[tool] = app; }
   }
-  return found;
+  return routes;
 }
 const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
 
@@ -94,7 +105,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   const context = async ({ clis = false } = {}): Promise<engine.PluginContext> => {
     const open = host.home();
     if (!open) throw new Error('No home is open.');
-    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: clis ? await use.findClis() : {}, overrides: open.overrides };
+    const routes = clis ? await use.findClis() : { binaries: {}, apps: {} };
+    return { home: open.home, dataDir: join(host.dataDir, 'plugins'), binaries: routes.binaries, apps: routes.apps, overrides: open.overrides };
   };
 
   /**
@@ -264,9 +276,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // All at once: one unreachable source doesn't hold up the others.
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh, records))));
     const desktopOnly = Object.fromEntries(tools.flatMap(tool => { const app = read.snapshots.find(snapshot => snapshot.harness === tool)?.app; return !ctx.binaries[tool] && app ? [[tool, app.name]] : []; }));
+    // The app's own copy, named with the version it answers (the Copilot runtime may run a newer Copilot CLI it updated to).
+    const via = Object.fromEntries(await Promise.all(Object.entries(ctx.apps ?? {}).filter(([tool]) => tools.includes(tool as HarnessId)).map(async ([tool, app]) => [tool, viaLabel(app, await cliVersion(ctx.binaries[tool as HarnessId]))] as const)));
     if (fresh) versionReads.clear();
     const versions = Object.fromEntries((await Promise.all(tools.filter(tool => SKILL_SWITCH_TESTED_FROM[tool]).map(async tool => [tool, await buildOf(ctx, tool, read.snapshots)] as const))).filter(([, version]) => version));
-    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, versions };
+    return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, via, versions };
   }
 
   /**
