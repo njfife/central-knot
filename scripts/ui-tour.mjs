@@ -99,6 +99,8 @@ const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent 
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
 // Types a marketplace source into "Add a marketplace" (opening the box first if needed) and clicks Add.
 async function addMarketplace(a, source) {
+  // Plugins reads its data when it opens, so the form may not be drawn yet.
+  await waitFor(a, `!!document.querySelector('#marketplace-source, #open-add-marketplace')`, 20000);
   if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
@@ -388,10 +390,7 @@ if (wanted('plugin-skills')) {
   };
   await a.click('#nav-plugins');
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
-  if (await a.has('#marketplace-source')) {
-    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    await a.click('#add-marketplace');
-  }
+  if (!(await a.has('#popen-0-issue-tracker'))) await addMarketplace(a, market);
   await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`, 15000);
   await shot(a, 'plugins-installed', 'document-tools is installed in Claude Code, Copilot CLI and Codex (by each tool’s own record). Clicked Refresh on team-tools.');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
@@ -443,10 +442,7 @@ if (wanted('plugin-versions')) {
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
   // Added already by the plugins feature: read again, so the installs written above show.
   if (await a.has('[data-plugin="document-tools"]')) { await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
-  else {
-    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    await a.click('#add-marketplace');
-  }
+  else await addMarketplace(a, market);
   await shot(a, 'list-versions', 'The team-tools marketplace (a local folder). Claude Code has document-tools 1.1.0; Codex has 1.2.0, the version the marketplace offers. Both have issue-tracker 1.9.0 where the marketplace offers 2.0.0. Copilot CLI isn\'t installed on this machine.');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pfile-0-skills-pdf-reader')`);
   await shot(a, 'plugin-versions', 'Clicked the "document-tools" row.');
@@ -487,10 +483,7 @@ if (wanted('parts')) {
   const market = join(scratch, 'parts-market');
   writeMarket(market);
   await a.click('#nav-skills'); await a.click('#nav-plugins');
-  if (await a.has('#marketplace-source')) {
-    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-    await a.click('#add-marketplace');
-  }
+  if (!(await a.has('#popen-0-issue-tracker'))) await addMarketplace(a, market);
   if (await a.has('#plugin-back')) await a.click('#plugin-back');
   const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
   await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
@@ -1162,6 +1155,7 @@ if (wanted('harnesses')) {
 
 // ---------- Git repo ----------
 if (wanted('repo')) {
+  await fresh();
   begin('repo');
   const sizes = async (name, caption) => {
     for (const [width, height] of [[860, 560], [1100, 720], [1728, 1117], [2560, 1440]]) {
