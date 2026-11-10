@@ -2341,7 +2341,7 @@ async function pluginUpdatesFlow() {
   // Each record Claude Code's stand-in moves to, written ahead with the copies it names; the last one written is where it starts.
   const recordPath = join(home, '.claude/plugins/installed_plugins.json');
   mkdirSync(stage, { recursive: true });
-  for (const [name, issue, docs] of [['docs', '1.9.0', '1.2.0'], ['issue-2.0.0', '2.0.0', '1.2.0'], ['issue-3.0.0', '3.0.0', '1.2.0'], ['start', '1.9.0', '1.1.0']]) {
+  for (const [name, issue, docs] of [['docs', '1.9.0', '1.2.0'], ['issue-2.0.0', '2.0.0', '1.2.0'], ['issue-3.0.0', '3.0.0', '1.2.0'], ['issue-4.0.0', '4.0.0', '1.2.0'], ['start', '1.9.0', '1.1.0']]) {
     rmSync(recordPath, { force: true });
     writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', issue, copies['issue-tracker']);
     writeClaudeInstall(home, 'ck-test-market', 'document-tools', docs, copies['document-tools']);
@@ -2370,7 +2370,8 @@ esac
   writeFileSync(join(home, 'issue-next'), '2.0.0');
   const versions = () => Object.fromEntries(Object.entries(JSON.parse(readFileSync(recordPath, 'utf8')).plugins).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
   const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n') : []);
-  const noted = () => (existsSync(join(data, 'plugin-updates.json')) ? JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')) : {});
+  // The record kept for this home (the file holds one per home).
+  const noted = () => { try { return JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')).find(record => record.home === home) ?? {}; } catch { return {}; } };
   const until = async (test, ms = 30000) => { for (let spent = 0; spent < ms; spent += 200) { if (await test()) return true; await wait(200); } return false; };
   mkdirSync(data, { recursive: true });
   // The first close's "still running" dialog was answered before.
@@ -2412,7 +2413,7 @@ esac
   for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
   await a.settle();
   const note = await a.text('#plugin-updates-updated') ?? '';
-  check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code, which can’t be undone · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code, which can’t be undone · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
+  check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
   check('the first note says once that plugins update by themselves now, and where that is turned off', (await a.text('#plugin-updates-new')) === 'Plugins now update by themselves. Settings turns that off.', note);
   same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code',
     [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('[data-plugin="release-helper"] .plugin-chip-gone'), await a.run(`document.querySelector('#pcell-0-release-helper-claude-cli')?.dataset.state`), await a.run(`document.querySelector('#pcell-0-release-helper-codex-cli')?.dataset.state`)],
@@ -2434,7 +2435,7 @@ esac
   check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
   await a.click('#setting-plugin-updates-notice-action');
   for (let tries = 0; tries < 50 && !(await a.exists('#plugin-updates-failed')); tries++) await wait(100);
-  check('the note says what couldn’t be updated, in the tool’s own words, and that it is tried again', /Couldn’t update automatically; Central Knot tries again later\./.test(await a.text('#plugin-updates-failed') ?? '') && /issue-tracker: Claude Code: Still 2\.0\.0 in Claude Code; the marketplace has 3\.0\.0\. Failed to update issue-tracker: the download stopped\./.test(await a.text('#plugin-updates-failed') ?? '')
+  check('the note says what couldn’t be updated, in the tool’s own words, and that it is tried again', /Couldn’t update automatically\./.test(await a.text('#plugin-updates-failed') ?? '') && /issue-tracker: Still 2\.0\.0 in Claude Code; the marketplace has 3\.0\.0\. Failed to update issue-tracker: the download stopped\. · today at .* · will be tried again/.test(await a.text('#plugin-updates-failed') ?? '')
     && versions()['issue-tracker'] === '2.0.0' && /`claude plugin update issue-tracker@ck-test-market --scope user` failed: Failed to update issue-tracker: the download stopped\./.test(readFileSync(join(data, 'central-knot.log'), 'utf8')), await a.text('#plugin-updates-failed'));
 
   // 4. The switch: off, nothing runs by itself; on again, the failed update is tried and goes through.
@@ -2460,6 +2461,21 @@ esac
   await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
   for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
   check('a later note no longer says that this is new', /issue-tracker: updated to 3\.0\.0 in Claude Code/.test(await a.text('#plugin-updates-updated') ?? '') && !(await a.exists('#plugin-updates-new')), await a.text('#plugin-updates-updated'));
+  check('the note scrolls with the page, so it never squeezes the list', await a.run(`!!document.querySelector('#plugins-scroll #plugin-updates-updated')`));
+
+  // 5. An update that failed by itself and is then made by hand on the page: its note goes at once, not at the next check.
+  publish({ 'issue-tracker': '4.0.0' });
+  writeFileSync(join(home, 'issue-next'), '4.0.0');
+  writeFileSync(join(home, 'issue-fails'), '');
+  check('the next version fails by itself and is said', await until(() => noted().failures?.length === 1) && await until(() => a.exists('#plugin-updates-failed'), 5000), JSON.stringify(noted()));
+  // Automatic sync off holds the schedule still, so the update below is the person's own and nothing else's.
+  await a.run(`window.centralKnot.setSync(false).then(() => true)`);
+  await wait(2500);
+  rmSync(join(home, 'issue-fails'));
+  for (let tries = 0; tries < 50 && !(await a.exists('#pupdate-0-issue-tracker')); tries++) await wait(100);
+  await a.click('#pupdate-0-issue-tracker');
+  await a.click('#plugins-apply');
+  check('Update on the page makes it, and the failure’s note goes with no check in between', await until(() => versions()['issue-tracker'] === '4.0.0' && noted().failures?.length === 0, 10000) && await until(async () => !(await a.exists('#plugin-updates-failed')), 5000), JSON.stringify([versions(), noted().failures, await a.text('#plugin-updates-failed')]));
   same('no page errors, plugin updates on a schedule', a.pageErrors, []);
   await a.quit();
 }

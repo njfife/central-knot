@@ -272,8 +272,10 @@ let quitting = false;
 let updater: ReturnType<typeof startUpdater> | undefined;
 /** Sync changed something while the window was closed or in the background: the menu bar icon shows it until seen. */
 let unseen = false;
-/** The same for plugins updated automatically; its menu line opens the Plugins page, where the note is. */
-let unseenPlugins = false;
+/** The same for plugins updated automatically, or an update that failed; its menu line opens the Plugins page, where the note is. */
+let unseenPlugins: 'updated' | 'failed' | undefined;
+/** A plugin update's tool command under way: Quit waits for it (see before-quit), so what follows it is never cut off. */
+let pluginStep: Promise<unknown> | undefined;
 let pluginUpdates: ReturnType<typeof autoUpdates> | undefined;
 function showWindow() {
   // Startup makes the first window. macOS sends `activate` during startup too: that must never make a second one.
@@ -320,7 +322,7 @@ function joinDock() {
 /** One status line for both menus: where, and any news. */
 function statusLine() {
   const where = current?.label ?? 'No home open yet';
-  return unseen ? `Sync made changes · Show (${where})` : unseenPlugins ? `Plugins were updated · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
+  return unseen ? `Sync made changes · Show (${where})` : unseenPlugins ? `${unseenPlugins === 'updated' ? 'Plugins were updated' : 'A plugin couldn’t be updated'} · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
 }
 /** The status line's click: the window, on Plugins when what is unseen is an automatic update. */
 const showNews = () => (unseenPlugins && !unseen ? showPage('plugins') : showWindow());
@@ -378,7 +380,7 @@ function trayMenu() {
     profileMenu(),
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
-    { label: statusLine(), enabled: unseen || unseenPlugins, click: showNews },
+    { label: statusLine(), enabled: unseen || !!unseenPlugins, click: showNews },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
@@ -393,7 +395,7 @@ function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(trayMenu());
   const profile = activeProfileName();
-  tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : unseenPlugins ? ': plugins were updated' : ''}`);
+  tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : unseenPlugins === 'updated' ? ': plugins were updated' : unseenPlugins ? ': a plugin couldn’t be updated' : ''}`);
   // The active profile is always in sight: its name sits beside the menu bar icon.
   // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu).
   const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
@@ -421,7 +423,7 @@ function appMenu() {
       { label: 'Settings…', accelerator: 'Command+,', click: () => showPage('settings') },
       profileMenu(),
       // The same status line as the menu bar menu: where, and any news.
-      { label: statusLine(), enabled: unseen || unseenPlugins, click: showNews },
+      { label: statusLine(), enabled: unseen || !!unseenPlugins, click: showNews },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
@@ -853,7 +855,7 @@ function createWindow(show: boolean) {
   window.webContents.on('did-finish-load', () => log('page loaded'));
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event.
-  window.on('focus', () => { unseen = false; unseenPlugins = false; refreshTray(); send('settings:changed'); });
+  window.on('focus', () => { unseen = false; unseenPlugins = undefined; refreshTray(); send('settings:changed'); });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
 }
@@ -866,7 +868,18 @@ app.on('second-instance', showWindow);
 // Opening Central Knot again (the Dock, Finder, Spotlight) while it runs: its window comes back.
 app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
-app.on('before-quit', () => { quitting = true; drafting?.abort(); });
+// A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
+// does, and what follows it here (turning a turned-off plugin off again, the note) must not be lost. No further step starts.
+let heldForPlugin = false;
+app.on('before-quit', event => {
+  quitting = true;
+  drafting?.abort();
+  if (!pluginStep || heldForPlugin) return;
+  heldForPlugin = true;
+  event.preventDefault();
+  log('quit waits for a plugin update under way');
+  void Promise.race([pluginStep.catch(() => undefined), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
+});
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
 
@@ -938,8 +951,16 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
-  // Marketplaces and plugins: their own module, given only what it needs from here.
-  const markets = registerMarketplaces({ handle, handleNow }, {
+  // Marketplaces and plugins: their own module, given only what it needs from here. A change the person makes to a plugin on
+  // its page that works (an update, an uninstall, its parts) settles what failed there by itself before.
+  const settling = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => handle(channel, async (...args) => {
+    const result = await work(...args);
+    const reports = (result as PluginActionResult | null)?.reports;
+    if (/^plugins:(update|install|uninstall|parts)$/.test(channel) && Array.isArray(reports) && typeof args[0] === 'string' && typeof args[2] === 'string')
+      void pluginUpdates?.settled(args[0], args[2], reports.filter(report => report.outcome === 'installed' || report.outcome === 'updated' || report.outcome === 'uninstalled').map(report => report.tool)).catch(error => logFailure('plugin updates', error));
+    return result;
+  });
+  const markets = registerMarketplaces({ handle: settling, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
     read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
@@ -949,12 +970,16 @@ app.whenReady().then(async () => {
     share: () => context(),
   });
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
-  // Apply all, and is logged as one; none starts once the app is quitting (a tool's command already running finishes).
-  const noPluginUpdates: PluginUpdatesView = { on: false, paused: false, checking: false, every: CHECK_EVERY_MS, updated: [], failed: [], first: false };
+  // Apply all, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).
+  const noPluginUpdates: PluginUpdatesView = { on: false, paused: false, checking: false, updated: [], failed: [], first: false };
   if (!smoke) {
     const recordPath = join(app.getPath('userData'), 'plugin-updates.json');
-    const step = (channel: string, args: unknown[], work: () => Promise<PluginActionResult>): Promise<PluginActionResult> =>
-      quitting ? Promise.resolve({ stopped: 'Central Knot is quitting.', reports: [] }) : queued(work).then(result => { logOutcome(`${channel} (by itself)`, args, result); return result; });
+    const step = (channel: string, args: unknown[], work: () => Promise<PluginActionResult>): Promise<PluginActionResult> => queued(async () => {
+      if (quitting) return { stopped: 'Central Knot was quitting.', reports: [] };
+      const running = pluginStep = work();
+      try { const result = await running; logOutcome(`${channel} (by itself)`, args, result); return result; }
+      finally { if (pluginStep === running) pluginStep = undefined; }
+    });
     // Test-only, read only when set: the time between checks in milliseconds, or `never` for no checks but those asked for
     // (the end-to-end run's other flows, which a check a minute after start would walk into).
     const paced = process.env.CK_PLUGIN_UPDATES_EVERY_MS;
@@ -966,14 +991,14 @@ app.whenReady().then(async () => {
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
         parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
       },
-      load: async () => record(JSON.parse(await readFile(recordPath, 'utf8'))) as UpdatesRecord | undefined,
+      load: async () => { const saved: unknown = JSON.parse(await readFile(recordPath, 'utf8')); return Array.isArray(saved) ? saved as UpdatesRecord[] : undefined; },
       save: async saved => { await mkdir(app.getPath('userData'), { recursive: true }); await writeFile(recordPath, `${JSON.stringify(saved, null, 2)}\n`); },
       changed: (view, news) => {
         send('plugin-updates:changed', view, news);
         if (!news) return;
         // What the tools have changed: every page reads again. Nobody saw it: the menu bar icon says so until the window is back.
-        send('sync:changed');
-        if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = true; refreshTray(); }
+        if (news === 'updated') send('sync:changed');
+        if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = news; refreshTray(); }
       },
     });
     if (paced !== 'never') {

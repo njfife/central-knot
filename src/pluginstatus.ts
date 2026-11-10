@@ -31,6 +31,12 @@ export function blocked(view: PluginsView, entry: MarketplaceView, tool: Harness
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
 
+/**
+ * Whether a plugin is marked "No longer offered": its marketplace's catalog was read and no longer lists it, while a tool
+ * still has it or its parts. (A plugin listed only because its marketplace can't be read now is `gone` too, without the mark.)
+ */
+export const noLongerOffered = (entry: MarketplaceView, plugin: PluginView) => !!plugin.gone && !!entry.fetchedAt;
+
 /** A plugin's state in one tool, as last read ("not installed" when the tool has no record of it). */
 export const stateOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): InstallState => entry.states[plugin]?.[tool] ?? { state: 'not-installed' };
 export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessId) => stateOf(entry, plugin, tool).state === 'installed';

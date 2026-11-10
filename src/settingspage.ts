@@ -7,8 +7,7 @@ import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
-import { checkPluginsNow, checkedWords, everyWords, pluginUpdates } from './pluginupdateview.ts';
-import { CHECK_EVERY_MS } from './pluginupdates.ts';
+import { checkPluginsNow, checkedWords, pluginUpdates } from './pluginupdateview.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -331,7 +330,7 @@ async function choosePluginUpdates(on: boolean): Promise<void> {
 function pluginUpdatesRow(): HTMLElement {
   const on = !!current?.pluginUpdates;
   const view = pluginUpdates.view;
-  const hint = `Central Knot checks your marketplaces ${everyWords(view?.every ?? CHECK_EVERY_MS)}, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.`;
+  const hint = 'Central Knot checks your marketplaces every four hours, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.';
   const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
   const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugins', run: () => showPage('plugins') } : undefined };
   return settingRow('plugin-updates', 'Update plugins automatically', hint,

@@ -519,7 +519,7 @@ esac
   await a.size(860, 560); await shot(a, 'plugin-no-longer-offered-860', 'The same at 860×560.'); await a.size(1280, 800);
   await a.click('#plugin-back');
   await a.click('#plugin-updates-updated-close'); await a.settle();
-  await shot(a, 'note-updated-closed', 'Closed the "Updated automatically" note: what couldn’t be updated stays until it is closed or the update goes through.');
+  await shot(a, 'note-updated-closed', 'Closed the "Updated automatically" note: what couldn’t be updated stays until it is closed or the update goes through, by itself or with Update on this page.');
   await a.click('#plugin-updates-failed-close'); await a.settle();
   await shot(a, 'note-closed', 'Closed that one too.');
   await a.click('#nav-settings');

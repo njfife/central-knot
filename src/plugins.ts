@@ -932,7 +932,7 @@ async function contentUpdate(context: PluginContext, catalog: Catalog, plugin: s
     return { tool, outcome: 'updated', changed: true, version, byContent, message: `${how} ${next}`.trim(), runs };
   };
   if (!(await differs())) return done('update');
-  if (!reinstall) return { tool, outcome: 'failed', message: `${name}’s own update kept the copy it had, which still differs from the marketplace’s. Update it on its page to reinstall it. ${said}`.trim(), runs };
+  if (!reinstall) return { tool, outcome: 'failed', kept: true, message: `${name}’s own update kept the copy it had, which still differs from the marketplace’s. Update it on its page to reinstall it. ${said}`.trim(), runs };
   const id = `${plugin}@${catalog.name}`;
   const removed = await native(context, tool, uninstallArgs(tool, id));
   runs.push(removed);

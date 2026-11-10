@@ -109,8 +109,8 @@ export interface DesktopApi {
   checkPluginUpdates(): Promise<PluginUpdatesView>;
   /** Closes one half of the note of what automatic updates did: what was updated, or what couldn't be. */
   closePluginUpdates(what: 'updated' | 'failed'): Promise<PluginUpdatesView>;
-  /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or an update failed. */
-  onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news: boolean) => void): void;
+  /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or else an update failed. */
+  onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news?: 'updated' | 'failed') => void): void;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** Updates (updates.ts): what this build is, whether it can update itself, and the last check or update. */
@@ -432,6 +432,7 @@ export interface NativeRun { tool: HarnessId; command: string; ok: boolean; outp
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
+  /** A failed update with nobody watching: the tool's own update kept its copy, and only a reinstall (never made unasked) would change that. */ kept?: true;
   /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
   /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[];
   /** Skills this run wrote in place of a link that led nowhere, by name. */ replacedLinks?: string[] }
@@ -658,18 +659,18 @@ export interface SignIn { on: boolean; available: boolean; reason?: { key: SignI
 /** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean }
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
-export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true }
+export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true; /** A failed update that is tried again by itself. */ again?: true }
 /**
  * Automatic plugin updates as the main process has them, for the open home. `on`: the switch in Settings; `paused`:
- * Automatic sync is off, so nothing is updated by itself whatever the switch says. `checking`: a check is under way; `every`:
- * the time between checks. `checked`: the last check: when, how many updates it made, how many are failing now, the
+ * Automatic sync is off, so nothing is updated by itself whatever the switch says. `checking`: a check is under way.
+ * `checked`: the last check: when, how many updates it made, how many are failing now, the
  * marketplaces it couldn't read (`offline`: every Git one, so it is tried again sooner), and why it did nothing (`stopped`).
  * The note: `updated`, what was updated since the note was last closed, oldest first, and `failed`, the updates that couldn't
  * be made (each is tried again). `first`: no note of updates has been closed in this home yet, so the note says once that
  * plugins update by themselves now.
  */
 export interface PluginUpdatesView {
-  on: boolean; paused: boolean; checking: boolean; every: number;
+  on: boolean; paused: boolean; checking: boolean;
   checked?: { at: number; updated: number; failed: number; unread: string[]; offline?: true; stopped?: string };
   updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
 }

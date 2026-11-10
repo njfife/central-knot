@@ -8,7 +8,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, clickPart, partStand, pickOf, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsPick, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -553,7 +553,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
-      h('h2', {}, title, plugin.gone ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null),
+      h('h2', {}, title, noLongerOffered(entry, plugin) ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),

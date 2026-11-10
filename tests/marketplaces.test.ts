@@ -331,7 +331,7 @@ test('What is due by itself is what Update all would choose: an older copy and o
     const due = await box.markets.pendingUpdates(box.home);
     assert.deepEqual(due.ops.map(op => [op.plugin, op.tool, op.action, op.offered, op.marketName, op.source]), [
       ['notes', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'pi-cli', 'install-parts', '2.0.0', 'team', root]]);
-    assert.deepEqual([due.stopped, due.unread], [undefined, ['Folder: broken']], 'named as the Plugins page names it');
+    assert.deepEqual([due.stopped, due.unread, due.read], [undefined, ['Folder: broken'], [root]], 'named as the Plugins page names it; the one that was read is told apart');
     // The update itself is the button's, told not to uninstall in order to reinstall.
     box.calls.length = 0;
     await box.markets.update(root, 'team', 'pdf', ['claude-cli'], box.home, { reinstall: false });
@@ -347,7 +347,7 @@ test('Where nothing may be changed, nothing is due and the reason is given', asy
     await versioned(root, 'team', { pdf: { version: '2.0.0' } });
     await box.markets.add(root);
     await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
-    assert.deepEqual(await box.markets.pendingUpdates(box.home), { stopped: 'Preview only.', ops: [], unread: [] });
+    assert.deepEqual(await box.markets.pendingUpdates(box.home), { stopped: 'Preview only.', ops: [], unread: [], read: [] });
   } finally { await box.cleanup(); }
 });
 
@@ -364,7 +364,7 @@ test('A plugin its marketplace dropped stays listed where a tool still has it, m
     await versioned(root, 'team', { xlsx: { version: '2.0.0' } });
     const entry = (await box.markets.view()).marketplaces[0]!;
     assert.deepEqual(entry.plugins.map(plugin => [plugin.name, plugin.gone, plugin.description]), [
-      ['xlsx', undefined, ''], ['pdf', true, 'No longer offered in this marketplace. It stays installed as it is until you uninstall it.']]);
+      ['xlsx', undefined, ''], ['pdf', true, 'Stays installed as it is until you uninstall it.']]);
     assert.deepEqual([entry.states.pdf?.['claude-cli']?.state, entry.states.pdf?.['codex-cli']?.state], ['installed', 'not-installed']);
     assert.deepEqual((await box.markets.detail(root, 'pdf'))?.installed?.['claude-cli']?.skills.map(skill => skill.name), ['pdf'], 'its page shows what the tool still holds');
     assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.map(op => op.plugin), ['xlsx']);

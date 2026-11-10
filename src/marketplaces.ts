@@ -78,8 +78,8 @@ const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools
 const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
 const RETRY_MS = 60_000;
-/** Said of a plugin a tool still has that its marketplace's catalog dropped. */
-export const NO_LONGER_OFFERED = 'No longer offered in this marketplace. It stays installed as it is until you uninstall it.';
+/** Said of a plugin a tool still has that its marketplace's catalog dropped, beside its "No longer offered" mark. */
+export const NO_LONGER_OFFERED = 'Stays installed as it is until you uninstall it.';
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
@@ -262,7 +262,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const shown: PluginView[] = (catalog?.plugins ?? []).map(({ entry: _entry, remote: _remote, ...plugin }) => plugin);
       const { parts, recordedName } = await partsStates(ctx, catalog, source, records);
       // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
-      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'No longer offered in this marketplace. Its parts stay as they are, and can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
+      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'Its parts stay as they are, and can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
       if (!catalog) return { ...base, name: recordedName ?? '', problem: problem ?? read?.problem, plugins: shown, parts };
       // A plugin the catalog dropped stays listed while a tool still has it installed: kept as it is, marked, until it is uninstalled (PLG-08).
       const dropped = await droppedPlugins(ctx, tools.filter(takesPlugins), catalog, source);
@@ -271,8 +271,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
         if (listed) listed.description = NO_LONGER_OFFERED;
         else shown.push({ name, description: NO_LONGER_OFFERED, gone: true });
       }
-      const pluginTools = tools.filter(takesPlugins);
-      const states = { ...await statesFor(ctx, pluginTools, catalog, source), ...await statesFor(ctx, pluginTools, catalog, source, dropped.map(name => ({ name, description: '' }))) };
+      const states = await statesFor(ctx, tools.filter(takesPlugins), catalog, source, [...catalog.plugins, ...dropped.map(name => ({ name, description: '' }))]);
       return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states, parts };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
@@ -428,17 +427,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * same version counts. Each op carries the version offered. Nothing here writes to a tool.
    *
    * A marketplace that couldn't be read now gives nothing and is named in `unread`: its last copy says nothing about what
-   * it offers today (`offline`: every Git marketplace did, so the next try can come sooner). A plugin its catalog dropped
+   * it offers today (`offline`: every Git marketplace did, so the next try can come sooner). `read`: those that were read. A plugin its catalog dropped
    * is left as it is. One turned off in a tool is still updated there, and update() keeps it off.
    */
-  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; offline?: true }> {
+  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; read: string[]; offline?: true }> {
     const stopped = await guard(home);
-    if (stopped) return { stopped, ops: [], unread: [] };
+    if (stopped) return { stopped, ops: [], unread: [], read: [] };
     const shown = await view(true);
     const ops: (PluginOp & { offered?: string })[] = [];
-    const unread: string[] = [];
+    const unread: string[] = [], read: string[] = [];
     for (const entry of shown.marketplaces) {
       if (entry.problem || !entry.name) { unread.push(marketTitle(entry)); continue; }
+      read.push(entry.source);
       for (const plugin of entry.plugins) {
         if (plugin.gone) continue;
         const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; });
@@ -452,7 +452,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     }
     // Every Git marketplace failed to read: most likely this computer is offline just now.
     const git = shown.marketplaces.filter(entry => entry.kind === 'git');
-    return { ops, unread, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
+    return { ops, unread, read, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
   }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */

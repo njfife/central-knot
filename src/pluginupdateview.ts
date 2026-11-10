@@ -15,13 +15,6 @@ const LINES_SHOWN = 4;
 
 const at = (time: number) => dayAndTime(new Date(time).toISOString());
 
-/** "every four hours", from the time between checks. */
-export function everyWords(ms: number): string {
-  const hours = Math.round(ms / 3_600_000);
-  const words = ['', 'hour', 'two hours', 'three hours', 'four hours', 'five hours', 'six hours'];
-  return hours === 24 ? 'once a day' : hours >= 1 ? `every ${words[hours] ?? `${hours} hours`}` : 'every few moments';
-}
-
 /**
  * What the last check came to, for the Settings row: when, how many updates it made and how many are failing, the
  * marketplaces it couldn't read, or why it did nothing. `note`: the Plugins page has more to read about it.
@@ -33,21 +26,24 @@ export function checkedWords(view: PluginUpdatesView | undefined): { text: strin
   // Off means Central Knot writes nothing to the tools in the background; a check the person asks for still runs.
   if (view.paused) return { text: `Paused while Automatic sync is off: nothing is updated by itself. Check now still updates what is behind.${checked ? ` Last checked ${at(checked.at)}.` : ''}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
   if (!checked) return { text: 'Not checked yet in this home. The first check comes soon after Central Knot opens.', tone: 'info' };
-  if (checked.stopped) return { text: `Last checked ${at(checked.at)}. Nothing was updated: ${checked.stopped}`, tone: 'attention' };
+  // A check that stopped (nothing may be changed in this home; the app was quitting) says how far it got.
+  if (checked.stopped) return { text: `Last checked ${at(checked.at)}. ${checked.updated ? `${plural(checked.updated, 'update')} made, then it stopped` : 'Nothing was updated'}: ${checked.stopped}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
   const unread = checked.unread.length ? ` ${andList(checked.unread)} couldn’t be read, so ${checked.unread.length > 1 ? 'their' : 'its'} plugins weren’t checked.` : '';
   const did = [checked.updated ? `${plural(checked.updated, 'update')} made` : '', checked.failed ? `${plural(checked.failed, 'update')} couldn’t be made` : ''].filter(Boolean).join(', ');
   return { text: `Last checked ${at(checked.at)}. ${did ? `${did.charAt(0).toUpperCase()}${did.slice(1)}.` : 'Nothing needed updating.'}${unread}`, tone: checked.failed || unread ? 'attention' : 'info', note: !!(view.updated.length || view.failed.length) };
 }
 
-/** Takes main's view. News (something was updated, or an update failed) is said in the status bar, and the Plugins page reads its tools again. */
-function take(view: PluginUpdatesView, news = false) {
+/** Takes main's view. News (something was updated, or else an update failed) is said in the status bar, and the Plugins page reads its tools again. */
+function take(view: PluginUpdatesView, news?: 'updated' | 'failed') {
   pluginUpdates.view = view;
   if (news) {
+    // The plugins of the check just made.
     const latest = (lines: PluginUpdateLine[]) => [...new Set(lines.filter(line => line.at === view.checked?.at && !line.warn).map(line => line.plugin))];
     const updated = latest(view.updated), failed = latest(view.failed);
     const said = [updated.length ? `Updated automatically: ${andList(updated)}.` : '', failed.length ? `Couldn’t update ${andList(failed)} automatically.` : ''].filter(Boolean).join(' ');
     // On Plugins the note itself says it; elsewhere the status bar does, with the way there.
     if (said) announce(said, app.page === 'plugins', app.page === 'plugins' ? undefined : { label: 'See Plugins', run: () => showPage('plugins') });
+    // The list is read again either way: after a failure it shows the marketplace's newer version beside the note.
     if (market.view && !app.busy) void loadPlugins();
   }
   if (app.page === 'plugins' || app.page === 'settings') rerender();
@@ -97,7 +93,7 @@ function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: s
       shown.length > 1 ? h('span.plugin-auto-lead', {}, lead) : null,
       shown.map((line, index) => h('span', {},
         shown.length > 1 ? null : [h('span.plugin-auto-lead', {}, lead), ' '],
-        h('button.result-link', { type: 'button', id: `plugin-updates-${what}-${index}`, title: `Open ${line.plugin}`, onclick: () => open(line) }, line.plugin), `: ${line.text}`, h('span.plugin-auto-when', {}, ` · ${at(line.at)}`))),
+        h('button.result-link', { type: 'button', id: `plugin-updates-${what}-${index}`, title: `Open ${line.plugin}`, onclick: () => open(line) }, line.plugin), `: ${line.text}`, h('span.plugin-auto-when', {}, ` · ${at(line.at)}${line.again ? ' · will be tried again' : ''}`))),
       newest.length > shown.length ? h('button.text-action', { type: 'button', id: `plugin-updates-${what}-all`, onclick: () => { pluginUpdates.all[what] = true; rerender(); } }, `Show all ${newest.length}`) : null,
       more),
     closeButton(() => void closeNote(what), { id: `plugin-updates-${what}-close`, label: 'Close this note' }));
@@ -112,6 +108,6 @@ export function pluginUpdateNotes(): (HTMLElement | null)[] {
     h('button.text-action', { type: 'button', id: 'plugin-updates-settings', onclick: () => showPage('settings') }, 'Settings'), ' turns that off.') : undefined;
   return [
     noteBand('updated', view.updated, 'Updated automatically.', isNew),
-    noteBand('failed', view.failed, view.on && !view.paused ? 'Couldn’t update automatically; Central Knot tries again later.' : 'Couldn’t update automatically.'),
+    noteBand('failed', view.failed.map(line => (view.on && !view.paused ? line : { ...line, again: undefined })), 'Couldn’t update automatically.'),
   ];
 }

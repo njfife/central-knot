@@ -39,7 +39,7 @@ const api: DesktopApi = {
   pluginUpdates: () => ipcRenderer.invoke('plugin-updates:view'),
   checkPluginUpdates: () => ipcRenderer.invoke('plugin-updates:check'),
   closePluginUpdates: what => ipcRenderer.invoke('plugin-updates:close', what),
-  onPluginUpdatesChanged: callback => { ipcRenderer.on('plugin-updates:changed', (_event, view, news) => callback(view, news === true)); },
+  onPluginUpdatesChanged: callback => { ipcRenderer.on('plugin-updates:changed', (_event, view, news) => callback(view, news === 'updated' || news === 'failed' ? news : undefined)); },
   onNavigate: callback => { ipcRenderer.on('navigate', (_event, page) => callback(String(page))); },
   updates: () => ipcRenderer.invoke('updates:view'),
   checkForUpdates: () => ipcRenderer.invoke('updates:check'),
