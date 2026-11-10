@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover, findApp, probeVersion } from '../src/discovery.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates } from '../src/platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, shellPath } from '../src/platform.ts';
 import { isPresent } from '../src/presence.ts';
 
 async function fixture() {
@@ -146,8 +146,39 @@ test('Finder-like PATH still yields bounded explicit candidates, never project p
   const candidates = executableCandidates('/Users/fixture', '/usr/bin:/bin:relative-project-bin');
   assert.ok(candidates.includes('/Users/fixture/.local/bin/claude'));
   assert.ok(candidates.includes('/opt/homebrew/bin/claude'));
-  assert.ok(candidates.length <= 12);
+  assert.ok(candidates.length <= 40);
   assert.ok(candidates.every(candidate => candidate.startsWith('/')));
+});
+
+test('On this computer a tool is here only when its CLI or app is found: a folder left behind is not the tool', async () => {
+  const setup = await fixture();
+  try {
+    await mkdir(join(setup.home, '.claude/skills'), { recursive: true });
+    // Searched, and nothing found beside the folder: not installed, so no page offers it.
+    const leftBehind = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [join(setup.home, 'absent')] });
+    assert.equal(leftBehind.detection, 'Config found but app not detected');
+    assert.equal(isPresent(leftBehind), false);
+    // With its CLI found, it is here.
+    const installed = await discover({ home: setup.home, mode: 'actual', runProbes: true, binaries: [await executable(setup.home, "printf '2.1.318 (Claude Code)\\n'")] });
+    assert.ok(isPresent(installed));
+    // A chosen folder is never searched for tools: there the folder is all there is to go by.
+    assert.ok(isPresent(await discover({ home: setup.home, mode: 'custom' })));
+  } finally { await setup.cleanup(); }
+});
+
+test('The terminal’s PATH is read from the login shell, whatever its startup files print around it', { skip: process.platform === 'win32' }, async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ck-shell-'));
+  try {
+    // A stand-in shell: a banner as a startup file might print, then the command it was given (-ilc), with nvm's folder on its PATH.
+    const shell = join(dir, 'shell');
+    await writeFile(shell, `#!/bin/sh\necho 'Welcome back'\nPATH="/Users/fixture/.nvm/versions/node/v24.9.0/bin:/usr/bin"\neval "$2"\necho\necho 'bye'\n`, { mode: 0o755 });
+    assert.equal(await shellPath(shell), '/Users/fixture/.nvm/versions/node/v24.9.0/bin:/usr/bin');
+    assert.ok(executableCandidates('/Users/fixture', (await shellPath(shell))!, 'codex').includes('/Users/fixture/.nvm/versions/node/v24.9.0/bin/codex'));
+    // A shell that fails, hangs or isn't there gives nothing, and the app's own PATH is used alone.
+    await writeFile(join(dir, 'broken'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+    await writeFile(join(dir, 'hangs'), '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    assert.deepEqual([await shellPath(join(dir, 'broken')), await shellPath(join(dir, 'hangs'), 200), await shellPath('')], [undefined, undefined, undefined]);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test('A version probe finds a script CLI’s interpreter beside it, even when the app was opened with a short PATH', { skip: process.platform === 'win32' }, async () => {

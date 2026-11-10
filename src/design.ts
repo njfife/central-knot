@@ -1,6 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
-import type { SwitchProblem } from './types.ts';
+import type { SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
@@ -24,6 +24,8 @@ export interface SampleSkill {
   managed: boolean;
   off: Tool[];
   cannot?: Partial<Record<Tool, string>>;
+  /** Tools with no copy of their own that have it through a plugin installed there (each is in `cannot` too). */
+  plugin?: Partial<Record<Tool, ThroughPlugin>>;
   /** Copies that differ, left as separate skills on purpose. */
   separate?: boolean;
   /** Why this skill cannot be managed at all. */

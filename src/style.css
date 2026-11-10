@@ -492,6 +492,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-button.cell-pending-edit, .legend-cell.cell-pending-edit { border-style: dashed; border-color: var(--accent); }
 .legend-cell.cell-absent { border-style: dotted; }
 .cell-cannot { background: repeating-linear-gradient(135deg, var(--control-line) 0 2px, transparent 2px 6px); }
+/* The tool has the item through a plugin installed there: a quiet box with the plugin mark, never the hatching of Can't load it. */
+.cell-plugin { color: var(--ink-soft); }
 .cell-working { border-style: dashed; color: var(--accent); }
 .cell-oneway-mark { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
 .cell-oneway-mark svg { width: 11px; height: 11px; }
@@ -619,6 +621,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-mcp .details-tool-head > .wrap-path { grid-column: 1 / -1; grid-row: 2; }
 .details-mcp .details-tool-head > .details-path-show { grid-column: 3; grid-row: 1; }
 .details-mcp .details-tool-head > .details-tool-line { grid-column: 1 / -1; }
+/* The tool's Enabled switch sits in its name's line, before Show in folder. */
+.details-mcp .details-tool-head > .details-tool-actions { grid-column: 2; grid-row: 1; justify-self: end; margin-left: 0; }
 .details-mcp .details-tool-head > .details-tool-line:empty { display: none; }
 .convert-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 /* A skill's own actions, together under its heading. */
