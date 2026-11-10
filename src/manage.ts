@@ -85,7 +85,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       if (entry.facts.cannot[tool]) continue;
       const problem = switches.get(tool)!.problem;
       if (problem) (entry.facts.switchProblem ??= {})[tool] = problem;
-      if (unverified.get(tool)) (entry.facts.disableUnverified ??= {})[tool] = unverified.get(tool)!;
+      if (unverified.get(tool)) (entry.facts.disableNote ??= {})[tool] = unverified.get(tool)!;
       // A tool without a copy is asked too, about the copy it would get: a switch left from an earlier removal still holds there.
       const target = switchTarget(entry, tool) ?? { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(ownCopyDir(context, tool, entry.facts.name), 'SKILL.md') };
       if (isDisabled(context, switches.get(tool)!, target)) (entry.facts.disabled ??= []).push(tool);

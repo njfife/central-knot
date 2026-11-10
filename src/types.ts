@@ -215,7 +215,7 @@ export interface SkillFacts {
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** Skills: a quiet note that Disable isn't verified on a tool's build (older than verified, or unreadable). Disable is still offered. */
-  disableUnverified?: Partial<Record<HarnessId, string>>;
+  disableNote?: Partial<Record<HarnessId, string>>;
 }
 
 /** Why a tool's skill switch can't be used: its settings file, and what is wrong with it ("isn’t valid JSON."). */

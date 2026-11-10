@@ -76,7 +76,7 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
   paths: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.directory])),
   // An MCP entry has no lines or edit date of its own: its details name the file it lives in.
   versions: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.lines ? { lines: `${copy!.lines} lines`, changed: ago(copy!.modified), text: copy!.summary || facts.description } : { lines: copy!.directory.split('/').pop() ?? '', changed: 'MCP entry', text: copy!.summary }])),
-  disabled: facts.disabled, switchProblem: facts.switchProblem, disableUnverified: facts.disableUnverified, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
+  disabled: facts.disabled, switchProblem: facts.switchProblem, disableNote: facts.disableNote, writable: Object.fromEntries(Object.entries(facts.copies).map(([tool, copy]) => [tool, copy!.writable])),
 });
 
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
@@ -625,7 +625,7 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
 function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
   // Disable is best effort: on a build older than the one verified it is only said (an unread version: the switch's tooltip).
   const note = !skill.removing?.includes(tool) && !skill.switchProblem?.[tool] && !skill.cannot?.[tool]
-    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableUnverified?.[tool]?.startsWith('Not checked') ? skill.disableUnverified[tool] : undefined;
+    && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync') && skill.disableNote?.[tool]?.startsWith('Not checked') ? skill.disableNote[tool] : undefined;
   return [rowSentence(skill, tool, quiet), note].filter(Boolean).join(' ');
 }
 
@@ -662,7 +662,7 @@ function toolControls(skill: SampleSkill, tool: Tool) {
   if (canRemove) remove.title = `Remove ${names[tool]}’s copy on Apply all. History keeps it for Restore${skill.managed ? ', and Central Knot stops syncing it here' : ''}.`;
   return h('span.details-tool-actions', {},
     unavailable ? h('span.tool-switch-na', {}, icon('circle-alert', 12, 'tone-muted'), 'Disable unavailable')
-      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableUnverified?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
+      : h(`span.tool-switch${pending ? '.tool-switch-pending' : ''}`, { title: skill.disableNote?.[tool] }, h('span.tool-switch-word', { 'aria-hidden': 'true' }, disabled ? 'Disabled' : 'Enabled'),
         toggle({ on: !disabled, label: `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, onchange: on => setDisabledIn(key, tool, !on), id: `enable-${key}-${tool}` })),
     remove);
 }

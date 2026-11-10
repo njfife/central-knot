@@ -86,7 +86,7 @@ test('Disable is best effort: a build older than the one verified only gets a no
   try {
     await skill(box.home, 'claude-cli', 'notes');
     await applyChanges(box.context, [{ key: 'notes', managed: true, off: [] }]);
-    assert.match((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disableUnverified?.['codex-cli'] ?? '', /Not checked on this version of Codex \(0\.100\.0\)/);
+    assert.match((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disableNote?.['codex-cli'] ?? '', /Not checked on this version of Codex \(0\.100\.0\)/);
     const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
     assert.ok(result.results.some(entry => entry.outcome === 'switched' && entry.harness === 'codex-cli'), JSON.stringify(result));
     assert.deepEqual((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disabled, ['codex-cli']);
