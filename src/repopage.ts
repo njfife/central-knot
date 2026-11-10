@@ -26,10 +26,14 @@ export const repo = {
   confirmDisconnect: false,
 };
 
-/** Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question, belong to it alone. */
-export function forgetRepoPrompts(): void {
+/**
+ * Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question, belong to it alone.
+ * `homeChanged`: the view was the other home's too, so it goes, and the next read starts afresh.
+ */
+export function forgetRepoPrompts(homeChanged = false): void {
   repo.problem = undefined;
   repo.confirmDisconnect = false;
+  if (homeChanged) { repo.view = undefined; lastReadFailure = undefined; }
 }
 
 /** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */

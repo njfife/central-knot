@@ -255,18 +255,19 @@ const byPreference = (first: HarnessId, second: HarnessId) => mcpTools.indexOf(f
 const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.';
 
 /**
- * Which tool's copy stands for a Managed item here, among the tools it syncs to: an edit waiting to spread when there is exactly one
- * (that is the newest content here), else the synced content. Preferred: a full copy over an agent's one-way one (`limits`), then
- * tool preference; never an agent's one-way copy edited there (`stopped`: it no longer is the item); for an MCP server, not Claude
- * Code's entry when another has it (it may still be waiting for Write now). `UNSETTLED` when edits waiting to spread disagree.
+ * Which tool's copy stands for a Managed item here, among the tools it syncs to, or why none does: an edit waiting to spread when
+ * there is exactly one (that is the newest content here), else the synced content. Preferred: a full copy over an agent's one-way
+ * one (`limits`), then tool preference, then a tool not in `preferNot` (for an MCP server, Claude Code, whose entry may still be
+ * waiting for Write now). Never an agent's one-way copy edited there (`stopped`: it no longer is the item). Edits waiting to spread
+ * that disagree: `UNSETTLED`; no copy left to choose: `NO_STANDING_COPY`.
  */
-function sourceTool(facts: SkillFacts, preferNot: HarnessId[] = []): HarnessId | typeof UNSETTLED | undefined {
+export function sourceTool(facts: SkillFacts, preferNot: HarnessId[] = []): { tool: HarnessId } | { why: string } {
   const tools = (Object.keys(facts.copies) as HarnessId[]).filter(tool => !facts.off.includes(tool) && !facts.stopped?.includes(tool))
     .sort((first, second) => Number(!!facts.limits?.[first]) - Number(!!facts.limits?.[second]) || byPreference(first, second));
   const edited = tools.filter(tool => facts.edited?.includes(tool));
-  if (new Set(edited.map(tool => facts.copies[tool]!.hash)).size > 1) return UNSETTLED;
-  if (edited.length) return edited[0];
-  return tools.find(tool => !preferNot.includes(tool)) ?? tools[0];
+  if (new Set(edited.map(tool => facts.copies[tool]!.hash)).size > 1) return { why: UNSETTLED };
+  const tool = edited[0] ?? tools.find(candidate => !preferNot.includes(candidate)) ?? tools[0];
+  return tool ? { tool } : { why: NO_STANDING_COPY };
 }
 
 /** Managed items that can't go in the repo, with why: Push leaves the repo's copy of each as it is. */
@@ -295,9 +296,9 @@ async function writeSkills(dir: string, skills: SkillFacts[]): Promise<Unsent> {
   const before: Record<string, string> = await readFile(writtenPath(dir), 'utf8').then(JSON.parse).catch(() => ({}));
   const sources = new Map<string, { directory: string; hash: string }>();
   for (const facts of skills.filter(skill => skill.managed)) {
-    const tool = sourceTool(facts);
-    if (tool === UNSETTLED) { markUnsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
-    const copy = tool && facts.copies[tool];
+    const source = sourceTool(facts);
+    if ('why' in source) { if (source.why === UNSETTLED) markUnsendable(unsent, facts.key, 'skill', facts.name, UNSETTLED); continue; }
+    const copy = facts.copies[source.tool];
     if (!copy) continue;
     if (facts.held) { markUnsendable(unsent, facts.key, 'skill', copy.folder, facts.held); continue; }
     sources.set(copy.folder, { directory: copy.directory, hash: copy.hash });
@@ -331,9 +332,9 @@ function standingEntries<Entry extends { tool: HarnessId }>(kind: 'mcp' | 'agent
   const result: Written & { sources: Entry[] } = { unsent: new Map(), unmanaged: new Set(), sources: [] };
   for (const facts of all) {
     if (!facts.managed) { result.unmanaged.add(rowKey(facts.name)); continue; }
-    const tool = sourceTool(facts, preferNot);
-    const entry = tool && tool !== UNSETTLED ? byTool.get(`${tool}\0${facts.key}`) : undefined;
-    if (facts.held || !entry) markUnsendable(result.unsent, rowKey(facts.name), kind, facts.name, facts.held ?? (tool === UNSETTLED ? UNSETTLED : NO_STANDING_COPY));
+    const source = sourceTool(facts, preferNot);
+    const entry = 'tool' in source ? byTool.get(`${source.tool}\0${facts.key}`) : undefined;
+    if (facts.held || !entry) markUnsendable(result.unsent, rowKey(facts.name), kind, facts.name, facts.held ?? ('why' in source ? source.why : NO_STANDING_COPY));
     else result.sources.push(entry);
   }
   return result;

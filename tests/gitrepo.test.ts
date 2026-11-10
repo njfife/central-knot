@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
 import { whyPushFailed } from '../src/plugins.ts';
-import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsChange, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, sourceTool, undoSettingsChange, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -208,6 +208,8 @@ test('Where only Claude Code takes MCP servers, the repo’s server waits, said 
     assert.deepEqual(before.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), [['docs', 'stuck']]);
     const after = live((await pullRepo(claudeOnly)).view);
     assert.deepEqual([after.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), rows(after.outgoing)], [[['docs', 'stuck']], []], 'not read as removed here');
+    await pushRepo(claudeOnly);
+    assert.match(git(box.remote, 'ls-tree', '-r', '--name-only', 'main'), /mcp\/docs\.json/);
   } finally { await box.cleanup(); }
 });
 
@@ -485,4 +487,16 @@ test('classify: an edit in the repo brings back an item removed here; an edit he
   assert.equal(classify(removed, {}, true).incoming[0].sync, undefined);
   const leftWaiting = { ...removed, base: new Map() };
   assert.equal(classify(leftWaiting, { 'agent:planner': { reason: 'waits', here: 'a', waitedForSync: true } }, true).incoming[0].sync, 'ready');
+});
+
+test('sourceTool: the copy that stands for an item is a full one before a one-way one, never one edited where it is one-way, and none when the edits disagree', () => {
+  const copy = (hash: string) => ({ hash }) as never;
+  const facts = (more: object) => ({ key: 'planner', name: 'planner', managed: true, off: [], copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('a') }, ...more }) as never;
+  assert.deepEqual(sourceTool(facts({})), { tool: 'claude-cli' });
+  assert.deepEqual(sourceTool(facts({ limits: { 'claude-cli': 'without tools' } })), { tool: 'copilot-cli' }, 'a full copy first');
+  assert.deepEqual(sourceTool(facts({ stopped: ['claude-cli'] })), { tool: 'copilot-cli' }, 'not a one-way copy edited there');
+  assert.ok('why' in sourceTool(facts({ stopped: ['claude-cli', 'copilot-cli'] })), 'no copy left to stand for it');
+  const disagree = facts({ copies: { 'claude-cli': copy('a'), 'copilot-cli': copy('b') }, edited: ['claude-cli', 'copilot-cli'] });
+  const unsettled = sourceTool(disagree);
+  assert.ok('why' in unsettled && /haven’t synced/.test(unsettled.why), 'edits waiting to spread that disagree');
 });

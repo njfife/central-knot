@@ -152,7 +152,7 @@ const readSummary = (view: HomeView) => {
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
-  if (view && view.home !== previous?.home) forgetRepoPrompts();
+  if (view && view.home !== previous?.home) forgetRepoPrompts(true);
   const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
