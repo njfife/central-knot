@@ -189,6 +189,9 @@ async function mainHelpers(port) {
     slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
     /** Makes one request's reply reach the page `ms` later (the work itself runs at once), until `restore` runs. */
     slowReply: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => Promise.resolve(real(...args)).then(value => new Promise(done => setTimeout(() => done(value), ${Number(ms)})))); return true; })()`),
+    /** Notes, for each sync:changed the page is sent, whether a `channel` request was under way (`told` reads it), until `restore` runs. */
+    noteTells: channel => run(`(() => { const { ipcMain, BrowserWindow } = ${electron}; const contents = BrowserWindow.getAllWindows()[0].webContents, real = ipcMain._invokeHandlers.get(${JSON.stringify(channel)}); let open = 0; globalThis.ckAside = real; globalThis.ckTold = []; contents.send = function (name, ...rest) { if (name === 'sync:changed') globalThis.ckTold.push(open > 0); return Object.getPrototypeOf(contents).send.call(contents, name, ...rest); }; ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, async (...rest) => { open++; try { return await real(...rest); } finally { open--; } }); return true; })()`),
+    told: () => run(`(() => { delete ${electron}.BrowserWindow.getAllWindows()[0].webContents.send; return globalThis.ckTold; })()`),
     /** Sends the page a message, as the main process does after a background pass. */
     tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
@@ -966,11 +969,14 @@ async function practiceFlow() {
     await a.click('#header-refresh');
     for (let tries = 0; tries < 40 && (await heads()).length !== all - 1; tries++) await wait(100);
     const without = (await heads()).length;
+    check('the marketplace request is watched', await main.noteTells('plugins:view'));
     renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
     const back = Date.now();
     await a.click('#nav-plugins');
     for (let tries = 0; tries < 50 && (await columns()) !== 3; tries++) await wait(100);
     const pluginColumns = await columns();
+    await main.restore('plugins:view');
+    same('and plugins:view was the read that told the page', await main.told(), [true]);
     await a.click('#nav-skills');
     for (let tries = 0; tries < 50 && (await heads()).length !== all; tries++) await wait(100);
     same('opening Plugins first: its columns and then Skills follow the tool that came back', [without, pluginColumns, (await heads()).length], [all - 1, 3, all]);
