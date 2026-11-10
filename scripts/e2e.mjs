@@ -244,6 +244,10 @@ async function harnessFlow() {
   await a.click('#harness-tab-instructions');
   await a.click('#ins-edit-claude-cli');
   await fitsAtMinimum(a, 'Claude Code’s instruction file while edited');
+  // On a wide window the card sizes to its file at the reading measure, not to its 520px minimum.
+  await sizeTo(a, 1728, 1117);
+  check('on a wide window the harness’s instruction file is as wide as its reading measure', await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); return area.getBoundingClientRect().width > 700; })()`), await a.run(`document.querySelector('#ins-text-claude-cli')?.getBoundingClientRect().width`));
+  await fullSize(a);
   await a.click('#ins-cancel-claude-cli');
   await a.click('#ins-edit-claude-cli');
   await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- Saved from its harness page.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);

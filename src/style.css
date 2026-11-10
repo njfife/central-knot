@@ -209,8 +209,6 @@ ul { list-style: none; }
 #header { height: 48px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: var(--surface); box-shadow: inset 0 -1px 0 var(--line); }
 .page-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-end { display: flex; gap: 8px; }
-.title-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 1px 0 0 10px; padding: 2px 8px; vertical-align: top; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); font: inherit; font-size: 11.5px; font-weight: 400; line-height: 16px; cursor: pointer; }
-.title-tag:hover { color: var(--ink); border-color: var(--control-line); background: var(--hover); }
 
 #status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
 #status-facts { display: flex; align-items: center; gap: 26px; min-width: 0; flex: 0 1 auto; }
@@ -679,12 +677,12 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .files-details, .files-tail { display: flex; flex-direction: column; gap: 12px; }
 .files-details > .details-actions, .files-tail > .details-actions { margin-top: 0; }
 /*
- * A wide pane has two tracks: the file takes the free width, up to a column at the right edge that grows a little with
- * the window and holds the details, then where each copy is and Delete everywhere, one under the other. The script
+ * A wide pane has two tracks: the file takes the free width, up to a column at the right edge (about a third of the
+ * pane) that holds the details, then where each copy is and Delete everywhere, one under the other. The script
  * decides it from the pane's width (matrix.ts settleFilesColumns, data-columns); below that the details sit above the
  * file and the rest below it.
  */
-.detail-column[data-columns="2"] .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 26%, 480px); grid-template-rows: auto 1fr; align-items: start; gap: 12px 32px; }
+.detail-column[data-columns="2"] .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 36%); grid-template-rows: auto 1fr; align-items: start; gap: 12px 32px; }
 .detail-column[data-columns="2"] .detail-files { grid-column: 1; grid-row: 1 / span 2; }
 .detail-column[data-columns="2"] .files-details { grid-column: 2; grid-row: 1; }
 .detail-column[data-columns="2"] .files-tail { grid-column: 2; grid-row: 1 / span 2; }
@@ -765,6 +763,9 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-card-status.wrapped > .kind-card-dot { display: none; }
 /* Each tool that holds the kind, with its count: entries wrap whole. */
 .kind-card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 10px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
+/* When they don't all fit on one line, every card's counts go on the same grid (pages.ts settleToolCounts). */
+.kind-card-tools[data-layout="columns"] { display: grid; grid-template-columns: repeat(2, max-content); column-gap: 28px; }
+.kind-card-tools[data-layout="stack"] { display: grid; grid-template-columns: max-content; }
 .kind-tool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kind-tool-count { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; }
@@ -862,10 +863,10 @@ span.ins-confirm { margin-top: 0; }
 .history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 /*
  * The list is the grid and each row a subgrid of it, so every row shares one set of columns: when, what changed (as wide
- * as the longest), what happened (up to the reading measure), the actions right after it, then the rest of the width,
- * which the row's stripe and hover still span.
+ * as the longest), what happened (the free width, its text capped at the reading measure), then the actions in a steady
+ * column at the right edge, as the tables keep theirs.
  */
-.history-list { --history-actions: 250px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 80px auto minmax(0, var(--measure)) var(--history-actions) minmax(0, 1fr); column-gap: 16px; }
+.history-list { --history-actions: 250px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 80px auto minmax(0, 1fr) var(--history-actions); column-gap: 16px; }
 .history-day { grid-column: 1 / -1; list-style: none; padding: 14px 16px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 /* In narrow content a row is its own grid, and what happened takes its own line beneath, so a row is two lines. */
 .history-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 12px; padding: 10px var(--pad-end) 10px 16px; box-shadow: inset 0 -1px 0 var(--line); }
@@ -881,8 +882,8 @@ span.ins-confirm { margin-top: 0; }
 .history-what { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .history-what > svg { flex: none; margin-top: 2px; }
 .history-what > strong { flex: 0 1 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.history-kind { flex: none; font-size: 11px; color: var(--ink-faint); }
-.history-done { padding-right: 6px; font-size: 12px; color: var(--ink-faint); }
+.history-kind { flex: none; min-width: 6em; font-size: 11px; color: var(--ink-faint); }
+.history-done { font-size: 12px; color: var(--ink-faint); }
 .history-undone .history-what, .history-undone .history-about { color: var(--ink-faint); }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
@@ -1027,8 +1028,10 @@ span.ins-confirm { margin-top: 0; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
 .plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
 /* With room for them (pluginpage.ts settlePluginTools): a column per tool from the left, capped, and Choose all as the next column, at the same rhythm. */
-.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(170px, 260px)) auto minmax(0, 1fr); justify-items: start; column-gap: 24px; }
-.plugin-tool-rows[data-layout="columns"] > .btn { grid-column: -3 / -2; }
+/* The box then takes the width of its columns, so no border runs around empty space on a wide window. */
+.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(170px, 260px)) auto; justify-items: start; column-gap: 24px; }
+.plugin-tool-rows[data-layout="columns"] > .btn { grid-column: -2 / -1; }
+.plugin-panel:has(> .plugin-tool-rows[data-layout="columns"]) { width: fit-content; max-width: 100%; }
 /* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
@@ -1501,15 +1504,18 @@ button.harness-card-main:disabled { cursor: default; }
    is as wide as its groups, so no empty frame runs on past them. */
 .harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
 .harness-about-column { flex: 0 1 auto; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
-.harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* A note after a path ("(empty; new skills go here)") wraps whole onto a line of its own rather than into stubs. */
+.harness-path { display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; min-width: 0; }
+.harness-path > .tone-faint { white-space: nowrap; }
 .harness-path .middle { min-width: 0; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
 @media (max-width: 1180px) { .harness-switch-item:not(.selected) .harness-switch-name { display: none; } }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
 /* Its instruction card: sized to its file at a reading measure, never wider than the pane; with notes or earlier versions
-   beside it (wide windows), it spans the pane. Sized to its file at a reading measure, never wider than the pane (the file box's 100% then resolves against the pane). */
-.harness-page .ins-card { max-width: 100%; width: fit-content; min-width: min(100%, 520px); box-sizing: border-box; }
+   beside it (wide windows), it spans the pane (the file box's 100% then resolves against the pane).
+   It is no size container here: containment would size it as if empty, leaving it at its minimum on any window. */
+.harness-page .ins-card { container-type: normal; max-width: 100%; width: fit-content; min-width: min(100%, 520px); box-sizing: border-box; }
 .harness-page .ins-card:has(> .ins-versions, > .ins-note) { width: auto; }
 /* Opened from the toolbar's Add from…: under that button, its right edge on the button's. */
 .add-from { position: relative; }

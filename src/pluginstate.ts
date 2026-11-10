@@ -216,7 +216,8 @@ export const addMarketplace = (source: string) => act('adding', async () => {
   market.addOpen = false;
   market.nav = { ...startNav(), source: added?.source };
   showView(result.view);
-  tell({ page: 'plugins', item: added?.name || undefined, text: `${added ? `${marketTitle(added)} added: ${plural(added.plugins.length, 'plugin')}` : 'Marketplace added'}. Nothing was installed.` });
+  // The outcome first, the name last, so a narrow status bar that shortens the message cuts the name, not the news.
+  tell({ page: 'plugins', item: added?.name || undefined, text: added ? `Marketplace added: ${plural(added.plugins.length, 'plugin')}, nothing installed (${marketTitle(added)}).` : 'Marketplace added. Nothing was installed.' });
   // Once added, focus leaves the add box (now gone), so the next key press doesn't land in an input that isn't there.
 }).then(() => { if (!market.problem) (document.activeElement as HTMLElement | null)?.blur(); });
 

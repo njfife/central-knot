@@ -147,6 +147,22 @@ function markWrappedStatus(): void {
 afterLayout(markWrappedStatus);
 
 /**
+ * After layout: the tool counts sit on one line when every card has room for them; otherwise every card lays them out
+ * the same way, in two columns, or one per line when two don't fit (style.css .kind-card-tools[data-layout]).
+ */
+function settleToolCounts(): void {
+  const lists = [...document.querySelectorAll<HTMLElement>('.kind-card-tools')];
+  const set = (layout: string) => { for (const list of lists) list.dataset.layout = layout; };
+  const wraps = (list: HTMLElement) => { const first = list.firstElementChild as HTMLElement | null, last = list.lastElementChild as HTMLElement | null; return !!first && !!last && last.offsetTop > first.offsetTop + first.offsetHeight / 2; };
+  set('line');
+  if (!lists.some(wraps)) return;
+  set('columns');
+  if (lists.some(list => list.scrollWidth > list.clientWidth)) set('stack');
+}
+
+afterLayout(settleToolCounts);
+
+/**
  * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it; with one
  * tool there is nothing to keep in step, so it says how a second one joins.
  */
@@ -223,6 +239,16 @@ const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.filter
   .map(skill => ({ tool: snapshot.harness, skill })));
 
 /**
+ * Whether a copy's real folder says more than its path: not when the link only changes the part above the home (macOS's
+ * /var and /private/var), where the line's visible end would repeat the path above it.
+ */
+const linkedElsewhere = (skill: Skill) => {
+  if (skill.realDirectory === skill.directory) return false;
+  const shown = shownPath(skill.directory);
+  return !/^[~…]\//.test(shown) || !skill.realDirectory.endsWith(shown.slice(1));
+};
+
+/**
  * One copy under "Where each copy is", the one place its paths show: its tool, its folder (with Show in folder and Copy),
  * the real folder when a link leads elsewhere, and its fields of note.
  */
@@ -232,7 +258,7 @@ function copyEntry(key: string, { tool, skill }: Found, index: number) {
       h('button.inline-link.copy-entry-show', { type: 'button', title: 'Show this folder in the file manager; nothing is opened or changed', onclick: () => showFile(skill.directory) }, 'Show in folder'),
       copyButton(skill.directory, `path for ${toolName(tool)}`, `copy-${key}-${index}`)),
     h('p.copy-entry-path', {}, wrappingPath(skill.directory)),
-    skill.realDirectory !== skill.directory ? h('p.copy-entry-real', {}, h('span.copy-entry-label', {}, 'Real folder'),
+    linkedElsewhere(skill) ? h('p.copy-entry-real', {}, h('span.copy-entry-label', {}, 'Real folder'),
       h('span.path-left', { title: skill.realDirectory }, h('span', {}, skill.realDirectory)),
       copyButton(skill.realDirectory, `real folder for ${toolName(tool)}`, `copy-real-${key}-${index}`)) : null,
     skill.metadataKeys.length ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Fields of note '), skill.metadataKeys.join(', ')) : null);
