@@ -8,7 +8,7 @@ import { lineDiff } from './diff.ts';
 import { errorCode, landingOf, plainError, recoverParked, removeFileChecked, sha256, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { baseAction, comparableBase, draftedOwn, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineCount, linesOf, toolList } from './words.ts';
-import { harnessIds, pluginsOnly } from './harnesses.ts';
+import { harnessIds } from './harnesses.ts';
 import { isPresent } from './presence.ts';
 import { onlyAllowed } from './values.ts';
 import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
@@ -16,7 +16,7 @@ import type { BaseApply, BaseHeld, BaseList, BaseResult, BaseUndo, BaseView, Har
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
 /** Every file a save can write in a tool's folder (Pi's CLAUDE.md: the file Pi reads when its folder has no AGENTS.md). */
 export const instructionFiles: Record<HarnessId, string[]> = {
-  'claude-cli': ['CLAUDE.md'], 'claude-cowork': [], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md'],
+  'claude-cli': ['CLAUDE.md'], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md'],
 };
 /** Where earlier versions are kept: one folder per tool, and one for the base instructions. */
 type Shelf = HarnessId | 'base';
@@ -59,7 +59,6 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
       notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
       return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
     }
-    case 'claude-cowork': return pluginsOnly(tool);
   }
 }
 
@@ -78,7 +77,7 @@ const describe = (kept: { id: string; text: string }[], now: string) => kept.map
 });
 
 /** Tool ids to hashes as read from base-tools.json: unknown tools and non-string values dropped. */
-const toolHashes = (value: unknown): Partial<Record<HarnessId, string>> => Object.fromEntries(Object.entries(value ?? {}).filter(([tool, hash]) => (harnessIds as string[]).includes(tool) && typeof hash === 'string'));
+const toolHashes = (value: unknown): Partial<Record<HarnessId, string>> => Object.fromEntries(Object.entries(value ?? {}).filter(([tool, hash]) => harnessIds.includes(tool as HarnessId) && typeof hash === 'string'));
 async function readBaseList(home: string): Promise<BaseList> {
   try {
     const list = JSON.parse(await readFile(baseListPath(home), 'utf8')) as Partial<BaseList>;

@@ -29,13 +29,6 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
     nextStep: 'Written. Start a new Claude Code session (CLI or Claude desktop’s Code tab), or run /reload-skills, to use it.',
     skillRoots: config => [{ path: join(config, 'skills'), label: 'Claude Code skills' }],
   },
-  // Cowork in Claude desktop: whole plugins only, kept in Claude Code's own format in the folder cowork.ts finds (its
-  // config folder is always given, never this default). It has no skills folder, MCP file or instruction file of its own.
-  'claude-cowork': {
-    id: 'claude-cowork', name: 'Cowork', surface: 'Claude desktop', binary: 'claude',
-    configEnv: 'CLAUDE_CONFIG_DIR', defaultConfig: 'Library/Application Support/Claude/local-agent-mode-sessions', reservedSkills: [], loadsDotFolders: false,
-    otherReaders: [], nextStep: '', skillRoots: () => [],
-  },
   'copilot-cli': {
     id: 'copilot-cli', name: 'GitHub Copilot', surface: 'CLI', binary: 'copilot',
     configEnv: 'COPILOT_HOME', defaultConfig: '.copilot', reservedSkills: [], loadsDotFolders: false,
@@ -72,11 +65,7 @@ export const harnesses: Record<HarnessId, HarnessDefinition> = {
   },
 };
 
-/** Cowork holds whole plugins only: asking it for a skills folder, an MCP file, an instruction file or a draft is a mistake in the code. */
-export function pluginsOnly(tool: 'claude-cowork'): never { throw new Error(`${tool} holds plugins only.`); }
-
-/** The tools with folders of their own for skills, MCP servers, agents and instructions: every tool but Cowork, which the Plugins pages alone add. */
-export const harnessIds = (Object.keys(harnesses) as HarnessId[]).filter(id => id !== 'claude-cowork');
+export const harnessIds = Object.keys(harnesses) as HarnessId[];
 
 export function configRoot(definition: HarnessDefinition, home: string, override?: string): string {
   return override === undefined ? join(home, definition.defaultConfig) : override;

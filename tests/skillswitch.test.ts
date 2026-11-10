@@ -8,9 +8,9 @@ import { discover } from '../src/discovery.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { isDisabled, readSwitchFile, setDisabled, switchPath, unverifiedBuild } from '../src/skillswitch.ts';
 import type { ShareContext } from '../src/share.ts';
-import type { FileTool, HarnessId } from '../src/types.ts';
+import type { HarnessId } from '../src/types.ts';
 
-const all: FileTool[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+const all: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 const text = (name: string, body = 'Body.') => `---\nname: ${name}\ndescription: The ${name} skill.\n---\n\n${body}\n`;
 
 async function sandbox(tools: HarnessId[]) {
@@ -21,7 +21,7 @@ async function sandbox(tools: HarnessId[]) {
   return { home, context, cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 const skillsDir = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills', 'pi-cli': '.pi/agent/skills' } as const;
-async function skill(home: string, tool: FileTool, folder: string, content = text(folder)) {
+async function skill(home: string, tool: HarnessId, folder: string, content = text(folder)) {
   await mkdir(join(home, skillsDir[tool], folder), { recursive: true });
   await writeFile(join(home, skillsDir[tool], folder, 'SKILL.md'), content);
 }
@@ -30,13 +30,13 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
   const box = await sandbox(all);
   try {
     // What each tool's switch file already holds, including its own comments and unrelated settings.
-    const before: Record<FileTool, string> = {
+    const before: Record<HarnessId, string> = {
       'claude-cli': '{\n  "model": "opus",\n  "skillOverrides": { "other": "name-only" }\n}\n',
       'copilot-cli': '{\n  "disabledSkills": ["other"],\n  "theme": "dark"\n}\n',
       'codex-cli': '# my settings\nmodel = "gpt"\n\n[mcp_servers.docs]\ncommand = "docs"\n',
       'pi-cli': '{\n  "skills": ["-skills/other/SKILL.md"]\n}\n',
     };
-    const expected: Record<FileTool, RegExp> = {
+    const expected: Record<HarnessId, RegExp> = {
       'claude-cli': /"alpha": "off"/,
       'copilot-cli': /"other",\s*"Alpha Skill"/,
       'codex-cli': /\[\[skills\.config\]\]\npath = ".*\/\.codex\/skills\/alpha\/SKILL\.md"\nenabled = false\n$/,

@@ -7,7 +7,7 @@ import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findBinary } from './discovery.ts';
-import { harnessIds, pluginsOnly } from './harnesses.ts';
+import { harnessIds } from './harnesses.ts';
 import { baseView, instructionsView } from './instructions.ts';
 import { pathBeside } from './platform.ts';
 import { fileName, toolNames } from './words.ts';
@@ -30,7 +30,6 @@ export function draftCommand(tool: HarnessId, answerFile: string): { args: strin
     case 'codex-cli': return { args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--ephemeral', '--color', 'never', '-o', answerFile, '-'], answer: 'file' };
     case 'copilot-cli': return { args: ['-s', '--no-color', '--no-ask-user'], answer: 'output' };
     case 'pi-cli': return { args: ['-p', '--no-tools', '--no-session'], answer: 'output' };
-    case 'claude-cowork': return pluginsOnly(tool);
   }
 }
 

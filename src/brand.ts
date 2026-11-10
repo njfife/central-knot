@@ -12,8 +12,7 @@ const glyphs: Record<string, string> = {
 /** A tool's mark (its id, as the tables pass it), or its first two letters when it has none. */
 export function brandMark(tool: string, size = 16): Element {
   const holder = document.createElement('template');
-  // Cowork is Claude's: the same mark, told apart by the name beside it.
-  const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool === 'claude-cowork' ? 'claude-cli' : tool];
+  const brand = (brands as Record<string, { color: string; path: string } | undefined>)[tool];
   // Codex and Pi have no mark of their own here: each a drawn glyph in a rounded square (a terminal prompt, a π), the same
   // size and weight as the others at any size, not letters squeezed into a tile.
   const drawn = !brand && glyphs[tool];

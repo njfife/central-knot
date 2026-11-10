@@ -2,7 +2,7 @@
 import type { HomeKind } from './presence.ts';
 import type { HarnessId, SwitchProblem } from './types.ts';
 
-export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'claude-cowork': 'Cowork', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
+export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
 /** Sorts tool ids into the order the app lists tools everywhere (columns, notes, results). */
 const TOOL_ORDER = Object.keys(toolNames);

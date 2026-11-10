@@ -11,7 +11,6 @@ import { errorCode, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
 import { problemText, toolName } from './words.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
-import { pluginsOnly } from './harnesses.ts';
 import { record, withoutBom } from './values.ts';
 import type { HarnessId, SkillFacts } from './types.ts';
 
@@ -76,7 +75,6 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     case 'copilot-cli': return list(jsonOf(text).disabledMcpServers).includes(name);
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
     case 'pi-cli': return piEntry(text, name)?.enabled === false;
-    case 'claude-cowork': return pluginsOnly(tool);
   }
 }
 
@@ -110,7 +108,6 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       if (!piEntry(text, name)) throw new Error(`Pi has no "${name}" server to switch.`);
       return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
     }
-    case 'claude-cowork': return pluginsOnly(tool);
   }
 }
 

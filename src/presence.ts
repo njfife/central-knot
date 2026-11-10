@@ -29,8 +29,8 @@ export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[])
 
 /** The tools that hold each kind besides skills: plugins and agents in every tool but Pi, which has neither; MCP servers in every tool. */
 export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
-export const pluginTools: PluginTool[] = ['claude-cli', 'claude-cowork', 'copilot-cli', 'codex-cli'];
-export type AgentTool = Exclude<HarnessId, 'pi-cli' | 'claude-cowork'>;
+export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+export type AgentTool = Exclude<HarnessId, 'pi-cli'>;
 export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 

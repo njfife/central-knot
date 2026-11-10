@@ -7,7 +7,7 @@ import { withoutBom } from './values.ts';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { configRoot, harnesses, pluginsOnly } from './harnesses.ts';
+import { configRoot, harnesses } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
@@ -56,7 +56,6 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
     // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
     case 'pi-cli': return join(rootOf(context, tool), 'mcp.json');
     case 'codex-cli': return join(rootOf(context, tool), 'config.toml');
-    case 'claude-cowork': return pluginsOnly(tool);
   }
 }
 
