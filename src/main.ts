@@ -831,7 +831,7 @@ app.whenReady().then(async () => {
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
-  handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
+  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));

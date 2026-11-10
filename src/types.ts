@@ -95,7 +95,7 @@ export interface DesktopApi {
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
   /** Each tool's own instruction file (INS-01). */
-  instructions(): Promise<InstructionFile[] | null>;
+  instructions(readId?: number): Promise<InstructionFile[] | null>;
   /** Convert to skill (AGT-02): an agent as a Pi skill. */
   convertAgent(key: string, home: string): Promise<{ stopped?: string; skill?: string; origin?: HarnessId }>;
   /** A skill edit's SKILL.md before and after, for "See change". */

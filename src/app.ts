@@ -168,7 +168,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
   forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
-  if (reload) void loadPageData(state.page);
+  if (reload) void loadPageData(state.page, { readId: view.readId });
 }
 
 /** Where focus goes when the running work ends, when its result replaced the control that started it (a review opening). */
@@ -205,8 +205,8 @@ export async function busy(message: string, work: () => Promise<void>) {
 
 /**
  * Opens a home (a switch, or the first at launch), where setHome only takes a newer view of the same one. Everything
- * read or chosen for the home before is let go: its pages' data (each starts over at reading, and is read for this home
- * at once), the marketplace choices and the open skill. An unsaved Instructions draft is kept: the Instructions page
+ * read or chosen for the home before is let go: its pages' data (each starts over at reading; the open page's is read for
+ * this home at once, the others as they open), the marketplace choices and the open skill. An unsaved Instructions draft is kept: the Instructions page
  * offers to copy or discard it.
  */
 function accept(view: HomeView) {
@@ -223,10 +223,7 @@ function accept(view: HomeView) {
   resetPageData(state.history);
   resetMarket();
   setHome(view, { reload: false });
-  void loadInstructions();
-  void loadHistory();
-  if (!absentKinds().includes('plugins')) void loadPlugins(false, view.readId);
-  if (state.page === 'settings') void loadSettings();
+  void loadPageData(state.page, { readId: view.readId });
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -371,9 +368,9 @@ export const whyReadOnly = (home: HomeView) => (!home.manage.access.allowed ? ho
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
-  if (page === 'instructions') return loadInstructions();
+  if (page === 'instructions') return loadInstructions(readId);
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
-  if (page === 'harnesses') return Promise.all([loadInstructions(), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
+  if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
 }
@@ -424,9 +421,9 @@ export function showPage(page: Page) {
   if (page !== state.page) state.skillsView = 'table';
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
+  state.page = page;
   if (page === 'settings') openSettings();
   else if (!stays) void loadPageData(page);
-  state.page = page;
   state.find = '';
   state.item = undefined;
   rerender();
@@ -611,8 +608,8 @@ const settleDraft = () => {
 };
 
 /** Reads each tool's instruction file into its slot; the page redraws once the answer is the newest. */
-export const loadInstructions = async (): Promise<void> => {
-  const reading = readPageData(state.instructions, readInstructionsAndBase);
+export const loadInstructions = async (readId?: number): Promise<void> => {
+  const reading = readPageData(state.instructions, () => readInstructionsAndBase(readId));
   rerender();
   const result = await reading;
   if (result === 'dropped') return;
@@ -624,8 +621,8 @@ export const loadInstructions = async (): Promise<void> => {
 const rereadInstructions = async () => { const files = await readInstructionsAndBase(); if (files) { putPageData(state.instructions, files); settleDraft(); } };
 
 /** Each tool's instruction file, with the base read beside it (state.base). */
-async function readInstructionsAndBase() {
-  const [files, base] = await Promise.all([api().instructions(), api().instructionBase()]);
+async function readInstructionsAndBase(readId?: number) {
+  const [files, base] = await Promise.all([api().instructions(readId), api().instructionBase()]);
   state.base = base ?? undefined;
   return files;
 }
