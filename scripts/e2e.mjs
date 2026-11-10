@@ -479,6 +479,10 @@ async function practiceFlow() {
   await switchFromBar('Incident');
   check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));
   check('the switch’s result shows over pending changes, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  // Display order: what every tool has disabled goes last, under Unused; notes, still on, stays above it.
+  const sections = await a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`);
+  const unusedRows = sections.find(([role]) => role === 'unused')?.[1] ?? [];
+  check('skills disabled in every tool come last, under Unused', sections.at(-1)?.[0] === 'unused' && unusedRows.includes('standup') && !unusedRows.includes('notes') && sections.some(([role, keys]) => role !== 'unused' && keys.includes('notes')), sections);
   await a.click('#outcome-undo');
   await a.click('#discard');
   // On History (no result band) the switch is listed at once and its result is said in the status bar, as is its Undo from there.

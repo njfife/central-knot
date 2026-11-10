@@ -4,7 +4,8 @@ import { announce, busy, rerender, setHome, state as app, tell } from './app.ts'
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools } from './pluginstatus.ts';
+import { FIND_FROM, categoriesOf, installed, marketTitle, matches, partsOf, partsTools } from './pluginstatus.ts';
+import { pluginsInDisplayOrder } from './roworder.ts';
 import { readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
 
@@ -82,8 +83,18 @@ export function clearNotice(): void { if (app.outcome?.page === 'plugins') app.o
 /** How many of a marketplace's plugins kept elsewhere are read ahead (each is a small Git copy), so a large catalog stays cheap. */
 const REMOTE_READ_AHEAD = 8;
 
-/** The plugins the marketplace on screen lists under the current find text and category. */
-export const shownPlugins = (entry: MarketplaceView) => entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
+/** How many of the tools shown have a plugin, whole or as parts. */
+const holdingTools = (entry: MarketplaceView, plugin: string, tools: readonly HarnessId[]) => tools.filter(tool => installed(entry, plugin, tool) || !!partsOf(entry, plugin, tool)).length;
+
+/**
+ * The plugins the marketplace on screen lists under the current find text and category: those every tool has first, then
+ * those some tool has, then those no tool has, by name within each. Pending choices move nothing until Apply all.
+ */
+export function shownPlugins(entry: MarketplaceView) {
+  const tools = market.view?.tools ?? [];
+  const listed = entry.plugins.filter(plugin => matches(plugin, market.nav.find) && (!market.nav.category || plugin.category === market.nav.category));
+  return pluginsInDisplayOrder(listed, plugin => holdingTools(entry, plugin.name, tools), tools.length);
+}
 
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {
