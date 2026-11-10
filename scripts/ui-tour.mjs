@@ -521,6 +521,22 @@ if (wanted('parts')) {
   await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
   await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  // Single parts: under "What it holds", a switch per part for each tool that takes them.
+  const atParts = async (name, caption) => { await a.run(`document.querySelector('.plugin-switched')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, name, caption); };
+  await waitFor(a, `!!document.querySelector('#ppart-0-issue-tracker-skill-triage-pi-cli')`);
+  await atParts('pick-switches', 'Scrolled to "What it holds": each skill and MCP server has a switch under each tool that can take it as a separate item.');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli');
+  await atParts('pick-chosen', 'Clicked triage’s switch under Pi and the issues server’s under Codex: both wait for Apply all.');
+  await a.theme('light'); await atParts('pick-chosen-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await size(860, 560); await atParts('pick-chosen-860', 'The same at 860×560.');
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-chosen-860-top', 'The top of the page at 860×560: the Pi and Codex boxes say what will change.');
+  await size(1728, 1117); await atParts('pick-chosen-1728', 'The same at 1728×1117.');
+  await size(1280, 800);
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'pick-applied', 'Clicked Apply all: Pi has the triage skill alone, Codex the issues server alone; each tool’s row says what was left out.');
+  await atParts('pick-applied-switches', 'The switches after Apply all.');
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
   // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: My own triage.\n---\nMine.\n');
