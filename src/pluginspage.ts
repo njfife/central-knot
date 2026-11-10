@@ -9,7 +9,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { allQueued, resultLines, pickOf, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare, whyNotCarried } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -39,6 +39,9 @@ function addBox(first: boolean) {
       button({ variant: 'outline', size: 'small', icon: 'folder-plus', label: 'Folder…', name: 'Choose a marketplace folder', id: 'pick-marketplace-folder', disabled: !!app.busy, onclick: () => void pickMarketplaceFolder().then(folder => { if (folder) void addMarketplace(folder); }) })));
 }
 
+/** The picture a bundled build gave its marketplace, drawn small before its name; nothing for any other marketplace. */
+const marketLogo = (entry: MarketplaceView) => (entry.bundled?.logo ? h('img.market-logo', { src: entry.bundled.logo, alt: '', 'aria-hidden': 'true' }) : null);
+
 /** Every marketplace, with how many plugins it lists, installed and chosen; the add box below. */
 function marketList(view: PluginsView, shown: MarketplaceView) {
   const item = (entry: MarketplaceView) => {
@@ -46,9 +49,9 @@ function marketList(view: PluginsView, shown: MarketplaceView) {
     const installedCount = count(plugin => view.tools.some(tool => installed(entry, plugin.name, tool)));
     const partsCount = count(plugin => view.tools.some(tool => !!partsOf(entry, plugin.name, tool)));
     const chosen = count(plugin => view.tools.some(tool => queued(market.draft, entry.source, plugin.name, tool)));
-    const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : '', partsCount ? `${partsCount} with parts` : '', chosen ? `${chosen} chosen` : ''].filter(Boolean).join(' · ');
+    const meta = entry.problem && !entry.plugins.length ? 'Couldn’t be read' : [entry.bundled ? 'Built in' : '', plural(entry.plugins.length, 'plugin'), installedCount ? `${installedCount} installed` : '', partsCount ? `${partsCount} with parts` : '', chosen ? `${chosen} chosen` : ''].filter(Boolean).join(' · ');
     return h('li', {}, h(`button.market-item${entry === shown ? '.selected' : ''}`, { type: 'button', title: `${marketTitle(entry)} · ${meta}`, 'aria-current': entry === shown ? 'true' : undefined, onclick: () => browse({ source: entry.source, plugin: undefined, tab: 'plugins', find: '', category: undefined }) },
-      h('span.market-item-name', {}, marketTitle(entry)), h('span.market-item-meta', {}, meta)));
+      h('span.market-item-name', {}, marketLogo(entry), marketTitle(entry)), h('span.market-item-meta', {}, meta)));
   };
   return h('nav.market-list', { 'aria-label': 'Marketplaces' },
     h('h2.market-list-title', {}, 'Marketplaces'), h('ul', {}, view.marketplaces.map(item)), addBox(false));
@@ -62,7 +65,9 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const reading = market.details.get(key);
   const readContents = detail === undefined && reading?.reading && !reading.quiet ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
   const offered = offeredVersion(plugin, detail);
-  const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
+  // A plugin a bundled build doesn't carry says so here, where its boxes can't be chosen; About has the reason.
+  const left = !!whyNotCarried(entry, plugin.name);
+  const holds = left ? '' : plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
   const compareTo = versionToCompare(plugin, detail);
   const others = otherVersions(view, entry, plugin.name, compareTo);
@@ -79,10 +84,13 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css).
-      plugin.description || holds ? h('span.plugin-row-line', {},
+      plugin.description || holds || left ? h('span.plugin-row-line', {},
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
-        plugin.description && holds ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
-        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null,
+        plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
+        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
+        // The link sits beside the words: a long app name shortens the words, never the link.
+        left ? h('span.plugin-row-left', {}, h('span.plugin-row-holds', { title: `Can’t be installed from ${entry.bundled!.app}` }, `Can’t be installed from ${entry.bundled!.app}`), h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
+          h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
@@ -153,22 +161,44 @@ function aboutTab(entry: MarketplaceView, marketIndex: number) {
   const read = market.readmes.get(entry.source);
   // Parts are removed together from their plugin's page, so a marketplace stays listed while any of its plugins' parts are in a tool.
   const holdsParts = Object.keys(entry.parts ?? {}).length > 0;
-  const remove = entry.origins.includes('central-knot') ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || holdsParts, onclick: () => void forgetMarketplace(entry.source) }) : null;
+  const remove = entry.origins.includes('central-knot') && !entry.bundled ? button({ variant: 'outline', size: 'small', icon: 'circle-minus', label: 'Remove from this list', name: `Remove ${marketTitle(entry)} from this list. Installed plugins stay installed.`, id: `forget-${marketIndex}`, disabled: !!app.busy || holdsParts, onclick: () => void forgetMarketplace(entry.source) }) : null;
   if (remove) remove.title = holdsParts ? 'Some of its plugins’ parts are in your tools. Remove those parts first; they are removed together from each plugin’s page.' : 'Removes it from this list only. Installed plugins stay installed.';
   const source = entry.page ? button({ variant: 'link', size: 'micro', label: entry.sourceLabel, id: `market-page-${marketIndex}`, onclick: () => openLink(entry.page!) }) : h('span', { title: entry.source }, entry.sourceLabel);
   return [
     // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
     entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
-    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted([...marketFacts(entry), source])), remove),
+    // A build's own marketplace says which release of it this is; where it "comes from" is the build, already among its facts.
+    h('div.market-about-head', {}, h('p.market-page-meta', {}, entry.bundled ? bundledFacts(entry) : dotted([...marketFacts(entry), source])), remove),
+    notCarriedNote(entry),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
       : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),
   ];
 }
 
-/** Who made a marketplace, which tools added it (said only when Central Knot didn't), and when it was read. */
+/** Who made a marketplace, which tools added it (said only when Central Knot didn't), and when it was read; for the one a build carries, that it comes with the app. */
 function marketFacts(entry: MarketplaceView): string[] {
-  const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.map(toolName);
+  if (entry.bundled) return [entry.owner ? `By ${entry.owner}` : '', entry.sourceLabel].filter(Boolean);
+  const addedBy = entry.origins.includes('central-knot') ? [] : entry.origins.filter(origin => origin !== 'bundle').map(toolName);
   return [entry.owner ? `By ${entry.owner}` : '', addedBy.length ? `Added in ${andList(addedBy)}` : '', entry.fetchedAt ? `Updated ${when(entry.fetchedAt)}` : ''].filter(Boolean);
+}
+
+/**
+ * About's line for a build's own marketplace: which release of it this is (what it was made from is its tooltip, for
+ * whoever needs to tell releases apart). Who made it and that it comes with the app are on the title line just above, so
+ * here they show only where that line is hidden (narrow).
+ */
+function bundledFacts(entry: MarketplaceView) {
+  const release = entry.bundled?.release ? h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `Plugins as of ${entry.bundled.release}`) : null;
+  return [h('span.market-fact-narrow', {}, dotted(marketFacts(entry)), release ? h('span.meta-dot', { 'aria-hidden': 'true' }, '·') : null), release];
+}
+
+/** The plugins a build's marketplace lists but the build carries no files for, each with why, so "not available" has its reason in one place. */
+function notCarriedNote(entry: MarketplaceView): HTMLElement | null {
+  const left = entry.bundled?.unpackaged ?? [];
+  if (!left.length) return null;
+  return h('div.market-not-carried', { role: 'note' },
+    h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} included in ${entry.bundled!.app}, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from here.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),
+    h('ul', {}, left.map(item => h('li', {}, h('strong', {}, item.name), `: ${item.reason}`))));
 }
 
 function marketPage(view: PluginsView, entry: MarketplaceView, marketIndex: number) {
@@ -321,7 +351,7 @@ function toolbar(shown: { entry: MarketplaceView; index: number } | undefined, l
  */
 function titleLine(entry: MarketplaceView) {
   const name = marketTitle(entry);
-  return h('div.market-title-line', {}, h('h2', { title: name }, name), marketFacts(entry).map(fact => h('span.market-fact', {}, fact)));
+  return h('div.market-title-line', {}, h('h2', { title: name }, marketLogo(entry), name), marketFacts(entry).map(fact => h('span.market-fact', {}, fact)));
 }
 
 /** Public marketplaces to try from the empty page; a click adds one (adding installs nothing). */

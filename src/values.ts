@@ -2,6 +2,13 @@
 // sources or links a person or a catalog gave. Each returns a safe default instead of throwing. No Node imports, so the
 // renderer can use them too.
 
+/**
+ * The product's own name, for what is written outside the app and must read the same from every build: the markers in a
+ * tool's instruction file, a commit's author and message. A custom build is renamed by replacing the name's plain spelling
+ * in the built code (scripts/build.mjs), so it is put together here and that renaming leaves it as it is.
+ */
+export const PRODUCT = ['Central', 'Knot'].join(' ');
+
 /** A string, or '' for anything else. */
 export const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
