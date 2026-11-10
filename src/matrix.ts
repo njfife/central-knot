@@ -796,7 +796,7 @@ function menuRows(tool: Tool, list: SampleSkill[]) {
   const live = menuPairs(tool, list);
   const what = kindNoun[kind][1];
   if (!live.length) return [h('p.tool-menu-empty', {}, tool === focus ? `The other tools have no ${what} that ${names[tool]} doesn’t already have.` : `${names[tool]} has no ${what} to add${focus ? ` to ${names[focus]}` : ''}.`)];
-  const label = tool === focus ? `Add to ${names[tool]} from…` : focus ? `Add ${names[tool]}’s ${what} to ${names[focus]}` : `Add ${names[tool]}’s ${what} to…`;
+  const label = tool === focus ? `Add to ${names[tool]} from` : focus ? `Add ${names[tool]}’s ${what} to ${names[focus]}` : `Add ${names[tool]}’s ${what} to…`;
   return [h('p.tool-menu-label', {}, label), live.map(([from, to]) => addRow(from, to, list, tool === focus ? from : to))];
 }
 
@@ -1289,7 +1289,8 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
           h('div.ov-name', { role: 'columnheader' }, nouns[kind][0]),
           h('div.ov-managed', { role: 'columnheader' }, 'Managed'),
           toolList().map(tool => toolHead(tool, shown)),
-          h('div.ov-fill', {}, focus ? h('span.ov-desc.ov-desc-head', {}, 'Description') : null)),
+          // MCP servers' "descriptions" are how they connect (a command or a URL), so the column says so.
+          h('div.ov-fill', {}, focus ? h('span.ov-desc.ov-desc-head', {}, kind === 'mcp' ? 'Connection' : 'Description') : null)),
         section('managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
         section('unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
         // Items only other tools have: their box in this tool's column adds them here (see setTool).

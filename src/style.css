@@ -1396,8 +1396,10 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Its groups sit side by side at a readable distance; past two groups' width the card keeps its edge and the rest stays empty on purpose. */
-.harness-about { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 16px 48px; }
-.harness-about-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
+/* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
+   is as wide as its groups, so no empty frame runs on past them. */
+.harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
+.harness-about-column { flex: 1 1 400px; display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
 .harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .harness-path .middle { min-width: 0; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
@@ -1422,8 +1424,10 @@ button.harness-card-main:disabled { cursor: default; }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
-/* Its instruction card spans the pane. */
-.harness-page .ins-card { max-width: none; }
+/* Its instruction card: with nothing beside the file, it is as wide as the file at its reading measure (no empty frame);
+   with notes or earlier versions beside it (wide windows), it spans the pane. */
+.harness-page .ins-card { max-width: none; width: fit-content; min-width: min(100%, 520px); }
+.harness-page .ins-card:has(> .ins-versions, > .ins-note) { width: auto; }
 /* Its toolbar holds one more action (Add from…), so the right-hand group wraps onto a second line rather than run off the edge. */
 .harness-page .ov-page > .toolbar { flex-wrap: wrap; row-gap: 4px; padding-top: 4px; padding-bottom: 4px; }
 .harness-page .toolbar-end { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; border-left: 0; padding-left: 0; }
@@ -1438,7 +1442,7 @@ button.harness-card-main:disabled { cursor: default; }
 button.harness-card-main:focus-visible { outline: 0; }
 .harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
 /* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. */
-@container (min-width: 560px) {
+@container (min-width: 520px) {
   .harness-counts { grid-template-columns: repeat(2, max-content minmax(2ch, max-content) minmax(0, 1fr)); }
   .harness-count:nth-child(1) > *, .harness-count:nth-child(4) > * { grid-row: 1; }
   .harness-count:nth-child(2) > *, .harness-count:nth-child(5) > * { grid-row: 2; }
@@ -1481,13 +1485,14 @@ button.harness-card-main:focus-visible { outline: 0; }
 }
 /* An agent's "one-way from …" tag always sits on its own line under the name. */
 .harness-page .ov-row:not(.ov-head) .ov-name { padding-top: 6px; padding-bottom: 6px; }
-.harness-page .ov-name > .row-tag { flex-basis: 100%; margin-left: 26px; }
+.harness-page .ov-name > .row-tag { flex-basis: 100%; margin-left: 20px; }
 /* The description shows in its column or, when that is hidden, under the name: an open row's details never say it again. */
 .harness-page .ov .details-description { display: none; }
 /* Under the name come, in order: any pill beside it, then the one-way tag, then the description. */
 .harness-page .ov-name > .row-tag { order: 1; }
-.ov-name-sub { order: 2; display: none; flex-basis: 100%; margin-left: 26px; font-size: 12px; line-height: 16px; color: var(--ink-faint); white-space: normal; }
+.ov-name-sub { order: 2; display: none; flex-basis: 100%; margin-left: 20px; font-size: 12px; line-height: 16px; color: var(--ink-faint); white-space: normal; }
 /* About: every fact row is as tall as one with a copy button, so the two groups' rows line up. */
 .harness-about .facts > dt, .harness-about .facts > dd { min-height: 24px; display: flex; align-items: center; }
 .harness-tab-none:not(.selected) { color: var(--ink-faint); }
+.harness-tab-none:not(.selected):hover { color: var(--ink); }
 .harness-page .empty-body { text-wrap: balance; }

@@ -82,8 +82,8 @@ function countRow(label: string, { value, note, faint = false }: Count) {
   return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
 }
 
-function kindCount({ supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
-  if (!supported) return { value: '—', note: `${names[tool]} has none of its own`, faint: true };
+function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
+  if (!supported) return { value: '—', note: `${names[tool]} doesn’t use ${kindNoun[kind][1]}`, faint: true };
   if (!total) return { value: '0', note: 'none yet', faint: true };
   return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
 }
@@ -128,7 +128,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const kinds = KINDS.map(kind => tally(home, kind, tool));
   const body = [
     h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), found(home, tool) ? icon('arrow-right', 14, 'tone-faint') : null),
-    h(`span.harness-card-status${snapshot.detection === 'Not found' && home.mode === 'actual' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)),
+    // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
+    home.mode === 'actual' ? h(`span.harness-card-status${snapshot.detection === 'Not found' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)) : null,
     h('span.harness-counts', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool))), countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool))),
   ];
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
@@ -175,7 +176,7 @@ function everyHarness(home: HomeView) {
 
 /** The tabs, each kind with its count. While an action runs they stay put, so its result lands on the tab it was started from. */
 function tabs(home: HomeView, tool: HarnessId) {
-  // A count, a dash where the tool has none of its own (as on its card), or nothing (Instructions, About, still reading).
+  // A count, a dash where the tool doesn't use that kind (as on its card), or nothing (Instructions, About, still reading).
   // Kinds count copies here and elsewhere directly: tabs redraw on every Find keystroke, so no differing-copies work here.
   const count = (tab: HarnessTab): { shown: number | '—'; elsewhere: number } | undefined => {
     if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? { shown: plugins.installed.length, elsewhere: 0 } : plugins.state === 'unsupported' ? { shown: '—', elsewhere: 0 } : undefined; }
@@ -191,7 +192,7 @@ function tabs(home: HomeView, tool: HarnessId) {
       // A kind this tool cannot hold shows no count and a quieter tab; its tooltip and its page say why.
       return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}${counted?.shown === '—' ? '.harness-tab-none' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
-        title: !counted ? undefined : counted.shown === '—' ? `${names[tool]} has none of its own` : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
+        title: !counted ? undefined : counted.shown === '—' ? `${names[tool]} doesn’t use ${isKind(tab) ? kindNoun[tab][1] : 'marketplace plugins'}` : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
         onclick: () => goHarness(tool, tab),
       }, tabLabel(tab), counted && counted.shown !== '—' ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
@@ -209,9 +210,9 @@ function switcher(home: HomeView, tool: HarnessId) {
 
 /** A kind the tool has no place for (Pi's agents): what it has instead. */
 function unsupported(kind: Kind, tool: HarnessId) {
-  const body = kind === 'agents' ? `${names[tool]} has no agents of its own. On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
-    : `${names[tool]} has no ${kindNoun[kind][1]} Central Knot can read or write.`;
-  return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', `No ${kindNoun[kind][1]} in ${names[tool]}`, body,
+  const body = kind === 'agents' ? `On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
+    : `Central Knot can’t read or write ${kindNoun[kind][1]} for ${names[tool]}.`;
+  return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', `${names[tool]} doesn’t use ${kindNoun[kind][1]}`, body,
     kind === 'agents' ? button({ variant: 'outline', label: 'Open Agents', id: 'harness-open-agents', onclick: () => showPage('agents') }) : undefined));
 }
 
