@@ -250,7 +250,7 @@ function pluginRow({ entry, plugin }: MarketPlugin) {
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
-      h('span.harness-plugin-note', {}, [entry.name, plugin.description].filter(Boolean).join(' · '))),
+      h('span.harness-plugin-note', { title: [entry.name, plugin.description].filter(Boolean).join(' · ') }, [entry.name, plugin.description].filter(Boolean).join(' · '))),
     button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in Plugins`, id: `harness-plugin-${entry.name}-${plugin.name}`,
       onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined }); } }));
 }
