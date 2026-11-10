@@ -1421,6 +1421,8 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 #repo-disconnect-confirm { border-color: currentColor; }
 /* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
 .repo-page .band-done .tone-faint { color: inherit; opacity: 1; }
+/* The Undo sentence moves down whole rather than leave a word or two behind. */
+.repo-page .band-done .band-text > .tone-faint { white-space: nowrap; }
 /* Wide windows: the intro lines up with the form and "What goes where" below it. */
 /* The intro lines up with the form at every width, as the connected page does. */
 .repo-page > .scroll > .empty { align-items: flex-start; text-align: left; }
