@@ -1050,6 +1050,23 @@ async function practiceFlow() {
   await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   check('Undo takes the parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
+  // A part left out because its name was taken goes in with Update parts once the name is free.
+  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !/Not the skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  await a.click('#pcell-0-issue-tracker-pi-cli');
+  await a.click('#plugins-apply');
+  check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
+  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !/Can go in now/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('once the name is free, the page offers it with Update parts', /Can go in now: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Update parts in Pi/.test(await a.text('#pparts-issue-tracker') ?? ''), await a.text('.plugin-parts-section'));
+  await a.click('#pparts-issue-tracker');
+  await a.click('#plugins-apply');
+  check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
+  await a.click('#punparts-issue-tracker');
+  await a.click('#plugins-apply');
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
@@ -1164,6 +1181,13 @@ async function practiceFlow() {
   check('going back from "Stop sharing" keeps the ticks', await a.run(`document.querySelector('#base-tool-claude-cli').checked && document.querySelector('#base-tool-codex-cli').checked`));
   await a.run(`document.querySelector('#base-tool-claude-cli').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`); await a.settle();
   check('Esc on a tool box cancels the untouched base editor', !(await a.exists('#base-text')));
+  // A typed base draft belongs to this home: switching home from another page asks first on Instructions, and stays.
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Not saved.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#nav-skills');
+  await a.click('#home-actual');
+  check('a home switch with a typed base draft asks first and stays', await a.exists('#base-discard') && (await a.run(`document.querySelector('#base-text')?.value`) ?? '').includes('- Not saved.') && await a.run(`document.querySelector('#home-fixture')?.getAttribute('aria-current') === 'true'`), await a.text('.bands'));
+  await a.click('#base-discard');
   await a.click('#base-edit');
   await a.click('#base-tool-claude-cli'); await a.click('#base-tool-codex-cli');
   await a.click('#base-review'); await a.click('#base-save');

@@ -323,7 +323,19 @@ export function heldKindNames(count: 'all' | 'one' = 'all'): string {
   return count === 'one' ? orList(held.map(kind => kindNouns[kind].one)) : andList(held.map(kind => kindNouns[kind].many));
 }
 
-export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
+/**
+ * Opens another home: every switch (the sidebar's homes, Choose another home…, Go back to …) comes through here. A typed
+ * base instructions draft belongs to the open home, so it is asked about first on the Instructions page, and nothing
+ * switches. (A tool's draft is kept across the switch: the Instructions page offers to copy or discard it.)
+ */
+export const loadHome = (mode: HomeMode) => (baseDraftTyped() ? askBeforeLeaving() : openHome(mode));
+function askBeforeLeaving(): Promise<void> {
+  if (state.page !== 'instructions') showPage('instructions');
+  askAboutBaseDraft();
+  announce('Save or discard your base instructions draft before opening another home.');
+  return Promise.resolve();
+}
+const openHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
   if (view && view.home !== previous?.home) forgetRepoPrompts(true);
@@ -727,12 +739,14 @@ function askAboutOpenDraft(): boolean {
     Object.assign(tool, { confirmDiscard: true, stage: 'edit' });
     rerender(); document.getElementById(`ins-keep-${tool.tool}`)?.focus(); return true;
   }
+  return askAboutBaseDraft();
+}
+/** The same question for the base editor alone. */
+function askAboutBaseDraft(): boolean {
   const base = state.baseEdit;
-  if (base && baseDraftTyped()) {
-    base.confirmDiscard = true;
-    rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
-  }
-  return false;
+  if (!base || !baseDraftTyped()) return false;
+  base.confirmDiscard = true;
+  rerender(); document.getElementById(base.stage === 'review' ? 'base-review-keep' : 'base-keep')?.focus(); return true;
 }
 
 /** This home only shows its files: saving is off (a preview-only home or another build syncing). */

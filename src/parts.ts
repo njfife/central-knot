@@ -379,7 +379,7 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
     // An Undo putting a part back through a skills folder that became a link fails (retryable), never quietly skips it.
     if (restoring) throughSkillsFolder();
     const why = blocker(now, holds, part, tool);
-    if (why) { moved.notes.push(`Left ${label}: ${why}. To add it once that is sorted out, remove the plugin’s parts and install them again.`); return; }
+    if (why) { moved.notes.push(`Left ${label}: ${why}. Once that is sorted out, Update parts on the plugin’s page adds it.`); return; }
     await writeIn(undefined);
     return;
   }

@@ -46,6 +46,19 @@ test('Parts are found as Claude Code and Codex find them: what plugin.json and t
   } finally { await cleanup(); }
 });
 
+test('Agents and Codex skills nested deeper than one folder are read, as far down as Codex looks, hidden folders aside', async () => {
+  const { root, cleanup } = await box();
+  try {
+    await put(join(root, 'agents/review/security/deep.md'), '---\ndescription: Deep\n---\n');
+    await put(join(root, 'skills/group/inner/nested/SKILL.md'), '---\nname: nested\ndescription: N\n---\n');
+    await put(join(root, 'skills/a/b/c/d/e/SKILL.md'), '---\nname: sixth\ndescription: S\n---\n');
+    await put(join(root, 'skills/a/b/c/d/e/f/SKILL.md'), '---\nname: seventh\ndescription: S\n---\n');
+    await put(join(root, 'skills/.hidden/tucked/SKILL.md'), '---\nname: hidden\ndescription: H\n---\n');
+    assert.deepEqual((await pluginContents(root, {}, root)).agents.map(agent => agent.name), ['deep']);
+    assert.deepEqual((await pluginContents(root, {}, root, { codex: {} })).skills.map(skill => skill.name), ['nested', 'sixth']);
+  } finally { await cleanup(); }
+});
+
 test('Server and hook files are read in every shape plugins use: flat or wrapped, a list of paths, and LSP servers', async () => {
   const { root, cleanup } = await box();
   try {
