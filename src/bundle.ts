@@ -6,7 +6,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseCatalog } from './plugins.ts';
 import { writeDurably } from './share.ts';
@@ -21,8 +21,9 @@ export const RELEASE_FILE = 'release.json';
 export const CARRIED_FOLDER = 'bundle';
 
 /**
- * What makes a build a custom one. `id` names its settings folder and `bundleId` is the system's name for the app, so it
- * installs beside the standard app and never shares its settings; `name` is what it calls itself. `marketplace` is set for a
+ * What makes a build a custom one. `bundleId` is the system's name for the app and the name of its settings folder (no
+ * other app's folder has that name), so it installs beside the standard app and never shares its settings; `id` is the
+ * short form the build was given, and `name` is what it calls itself. `marketplace` is set for a
  * bundled build: how the carried marketplace is shown here (its name for the tools is always the catalog's own).
  */
 export interface CustomBuild {
@@ -57,15 +58,15 @@ export function readCustomBuildSync(folder: string): CustomBuild | undefined {
 }
 
 /**
- * What a custom build says about itself in Settings: what it is, that it doesn't update itself, and where its marketplace's
- * content comes from. Neither an update location nor a content feed can be configured yet, and the app says so rather
- * than leaving it unsaid (ORG-06).
+ * What a custom build says about itself in Settings: what it is, that it doesn't update itself, and that its marketplace
+ * changes only with a new build. Neither its own updates nor new marketplace content without a build exist yet, and the
+ * app says so rather than leaving it unsaid (ORG-06).
  */
-export function aboutBuild(build: CustomBuild, version: string, market?: { name: string; release: string }): string[] {
+export function aboutBuild(build: CustomBuild, version: string, market?: { name: string; date: string }): string[] {
   return [
-    build.name === PRODUCT ? `This is a custom build of ${PRODUCT} ${version} (${build.id}).` : `${build.name} is a custom build of ${PRODUCT} ${version}.`,
-    'It has its own settings, apart from the standard app’s, and it doesn’t update itself: it has no update location.',
-    ...(market ? [`It carries the marketplace ${market.name}, as of ${market.release}. That changes only with a new build: it has no content feed.`] : []),
+    `${build.name === PRODUCT ? `This (${build.id})` : build.name} is a custom build of ${PRODUCT} ${version}, with its own settings apart from the standard app’s.`,
+    'It doesn’t update itself.',
+    ...(market ? [`It comes with the ${market.name} marketplace${market.date ? ` as of ${market.date}` : ''}, which changes only with a new build${build.name === PRODUCT ? '' : ` of ${build.name}`}.`] : []),
   ];
 }
 
@@ -102,10 +103,15 @@ export function bundleRelease(value: unknown): BundleRelease | undefined {
 
 export const readRelease = async (path: string) => bundleRelease(await readJson(path));
 
-/** A release in words: "November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)". */
-export function releaseLabel(release: Pick<BundleRelease, 'madeAt' | 'from'>): string {
+/** A release's date in words: "November 10, 2026". Empty when its manifest gives none that can be read. */
+export function releaseDate(release: Pick<BundleRelease, 'madeAt'>): string {
   const made = new Date(release.madeAt);
-  const date = Number.isNaN(made.getTime()) ? '' : made.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return Number.isNaN(made.getTime()) ? '' : made.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+/** A release in words, for whoever made it: "November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)". */
+export function releaseLabel(release: Pick<BundleRelease, 'madeAt' | 'from'>): string {
+  const date = releaseDate(release);
   return [date, release.from ? (date ? `(${release.from})` : release.from) : ''].filter(Boolean).join(' ');
 }
 
@@ -162,6 +168,8 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
     return { problem };
   };
   try {
+    // What an open that was stopped while unpacking left behind goes first.
+    for (const name of await readdir(root).catch(() => [] as string[])) if (name.startsWith('incoming-')) await rm(join(root, name), { recursive: true, force: true });
     await mkdir(join(stage, 'marketplace'), { recursive: true });
     const copy = join(stage, 'content.tgz');
     await copyFile(archive, copy);
@@ -180,10 +188,11 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
     if (await exists(live)) await rename(live, previous);
     await rename(join(stage, 'marketplace'), live);
     await writeDurably(join(root, RELEASE_FILE), `${JSON.stringify(release, null, 2)}\n`);
-    await rm(previous, { recursive: true, force: true });
-    await rm(stage, { recursive: true, force: true });
-    return {};
   } catch (error) { return failed(`It could not be put in place: ${error instanceof Error ? error.message : String(error)}`); }
+  // The release is in use from here on: tidying up that fails changes nothing about that.
+  await rm(previous, { recursive: true, force: true }).catch(() => undefined);
+  await rm(stage, { recursive: true, force: true }).catch(() => undefined);
+  return {};
 }
 
 /**

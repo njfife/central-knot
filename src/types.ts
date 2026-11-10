@@ -467,10 +467,10 @@ export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'h
 
 /**
  * The marketplace a bundled build carries, as the page shows it: the app's name, the name and picture the build gave the
- * marketplace, its release in words ("November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)"), and each plugin the
+ * marketplace, its release ("November 10, 2026", made from "GitHub: acme/plugins at 1a2b3c4d5e"), and each plugin the
  * marketplace lists whose files the build doesn't carry, with why.
  */
-export interface BundledView { app: string; displayName?: string; logo?: string; release: string; unpackaged: { name: string; reason: string }[] }
+export interface BundledView { app: string; displayName?: string; logo?: string; /** Its release's date, in words. */ release: string; /** What the release was made from, for whoever needs to tell releases apart. */ from?: string; unpackaged: { name: string; reason: string }[] }
 
 export interface MarketplaceView {
   source: string;

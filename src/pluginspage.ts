@@ -9,7 +9,7 @@ import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { allQueued, resultLines, pickOf, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
+import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare, whyNotCarried } from './pluginstatus.ts';
 import { ACTIVITIES, addCarriedTo, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -65,7 +65,9 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   const reading = market.details.get(key);
   const readContents = detail === undefined && reading?.reading && !reading.quiet ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
   const offered = offeredVersion(plugin, detail);
-  const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
+  // A plugin a bundled build doesn't carry says so here, where its boxes can't be chosen; About has the reason.
+  const left = !!whyNotCarried(entry, plugin.name);
+  const holds = left ? '' : plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
   const compareTo = versionToCompare(plugin, detail);
   const others = otherVersions(view, entry, plugin.name, compareTo);
@@ -82,10 +84,11 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css).
-      plugin.description || holds ? h('span.plugin-row-line', {},
+      plugin.description || holds || left ? h('span.plugin-row-line', {},
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
-        plugin.description && holds ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
-        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null,
+        plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
+        holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
+        left ? h('span.plugin-row-holds.plugin-row-left', {}, 'Not in this build · ', h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see About')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
@@ -163,7 +166,7 @@ function aboutTab(view: PluginsView, entry: MarketplaceView, marketIndex: number
     // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
     entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
     // A build's own marketplace says which release of it this is; where it "comes from" is the build, already among its facts.
-    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted(entry.bundled ? [...marketFacts(entry), `As of ${entry.bundled.release}`] : [...marketFacts(entry), source])), remove),
+    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted(entry.bundled ? [...marketFacts(entry), ...(entry.bundled.release ? [h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `As of ${entry.bundled.release}`)] : [])] : [...marketFacts(entry), source])), remove),
     inToolsNote(view, entry, marketIndex),
     notCarriedNote(entry),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
@@ -200,7 +203,7 @@ function notCarriedNote(entry: MarketplaceView): HTMLElement | null {
   const left = entry.bundled?.unpackaged ?? [];
   if (!left.length) return null;
   return h('div.market-not-carried', { role: 'note' },
-    h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} carried by this build, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from it.`)),
+    h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} carried by this build, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from it.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),
     h('ul', {}, left.map(item => h('li', {}, h('strong', {}, item.name), `: ${item.reason}`))));
 }
 
