@@ -75,6 +75,7 @@ export const sample: SampleSkill[] = [
     versions: { 'claude-cli': { lines: '12 lines', changed: 'edited 2 weeks ago', text: 'Summarize what changed and what to check.' }, 'copilot-cli': { lines: '19 lines', changed: 'edited 4 days ago', text: 'List defects first, then missing tests.' } } },
   { key: '.scratch', description: 'Private notes skill.', copies: { 'claude-cli': 'k' }, managed: false, off: [], cannot: { 'copilot-cli': 'Copilot CLI does not load folders starting with a dot.' } },
   { key: 'writing-shape', description: 'Shape a draft before polishing it.', copies: { 'claude-cli': 'l', 'copilot-cli': 'l' }, managed: true, off: [] },
+  { key: 'old-deploy', description: 'Deploy steps from the last project.', copies: { 'claude-cli': 'm' }, managed: false, off: [], disabled: ['claude-cli'] },
 ];
 
 export const designMode = new URLSearchParams(location.search).has('design');

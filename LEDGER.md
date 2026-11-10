@@ -731,3 +731,18 @@ SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag 
 **Validation (macOS 26.6.2, signed build of 9a807b0).** `codesign`, `stapler validate` and `spctl` (`accepted`, `source=Notarized Developer ID`) pass for the disk image and for the app inside it. In real Finder windows, through Computer Use: the image marked as a download opened on a double-click with no warning; its window came up by itself at 660 by 432 with no sidebar or toolbar, the picture filling it, both icons and the arrow in place, the caption 58 points above the bottom, labels readable; the disk shows the app's icon; the shortcut opens the real Applications folder. The app copied out of that image opened in a throwaway home. The drag: Nathan dragged the app onto the shortcut by hand from the first test image (unsigned, same layout but for the window's height), and Finder copied it into `/Applications`; the tester's synthetic drag does not register in Finder.
 
 **Not proven.** The drag from a signed image. Light appearance (the Mac was in Dark; labels were black on the slate blue). Macs older than macOS 26, where the title bar is 4 points shorter and the window shows 4 more points of the picture.
+
+## Display order: managed, then in use, then disabled everywhere, November 10, 2026
+
+Nathan asked that what is managed come first, then what some tool has, and that what no tool has or every tool has disabled go to the very bottom, so moving an item between tools means no scrolling past what nothing loads.
+
+- **Tables (Skills, MCP servers, Agents, and each harness's page):** Managed, Unmanaged, then on a harness's page "Not in <tool>", then **Disabled everywhere** last: items every tool that has them has disabled, managed or not. A tool that has the item through an installed plugin that is on counts as using it. Rows are placed as things stand before pending changes; a row that will join or leave the last section is told on its heading.
+- **Bulk actions** (Manage all, Add all, a section's Manage all) leave the Disabled everywhere rows alone, so a skill someone disabled is not spread to other tools by a bulk click. Each row's own controls still work.
+- **Skills list (files view):** the same order, with the same three headings where the group changes.
+- **Plugins:** in a marketplace, plugins every tool that can take them has come first, then plugins some tool has, then plugins no tool has; by name within each. Whole or as parts both count. A tool that can't take the plugin (Pi, a blocked marketplace) doesn't keep it from the top group.
+- The rule is `src/roworder.ts` (`standing`) for items and `pluginPlace` in `src/pluginstatus.ts` for plugins.
+- Housekeeping: `.gitignore` now covers a `node_modules` link as well as a folder.
+
+**Validation.** 358 unit tests. Linux e2e 409/409 on the branch with next at 31278c4 merged in; unit tests again with next at 5f06ab1. Reviews: Opus 5.5 (8 for what was asked, 8 for code) and Fable 5.2 (7 and 8) on the first commit; their findings are in the list above. Astra could not run (ChatGPT usage limit). On macOS 26.6.2, a packaged ad hoc build on the real home through Computer Use: Skills Managed 1 then Unmanaged 44; MCP servers Unmanaged 2 then Disabled everywhere 1; claude-plugins-official (317 plugins) lists its 4 installed first; nothing cut off at about 900 by 600.
+
+**Not done.** A whole plugin turned off in every tool still counts as installed on the Plugins page: its switch is read (`installedPlugins`) but not yet carried to that page. The marketplaces list keeps its order. Mac packaged e2e was not run on this branch.
