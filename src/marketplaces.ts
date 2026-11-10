@@ -9,11 +9,11 @@ import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import * as engine from './plugins.ts';
-import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
+import { pluginTools, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
 import { heldReason } from './pluginstatus.ts';
-import { isFolder, isHttps } from './values.ts';
+import { isFolder, isHttps, onlyAllowed } from './values.ts';
 
 /** What the marketplace feature needs from the app around it. */
 export interface MarketplaceHost {
@@ -21,9 +21,9 @@ export interface MarketplaceHost {
   home(): { home: string; overrides?: Partial<Record<HarnessId, string>> } | undefined;
   /**
    * This home's tools, in the order the page shows them, and the snapshots they were found in: one read (or the read a
-   * Refresh made a moment ago), so the columns and what each tool's install says always agree.
+   * Refresh or home switch just made, named by `readId`), so the columns and what each tool's install says always agree.
    */
-  read(): Promise<{ tools: HarnessId[]; snapshots: Snapshot[] }>;
+  read(readId?: number): Promise<{ tools: HarnessId[]; snapshots: Snapshot[] }>;
   /** Whether writing is allowed in this home, and why not. */
   writeAccess(): Promise<{ allowed: boolean; reason?: string }>;
   /** Central Knot's own data folder: the added list here, Git copies under plugins/. */
@@ -59,7 +59,7 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
 const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall };
 
 /** Tools named by the page: only those that install plugins. */
-const toolIds = (value: unknown): PluginTool[] => (Array.isArray(value) ? value.filter(takesPlugins) : []);
+const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools);
 /** Reports go to the page without each run's file bytes (kept only for the record here); the page never reads them. */
 const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
@@ -146,9 +146,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
-  async function view(fresh = false): Promise<PluginsView> {
+  async function view(fresh = false, readId?: number): Promise<PluginsView> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
-    const read = await host.read();
+    const read = await host.read(readId);
     const tools = toolIds(read.tools);
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
@@ -271,7 +271,7 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
 export function registerMarketplaces({ handle, handleRead }: { handle: Handle; handleRead: Handle }, host: MarketplaceHost): void {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
-  handle('plugins:view', async fresh => (open() ? markets.view(fresh === true) : null));
+  handle('plugins:view', async (fresh, readId) => (open() ? markets.view(fresh === true, typeof readId === 'number' ? readId : undefined) : null));
   handleRead('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
   handleRead('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.

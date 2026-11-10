@@ -1,7 +1,7 @@
 // One plugin's page: what it is, where to install it, what it holds (read from its files), what each tool does with it,
 // and its README.
 import { rerender, state as app } from './app.ts';
-import { button, h, icon, withToolCount } from './dom.ts';
+import { afterLayout, button, h, icon, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { dotted, pluginTitle, readme, toolBox } from './pluginparts.ts';
@@ -101,10 +101,9 @@ const TOOL_COLUMN_MIN = 170, TOOL_COLUMN_GAP = 24;
  * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off). With room for a
  * column per tool and the button, each tool gets one from the left, and "Choose all" sits at the right end. Otherwise
  * they wrap in a row, and a "Choose all" that wraps onto a line of its own moves to the right edge, where a lone button
- * reads as belonging to the whole row (.choice-wrapped). The renderer calls it right after drawing, before the page is
- * painted, and the watcher whenever the page changes width.
+ * reads as belonging to the whole row (.choice-wrapped). Run after layout (dom.ts afterLayout), before the page is painted.
  */
-export function settlePluginTools(): void {
+function settlePluginTools(): void {
   const rows = document.querySelector<HTMLElement>('.plugin-tool-rows'), all = rows?.querySelector<HTMLElement>(':scope > .btn');
   const first = rows?.firstElementChild as HTMLElement | null;
   if (!rows || !first) return;
@@ -114,16 +113,10 @@ export function settlePluginTools(): void {
   all?.classList.toggle('choice-wrapped', !columns && all.offsetTop > first.offsetTop + first.offsetHeight / 2);
 }
 
-/**
- * Lays out what depends on width once the page is drawn, and again whenever it changes width (a window resize, or the
- * README moving beside the contents): which descriptions are cut, and how "Your tools" sits.
- */
-const layoutWatcher = new ResizeObserver(() => { markClamped(); settlePluginTools(); });
-function watchLayout(page: HTMLElement): HTMLElement {
-  layoutWatcher.disconnect();
-  layoutWatcher.observe(page);
-  return page;
-}
+// What depends on width, once the page is drawn and whenever the content changes width: which descriptions are cut, and
+// how "Your tools" sits.
+afterLayout(markClamped);
+afterLayout(settlePluginTools);
 
 const group = (owner: string, title: string, parts: NamedPart[]) => parts.length ? h('div.plugin-group', {}, h('h4', {}, `${title} (${parts.length})`), partList(`${owner}\u0000${title}`, parts.map(part => ({ name: part.name, text: part.description })))) : null;
 
@@ -155,7 +148,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   if (plugin.from) facts.push(plugin.from.url ? button({ variant: 'link', size: 'micro', label: plugin.from.label, id: 'plugin-source', onclick: () => openLink(plugin.from!.url!) }) : `From ${plugin.from.label}`);
   const parts = detail ? [...detail.skills, ...detail.commands, ...detail.agents] : [];
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
-  return watchLayout(h('article.plugin-page', { 'aria-label': title },
+  return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
       h('h2', {}, title),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
@@ -167,5 +160,5 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
       h('div.plugin-column', {},
         contentsBlock(pluginKey(entry.source, plugin.name), plugin, detail, reading),
         components ? h('section.plugin-section', {}, h('h3', {}, 'In each tool'), outcomesBlock(view, plugin, components)) : null),
-      detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null)));
+      detail?.readme ? h('section.plugin-section.plugin-readme', {}, h('h3', {}, 'Readme'), h('div.plugin-readme-body', {}, readme(detail.readme, plugin.name, descriptions, parts))) : null));
 }

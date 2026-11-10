@@ -30,7 +30,7 @@ const api: DesktopApi = {
   onNavigate: callback => { ipcRenderer.on('navigate', (_event, page) => callback(String(page))); },
   restore: (eventId, resume, home, choice) => ipcRenderer.invoke('history:restore', eventId, resume, home, choice),
   deleteEverywhere: (key, resume, home) => ipcRenderer.invoke('manage:delete-everywhere', key, resume, home),
-  plugins: fresh => ipcRenderer.invoke('plugins:view', fresh),
+  plugins: (fresh, readId) => ipcRenderer.invoke('plugins:view', fresh, readId),
   addMarketplace: source => ipcRenderer.invoke('plugins:add', source),
   forgetMarketplace: source => ipcRenderer.invoke('plugins:forget', source),
   pickMarketplaceFolder: () => ipcRenderer.invoke('plugins:pick-folder'),

@@ -2,19 +2,18 @@ import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
-import { button, fitBars, h, icon } from './dom.ts';
+import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
-import type { HomeKind } from './presence.ts';
-import { agentsPage, markWrappedStatus, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
+import { kindNouns, type HomeKind } from './presence.ts';
+import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import { settleFilesColumns } from './matrix.ts';
-import { settlePluginTools } from './pluginpage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
-const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', tools: 'Tools', settings: 'Settings' };
+/** Each page's title, in the header and the sidebar: a kind's page by its kind's title (presence.ts kindNouns). */
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, history: 'History', tools: 'Tools', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -69,18 +68,18 @@ function renderSidebar() {
   const home = state.home;
   // A kind no tool here can hold has no row (app.ts absentKinds).
   const absent = absentKinds();
-  const row = (page: HomeKind, ...rest: [string, IconName, number?]) => (absent.includes(page) ? null : navRow(page, ...rest));
+  const row = (page: HomeKind, ...rest: [IconName, number?]) => (absent.includes(page) ? null : navRow(page, titles[page], ...rest));
   region('nav').replaceChildren(...[
-    navRow('overview', 'Overview', 'layout-grid'),
-    row('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
-    row('mcp', 'MCP servers', 'plug', designMode ? undefined : home?.mcp.servers.length),
-    row('agents', 'Agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
-    row('instructions', 'Instructions', 'pencil-line'),
-    row('plugins', 'Plugins', 'puzzle'),
+    navRow('overview', titles.overview, 'layout-grid'),
+    row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
+    row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
+    row('agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
+    row('instructions', 'pencil-line'),
+    row('plugins', 'puzzle'),
     !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
-    navRow('history', 'History', 'history'),
-    navRow('tools', 'Tools', 'boxes'),
-    navRow('settings', 'Settings', 'settings'),
+    navRow('history', titles.history, 'history'),
+    navRow('tools', titles.tools, 'boxes'),
+    navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
   // The homes: the Practice copy where this build offers it (dev builds and tests; a released build doesn't), then this
   // computer's home, then a folder.
@@ -169,10 +168,8 @@ function render() {
   renderSidebar();
   renderHeader(rail);
   renderPage();
-  // Columns that depend on a pane's width are decided now, before the page is painted, and drawn again if they changed.
-  if (settleFilesColumns()) renderPage();
-  settlePluginTools();
-  markWrappedStatus();
+  // What depends on the drawn widths (columns, wrapped lines) is decided now, before the page is painted (dom.ts afterLayout).
+  runAfterLayout();
   renderStatus();
   fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
@@ -201,8 +198,8 @@ window.addEventListener('resize', () => {
 });
 
 // Bars refit whenever the content area changes width (a resize, the sidebar's shape) and once the fonts have loaded.
-new ResizeObserver(() => { fitBars(); markWrappedStatus(); }).observe(document.getElementById('main')!);
-void document.fonts.ready.then(() => { fitBars(); markWrappedStatus(); });
+new ResizeObserver(() => { fitBars(); runAfterLayout(); }).observe(document.getElementById('main')!);
+void document.fonts.ready.then(() => { fitBars(); runAfterLayout(); });
 
 document.addEventListener('keydown', event => {
   const typing = event.target instanceof HTMLInputElement && event.target.type === 'text';

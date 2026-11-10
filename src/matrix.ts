@@ -6,7 +6,7 @@ import { kindNouns } from './presence.ts';
 import { andList, capitalToolsPhrase, orList, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { saidInStatusBar, tell, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
@@ -455,16 +455,13 @@ const isDiffering = (skill: SampleSkill) => !skill.held && toolList().some(tool 
 
 /**
  * The Files view's parts for one skill, in the order they read: its details (status, choices; none when every copy is
- * the same, which the pane's header already says), then where each copy is, then Delete everywhere. A wide pane keeps all
- * of them in its column beside the file; stacked, the details stay above the file and the rest goes below it, so nothing
- * to delete sits above the file.
+ * the same, which the pane's header already says), then where each copy is and Delete everywhere. Stacked, the details
+ * sit above the file and the rest below it, so nothing to delete sits above the file; a wide pane (style.css
+ * data-columns) puts both in its column beside the file, one under the other.
  */
-function filesLayout(skill: SampleSkill, where: Node[]): { column: Node[]; tail: Node[] } {
+function filesLayout(skill: SampleSkill, where: Node[]): { head: Node | null; tail: Node[] } {
   const remove = deleteAction(skill);
-  const rest = [wherePaths(skill, where, true), remove ? h('div.details-actions', {}, remove) : null].filter((part): part is HTMLElement => !!part);
-  const head = details(skill, 'files');
-  const top = head ? [head] : [];
-  return detailWide ? { column: [...top, ...rest], tail: [] } : { column: top, tail: rest };
+  return { head: details(skill, 'files'), tail: [wherePaths(skill, where, true), remove ? h('div.details-actions', {}, remove) : null].filter((part): part is HTMLElement => !!part) };
 }
 
 /** Delete everywhere (DEL-02) for a managed skill: two clicks, the second naming what goes. */
@@ -502,7 +499,8 @@ function wherePaths(skill: SampleSkill, entries: Node[] = [], inFiles = false) {
   if (!shown.length && !entries.length) return null;
   // MCP: the settings files are where a server is changed, so they show open. Skills and agents fold them away, except in
   // the Files view's wide pane, whose details column has the room: there they start open, until the person says otherwise.
-  const open = kind === 'mcp' || (inFiles && (view.whereOpen ?? detailWide));
+  // In the Files view an open or closed one stays as the person left it; until then it follows the pane (settleFilesColumns).
+  const open = kind === 'mcp' || (inFiles && view.whereOpen === true);
   const paths = h('details.details-paths', open ? { open: true } : {}, h('summary', { onclick: () => { if (inFiles) view.whereOpen = !(paths as HTMLDetailsElement).open; } }, icon('chevron-right', 12, 'tone-faint'), kind === 'mcp' ? 'Settings files' : 'Where each copy is'),
     shown.map(tool => pathLine(tool, skill.paths![tool]!)), entries);
   return paths;
@@ -764,8 +762,9 @@ function oneWayTag(skill: SampleSkill, from: Tool) {
 }
 
 /**
- * An item's name cell. The name never gives way first: as the column narrows, the description wraps out of sight, then the
- * one-way tag, and only then does the name shorten (style.css .ov-name-fit). Its full text is always in the tooltip.
+ * An item's name cell. The name never gives way first: as the column narrows, the description shortens (and in every row
+ * at once steps aside, settleDescriptions), the one-way tag wraps out of sight, and only then does the name shorten
+ * (style.css .ov-name-fit). Its full text is always in the tooltip.
  */
 function nameCell(skill: SampleSkill, attention: boolean) {
   const decided = view.draft.get(skill.key)?.resolve;
@@ -1463,27 +1462,40 @@ const listWatcher = new ResizeObserver(entries => {
   listSize = size;
 });
 
-/**
- * Whether the Files view's detail pane is wide enough for its two columns (from 1040px; style.css keys off data-columns).
- * Watched, so crossing that width redraws: "Where each copy is" starts open only there.
- */
-let detailWide = false;
-const DETAIL_COLUMNS_FROM = 1040;
-const detailWatcher = new ResizeObserver(() => { if (settleFilesColumns()) rerender(); });
+/** The least room a description gets beside its name before every row leaves it out: about eight characters. */
+const ABOUT_MIN = 60;
 
 /**
- * Decides the Files view's columns from its pane's width (data-columns, which style.css keys off), and says whether that
- * changed, so the page is drawn again. The renderer calls it right after drawing, before the page is painted, so a wide
- * window never shows the stacked layout first; the watcher calls it when the pane changes width.
+ * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
+ * than about eight characters, every row leaves its description out (.no-about); its name's tooltip still has it.
+ * Run after layout (dom.ts afterLayout).
  */
-export function settleFilesColumns(): boolean {
-  const pane = document.getElementById('skill-detail');
-  if (!pane) return false;
-  const wide = pane.clientWidth >= DETAIL_COLUMNS_FROM;
-  if (wide === detailWide) return false;
-  detailWide = wide;
-  return true;
+function settleDescriptions(): void {
+  for (const table of document.querySelectorAll<HTMLElement>('.ov')) {
+    table.classList.remove('no-about');
+    const widths = [...table.querySelectorAll<HTMLElement>('.ov-name-about')].map(about => about.clientWidth);
+    table.classList.toggle('no-about', widths.length > 0 && Math.min(...widths) < ABOUT_MIN);
+  }
 }
+afterLayout(settleDescriptions);
+
+/** The Files view's pane width from which the file and the skill's details sit in two columns. */
+const DETAIL_COLUMNS_FROM = 1040;
+
+/**
+ * Decides the Files view's columns from its pane's width (data-columns, which style.css keys off). "Where each copy is"
+ * starts open in two columns, where the column has room for it, and closed when stacked, until the person opens or closes
+ * it. Run after layout (dom.ts afterLayout), before the page is painted, so a wide window never shows the stacked layout.
+ */
+function settleFilesColumns(): void {
+  const pane = document.getElementById('skill-detail');
+  if (!pane) return;
+  const wide = pane.clientWidth >= DETAIL_COLUMNS_FROM;
+  pane.dataset.columns = wide ? '2' : '1';
+  const where = pane.querySelector<HTMLDetailsElement>('.files-tail > details.details-paths');
+  if (where && view.whereOpen === undefined) where.open = wide;
+}
+afterLayout(settleFilesColumns);
 
 /** A list of every skill beside (or, in narrow content, above) one skill's details: the same choices as the table, and the same Apply all. `more` adds files and contents. */
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
@@ -1512,9 +1524,8 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   const draft = view.draft.get(skill.key);
   if (skill.key !== revealed) { revealed = skill.key; requestAnimationFrame(revealSelected); }
   requestAnimationFrame(() => {
-    listWatcher.disconnect(); detailWatcher.disconnect();
+    listWatcher.disconnect();
     const list = document.getElementById('skills-list'); if (list) listWatcher.observe(list);
-    const pane = document.getElementById('skill-detail'); if (pane) detailWatcher.observe(pane);
   });
   const { where, contents } = more(skill.key);
   const layout = filesLayout(skill, where);
@@ -1525,7 +1536,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       h('div.scroll.list-scroll', { id: 'skills-list' },
         h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
         list)),
-    h('section.detail-column', { id: 'skill-detail', 'data-columns': detailWide ? '2' : '1', 'aria-label': 'Skill details' },
+    h('section.detail-column', { id: 'skill-detail', 'aria-label': 'Skill details' },
       h('div.pane-header.fit-bar', {},
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Waits for Apply all')
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : skill.managed ? 'Managed' : 'Unmanaged')),
@@ -1537,7 +1548,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       notices(),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
       h('div.scroll.detail-scroll', { id: 'detail-scroll' },
-        layout.column.length ? h('div.files-details', {}, layout.column) : null,
+        layout.head ? h('div.files-details', {}, layout.head) : null,
         h('div.detail-files', {}, ...contents),
         layout.tail.length ? h('div.files-tail', {}, layout.tail) : null)));
 }

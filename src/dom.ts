@@ -192,6 +192,30 @@ export function withToolCount(element: HTMLElement, count: number): HTMLElement 
   return element;
 }
 
+/**
+ * What a page with its own data (pagedata.ts) says above what it shows, once something was read: a quiet band while it
+ * reads again (`reading`, for a page whose read can take seconds), or that the last read again failed, so what shows is
+ * the read before. Nothing while there is nothing read: the page itself then says it is reading or couldn't.
+ */
+export function rereadBand(slot: { state: string; data?: unknown }, reading?: string): HTMLElement | null {
+  if (slot.data === undefined) return null;
+  if (slot.state === 'failed') return h('div.band.band-quiet.reread-failed', { role: 'status' }, icon('circle-alert', 14, 'tone-muted'), h('span.band-text', {}, 'Could not read again; showing the last read.'));
+  if (slot.state === 'reading' && reading) return h('div.band.band-quiet.rereading', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, reading));
+  return null;
+}
+
+/** Steps that measure the drawn page and mark it (afterLayout). */
+const layoutSteps: (() => void)[] = [];
+
+/**
+ * Registers a step that reads what the drawn page measures and marks it with an attribute or class (columns from a
+ * width, whether a line wrapped). The renderer runs every step right after drawing, before the page is painted, and
+ * again whenever the content area changes width (runAfterLayout); a step that finds nothing of its own on the page does
+ * nothing.
+ */
+export const afterLayout = (step: () => void): void => { layoutSteps.push(step); };
+export const runAfterLayout = (): void => { for (const step of layoutSteps) step(); };
+
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */
 export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dismiss', title = label, look = '' }: { id?: string; label?: string; title?: string; look?: string } = {}) =>
   h(`button.band-dismiss${look}`, { type: 'button', id, 'aria-label': label, title, onclick }, icon('x', 12));

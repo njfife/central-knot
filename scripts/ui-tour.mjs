@@ -23,10 +23,12 @@ mkdirSync(HOME, { recursive: true });
 
 async function launch() {
   const port = 9300 + Math.floor(Math.random() * 400);
+  // A development run also opens the main process's debugger, so a step can slow or fail one request (mainProcess).
+  const inspect = port + 400;
   const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
   const socket = new WebSocket(target.webSocketDebuggerUrl);
@@ -49,11 +51,35 @@ async function launch() {
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
   await settle();
   return {
-    run, send, settle, size, viewport,
+    run, send, settle, size, viewport, inspect,
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
     quit: () => { socket.close(); child.kill('SIGKILL'); },
+  };
+}
+
+/**
+ * The main process, through its debugger (development runs only): one request from the page can be slowed or made to
+ * fail until `restore`, so the tour can show a page reading again, or a read that failed. Null in a packaged run.
+ */
+async function mainProcess(a) {
+  if (!flag('--electron')) return null;
+  let target;
+  for (let attempt = 0; attempt < 50 && !target; attempt++) { try { [target] = await (await fetch(`http://127.0.0.1:${a.inspect}/json/list`)).json(); } catch { await wait(100); } }
+  if (!target) return null;
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise(done => { socket.onopen = done; });
+  const pending = new Map();
+  let id = 0;
+  socket.onmessage = message => { const data = JSON.parse(message.data); pending.get(data.id)?.(data); pending.delete(data.id); };
+  const run = expression => new Promise(done => { const key = ++id; pending.set(key, reply => done(reply.result?.result?.value)); socket.send(JSON.stringify({ id: key, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } })); });
+  const handlers = `process.mainModule.require('electron').ipcMain._invokeHandlers`;
+  return {
+    slow: (channel, ms) => run(`(() => { const real = ${handlers}.get(${JSON.stringify(channel)}); globalThis.ckAside = real; ${handlers}.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${ms})).then(() => real(...args))); return true; })()`),
+    fail: channel => run(`(() => { globalThis.ckAside = ${handlers}.get(${JSON.stringify(channel)}); ${handlers}.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the tour.'); }); return true; })()`),
+    restore: channel => run(`(() => { ${handlers}.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close: () => socket.close(),
   };
 }
 
@@ -364,6 +390,24 @@ if (wanted('sizes')) {
   await a.theme('light');
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
   await a.theme('dark');
+  // Reading again, and a read again that failed: a page keeps what it showed, and says so in a quiet band.
+  const main = await mainProcess(a);
+  if (main) {
+    await a.size(1728, 1117);
+    await ensureMarket();
+    await main.slow('plugins:view', 4000);
+    await a.click('#header-refresh');
+    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugins at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
+    await main.restore('plugins:view');
+    await waitFor(a, `!document.querySelector('.rereading')`, 8000);
+    await a.click('#nav-history');
+    await main.fail('history:list');
+    await a.click('#nav-history');
+    if (await waitFor(a, `!!document.querySelector('.reread-failed')`, 3000)) await shot(a, '1728-history-reread-failed', 'Opened History again while its read was made to fail: the last read stays on screen, and a quiet band says it could not read again.');
+    await main.restore('history:list');
+    await a.click('#nav-history');
+    main.close();
+  }
   // A marketplace with a long name and long facts, with a change waiting, at the smallest window.
   await a.size(860, 560);
   await ensureMarket();
@@ -405,6 +449,7 @@ if (wanted('missing')) {
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
   await a.click('#home-actual'); await a.click('#nav-tools');
   await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
+  await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
   const folder = join(scratch, 'two-tools');
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true });
   a.quit();
@@ -414,6 +459,10 @@ if (wanted('missing')) {
   a = await launch();
   await toolViews('after', 'A folder with only Claude Code and Codex');
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
+  await a.size(2560, 1440);
+  await a.click('#nav-tools'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
+  await a.size(1280, 800);
   await a.size(860, 560);
   await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
   await a.size(1280, 800);
@@ -426,6 +475,7 @@ if (wanted('missing')) {
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
   await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
   mkdirSync(empty, { recursive: true });

@@ -175,7 +175,7 @@ function accept(view: HomeView) {
   setHome(view, { reload: false });
   void loadInstructions();
   void loadHistory();
-  if (!absentKinds().includes('plugins')) void loadPlugins();
+  if (!absentKinds().includes('plugins')) void loadPlugins(false, view.readId);
   if (state.page === 'settings') void loadSettings();
 }
 
@@ -285,7 +285,7 @@ export async function readAgain() {
     read = true;
   });
   // Only a new read goes on to the page's own data: after a failure its message stays, and the page keeps what it showed.
-  if (read) await loadPageData(state.page, { fresh: true });
+  if (read) await loadPageData(state.page, { fresh: true, readId: state.home?.readId });
 }
 
 /**
@@ -293,11 +293,11 @@ export async function readAgain() {
  * (pagedata.ts), never as an action: the page says it is reading, and anything else can go on meanwhile. `fresh` reads
  * each marketplace anew.
  */
-function loadPageData(page: Page, { fresh = false } = {}): Promise<void> {
+function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings();
   if (page === 'instructions') return loadInstructions();
-  if (page === 'plugins') return loadPlugins(fresh);
+  if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
 }
 

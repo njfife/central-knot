@@ -137,11 +137,12 @@ export function browse(patch: Partial<typeof market.nav>): void {
 }
 
 /**
- * Reads every marketplace and install into the page's slot; `fresh` (Refresh all) fetches each Git marketplace again.
+ * Reads every marketplace and install into the page's slot; `fresh` (Refresh all) fetches each Git marketplace again,
+ * and `readId` (the home's view, just read) lets the main process use that read rather than reading the home again.
  * The page says it is reading meanwhile, and anything else can go on: an action keeps its own activity and result.
  */
-export async function loadPlugins(fresh = false): Promise<void> {
-  const reading = readPageData(market.read, () => api().plugins(fresh));
+export async function loadPlugins(fresh = false, readId?: number): Promise<void> {
+  const reading = readPageData(market.read, () => api().plugins(fresh, readId));
   rerender();
   const result = await reading;
   if (result === 'dropped') return;

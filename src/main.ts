@@ -61,10 +61,11 @@ async function read(): Promise<Snapshot[]> {
   })));
 }
 
-/** The home as last read by a page's request or a background pass, and when: a request right after can use it (readRecent). */
-let latest = { home: '', snapshots: [] as Snapshot[], at: 0 };
-/** How old a read can be and still serve the next request: Refresh reads the home, then the page's marketplaces at once. */
-const RECENT_MS = 3_000;
+/**
+ * The read the page's latest view was built from, handed over as the view's readId. A request made right after it
+ * (Plugins after a Refresh or a home switch) passes the id back and uses this read rather than reading the home again.
+ */
+let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
 
 function context(): ShareContext {
   return {
@@ -300,14 +301,16 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
   const writable = (await writeAccess(shared)).allowed;
+  const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId,
     manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
-  noteRead(snapshots);
+  handoff = { id: readId, home: current!.home, snapshots };
+  toolsChangedHere(snapshots);
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
@@ -327,22 +330,20 @@ let touched = false;
 /** The tools in the open home, read now: the one way the requests below learn them. */
 const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
 
-/** The home as read a moment ago (a Refresh's read), else read now; either way kept as the latest read. */
-async function readRecent(): Promise<Snapshot[]> {
-  if (current && latest.home === current.home && Date.now() - latest.at < RECENT_MS) return latest.snapshots;
+/**
+ * The home for a request that names the read it follows (`readId`, from the page's view): that read when it is the one
+ * just handed over, else a new read. A new read that finds the tools changed tells the page, so the sidebar and every
+ * page follow it, not only the request that noticed.
+ */
+async function readFor(readId?: number): Promise<Snapshot[]> {
+  if (current && readId === handoff.id && handoff.home === current.home) return handoff.snapshots;
   const snapshots = await read();
-  noteRead(snapshots);
+  if (toolsChangedHere(snapshots)) tell('sync:changed');
   return snapshots;
 }
 
 /** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
 let lastPresent = { home: '', tools: '' };
-
-/** Keeps a read of the open home as the latest, and notes its tools (toolsChangedHere). */
-function noteRead(snapshots: Snapshot[]): boolean {
-  latest = { home: current?.home ?? '', snapshots, at: Date.now() };
-  return toolsChangedHere(snapshots);
-}
 
 /**
  * Notes which tools are in the open home and says whether they changed while that home stayed open. Then the folders
@@ -370,7 +371,7 @@ async function backgroundPass() {
   // Whatever the pass finds, the page is told once, at the end (it keeps the news until it can read).
   const snapshots = await read();
   // A tool installed or removed changes every page's columns.
-  let changed = noteRead(snapshots);
+  let changed = toolsChangedHere(snapshots);
   const { skills, mcpAndAgents } = await pass(snapshots);
   keepMcpAndAgents(mcpAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
@@ -597,7 +598,7 @@ app.whenReady().then(async () => {
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces({ handle, handleRead }, {
     home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
-    read: async () => { const snapshots = await readRecent(); return { tools: presentTools(snapshots), snapshots }; },
+    read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },

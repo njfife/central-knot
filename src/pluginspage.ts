@@ -1,9 +1,9 @@
 // Plugins: browse marketplaces, choose which plugins go to which tools, then Apply all.
 // The list of marketplaces sits at the left; the chosen one shows its plugins or its README, and a plugin opens its own page
 // (pluginpage.ts). Boxes only choose changes; Apply all runs them (pluginstate.ts, pluginplan.ts).
-import { announce, homeTools, rerender, showPage, state as app } from './app.ts';
+import { announce, noTools, rerender, showPage, state as app } from './app.ts';
 import { noToolsState } from './pages.ts';
-import { button, closeButton, emptyState, h, icon, pendingCount, withToolCount } from './dom.ts';
+import { button, closeButton, emptyState, h, icon, pendingCount, rereadBand, withToolCount } from './dom.ts';
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
@@ -272,7 +272,7 @@ export function pluginsPage() {
   // From the marketplaces' own read (pagedata.ts): what it found, else that it is reading or could not read.
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.read.state === 'failed' ? 'Marketplaces could not be read.' : 'Reading marketplaces…')));
   // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
-  if (!homeTools().length) return h('div.page', {}, noToolsState('plugins-choose-home'));
+  if (noTools()) return h('div.page', {}, noToolsState('plugins-choose-home'));
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Tools', id: 'plugins-no-tools', onclick: () => showPage('tools') })));
   const shown = current();
@@ -287,7 +287,9 @@ export function pluginsPage() {
     shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
-      market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band)) : null,
+      market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band))
+        // Reading the marketplaces again (Git can take seconds) while the last read stays on screen, or that it failed.
+        : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.'),
       problemBand(lines)),
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),

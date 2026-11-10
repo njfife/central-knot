@@ -546,8 +546,8 @@ async function practiceFlow() {
   // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
   // file's box spanning to meet it.
   await sizeTo(a, 1728, 1117);
-  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .files-details .details-paths[open]')); tries++) await wait(50);
-  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-details').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-details .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .files-tail .details-paths[open]')); tries++) await wait(50);
+  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-tail').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-tail .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
   check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
   await fullSize(a);
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
@@ -774,6 +774,22 @@ async function practiceFlow() {
     await main.tellPage('sync:changed');
     await wait(1500);
     same('a sync:changed right after an action keeps its message', await a.run(`document.querySelector('#announcement').dataset.text`), 'Changes discarded. Nothing was written.');
+    // A tool that appears is noticed by whichever read sees it first. Opening Plugins before the poll reads the home for
+    // its columns, and the page as a whole hears of the new tool: Skills gets its column too, with no Refresh.
+    await a.click('#nav-skills');
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await heads()).length !== all - 1; tries++) await wait(100);
+    const without = (await heads()).length;
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    const back = Date.now();
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 50 && (await columns()) !== 3; tries++) await wait(100);
+    const pluginColumns = await columns();
+    await a.click('#nav-skills');
+    for (let tries = 0; tries < 50 && (await heads()).length !== all; tries++) await wait(100);
+    same('opening Plugins first: its columns and then Skills follow the tool that came back', [without, pluginColumns, (await heads()).length], [all - 1, 3, all]);
+    console.log(`(Skills followed the returned tool after ${Math.round((Date.now() - back) / 100) / 10} s)`);
     // After a home switch, History says it is reading while it reads (never that it couldn't), then shows what it read.
     await a.click('#nav-history');
     check('the History request is slowed', await main.slowRequest('history:list', 1500));
@@ -783,8 +799,25 @@ async function practiceFlow() {
     await main.restore('history:list');
     for (let tries = 0; tries < 60 && !(await a.exists('.history-row')); tries++) await wait(100);
     check('after a home switch History says it is reading, then shows its rows', /Reading History…/.test(whileReading ?? '') && !/could not be read/.test(whileReading ?? '') && await a.exists('.history-row'), whileReading);
+    // A read again that fails keeps the last read on screen, and says so.
+    check('the History request is made to fail', await main.failRequest('history:list'));
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && !(await a.exists('.reread-failed')); tries++) await wait(100);
+    const failedAgain = [await a.exists('.history-row'), await a.text('.reread-failed')];
+    await main.restore('history:list');
+    same('a failed read again keeps the last read and says so', failedAgain, [true, 'Could not read again; showing the last read.']);
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && await a.exists('.reread-failed'); tries++) await wait(100);
+    check('and a read that works again clears it', !(await a.exists('.reread-failed')));
+    // Plugins after Refresh: while the marketplaces are read again, the last read stays with a quiet band saying so.
     await a.click('#nav-plugins');
-    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 30 && !(await a.exists('[data-plugin="document-tools"]')); tries++) await wait(100);
+    check('the marketplace request is slowed', await main.slowRequest('plugins:view', 2000));
+    await a.click('#header-refresh');
+    const rereading = [await a.exists('.rereading'), await a.exists('[data-plugin="document-tools"]')];
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 50 && await a.exists('.rereading'); tries++) await wait(100);
+    same('Plugins says it is reading again, keeping what it showed, until the read is done', [...rereading, await a.exists('.rereading')], [true, true, false]);
   }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
@@ -935,6 +968,13 @@ async function practiceFlow() {
     await a.click(`#nav-${page}`);
     await wait(300);
     same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
+  }
+  // Every card grid at full screen: as many columns as its cards, up to four, so four tools sit in one row.
+  for (const page of ['tools', 'instructions', 'settings']) {
+    await a.click(`#nav-${page}`);
+    for (let tries = 0; tries < 30 && !(await a.exists('.card-grid')); tries++) await wait(100);
+    const rows = await a.run(`(() => { const cards = [...document.querySelectorAll('.card-grid > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
+    same(`at 2560×1440 the ${page} cards (${rows[0]}) sit in one row`, rows[1], 1);
   }
   await fullSize(a);
   await a.click('#nav-skills');

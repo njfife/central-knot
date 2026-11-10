@@ -1,9 +1,9 @@
-import { absentKinds, announce, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
-import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
+import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { afterLayout, button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, isPresent, kindNames, kindNouns } from './presence.ts';
+import { absentTools, heldKinds, isPresent, kindNames, kindNouns } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, noToolsSentence, orList } from './words.ts';
 
@@ -34,7 +34,7 @@ export const noToolsState = (id: string, more?: string) => h('div.scroll.overvie
 
 /** An empty page: what is missing and the way forward. In a home with no tools at all, that is another home. */
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {
-  if (!homeTools().length) return h('div.page', {}, emptyBands(), noToolsState(`${id}-choose-home`));
+  if (noTools()) return h('div.page', {}, emptyBands(), noToolsState(`${id}-choose-home`));
   return h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
     h('div.empty-actions', {},
       button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
@@ -56,10 +56,10 @@ const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here ye
  */
 function leadSentence(home: HomeView): string {
   const tools = homeTools();
-  if (!tools.length) return noToolsSentence;
+  if (noTools()) return noToolsSentence;
   const named = andList(tools.map(toolName));
-  const kinds: [string, HarnessId[]][] = [['skills', tools], ['MCP servers', home.mcp.tools], ['agents', home.agents.tools]];
-  const held = kinds.filter(([, holders]) => holders.length);
+  const holdersOf = { skills: tools, mcp: home.mcp.tools, agents: home.agents.tools };
+  const held = heldKinds(home).map(kind => [kindNouns[kind].many, holdersOf[kind]] as const);
   if (tools.length === 1) return `Central Knot keeps the ${andList(held.map(([kind]) => kind))} you choose the same between your tools. Only ${named} is in this home, so there is nothing to keep in step yet.`;
   const everywhere = held.filter(([, holders]) => holders.length === tools.length).map(([kind]) => kind);
   const some = held.filter(([, holders]) => holders.length < tools.length).map(([kind, holders]) => {
@@ -128,10 +128,9 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
 
 /**
  * After layout: a kind card's status that wrapped onto a line of its own drops its "·", which only separates it from
- * the counts on the same line (style.css .kind-card-status.wrapped). The renderer calls it before the page is painted
- * and whenever the content area changes width.
+ * the counts on the same line (style.css .kind-card-status.wrapped). Run after layout (dom.ts afterLayout).
  */
-export function markWrappedStatus(): void {
+function markWrappedStatus(): void {
   for (const status of document.querySelectorAll<HTMLElement>('.kind-card-status')) {
     status.classList.remove('wrapped');
     const counts = status.previousElementSibling as HTMLElement | null;
@@ -139,12 +138,14 @@ export function markWrappedStatus(): void {
   }
 }
 
+afterLayout(markWrappedStatus);
+
 /**
  * The lead's next step, only where it can be taken: with two tools or more and something unmanaged, manage it; with one
  * tool there is nothing to keep in step, so it says how a second one joins.
  */
 function nextStep(home: HomeView, nothingManaged: boolean): string {
-  if (!homeTools().length) return '';
+  if (noTools()) return '';
   if (!home.manage.skills.length && !home.mcp.servers.length && !home.agents?.servers.length) return ' Nothing found in this home yet.';
   if (homeTools().length === 1) return ' When a second tool is installed, or its folder appears here, Central Knot finds it on its own; then manage what you want the same in both.';
   return nothingManaged && home.manage.access.allowed ? ' Open one below, turn on Managed for what you want to sync, then click Apply all.' : '';
@@ -158,7 +159,7 @@ export function overviewPage() {
   const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
-  const noTools = !homeTools().length;
+  const empty = noTools();
   const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...(home.agents?.servers ?? [])].some(fact => fact.managed);
   const done = outcomeBand();
   return h('div.page', {},
@@ -166,15 +167,15 @@ export function overviewPage() {
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
       // A home with no tools has nothing to count: the way forward is another home.
-      noTools ? noToolsLead('overview-choose-home') : h('p.overview-lead', {}, leadSentence(home),
+      empty ? noToolsLead('overview-choose-home') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
-      noTools ? null : h('div.kind-cards', {},
+      empty ? null : h('div.kind-cards', { 'data-count': String(3 - absent.filter(kind => kind === 'mcp' || kind === 'agents').length) },
         kindCard('skills', 'wand-sparkles', pick(home.manage.skills), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
         absent.includes('agents') ? null : kindCard('agents', 'bot', pick(home.agents?.servers ?? []), home.agents.tools)),
       h('div.overview-more', {},
-        absent.length && !noTools ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
+        absent.length && !empty ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
@@ -183,7 +184,7 @@ export function overviewPage() {
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
         // installs them, and neither in a home with no tools.
-        noTools ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
+        empty ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
           ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
 }
 
@@ -224,7 +225,9 @@ function copyEntry(key: string, { tool, skill }: Found, index: number) {
       h('button.inline-link.copy-entry-show', { type: 'button', title: 'Show this folder in the file manager; nothing is opened or changed', onclick: () => showFile(skill.directory) }, 'Show in folder'),
       copyButton(skill.directory, `path for ${toolName(tool)}`, `copy-${key}-${index}`)),
     h('p.copy-entry-path', {}, wrappingPath(skill.directory)),
-    skill.realDirectory !== skill.directory ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Real folder '), wrappingPath(skill.realDirectory)) : null,
+    skill.realDirectory !== skill.directory ? h('p.copy-entry-real', {}, h('span.copy-entry-label', {}, 'Real folder'),
+      h('span.path-left', { title: skill.realDirectory }, h('span', {}, skill.realDirectory)),
+      copyButton(skill.realDirectory, `real folder for ${toolName(tool)}`, `copy-real-${key}-${index}`)) : null,
     skill.metadataKeys.length ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Fields of note '), skill.metadataKeys.join(', ')) : null);
 }
 

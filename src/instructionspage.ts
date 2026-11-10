@@ -3,7 +3,7 @@
 import { announce, machine, draftFile, draftUnsaved, loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
-import { button, cardGrid, h, icon, pathText } from './dom.ts';
+import { button, cardGrid, h, icon, pathText, rereadBand } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import { noToolsState } from './pages.ts';
 import type { InstructionFile } from './types.ts';
@@ -182,7 +182,8 @@ export function instructionsPage() {
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
   const orphan = orphanDraft();
-  return h('div.page', {}, done || preview || orphan ? h('div.bands', {}, orphan, done, preview) : null,
+  const reread = rereadBand(state.instructions);
+  return h('div.page', {}, done || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
       cardGrid(files.map(card))));

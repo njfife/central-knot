@@ -1,10 +1,10 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
-import { homeTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
+import { noTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
-import { button, emptyState, h, icon } from './dom.ts';
+import { button, emptyState, h, icon, rereadBand } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HistoryEvent } from './types.ts';
 
@@ -80,13 +80,11 @@ export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
   if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
-  if (!events.length && !homeTools().length) return h('div.page', {}, noToolsState('history-choose-home'));
+  if (!events.length && noTools()) return h('div.page', {}, noToolsState('history-choose-home'));
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
-  // The row's own button redoes; the band only confirms.
-  // The new top row says what happened (and the announcement reads it out); a band repeating it would say it twice.
-  const done = null;
-  return h('div.page', {}, done, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  const reread = rereadBand(state.history);
+  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.
