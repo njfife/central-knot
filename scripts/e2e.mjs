@@ -8,7 +8,7 @@ import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -114,21 +114,22 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
-  const port = 9400 + randomInt(500);
   const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
-  const inspect = flag('--electron') ? port + 1000 : undefined;
-  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
+  // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
+  // debugPorts). A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
+  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: ['ignore', 'ignore', 'pipe'] });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
+  let port, inspect;
+  try { ({ port, inspect } = await debugPorts(child, flag('--electron'))); } catch (error) { child.kill('SIGKILL'); throw error; }
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
-    await wait(200);
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page'); if (!targets.length) targets = undefined; } catch { /* still starting */ }
+    if (!targets) await wait(200);
   }
-  if (!targets) { child.kill('SIGKILL'); throw new Error('The app did not open a debug port.'); }
+  if (!targets) { child.kill('SIGKILL'); throw new Error('The app opened no window.'); }
   const pageErrors = [];
   const page = await connect(targets[0].webSocketDebuggerUrl, data => {
     if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text);
@@ -195,6 +196,9 @@ async function mainHelpers(port) {
     told: () => run(`(() => { delete ${electron}.BrowserWindow.getAllWindows()[0].webContents.send; return globalThis.ckTold; })()`),
     /** Sends the page a message, as the main process does after a background pass. */
     tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    /** Notes the arguments of each `channel` request (`calls` reads them), until `restore` runs. */
+    noteCalls: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; globalThis.ckCalls = []; handlers.set(${JSON.stringify(channel)}, (event, ...args) => { globalThis.ckCalls.push(args); return real(event, ...args); }); return true; })()`),
+    calls: () => run(`globalThis.ckCalls`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
     close,
   };
@@ -567,6 +571,19 @@ async function practiceFlow() {
     let keptNotice = false;
     for (let tries = 0; tries < 40 && !keptNotice; tries++) { await wait(250); keptNotice = (await a.text('.sync-notices') ?? '').includes('standup was edited in Codex'); }
     check('a notice from a background read set aside for an action is still shown', keptNotice, await a.text('.bands'));
+  }
+  // A home switch that can't save its settings changes nothing: the page stays on this home, and this home (not the one asked
+  // for) is still the one watched, so an edit on disk spreads within seconds, not at the next poll (20 s).
+  if (process.platform !== 'win32' && process.getuid() !== 0) {
+    const settingsFile = join(scratch, 'data/app-settings.json');
+    chmodSync(settingsFile, 0o444);
+    await a.click('#home-actual');
+    chmodSync(settingsFile, 0o644);
+    const said = await a.text('#announcement');
+    writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited after a switch that failed.\n'));
+    let stillWatched = false;
+    for (let tries = 0; tries < 32 && !stillWatched; tries++) { await wait(250); stillWatched = readNow(standupPath('copilot')).includes('switch that failed'); }
+    same('a home switch whose settings can’t be saved stays on this home, still watched', [/could not finish\. Still on Practice copy/.test(said ?? ''), await a.text('#home-label'), stillWatched], [true, 'Practice copy', true]);
   }
   // Sync off: edits are noted, not spread; the page shows them pending; Sync now spreads once; Apply all still works.
   await a.click('#sync-switch');
@@ -1038,6 +1055,20 @@ async function practiceFlow() {
     await main.restore('plugins:view');
     for (let tries = 0; tries < 50 && await a.exists('.rereading'); tries++) await wait(100);
     same('Plugins says it is reading again, keeping what it showed, until the read is done', [...rereading, await a.exists('.rereading')], [true, true, false]);
+    // Refresh on Harnesses (which only counts installs) reads the marketplaces as last read; Plugins' own Refresh fetches them anew.
+    check('the marketplace request is noted', await main.noteCalls('plugins:view'));
+    await a.click('#nav-harnesses');
+    for (let tries = 0; tries < 50 && (await main.calls()).length < 1; tries++) await wait(100);
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && (await main.calls()).length < 2; tries++) await wait(100);
+    const onHarnesses = await main.calls();
+    await a.click('#nav-plugins');
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && !(await main.calls()).some(([fresh]) => fresh === true); tries++) await wait(100);
+    const onPlugins = (await main.calls()).slice(onHarnesses.length);
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 50 && (await a.exists('.rereading') || !(await a.exists('[data-plugin="document-tools"]'))); tries++) await wait(100);
+    same('Refresh on Harnesses reads the marketplaces as last read; Refresh on Plugins, anew', [onHarnesses.length, onHarnesses.some(([fresh]) => fresh === true), onPlugins.some(([fresh]) => fresh === true)], [2, false, true]);
   }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
@@ -1578,6 +1609,40 @@ async function practiceFlow() {
  * The base instructions through a git repo, in two homes, as people click it: Push from one, Pull into the other, an edit, and
  * a deletion, said before Pull, carried out by the base's own apply and undone from History (the base and its tools come back).
  */
+/**
+ * The Plugins list knows, after a fresh launch and with no plugin's page opened, that a tool's copy differs from the
+ * marketplace's at the same version: it reads the installed plugins' files in the background once the list is drawn.
+ */
+async function listDiffersFlow() {
+  const home = join(scratch, 'home-list-differs'), data = join(scratch, 'list-differs-data'), market = join(scratch, 'market-list-differs');
+  writeMarket(market, 'ck-test-market');
+  const marketText = path => readFileSync(join(market, 'plugins', path), 'utf8');
+  // Claude Code has three plugins at the marketplace's versions: two edited by hand since, one as the marketplace has it.
+  writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': `${marketText('issue-tracker/skills/triage/SKILL.md')}\nA line added by hand.\n` });
+  writeClaudeInstall(home, 'ck-test-market', 'document-tools', '1.2.0', { 'skills/pdf-reader/SKILL.md': marketText('document-tools/skills/pdf-reader/SKILL.md'), 'skills/spreadsheet/SKILL.md': `${marketText('document-tools/skills/spreadsheet/SKILL.md')}\nMine.\n` });
+  writeClaudeInstall(home, 'ck-test-market', 'release-helper', '0.4.1', { 'commands/release-notes.md': marketText('release-helper/commands/release-notes.md'), 'agents/release-reviewer.md': marketText('release-helper/agents/release-reviewer.md') });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const first = await launch(data);
+  same('the marketplace is added', await first.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await first.quit();
+  const a = await launch(data);
+  const row = name => `[data-plugin="${name}"] .plugin-row-warning`;
+  const started = Date.now();
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 200 && !(await a.exists('[data-plugin="issue-tracker"]')); tries++) await wait(10);
+  const drawn = Date.now() - started;
+  for (let tries = 0; tries < 100 && !(await a.exists(row('document-tools'))); tries++) await wait(50);
+  const known = Date.now() - started;
+  await a.settle();
+  same('after a fresh launch, with no plugin page opened, the list says which copies differ and offers Update', [await a.text(row('issue-tracker')), await a.text(row('document-tools')), await a.exists(row('release-helper')),
+    await a.text('#pupdate-0-issue-tracker'), await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), /2 plugins have an update/.test(await a.text('#plugins-scroll') ?? ''), await a.exists('#plugin-back')],
+  ['Claude Code differs from the marketplace’s copy', 'Claude Code differs from the marketplace’s copy', false, 'Update in Claude Code', 'outdated', true, false]);
+  console.log(`(Plugins list drawn ${drawn} ms after opening it; the differing copies known after ${known} ms)`);
+  same('no page errors, list differs', a.pageErrors, []);
+  await a.quit();
+}
+
 async function repoBaseFlow() {
   const git = (...rest) => spawnSync('git', rest, { encoding: 'utf8' });
   if (git('--version').status !== 0) { console.log('repo base: skipped, no git on this machine'); return; }
@@ -1630,6 +1695,17 @@ async function repoBaseFlow() {
   check('and shows as changed in the repo', (await rowSays(second, 'Changed in the repo')).includes('Changed in the repo'), await second.text('#repo-incoming'));
   await pull(second, 'Be briefer.\n');
   same('Pull brings the edit in', [baseText('second'), claudeText('second').includes('Be briefer.')], ['Be briefer.\n', true]);
+  const undoneSays = (a, words) => a.run(`[...document.querySelectorAll('.history-row.history-undone')].some(row => row.textContent.includes(${JSON.stringify(words)}))`);
+  await second.click('#nav-history');
+  const edit = await api(second, `return (await api.history()).events.filter(event => event.key === 'instructions:base' && event.kind === 'edit').at(-1)?.id ?? null;`);
+  await until(async () => second.exists(`#history-${edit}`));
+  check('History has the pulled edit, with an Undo of the pull', edit && (await second.text('.history-list') ?? '').includes('Changed in the git repo, so Pull updated the base instructions in Claude Code.') && await second.text(`#history-${edit}`) === 'Undo pull in Claude Code', await second.text('.history-list'));
+  await second.click(`#history-${edit}`);
+  await until(async () => baseText('second') === 'Be brief.\n');
+  same('its Undo puts the earlier base back, in Claude Code too', [baseText('second'), claudeText('second').includes('Be brief.'), claudeText('second').includes('Be briefer.')], ['Be brief.\n', true, false]);
+  check('and the row reads as undone', await until(() => undoneSays(second, 'Pull updated the base instructions')), await second.text('.history-list'));
+  // Saved again as the repo has it, so nothing waits to go out before the deletion below.
+  same('the repo’s text saved again', await setBase(second, 'Be briefer.\n'), 'saved');
 
   same('the first home deletes the base and pushes', [await setBase(first, ''), await push(first)], ['saved', 'pushed']);
   const deleting = await rowSays(second, 'Removed in the repo');
@@ -1637,12 +1713,12 @@ async function repoBaseFlow() {
   await pull(second, '');
   same('Pull empties the base and takes it out of Claude Code, which keeps its own text', [baseText('second'), claudeText('second').includes('Be briefer.'), claudeText('second').includes('My own notes.')], ['', false, true]);
   await second.click('#nav-history');
-  const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base')?.id ?? null;`);
+  const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base' && event.kind === 'deleted')?.id ?? null;`);
   await until(async () => second.exists(`#history-${event}`));
   check('History has the deletion, with an Undo', event && /Pull emptied the base instructions/.test(await second.text('.history-list') ?? ''), await second.text('.history-list'));
   await second.click(`#history-${event}`);
   same('Undo puts the base back, and Claude Code gets it again', [baseText('second'), claudeText('second').includes('Be briefer.'), await api(second, `return (await api.instructionBase()).tools;`)], ['Be briefer.\n', true, ['claude-cli']]);
-  check('and the row reads as undone', await until(async () => (await second.text('.history-row.history-undone') ?? '').includes('Base instructions')), await second.text('.history-list'));
+  check('and the row reads as undone', await until(() => undoneSays(second, 'Pull emptied the base instructions')), await second.text('.history-list'));
   await second.quit();
   await first.quit();
 }
@@ -2094,6 +2170,7 @@ try {
   await releasedStartupFlow();
   await updateFlow();
   await fewToolsFlow();
+  await listDiffersFlow();
   await repoBaseFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();

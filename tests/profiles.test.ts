@@ -282,3 +282,21 @@ test('A profile switch and back keeps a Claude Code override other than off, as 
     assert.equal(await readFile(settings, 'utf8'), original);
   } finally { await box.cleanup(); }
 });
+
+test('An override taken out by hand stays out when a profile, then the Skills page, switch the skill off and on', async () => {
+  const box = await sandbox();
+  try {
+    const settings = join(box.home, '.claude/settings.json');
+    await writeFile(settings, '{\n  "skillOverrides": { "pager": "name-only" }\n}\n');
+    // History keeps what this Disable replaced; the Enable puts it back.
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides.pager, 'name-only');
+    // The person takes the override out, and a profile turns the skill off: that replaced nothing, and it is the latest Disable.
+    await writeFile(settings, '{}\n');
+    await switchProfile(box.context, (await saveProfile(box.context, { name: 'Dev', items: ['skill:dev'] })).id!);
+    assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides.pager, 'off');
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    assert.equal(JSON.parse(await readFile(settings, 'utf8')).skillOverrides?.pager, undefined);
+  } finally { await box.cleanup(); }
+});

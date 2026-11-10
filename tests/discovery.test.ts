@@ -271,7 +271,7 @@ test('Desktop apps are found where Windows and Linux install them, with the copy
     // A system folder (/usr/lib, Program Files) is stood in under the fixture; the layout inside it is the vendor's.
     const rebased = (candidates: ReturnType<typeof appCandidates>) => candidates.filter(candidate => !candidate.app.startsWith('/Applications')).map(candidate => (candidate.app.startsWith(setup.home) ? candidate : { ...candidate, app: join(system, candidate.app.replace(/^C:\\/, '')) }));
     const tool = async (path: string, output: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, `#!/bin/sh\n${output}\n`, { mode: 0o755 }); };
-    const cliVersion = async (path: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, 'export declare const COPILOT_CLI_VERSION = "1.0.102-0.unstable.r41779900948.gf482387";\n'); };
+    const cliVersion = async (path: string, version: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, `export declare const COPILOT_CLI_VERSION = "${version}";\n`); };
 
     // Windows: MSIX packages are found through the app execution aliases they install, which link into the package folder.
     const packages = join(system, 'Program Files/WindowsApps');
@@ -287,9 +287,13 @@ test('Desktop apps are found where Windows and Linux install them, with the copy
     await tool(join(chatgptPackage, 'app/resources/codex.exe'), 'echo codex-cli 0.165.0-alpha.1.2');
     await alias('OpenAI.Codex_2p2nqsd0c76g0', 'codex-core-command-runner.exe', join(chatgptPackage, 'app/resources/codex-command-runner.exe'));
     assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'codex', 'win32'))), { name: 'ChatGPT desktop', version: '26.1023.51421', carries: 'Codex', carriedVersion: '0.165.0-alpha.1.2', binary: join(chatgptPackage, 'app/resources/codex.exe') });
-    // The Copilot app's runtime route wasn't run on Windows: its version is shown, no copy is used.
-    await cliVersion(join(setup.home, 'AppData/Local/GitHub Copilot/copilot-sdk/cliVersion.d.ts'));
-    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'win32'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.102-0.unstable.r41779900948.gf482387' });
+    // The Copilot app's setup program installs under Programs. Before the app has run there is no runtime: its version only.
+    await cliVersion(join(setup.home, 'AppData/Local/Programs/GitHub Copilot/copilot-sdk/cliVersion.d.ts'), '1.0.106-8');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'win32'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.106-8' });
+    // Once it has run, its runtime is in a folder named by that version.
+    const windowsRuntime = join(setup.home, 'AppData/Local/github-copilot-sdk/cli/1.0.106-8/copilot.exe');
+    await tool(windowsRuntime, 'echo 1.0.106-8');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'win32'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.106-8', binary: windowsRuntime });
 
     // Linux: the vendors' packages install under /usr/lib; ChatGPT's preview was also unpacked under ~/.local/opt.
     await asar(join(system, 'usr/lib/claude-desktop/resources/app.asar'), '4.23118.1');
@@ -299,8 +303,10 @@ test('Desktop apps are found where Windows and Linux install them, with the copy
     await asar(join(opt, 'resources/app.asar'), '26.901.51231');
     await tool(join(opt, 'resources/codex'), 'echo codex-cli 0.153.4');
     assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'codex', 'linux'))), { name: 'ChatGPT desktop', version: '26.901.51231', carries: 'Codex', carriedVersion: '0.153.4', binary: join(opt, 'resources/codex') });
-    await cliVersion(join(system, 'usr/lib/GitHub Copilot/copilot-sdk/cliVersion.d.ts'));
-    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'linux'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.102-0.unstable.r41779900948.gf482387' });
+    await cliVersion(join(system, 'usr/lib/GitHub Copilot/copilot-sdk/cliVersion.d.ts'), '1.0.106-8');
+    const linuxRuntime = join(setup.home, '.cache/github-copilot-sdk/cli/1.0.106-8/copilot');
+    await tool(linuxRuntime, 'echo 1.0.106-8');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'linux'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.106-8', binary: linuxRuntime });
   } finally { await setup.cleanup(); }
 });
 

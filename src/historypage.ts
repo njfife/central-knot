@@ -13,9 +13,10 @@ const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
+  // A Pull's edit or deletion of the base instructions: said as the pull, undone or not.
+  if (event.base) return pulledBase(event, event.base.list.tools.length ? touchedToolsPhrase(event.base.list.tools) : '');
   // Pull from the git repo: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
-    if (event.base) return { glyph: 'git-branch', text: `Deleted in the git repo, so Pull emptied the base instructions${event.base.list.tools.length ? ` and took them out of ${touchedToolsPhrase(event.base.list.tools)}` : ''}.`, action: 'Undo' };
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
     if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
     if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Undo' };
@@ -52,6 +53,13 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
       return { glyph: 'undo-2', text: `Undid ${undone ? named(undone) : 'a change'}; the earlier version is back${where}.`, action: 'Redo edit' };
     }
   }
+}
+
+/** The base instructions as a Pull changed them: set for the first time, edited, or deleted; `tools` names the tools that get them. */
+function pulledBase(event: HistoryEvent, tools: string): { glyph: IconName; text: string; action: string } {
+  if (event.kind === 'deleted') return { glyph: 'git-branch', text: `Deleted in the git repo, so Pull emptied the base instructions${tools ? ` and took them out of ${tools}` : ''}.`, action: 'Undo' };
+  const first = !event.base!.text.trim();
+  return { glyph: 'git-branch', text: `${first ? 'Added in the git repo, so Pull set' : 'Changed in the git repo, so Pull updated'} the base instructions${tools ? ` in ${tools}` : ''}.`, action: 'Undo' };
 }
 
 /** A profile switch: what it switched to, and how many items it turned off and on, where. An undo says what it undid. */
@@ -107,12 +115,13 @@ function actions(event: HistoryEvent, action?: string) {
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies Apply all (or Pull) added, in those tools alone.
   const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
-  const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : 'in all tools';
+  // A base no tool gets is undone in Central Knot alone, so its Undo names no tools.
+  const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : event.base ? '' : 'in all tools';
   // A switch's Undo says that it is one, and what it does: enable where it was disabled, disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
     : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : action;
-  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
+  const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}`.trim() : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
   return control;
@@ -143,7 +152,7 @@ export function historyPage() {
       h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event)), h('strong', { title: event.item }, event.item)),
       h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, event.kind === 'removed' ? 'Restored' : 'Undone'))
-        : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
+        : h('span.history-actions', {}, !event.base && (event.kind === 'edit' || event.kind === 'conflict') ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
       changePanel(event.id))];
   }))));
 }
