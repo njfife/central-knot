@@ -6,8 +6,9 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { CODEX_MANIFEST, MANIFEST, parseObject } from './catalogdetail.ts';
 import { parseCatalog } from './plugins.ts';
 import { writeDurably } from './share.ts';
 import { PRODUCT, SAFE_NAME, record, text } from './values.ts';
@@ -31,12 +32,28 @@ export interface CustomBuild {
   name: string;
   bundleId: string;
   marketplace?: { displayName?: string; /** A picture's file name in the carried folder. */ logo?: string };
+  /** Where newer releases of the carried marketplace are published: the address of a folder holding release.json and its archive. */
+  feed?: string;
 }
 
 /** An identity is letters, digits, dot and dash: it becomes a folder name and part of a bundle id. */
 export const BUILD_ID = /^[a-z0-9][a-z0-9.-]{0,62}$/;
 /** A logo's file name as the build writes it: no folders, a picture the page can show. */
 const LOGO_FILE = /^[\w-]+\.(png|svg|jpg|jpeg|webp)$/;
+
+/**
+ * A feed's address as the app uses it: an http or https address (plain http is accepted: a feed is often inside a
+ * company's network), ending in a slash, so the manifest and the archive are read from that folder. Undefined for anything else.
+ */
+export function feedAddress(given: string): string | undefined {
+  try {
+    const url = new URL(given.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+    url.hash = '';
+    if (!url.pathname.endsWith('/')) url.pathname += '/';
+    return url.href;
+  } catch { return undefined; }
+}
 
 /** custom-build.json as an object, or undefined for anything that isn't one (then the build is the standard app). */
 export function customBuild(value: unknown): CustomBuild | undefined {
@@ -45,8 +62,8 @@ export function customBuild(value: unknown): CustomBuild | undefined {
   if (!BUILD_ID.test(id) || !name || !/^[A-Za-z0-9][A-Za-z0-9.-]{0,150}$/.test(bundleId)) return undefined;
   const market = record(read?.marketplace);
   if (!market) return { id, name, bundleId };
-  const displayName = text(market.displayName).trim(), logo = text(market.logo);
-  return { id, name, bundleId, marketplace: { ...(displayName ? { displayName } : {}), ...(LOGO_FILE.test(logo) ? { logo } : {}) } };
+  const displayName = text(market.displayName).trim(), logo = text(market.logo), feed = feedAddress(text(read?.feed));
+  return { id, name, bundleId, marketplace: { ...(displayName ? { displayName } : {}), ...(LOGO_FILE.test(logo) ? { logo } : {}) }, ...(feed ? { feed } : {}) };
 }
 
 const readJson = async (path: string): Promise<unknown> => { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return undefined; } };
@@ -89,6 +106,13 @@ export interface BundleRelease {
   sha256: string;
   plugins: { name: string; version?: string }[];
   unpackaged: { name: string; reason: string }[];
+  /** The oldest app version that can use this release; an older app keeps the content it has until it is updated. */
+  minApp?: string;
+  /**
+   * Only in the manifest of the content in use on a computer, never in a published one: plugins this release no longer
+   * packs that were carried over from the content before it, because a tool here still has them installed.
+   */
+  kept?: string[];
 }
 
 /** A release manifest as an object, or undefined for one this version can't use. */
@@ -99,7 +123,9 @@ export function bundleRelease(value: unknown): BundleRelease | undefined {
   const list = (items: unknown) => (Array.isArray(items) ? items : []).map(record).filter((item): item is Record<string, unknown> => !!item && !!text(item.name));
   return { format: 1, marketplace: text(read.marketplace), sequence: read.sequence, madeAt: text(read.madeAt), from: text(read.from), archive: text(read.archive), size: read.size, sha256: text(read.sha256),
     plugins: list(read.plugins).map(item => ({ name: text(item.name), ...(text(item.version) ? { version: text(item.version) } : {}) })),
-    unpackaged: list(read.unpackaged).map(item => ({ name: text(item.name), reason: text(item.reason) })) };
+    unpackaged: list(read.unpackaged).map(item => ({ name: text(item.name), reason: text(item.reason) })),
+    ...(text(read.minApp) ? { minApp: text(read.minApp) } : {}),
+    ...(Array.isArray(read.kept) && read.kept.length ? { kept: read.kept.filter((name): name is string => typeof name === 'string') } : {}) };
 }
 
 export const readRelease = async (path: string) => bundleRelease(await readJson(path));
@@ -154,11 +180,57 @@ export async function fileDigest(path: string): Promise<{ size: number; sha256: 
 export const packArchive = (folder: string, path: string) => tar(['-czf', path, '-C', folder, '.'], { COPYFILE_DISABLE: '1' });
 
 /**
+ * Points entries of the marketplace in `root` at folders inside it, in each manifest it has (Claude's and Codex's): for
+ * each name, the entry's `source` becomes that path; with `entry`, the whole entry is that one (added when the manifest
+ * has none of that name). A manifest it changes is written again as JSON, every other value as it was.
+ */
+export async function pointEntries(root: string, changes: Map<string, { path: string; entry?: Record<string, unknown> }>): Promise<void> {
+  for (const [file, local] of [[MANIFEST, (path: string): unknown => path], [CODEX_MANIFEST, (path: string): unknown => ({ source: 'local', path })]] as const) {
+    const manifest = parseObject(await readFile(join(root, file), 'utf8').catch(() => ''));
+    if (!manifest || !Array.isArray(manifest.plugins)) continue;
+    for (const [name, change] of changes) {
+      const at = manifest.plugins.findIndex(item => record(item)?.name === name);
+      if (at < 0 && !change.entry) continue;
+      const entry = { ...(change.entry ?? record(manifest.plugins[at])), source: local(change.path) };
+      if (at < 0) manifest.plugins.push(entry); else manifest.plugins[at] = entry;
+    }
+    await writeFile(join(root, file), `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+}
+
+/** The folder, in a marketplace in use, for plugins carried over from the content before it. */
+const KEPT_FOLDER = '_kept';
+
+/**
+ * Carries plugins over from the content in use (`live`) into a release unpacked in `staged`: each of `keep` that the
+ * release doesn't pack and the content in use has files for. Its files go into a folder of their own and its entry, as it
+ * was, is pointed there, since a tool that has it installed stops loading it once its marketplace no longer lists it
+ * (Claude Code 2.1: "not found in marketplace"). Returns the names carried over.
+ */
+async function carryOver(live: string, staged: string, release: BundleRelease, keep: string[]): Promise<string[]> {
+  const packed = new Set(release.plugins.map(plugin => plugin.name));
+  const wanted = keep.filter(name => !packed.has(name));
+  if (!wanted.length || !(await exists(live))) return [];
+  const before = await parseCatalog(live, live, 'folder', { counts: false });
+  const changes = new Map<string, { path: string; entry: Record<string, unknown> }>();
+  for (const plugin of before.plugins) {
+    if (!wanted.includes(plugin.name) || !plugin.folder || !plugin.entry || !(await exists(plugin.folder))) continue;
+    await mkdir(join(staged, KEPT_FOLDER), { recursive: true });
+    await cp(plugin.folder, join(staged, KEPT_FOLDER, plugin.name), { recursive: true, verbatimSymlinks: true });
+    changes.set(plugin.name, { path: `./${KEPT_FOLDER}/${plugin.name}`, entry: plugin.entry });
+  }
+  if (changes.size) await pointEntries(staged, changes);
+  return [...changes.keys()];
+}
+
+/**
  * Puts a release in use: its archive (at `archive`, read as any file is, so one inside the app's own package works) is copied
  * into the data folder and checked against the manifest's size and SHA-256, unpacked aside, read as a marketplace, and only
  * then swapped into the marketplace folder. Anything short of that returns the problem and leaves what was in use untouched.
+ * `keep`: plugins a tool on this computer has installed from this marketplace; one the release no longer packs is carried
+ * over from the content in use, so it keeps working until it is uninstalled (the manifest's `kept` names them).
  */
-export async function activateRelease(dataDir: string, release: BundleRelease, archive: string): Promise<{ problem?: string }> {
+export async function activateRelease(dataDir: string, release: BundleRelease, archive: string, keep: string[] = []): Promise<{ problem?: string }> {
   const root = bundleRoot(dataDir);
   const stage = join(root, `incoming-${randomUUID()}`);
   const live = bundledMarketplace(dataDir), previous = previousFolder(dataDir);
@@ -182,13 +254,15 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
     const catalog = await parseCatalog(join(stage, 'marketplace'), join(stage, 'marketplace'), 'folder', { counts: false });
     if (catalog.problem) return failed(`Its archive doesn’t hold a marketplace that can be read: ${catalog.problem}`);
     if (catalog.name !== release.marketplace) return failed(`Its archive holds the marketplace “${catalog.name}”, not “${release.marketplace}”, so it was not used.`);
+    const kept = await carryOver(live, join(stage, 'marketplace'), release, keep);
     // The swap: the folder in use steps aside, the new one takes its path, then the manifest says what is there. If the
     // app is stopped between the first two steps, the next open puts the folder back (activeBundle); stopped before the
     // manifest is written, the new content sits under the old manifest, and the next open replaces it from the same release.
     await rm(previous, { recursive: true, force: true });
     if (await exists(live)) await rename(live, previous);
     await rename(join(stage, 'marketplace'), live);
-    await writeDurably(join(root, RELEASE_FILE), `${JSON.stringify(release, null, 2)}\n`);
+    const { kept: _before, ...published } = release;
+    await writeDurably(join(root, RELEASE_FILE), `${JSON.stringify({ ...published, ...(kept.length ? { kept } : {}) }, null, 2)}\n`);
   } catch (error) { return failed(`It could not be put in place: ${error instanceof Error ? error.message : String(error)}`); }
   // The release is in use from here on: tidying up that fails changes nothing about that.
   await rm(previous, { recursive: true, force: true }).catch(() => undefined);
@@ -202,11 +276,11 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
  * that is as new or newer stays (`kept` says so when it is newer): an app update never takes a bundle's content back (ORG-05). `problem` says why the carried
  * release could not be used; whatever was in use before is still returned.
  */
-export async function openBundle(dataDir: string, carried: string): Promise<{ active?: ActiveBundle; problem?: string; /** The carried release was not put in use, and why. */ kept?: string }> {
+export async function openBundle(dataDir: string, carried: string, keep: () => Promise<string[]> = async () => []): Promise<{ active?: ActiveBundle; problem?: string; /** The carried release was not put in use, and why. */ kept?: string }> {
   const active = await activeBundle(dataDir);
   const release = await readRelease(join(carried, RELEASE_FILE));
   if (!release) return { active, problem: 'The marketplace this build carries has no manifest that can be read.' };
   if (active && active.release.marketplace === release.marketplace && active.release.sequence >= release.sequence) return { active, ...(active.release.sequence > release.sequence ? { kept: `the content in use (sequence ${active.release.sequence}) is newer than the release this app carries (sequence ${release.sequence}), so it stays` } : {}) };
-  const { problem } = await activateRelease(dataDir, release, join(carried, release.archive));
+  const { problem } = await activateRelease(dataDir, release, join(carried, release.archive), active ? await keep() : []);
   return problem ? { active, problem: `The marketplace this build carries could not be unpacked. ${problem}` } : { active: await activeBundle(dataDir) };
 }

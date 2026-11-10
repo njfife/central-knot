@@ -3,11 +3,11 @@
 // runs in a local build, in CI and in tests. What a marketplace holds is copied as it is: only the fetch's own .git folders
 // stay behind, and an entry is rewritten only to point at files that were fetched from elsewhere for it.
 import { execFile } from 'node:child_process';
-import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
-import { BUILD_ID, CARRIED_FOLDER, CUSTOM_FILE, RELEASE_FILE, fileDigest, packArchive, releaseLabel, type BundleRelease, type CustomBuild } from './bundle.ts';
-import { CODEX_MANIFEST, MANIFEST, parseObject, sourceLabel } from './catalogdetail.ts';
+import { BUILD_ID, CARRIED_FOLDER, CUSTOM_FILE, RELEASE_FILE, feedAddress, fileDigest, packArchive, pointEntries, readRelease, releaseLabel, type BundleRelease, type CustomBuild } from './bundle.ts';
+import { CODEX_MANIFEST, MANIFEST, sourceLabel } from './catalogdetail.ts';
 import { parseCatalog, readCatalog, readRemotePlugin, type PluginContext } from './plugins.ts';
 import { isFolder, record, text } from './values.ts';
 import type { CatalogPlugin } from './types.ts';
@@ -29,11 +29,13 @@ export interface BuildInputs {
   marketplaceLogo?: string;
   /** The release's place in the order of releases; the time it was made when not given. */
   sequence?: number;
+  /** Where newer releases of the marketplace will be published: an http or https address of a folder. */
+  feed?: string;
 }
 
 const OPTIONS: Record<string, keyof BuildInputs> = {
   '--marketplace': 'marketplace', '--app-name': 'appName', '--app-id': 'appId', '--app-icon': 'appIcon',
-  '--marketplace-name': 'marketplaceName', '--marketplace-logo': 'marketplaceLogo', '--sequence': 'sequence',
+  '--marketplace-name': 'marketplaceName', '--marketplace-logo': 'marketplaceLogo', '--sequence': 'sequence', '--feed': 'feed',
 };
 
 /**
@@ -72,6 +74,9 @@ const slug = (name: string) => name.normalize('NFKD').toLowerCase().replace(/[^a
 export function describeBuild(inputs: BuildInputs): CustomBuild {
   if (!inputs.marketplace && (inputs.marketplaceName || inputs.marketplaceLogo)) throw new Error('--marketplace-name and --marketplace-logo are for a build that carries a marketplace: add --marketplace.');
   if (!inputs.marketplace && inputs.sequence !== undefined) throw new Error('--sequence orders a carried marketplace’s releases: add --marketplace.');
+  if (!inputs.marketplace && inputs.feed !== undefined) throw new Error('--feed is where newer releases of a carried marketplace come from: add --marketplace, the release the build starts with.');
+  const feed = inputs.feed === undefined ? undefined : feedAddress(inputs.feed);
+  if (inputs.feed !== undefined && !feed) throw new Error('--feed takes an http or https address: the folder release.json and its archive are published in.');
   if (inputs.appName === undefined) throw new Error(`A custom build needs its own name: add --app-name "<name>". Under the standard app’s name it would take that app’s place in Applications.`);
   const name = inputs.appName.trim();
   // The name is also the app's file name, so nothing a file name can't hold as written.
@@ -83,7 +88,8 @@ export function describeBuild(inputs: BuildInputs): CustomBuild {
     if (file && !(kinds as readonly string[]).includes(extname(file).toLowerCase())) throw new Error(`${option} takes a ${kinds.join(' or ')} file.`);
   }
   return { id, name, bundleId: `com.centralknot.custom.${id}`,
-    ...(inputs.marketplace ? { marketplace: { ...(inputs.marketplaceName?.trim() ? { displayName: inputs.marketplaceName.trim() } : {}), ...(inputs.marketplaceLogo ? { logo: `marketplace-logo${extname(inputs.marketplaceLogo).toLowerCase()}` } : {}) } } : {}) };
+    ...(inputs.marketplace ? { marketplace: { ...(inputs.marketplaceName?.trim() ? { displayName: inputs.marketplaceName.trim() } : {}), ...(inputs.marketplaceLogo ? { logo: `marketplace-logo${extname(inputs.marketplaceLogo).toLowerCase()}` } : {}) } } : {}),
+    ...(feed ? { feed } : {}) };
 }
 
 // ---------- Packing a marketplace ----------
@@ -133,7 +139,7 @@ function whyNotFetched(plugin: CatalogPlugin): string {
  * is then written again as JSON: every value as it was, its layout not). A plugin that
  * can't be fetched is named in `unpackaged` with the reason; its entry stays as written, and the release is still made.
  */
-export async function packRelease({ source, out, work, sequence, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease; /** What whoever makes the release should know about it, beyond what is packed. */ notes: string[] } | { problem: string }> {
+export async function packRelease({ source, out, work, sequence, minApp, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; /** The oldest app version that can use the release. */ minApp?: string; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease; /** What whoever makes the release should know about it, beyond what is packed. */ notes: string[]; /** Plugins left out because fetching their files failed this time (another try may pack them), not because they can never be packed. */ failedNow: string[] } | { problem: string }> {
   const context: PluginContext = { home: work, dataDir: join(work, 'fetched'), binaries: {} };
   const where = (await folderGiven(source)) ?? source.trim();
   const catalog = await readCatalog(context, where);
@@ -148,6 +154,7 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
   for (let n = 2; await exists(join(stage, held)); n++) held = `_bundled-${n}`;
   const moved = new Map<string, string>();
   const unpackaged: BundleRelease['unpackaged'] = [];
+  const failedNow: string[] = [];
   for (const plugin of catalog.plugins) {
     if (plugin.folder) {
       // A folder that is there but empty (a submodule, which a fetch leaves empty) holds nothing to install.
@@ -157,19 +164,12 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
     }
     if (!plugin.remote) { unpackaged.push({ name: plugin.name, reason: whyNotFetched(plugin) }); continue; }
     const copy = await fetchPlugin(context, plugin.remote);
-    if ('problem' in copy) { unpackaged.push({ name: plugin.name, reason: `Its files couldn’t be fetched from ${plugin.from?.label ?? plugin.remote.url}: ${copy.problem}` }); continue; }
+    if ('problem' in copy) { failedNow.push(plugin.name); unpackaged.push({ name: plugin.name, reason: `Its files couldn’t be fetched from ${plugin.from?.label ?? plugin.remote.url}: ${copy.problem}` }); continue; }
     await mkdir(join(stage, held), { recursive: true });
     await cp(copy.folder, join(stage, held, plugin.name), { recursive: true, verbatimSymlinks: true, filter: path => resolve(path) !== resolve(copy.root, '.git') });
     moved.set(plugin.name, `./${held}/${plugin.name}`);
   }
-  if (moved.size) {
-    for (const [file, local] of [[MANIFEST, (path: string): unknown => path], [CODEX_MANIFEST, (path: string): unknown => ({ source: 'local', path })]] as const) {
-      const manifest = parseObject(await readFile(join(stage, file), 'utf8').catch(() => ''));
-      if (!manifest || !Array.isArray(manifest.plugins)) continue;
-      for (const entry of manifest.plugins.map(record)) if (entry && moved.has(text(entry.name))) entry.source = local(moved.get(text(entry.name))!);
-      await writeFile(join(stage, file), `${JSON.stringify(manifest, null, 2)}\n`);
-    }
-  }
+  if (moved.size) await pointEntries(stage, new Map([...moved].map(([name, path]) => [name, { path }])));
   // What the archive holds is read once more, as the app will read it: a plugin counts as packed only if it is found there.
   const packed = await parseCatalog(stage, stage, 'folder', { counts: false });
   if (packed.problem) return { problem: `The packed marketplace could not be read back: ${packed.problem}` };
@@ -184,10 +184,10 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
   if (failed) return { problem: `The marketplace could not be packed: ${failed}` };
   const release: BundleRelease = { format: 1, marketplace: packed.name, sequence: order, madeAt: now.toISOString(),
     from: `${sourceLabel(where)}${commit ? ` at ${commit}` : ''}`, archive, ...(await fileDigest(join(out, archive))),
-    plugins: packed.plugins.filter(plugin => !left.has(plugin.name)).map(plugin => ({ name: plugin.name, ...(plugin.version ? { version: plugin.version } : {}) })), unpackaged };
+    plugins: packed.plugins.filter(plugin => !left.has(plugin.name)).map(plugin => ({ name: plugin.name, ...(plugin.version ? { version: plugin.version } : {}) })), unpackaged, ...(minApp ? { minApp } : {}) };
   await writeFile(join(out, RELEASE_FILE), `${JSON.stringify(release, null, 2)}\n`);
   await rm(stage, { recursive: true, force: true });
-  return { release, notes: packed.copilotRefuses ? [`${packed.copilotRefuses} It then installs none of this marketplace’s plugins whole, for anyone, until that entry is taken out of the marketplace.`] : [] };
+  return { release, failedNow, notes: packed.copilotRefuses ? [`${packed.copilotRefuses} It then installs none of this marketplace’s plugins whole, for anyone, until that entry is taken out of the marketplace.`] : [] };
 }
 
 // ---------- Staging a custom build ----------
@@ -247,8 +247,48 @@ export function buildReport(build: CustomBuild, release: BundleRelease | undefin
   } else lines.push('', 'Marketplace: none. This build carries no marketplace.');
   lines.push('',
     'App updates: not met. No update location is configured, so this build does not update itself. It never uses the standard app’s updates.',
-    release ? 'Content feed: not met. No feed is configured, so the carried marketplace changes only with a new build.' : 'Content feed: none (no marketplace is carried).');
+    !release ? 'Content feed: none (no marketplace is carried).'
+      : build.feed ? `Content feed: ${build.feed} The app reads release.json there, and the archive it names, and takes a release with a higher sequence than the one it has. Publish with scripts/publish-bundle.mjs.`
+        : 'Content feed: not met. No feed is configured (--feed), so the carried marketplace changes only with a new build.');
   return `${lines.join('\n')}\n`;
+}
+
+// ---------- Publishing a release to a feed ----------
+
+/**
+ * Publishes a new release of a marketplace into `out`, the folder a feed serves (ORG-05, D-35): the archive first, then
+ * release.json, so a copy of the folder taken at any moment never names an archive that isn't there. Nothing is written
+ * unless the whole release can be: a plugin whose files couldn't be fetched this time holds the release (another try may
+ * pack it, and a release must not lose a plugin to a hiccup), while one that can never be packed (an npm package) is left
+ * out and named, as in a build. The sequence must be higher than the one `out` already holds, and the marketplace the same.
+ */
+export async function publishRelease(input: { source: string; out: string; work: string; sequence?: number; minApp?: string; now?: Date; fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease; report: string } | { problem: string }> {
+  if (input.minApp !== undefined && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(input.minApp)) return { problem: '--min-app takes an app version, such as 0.6.0.' };
+  const before = await readRelease(join(input.out, RELEASE_FILE));
+  const packed = await packRelease({ ...input, out: join(input.work, 'publish') });
+  if ('problem' in packed) return packed;
+  const { release, notes, failedNow } = packed;
+  const nothing = 'Nothing was published.';
+  if (failedNow.length) return { problem: `${nothing} The files of ${failedNow.length === 1 ? 'one plugin' : `${failedNow.length} plugins`} couldn’t be fetched this time, and a release doesn’t go out without ${failedNow.length === 1 ? 'it' : 'them'}:\n${release.unpackaged.filter(item => failedNow.includes(item.name)).map(item => `  - ${item.name}: ${item.reason}`).join('\n')}\nTry again, or take ${failedNow.length === 1 ? 'that entry' : 'those entries'} out of the marketplace.` };
+  if (before && before.marketplace !== release.marketplace) return { problem: `${nothing} ${input.out} holds releases of the marketplace “${before.marketplace}”, and this one is “${release.marketplace}”.` };
+  if (before && release.sequence <= before.sequence) return { problem: `${nothing} Its sequence (${release.sequence}) must be higher than the one already published there (${before.sequence}): installed copies take only a higher one.` };
+  await mkdir(input.out, { recursive: true });
+  await copyFile(join(input.work, 'publish', release.archive), join(input.out, release.archive));
+  // The manifest goes last and all at once: it is what says there is a release.
+  await writeFile(join(input.out, `${RELEASE_FILE}.new`), `${JSON.stringify(release, null, 2)}\n`);
+  await rename(join(input.out, `${RELEASE_FILE}.new`), join(input.out, RELEASE_FILE));
+  const lines = [
+    `Published ${release.marketplace}: ${releaseLabel(release)}, sequence ${release.sequence}${before ? ` (the one before: ${before.sequence})` : ''}`,
+    `Archive: ${release.archive}, ${release.size} bytes, SHA-256 ${release.sha256}`,
+    `Plugins packed (${release.plugins.length}): ${release.plugins.map(plugin => `${plugin.name}${plugin.version ? ` ${plugin.version}` : ''}`).join(', ') || 'none'}`,
+    ...(release.unpackaged.length ? [`NOT PACKED (${release.unpackaged.length}): the release has no files for these. Installed copies keep the ones they have.`, ...release.unpackaged.map(item => `  - ${item.name}: ${item.reason}`)] : []),
+    ...(before ? before.plugins.filter(plugin => !release.plugins.some(now => now.name === plugin.name) && !release.unpackaged.some(now => now.name === plugin.name)).map(plugin => `No longer listed: ${plugin.name}. It stays, as it is, where a tool has it installed, and is offered to nobody else.`) : []),
+    ...(release.minApp ? [`Needs the app at ${release.minApp} or newer: an older app keeps the plugins it has until it is updated.`] : []),
+    ...notes.map(note => `Note: ${note}`),
+    '',
+    `In ${input.out}: ${release.archive} and ${RELEASE_FILE}. Serve that folder at the address the build was given (--feed). When copying it somewhere, copy the archive before ${RELEASE_FILE}. Earlier archives there are no longer needed.`,
+  ];
+  return { release, report: `${lines.join('\n')}\n` };
 }
 
 /** A file name for the build's downloads: "Acme Knot" is "Acme-Knot". */
