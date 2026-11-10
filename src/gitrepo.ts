@@ -24,6 +24,7 @@ import { harnesses } from './harnesses.ts';
 import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
+import { PRODUCT } from './values.ts';
 import { agentTools, mcpTools, presentTools } from './presence.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { undoBase } from './instructions.ts';
@@ -1067,7 +1068,7 @@ async function keepAsBase(dir: string, items: { atBase?: SideItem; here?: SideIt
 async function identity(dir: string): Promise<string[]> {
   const name = (await git(dir, ['config', 'user.name'])).output.trim();
   const email = (await git(dir, ['config', 'user.email'])).output.trim();
-  return name && email ? [] : ['-c', `user.name=${name || 'Central Knot'}`, '-c', `user.email=${email || 'central-knot@localhost'}`];
+  return name && email ? [] : ['-c', `user.name=${name || PRODUCT}`, '-c', `user.email=${email || 'central-knot@localhost'}`];
 }
 
 /** A commit message naming what changed, short enough for a log line. */
@@ -1075,7 +1076,7 @@ function message(outgoing: RepoChange[], from: string): string {
   const names = outgoing.map(change => change.name);
   const listed = names.length > 4 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
   const noun = { skill: 'skill', mcp: 'MCP server', agent: 'agent', base: '' };
-  return `Central Knot: update ${listed}\n\nFrom ${from}.\n\n${outgoing.map(change => `- ${change.change} ${noun[change.kind]} ${change.name}`.replace(/  +/g, ' ')).join('\n')}\n`;
+  return `${PRODUCT}: update ${listed}\n\nFrom ${from}.\n\n${outgoing.map(change => `- ${change.change} ${noun[change.kind]} ${change.name}`.replace(/  +/g, ' ')).join('\n')}\n`;
 }
 
 /**
