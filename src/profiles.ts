@@ -6,10 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { harnessIds, harnesses } from './harnesses.ts';
-import { appendHistory, manageView, readHistory, replaceHistory } from './manage.ts';
+import { appendHistory, clock, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
-import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, switchItems, type SwitchItem } from './profileplan.ts';
+import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { notTaken, switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
 import { strings } from './values.ts';
@@ -20,6 +20,16 @@ import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, 
 interface ProfilesFile { formatVersion: 1; profiles: Profile[]; active?: string; offByProfile: Record<string, HarnessId[]> }
 const profilesPath = (home: string) => join(storeDirectory(home), 'profiles.json');
 
+/** The profiles in a profiles file: each with a string id and name; items kept only as strings. */
+const profilesOf = (raw: unknown): Profile[] => (Array.isArray(raw) ? raw : [])
+  .filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string')
+  .map(profile => ({ id: profile.id, name: profile.name, items: strings(profile.items) ?? [] }));
+
+/** What profiles hold off, per item, as the file says: tools Central Knot doesn't know are dropped, and so is an item left with none. */
+const holdsOf = (raw: unknown): Record<string, HarnessId[]> => Object.fromEntries(Object.entries(raw && typeof raw === 'object' ? raw : {})
+  .map(([id, tools]) => [id, (strings(tools) ?? []).filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId))] as const)
+  .filter(([, tools]) => tools.length));
+
 /** The home's profiles. A file that can't be read is reported, never overwritten: the person's profiles may still be in it. */
 export async function readProfiles(home: string): Promise<ProfilesView> {
   let text: string;
@@ -28,8 +38,8 @@ export async function readProfiles(home: string): Promise<ProfilesView> {
   }
   try {
     const parsed = JSON.parse(text) as Partial<ProfilesFile>;
-    const profiles = (Array.isArray(parsed.profiles) ? parsed.profiles : []).filter(profile => profile && typeof profile.id === 'string' && typeof profile.name === 'string').map(profile => ({ id: profile.id, name: profile.name, items: strings(profile.items) ?? [] }));
-    const offByProfile = Object.fromEntries(Object.entries(parsed.offByProfile && typeof parsed.offByProfile === 'object' ? parsed.offByProfile : {}).map(([id, tools]) => [id, (strings(tools) ?? []).filter((tool): tool is HarnessId => harnessIds.includes(tool as HarnessId))]).filter(([, tools]) => tools.length));
+    const profiles = profilesOf(parsed.profiles);
+    const offByProfile = holdsOf(parsed.offByProfile);
     const active = profiles.some(profile => profile.id === parsed.active) ? parsed.active : undefined;
     return { profiles, offByProfile, ...(active ? { active } : {}) };
   } catch {
@@ -130,10 +140,11 @@ export async function switchFilesStamp(context: ShareContext): Promise<string> {
   return (await Promise.all(files.map(file => stat(file).then(info => `${file}:${info.mtimeMs}`, () => `${file}:-`)))).join('|');
 }
 
-/** How many items the tools no longer match the profile in use on, read fresh (for the menu bar after a switch made there). */
-export async function driftNow(context: ShareContext): Promise<number> {
+/** How many items the tools no longer match the profile in use on, and every item, read fresh (for the menus when the page hasn't read). */
+export async function driftNow(context: ShareContext): Promise<{ drift: number; items: SwitchItem[] }> {
   const view = await readProfiles(context.home);
-  return view.problem ? 0 : driftOf((await readHome(context)).items, view);
+  const { items } = await readHome(context);
+  return { drift: view.problem ? 0 : driftOf(items, view), items };
 }
 
 /**
@@ -210,28 +221,6 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
   return { done, results };
 }
 
-/**
- * `offByProfile` changed by the flips that were made: a switch turned off is held from now on, one turned back on is let go. A flip that
- * failed changes nothing, so its switch stays held (or not) as it was.
- */
-function offAfterFlips(offByProfile: Record<string, HarnessId[]>, done: ProfileFlip[]): Record<string, HarnessId[]> {
-  const next = Object.fromEntries(Object.entries(offByProfile).map(([id, tools]) => [id, new Set(tools)]));
-  for (const flip of done) {
-    const tools = (next[flip.item] ??= new Set());
-    if (flip.disabled) tools.add(flip.tool); else tools.delete(flip.tool);
-  }
-  return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.size).map(([id, tools]) => [id, [...tools]]));
-}
-
-/**
- * The plan's holds, which assume every flip was made, corrected for the flips that failed and left their switch as it was: a
- * failed turn-off isn't held, and a failed turn-on is still held. Taking a failed flip back out of the plan is the same as making
- * its opposite, so each one is applied reversed.
- */
-export function offAfterFailures(planned: Record<string, HarnessId[]>, failed: ProfileFlip[]): Record<string, HarnessId[]> {
-  return offAfterFlips(planned, failed.map(flip => ({ ...flip, disabled: !flip.disabled })));
-}
-
 /** History keys every profile switch with this; Undo finds switches by their kind, 'profile'. */
 const SWITCH_KEY = 'profiles:switch';
 
@@ -242,7 +231,7 @@ const stopped = (why: string): ProfileSwitchResult => ({ stopped: why, results: 
 function switchEvent(context: ShareContext, profiles: ProfilesView, before: string | undefined, flips: ProfileFlip[]): HistoryEvent {
   const name = (id?: string) => profiles.profiles.find(profile => profile.id === id)?.name;
   const after = profiles.active;
-  return { id: randomUUID(), at: new Date(context.now?.() ?? Date.now()).toISOString(), key: SWITCH_KEY, item: name(after) ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
+  return { id: randomUUID(), at: new Date(clock(context)).toISOString(), key: SWITCH_KEY, item: name(after) ?? NO_PROFILE, kind: 'profile', losers: [], orderProved: true,
     profile: { ...(before ? { from: before, fromName: name(before) } : {}), ...(after ? { to: after, toName: name(after) } : {}), flips } };
 }
 
@@ -316,7 +305,9 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   results.push(...flipped);
   const before = profiles.active;
   if (choseProfileInUse(history, past)) profiles.active = past.profile.from && profiles.profiles.some(profile => profile.id === past.profile!.from) ? past.profile.from : undefined;
-  profiles.offByProfile = releaseHolds(offAfterFlips(profiles.offByProfile, done), foundOn);
+  const holds = releaseHolds(offAfterFlips(profiles.offByProfile, done), foundOn);
+  // Back to No profile: holds on what is gone let go, as a switch to No profile would, so none is left that nothing could clear.
+  profiles.offByProfile = profiles.active ? holds : holdsOnWhatIsHere(holds, home.items);
   await saveProfiles(context.home, profiles);
   // Nothing went back, the profile in use is the same, and something couldn't change: the switch stays as it is in History, so
   // its Undo can be tried again once that is fixed.

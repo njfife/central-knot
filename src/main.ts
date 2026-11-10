@@ -172,34 +172,35 @@ const activeProfileName = () => activeProfile(lastProfiles)?.name;
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!profilesInUse(lastProfiles)) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const choose = (id: string | null) => {
-    // The profile in use, already matching: nothing to switch, and an empty switch's band would replace the last one's Undo.
+  /**
+   * A choice in the Profile menu. The profile in use, already matching, needs nothing: an empty switch's band would replace the
+   * last one's Undo. Otherwise it switches: a switch that couldn't start, or that changed nothing (every flip failed), waits on the
+   * page with sync's results; one that changed something goes to the page's band with Undo.
+   */
+  const switchFromMenu = (id: string | null) => {
     if (id === (lastProfiles.active ?? null) && !lastDrift) { refreshTray(); return; }
-    void chooseProfile(id);
+    void fromTray(async () => {
+      if (!current) return;
+      const result = await switchProfile(context(), id);
+      if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
+      else if (result.event && window && !window.isDestroyed()) window.webContents.send('profile:switched', result);
+      else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
+      const fresh = await driftNow(context());
+      lastItems = fresh.items;
+      followProfiles(await readProfiles(current.home), fresh.drift);
+    });
   };
-  const chooseProfile = (id: string | null) => fromTray(async () => {
-    if (!current) return;
-    const result = await switchProfile(context(), id);
-    const page = window && !window.isDestroyed();
-    // Reporting: a switch that couldn't start waits on the page like sync's failures. Otherwise its result, failures included,
-    // goes to the page's band with Undo; with no window, the failures wait with sync's.
-    if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
-    else if (page) window.webContents.send('profile:switched', result);
-    else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
-    // Menus: the profiles as saved, and what still differs.
-    followProfiles(await readProfiles(current.home), await driftNow(context()));
-  });
-  const usable = homeWritable && !!current && !lastProfiles.problem;
+  const usable = homeWritable && !!current;
   const drift = lastDrift ? ` (${plural(lastDrift, 'item')} to apply)` : '';
   return { label: `Profile: ${activeProfileName() ?? NO_PROFILE}${drift}`, submenu: [
-    { label: NO_PROFILE, type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
+    { label: NO_PROFILE, type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => switchFromMenu(null) },
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
     ...lastProfiles.profiles.map(profile => {
       const empty = !presentItems(profile, lastItems).length;
-      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!empty || profile.id === lastProfiles.active), click: () => choose(profile.id) };
+      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!empty || profile.id === lastProfiles.active), click: () => switchFromMenu(profile.id) };
     }),
     // The profile in use no longer matches the tools: applying it again is one click here too, as in the status bar menu.
-    ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? NO_PROFILE} to tools (${plural(lastDrift, 'item')})`, enabled: usable, click: () => choose(lastProfiles.active ?? null) }] : []),
+    ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? NO_PROFILE} to tools (${plural(lastDrift, 'item')})`, enabled: usable, click: () => switchFromMenu(lastProfiles.active ?? null) }] : []),
     { type: 'separator' },
     { label: 'Edit profiles…', click: () => showPage('profiles') },
   ] };
@@ -387,7 +388,9 @@ async function lookAtSwitchFiles(passWrote: boolean) {
   const switched = stamp !== lastStamp;
   if (!switched && !passWrote) return;
   lastStamp = stamp;
-  const drift = await driftNow(context()).catch(() => lastDrift);
+  const fresh = await driftNow(context()).catch(() => undefined);
+  if (fresh) lastItems = fresh.items;
+  const drift = fresh?.drift ?? lastDrift;
   const drifted = drift !== lastDrift;
   followProfiles(lastProfiles, drift);
   if ((switched || drifted) && !window.isDestroyed()) window.webContents.send('sync:changed');

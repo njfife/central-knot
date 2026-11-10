@@ -1,9 +1,9 @@
 import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, ProfileEdit, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, ProfileEdit, ProfileFlip, ProfileSwitchResult, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
-import { activeProfile, flipSummary, NO_PROFILE } from './profileplan.ts';
+import { activeProfile, flipSummary, NO_PROFILE, redoneSwitch } from './profileplan.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -246,12 +246,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
   if (past?.kind === 'profile') {
-    // Said from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch chose.
-    const inUse = (state.home && activeProfile(state.home.profiles)?.name) ?? NO_PROFILE;
-    const put = flipSummary(result.flips ?? []) || 'nothing needed putting back';
-    // Undoing an undo redoes the switch: its own Undo is an undo again.
-    const redo = state.history?.some(event => event.undoneBy === eventId);
-    if (!result.stopped) state.outcome = { page: state.page, text: `${redo ? 'Redone' : 'Undone'}: ${put}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: redo ? 'Undo switch' : 'Redo switch' } : undefined };
+    if (!result.stopped) undoOutcome(result, undoneBy);
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
     return;
   }
@@ -550,11 +545,18 @@ const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…'
  * can't be switched), and, for an undo, switches left as they are because they changed since.
  */
 const notChangedNote = (results: DestinationResult[]) => {
-  const failed = results.filter(entry => entry.outcome === 'failed' || entry.outcome === 'held');
-  const stayed = results.filter(entry => entry.outcome === 'stayed').length;
-  return (failed.length ? ` ${plural(failed.length, 'switch', 'switches')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '')
-    + (stayed ? ` ${plural(stayed, 'switch', 'switches')} changed since, so ${stayed === 1 ? 'it was' : 'they were'} left as ${stayed === 1 ? 'it is' : 'they are'}.` : '');
+  const failed = results.filter(couldNotChange);
+  const items = (list: DestinationResult[]) => new Set(list.map(entry => entry.item)).size;
+  const stayed = items(results.filter(entry => entry.outcome === 'stayed'));
+  return (failed.length ? ` ${plural(items(failed), 'item')} could not change: ${failed.slice(0, 2).map(entry => entry.message).join(' ')}${failed.length > 2 ? ' …' : ''}` : '')
+    + (stayed ? ` ${plural(stayed, 'item')} changed since, so ${stayed === 1 ? 'it was' : 'they were'} left as ${stayed === 1 ? 'it is' : 'they are'}.` : '');
 };
+/** A switch that failed, or whose tool can't be read: it stayed as it was. */
+const couldNotChange = (entry: DestinationResult) => entry.outcome === 'failed' || entry.outcome === 'held';
+/** What flips changed, in words; with none, whether nothing needed it (`nothing`) or the switches it needed couldn't change. */
+const changedWords = (result: { flips?: ProfileFlip[]; results: DestinationResult[] }, nothing: string) =>
+  flipSummary(result.flips ?? []) || (result.results.some(couldNotChange) ? 'no switch changed' : nothing);
+const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /** The Profiles page's id for No profile, in the list and in `profileState.open`. */
 export const NONE = 'none';
@@ -574,11 +576,24 @@ export const profileState = {
 /** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
 function switchOutcome(result: ProfileSwitchResult) {
   const name = result.name ?? NO_PROFILE;
-  const what = flipSummary(result.flips);
   const said = result.again ? `Applied ${name} to tools again.` : `${name} is the profile now.`;
-  state.outcome = { page: state.page, item: name, text: `${said} ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
+  const what = changedWords(result, 'nothing needed switching');
+  state.outcome = { page: state.page, item: name, text: `${said} ${sentence(what)}${result.flips.length ? '; new sessions use it.' : '.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
   announce(state.outcome.text, true);
+}
+
+/**
+ * What an Undo of a profile switch did, as its band says it, with the Undo of that undo (`undoneBy`, the new History entry). Said
+ * from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch
+ * chose. Undoing an undo redoes the switch, and its own Undo is an undo again.
+ */
+function undoOutcome(result: ApplyResult, undoneBy: string | undefined) {
+  const inUse = (state.home && activeProfile(state.home.profiles)?.name) ?? NO_PROFILE;
+  const made = state.history?.find(event => event.id === undoneBy);
+  const redo = !!made && !!state.history && !!redoneSwitch(state.history, made);
+  state.outcome = { page: state.page, text: `${redo ? 'Redone' : 'Undone'}: ${changedWords(result, 'nothing needed putting back')}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`,
+    act: undoneBy ? { label: redo ? 'Undo switch' : 'Redo switch', id: 'outcome-undo', run: () => void restoreEvent(undoneBy) } : undefined };
 }
 
 /** Switches to a profile (null: No profile). The band says what changed, with Undo; the menu bar follows. */
@@ -589,7 +604,12 @@ export const switchToProfile = (id: string | null) => busy('Switching profile…
   switchOutcome(result);
 });
 // A switch from the menu bar: its result and Undo are on the page the next time the window shows.
-api().onProfileSwitched(result => { switchOutcome(result); rerender(); });
+api().onProfileSwitched(async result => {
+  switchOutcome(result);
+  // History lists the new switch at once when it is the page open (it reads History only when opened).
+  if (state.page === 'history') state.history = await api().history();
+  rerender();
+});
 
 /**
  * Saves a profile: only the fields given change. A new or restored profile opens (a new one with its name field ready to type); an

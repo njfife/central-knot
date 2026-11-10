@@ -5,8 +5,8 @@
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)
 //   Pi           mcp.json       "mcpServers": { "<name>": { "enabled": false } }    (1.5.0: `pi mcp list` shows it disabled)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
-import { join } from 'node:path';
-import { configRoot, harnesses } from './harnesses.ts';
+import { harnesses } from './harnesses.ts';
+import { mcpFile } from './mcp.ts';
 import type { ShareContext } from './share.ts';
 import { list, parseJson, readSettingsFile, switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
@@ -14,11 +14,10 @@ import type { HarnessId } from './types.ts';
 
 /**
  * The file that holds a tool's MCP switches: Claude Code's and Copilot's settings.json (beside their skill switches), Codex's
- * config.toml and Pi's mcp.json (each server's own entry). Pi's must be the file mcp.ts's mcpFile reads; it is spelled out here
- * because mcp.ts imports this file.
+ * config.toml (beside its skill switches, and its servers) and Pi's mcp.json (each server's own entry).
  */
 export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
-  return tool === 'pi-cli' ? join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'mcp.json') : switchPath(context, tool);
+  return tool === 'pi-cli' ? mcpFile(context, tool) : switchPath(context, tool);
 }
 
 /** Each tool's MCP switch file as read ('' when there is none yet), or why it can't be used. */

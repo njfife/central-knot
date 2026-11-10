@@ -48,12 +48,23 @@ export function changedSince(history: HistoryEvent[], past: HistoryEvent): (flip
   return flip => touched.has(`${flip.item}|${flip.tool}`);
 }
 
+/** Whether a profile event changed which profile is in use: an Apply (the same profile again) did not. */
+export const changedProfile = (event: HistoryEvent) => event.kind === 'profile' && !!event.profile && (event.profile.from ?? '') !== (event.profile.to ?? '');
+
 /**
  * Whether `past` chose the profile in use: it is the latest switch still standing that changed which profile is in use. An Apply,
  * or an undo of an older switch, changes switches but not the profile, so it chooses nothing; a switch and its undo cancel out.
  */
-export const choseProfileInUse = (history: HistoryEvent[], past: HistoryEvent) =>
-  [...standing(history, past)].reverse().find(entry => entry.kind === 'profile' && entry.profile && (entry.profile.from ?? '') !== (entry.profile.to ?? ''))?.id === past.id;
+export const choseProfileInUse = (history: HistoryEvent[], past: HistoryEvent) => [...standing(history, past)].reverse().find(changedProfile)?.id === past.id;
+
+/**
+ * The switch `event` made again, when it is a redo: it undid an undo, so it redoes what that undo reversed. Undefined for a switch
+ * or a plain undo.
+ */
+export function redoneSwitch(history: HistoryEvent[], event: HistoryEvent): HistoryEvent | undefined {
+  const undid = history.find(other => other.undoneBy === event.id);
+  return undid && history.find(other => other.undoneBy === undid.id);
+}
 
 export type ItemKind = 'skill' | 'mcp';
 export const itemId = (kind: ItemKind, key: string) => `${kind}:${key}`;
@@ -109,7 +120,7 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
   const flips: ProfileFlip[] = [];
   const blocked: SwitchPlan['blocked'] = [];
   // An item that isn't here right now (an unreadable folder, a tool not found this time) keeps what it holds, until No profile:
-  // that lets go of everything it can't check, so a hold on something deleted for good doesn't keep profiles in play forever.
+  // that lets go of holds on what isn't here, so a hold on something deleted for good doesn't keep profiles in play forever.
   const next: Record<string, HarnessId[]> = profile ? Object.fromEntries(Object.entries(offByProfile).filter(([id]) => !items.some(item => item.id === id))) : {};
   for (const item of items) {
     const before = offByProfile[item.id] ?? [];
@@ -140,11 +151,36 @@ export function planSwitch(items: SwitchItem[], profile: Pick<Profile, 'items'> 
 /** Each item's tools turned off by hand (off, and not turned off by a profile). */
 export const offByHand = (item: SwitchItem, offByProfile: Record<string, HarnessId[]>) => (Object.entries(item.tools) as [HarnessId, 'on' | 'off'][]).filter(([tool, now]) => now === 'off' && !offByProfile[item.id]?.includes(tool)).map(([tool]) => tool);
 
-/** `offByProfile` with some switches taken over: profiles no longer hold each item's listed tools (an explicit Disable or Enable elsewhere). */
-export function releaseHolds(offByProfile: Record<string, HarnessId[]>, released: { item: string; tool: HarnessId }[]): Record<string, HarnessId[]> {
-  const next = Object.fromEntries(Object.entries(offByProfile).map(([id, tools]) => [id, tools.filter(tool => !released.some(entry => entry.item === id && entry.tool === tool))]));
-  return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.length));
+/**
+ * `offByProfile` changed by flips that were made: a switch turned off is held from now on, one turned back on is let go. A flip
+ * that failed changes nothing, so its switch stays held (or not) as it was.
+ */
+export function offAfterFlips(offByProfile: Record<string, HarnessId[]>, done: Pick<ProfileFlip, 'item' | 'tool' | 'disabled'>[]): Record<string, HarnessId[]> {
+  const next = Object.fromEntries(Object.entries(offByProfile).map(([id, tools]) => [id, new Set(tools)]));
+  for (const flip of done) {
+    const tools = (next[flip.item] ??= new Set());
+    if (flip.disabled) tools.add(flip.tool); else tools.delete(flip.tool);
+  }
+  return Object.fromEntries(Object.entries(next).filter(([, tools]) => tools.size).map(([id, tools]) => [id, [...tools]]));
 }
+
+/**
+ * The plan's holds, which assume every flip was made, corrected for the flips that failed and left their switch as it was: a
+ * failed turn-off isn't held, and a failed turn-on is still held. Taking a failed flip back out of the plan is the same as making
+ * its opposite, so each one is applied reversed.
+ */
+export const offAfterFailures = (planned: Record<string, HarnessId[]>, failed: ProfileFlip[]) => offAfterFlips(planned, failed.map(flip => ({ ...flip, disabled: !flip.disabled })));
+
+/** `offByProfile` with some switches taken over (an explicit Disable or Enable, or found on again): profiles no longer hold them. */
+export const releaseHolds = (offByProfile: Record<string, HarnessId[]>, released: Pick<ProfileFlip, 'item' | 'tool'>[]) => offAfterFlips(offByProfile, released.map(entry => ({ ...entry, disabled: false })));
+
+/**
+ * Holds on what is here, as No profile keeps them: an item or a tool's copy that is gone lets go, a tool whose switch can't be
+ * read keeps its hold until it can be checked.
+ */
+export const holdsOnWhatIsHere = (offByProfile: Record<string, HarnessId[]>, items: SwitchItem[]) => Object.fromEntries(Object.entries(offByProfile)
+  .map(([id, tools]) => { const item = items.find(entry => entry.id === id); return [id, item ? tools.filter(tool => item.tools[tool] || item.blocked[tool]) : []] as const; })
+  .filter(([, tools]) => tools.length));
 
 /** How many items flips turn off and back on. An item flipped in several tools counts once. */
 export function flipCounts(flips: ProfileFlip[]): { off: number; on: number } {

@@ -7,11 +7,11 @@ import { discover } from '../src/discovery.ts';
 import { applyChanges, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp } from '../src/mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
-import { choseProfileInUse, itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
-import { deleteProfile, offAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
+import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, switchItems, type SwitchItem } from '../src/profileplan.ts';
+import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { switchState, targetOf } from '../src/skillswitch.ts';
-import type { HarnessId, HistoryEvent } from '../src/types.ts';
+import type { HarnessId, HistoryEvent, SkillFacts } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
   const before: Record<HarnessId, string> = {
@@ -62,6 +62,10 @@ test('A switch turns off what the profile leaves out, and back on only what a pr
   const none = planSwitch(items, undefined, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli'] });
   assert.deepEqual(none.flips.map(flip => `${flip.item} ${flip.tool} ${flip.disabled ? 'off' : 'on'}`), ['skill:pager claude-cli on']);
   assert.deepEqual(none.offByProfile, {});
+  // What the home reads becomes items: a tool whose switch can't be read counts as on, and a server that belongs to an app is left out.
+  const facts = (key: string, extra: object) => ({ key, name: key, description: '', copies: { 'claude-cli': {}, 'codex-cli': {} }, ...extra }) as unknown as SkillFacts;
+  const read = switchItems({ skills: [facts('dev', { disabled: ['claude-cli', 'codex-cli'], switchProblem: { 'codex-cli': 'unreadable' } })] }, { servers: [facts('app', { held: 'ChatGPT' })] });
+  assert.deepEqual(read.map(entry => [entry.id, entry.tools]), [['skill:dev', { 'claude-cli': 'off', 'codex-cli': 'on' }]]);
 });
 
 test('A flip that failed leaves its switch held or not, as it was', () => {
@@ -81,6 +85,8 @@ test('A hold is kept while its tool can’t be read; one on a tool with no copy 
   const held = { 'skill:pager': ['claude-cli', 'codex-cli'] as HarnessId[] };
   assert.deepEqual(planSwitch(pager, { items: ['skill:pager'] }, held).offByProfile, held);
   assert.deepEqual(planSwitch(pager, undefined, held).offByProfile, { 'skill:pager': ['claude-cli'] });
+  // The same holds are left when an Undo lands on No profile; an item gone for good lets go too.
+  assert.deepEqual(holdsOnWhatIsHere({ ...held, 'skill:gone': ['claude-cli'] }, pager), { 'skill:pager': ['claude-cli'] });
 });
 
 async function sandbox() {

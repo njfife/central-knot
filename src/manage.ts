@@ -155,7 +155,8 @@ const rootOf = (context: ShareContext, tool: HarnessId) => writeRoot(harnesses[t
 interface Seen { verifiedAt?: number; changed?: string; firstSeen?: number; missingSince?: number }
 const evidence = new Map<string, Seen>();
 const mark = (directory: string) => { let seen = evidence.get(directory); if (!seen) { seen = {}; evidence.set(directory, seen); } return seen; };
-const clock = (context: ShareContext) => context.now?.() ?? Date.now();
+/** Now, as this home's context tells it (tests set it). */
+export const clock = (context: ShareContext) => context.now?.() ?? Date.now();
 
 /** The fixed tie-break when order is unknown (D-04): each location ranks by its highest-ordered reader in SPEC §5.1, then by path. */
 const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3 };

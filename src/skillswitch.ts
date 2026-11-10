@@ -55,6 +55,7 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
 /**
  * Reads a settings file a switch lives in (skills' here, MCP servers' in mcpswitch.ts): '' when there is none yet. A file that
  * can't be read, or that `check` throws on (not the tool's format), comes with a problem ending in `consequence`, and is never written.
+ * Only the skill check throws CK_FORM (skill rules in a form not edited here); the MCP check fails only on a file that doesn't parse.
  */
 export async function readSettingsFile(path: string, check: (text: string) => void, consequence: string): Promise<SwitchFile> {
   let text: string;
