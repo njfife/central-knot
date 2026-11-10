@@ -77,9 +77,9 @@ test('what the Update button says at each step', () => {
   assert.equal(label({ step: 'installing' }), 'Preparing update…');
   assert.equal(label({ step: 'ready' }), 'Restart to update');
   assert.equal(label({ step: 'ready' }, { restarting: true }), 'Restarting…');
-  const held = updateButton({ ...base, step: 'ready' }, { held: 'Your instructions draft isn’t saved, and restarting now loses it.' })!;
+  const held = updateButton({ ...base, step: 'ready' }, { held: 'Restarting now loses your unsaved instructions draft.' })!;
   assert.deepEqual([held.label, held.busy], ['Restart to update', false]);
-  assert.match(held.title, /draft isn’t saved/, 'the button says why it waits');
+  assert.match(held.title, /loses your unsaved instructions draft\. Click to restart anyway\.$/, 'the button says what restarting loses');
   assert.equal(updateButton({ ...base, step: 'downloading' })!.busy, true);
   assert.equal(label({ failed: 'The download didn’t finish.' }), 'Update to 0.5.0 preview 5', 'after a failure it can be tried again');
 });
@@ -89,7 +89,7 @@ test('what the Settings row says about the last check or update', () => {
   assert.equal(updateStatus(base), undefined, 'before the first check');
   assert.equal(updateStatus({ ...base, checking: true })?.text, 'Checking for updates…');
   assert.equal(updateStatus({ ...base, checked: { at: 1 } })?.text, 'Up to date.');
-  assert.equal(updateStatus({ ...base, checked: { at: 1 }, available: { tag: 'v0.5.0-preview.5', zip: '', size: 1, page: '' } })?.text, '0.5.0 preview 5 is available.');
+  assert.equal(updateStatus({ ...base, checked: { at: 1 }, available: { tag: 'v0.5.0-preview.5', zip: '', size: 1, page: '' } })?.text, '0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.');
   assert.equal(updateStatus({ ...base, checked: { at: 1, failed: 'Couldn’t check.' } })?.tone, 'failure');
   assert.equal(updateStatus({ ...base, checked: { at: 2, failed: 'Couldn’t check.' }, available: { tag: 'v0.5.0-preview.5', zip: '', size: 1, page: '' } })?.text, 'Couldn’t check.', 'the newest check failing is said');
   assert.equal(updateStatus({ ...base, failed: 'The download didn’t finish.', checked: { at: 1 } })?.text, 'The download didn’t finish.');

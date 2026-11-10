@@ -241,6 +241,11 @@ ul { list-style: none; }
 .status-update:hover:not(:disabled) { background: var(--hover); }
 .status-update:disabled { cursor: default; color: var(--ink-soft); border-color: var(--line); }
 #said-link { flex: none; margin-left: 4px; padding: 0 4px; line-height: 16px; }
+/* A narrow status bar: the version alone, the Update button's short label (its tooltip has it all), and no link where the message is only its mark. */
+.update-short { display: none; }
+@container status (width < 1000px) { .status-name { display: none; } .update-long { display: none; } .update-short { display: inline; } }
+@container message (width < 160px) { #said-link { display: none; } }
+#setting-update { font-variant-numeric: tabular-nums; }
 .sync-switch { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
 .sync-switch:hover { background: var(--hover); }
 .sync-switch:hover .sync-label, .sync-switch:focus-visible .sync-label { color: var(--ink); }

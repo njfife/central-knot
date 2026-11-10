@@ -6,7 +6,7 @@ import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
-import { checkNow, updateControl, updates } from './updateview.ts';
+import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -301,10 +301,12 @@ function updatesRow(): HTMLElement | null {
   const view = updates.view;
   if (!view?.shown) return null;
   const checks = !!view.tag && view.reason?.key !== 'dev' && view.reason?.key !== 'untagged';
-  const hint = `Central Knot ${buildWords(view)}${view.tag ? `, from release ${view.tag}` : ''}.${checks ? ' Checks GitHub for a newer release every few hours.' : ''}`;
-  const status = updateStatus(view);
+  const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every few hours.' : ''}`;
+  // A restart held for unsaved work says so here too, not only on the button.
+  const held = view.step === 'ready' && view.available ? unsavedWork() : undefined;
+  const status = held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const } : updateStatus(view);
   const page = view.available?.page;
-  const notice: RowMessage | undefined = status && { ...status, action: page && !view.reason ? { label: 'Release notes', run: () => void window.centralKnot.openExternal(page) } : undefined };
+  const notice: RowMessage | undefined = status && { ...status, action: page && !view.reason ? { label: status.tone === 'failure' ? 'Open the release page' : 'Release notes', run: () => void window.centralKnot.openExternal(page) } : undefined };
   const why = view.reason && messageLine({ text: view.reason.text, tone: 'attention', action: { label: page ? `Open ${tagWords(view.available!.tag)}’s page` : 'Open the releases page', run: () => void window.centralKnot.openExternal(page ?? releasesPage) } },
     { id: 'setting-updates-reason', announce: false });
   return settingRow('updates', 'Updates', hint,

@@ -16,10 +16,10 @@ let saidUpdated = false;
 
 /** Why restarting now would lose something typed or chosen, or nothing. Read when it matters: typing doesn't redraw the page. */
 export function unsavedWork(): string | undefined {
-  if (toolDraftTyped()) return 'Your instructions draft isn’t saved, and restarting now loses it.';
-  if (baseDraftTyped()) return 'Your base instructions draft isn’t saved, and restarting now loses it.';
+  if (toolDraftTyped()) return 'Restarting now loses your unsaved instructions draft.';
+  if (baseDraftTyped()) return 'Restarting now loses your unsaved base instructions draft.';
   const waiting = changesWaiting() + market.draft.size;
-  if (waiting) return `${plural(waiting, 'change')} ${waiting === 1 ? 'waits' : 'wait'} for Apply all, and restarting now loses ${waiting === 1 ? 'it' : 'them'}.`;
+  if (waiting) return `Restarting now loses ${plural(waiting, 'change')} waiting for Apply all.`;
   return undefined;
 }
 
@@ -44,7 +44,8 @@ export function takeUpdates(view: UpdateView) {
   if (view.failed && view.failed !== before?.failed) { announce(view.failed); updates.restarting = false; }
   if (view.step === 'ready' && before?.step !== 'ready') {
     const held = unsavedWork();
-    if (held) announce(`The update is ready. ${held}`);
+    // What would be lost comes first: the status bar drops a message's later sentences when they don't fit.
+    if (held) announce(`${held} The update is ready when you are.`);
     else restart();
   }
   if (before?.step === 'downloading' && view.step === 'downloading') { paintProgress(); return; }
@@ -61,7 +62,12 @@ export async function checkNow() {
 }
 
 /** Starts the update: main downloads and prepares it and reports each step. */
-export const startUpdate = () => void window.centralKnot.installUpdate().then(takeUpdates, () => announce('Couldn’t start the update. Try again.'));
+export function startUpdate() {
+  const next = updates.view?.available;
+  // Said at the click, for anyone who can't see the button's tooltip: the app is going to restart.
+  if (next) announce(`Downloading ${tagWords(next.tag)}. Central Knot restarts when it’s ready.`);
+  void window.centralKnot.installUpdate().then(takeUpdates, () => announce('Couldn’t start the update. Try again.'));
+}
 
 /** What the Update button says now, with the reason restarting is held, if it is. */
 export const buttonNow = (view = updates.view) => (view ? updateButton(view, { held: view.step === 'ready' ? unsavedWork() : undefined, restarting: updates.restarting }) : undefined);
@@ -72,7 +78,9 @@ export function updateControl(id: string, variant: 'status' | 'setting') {
   if (!shown) return null;
   const run = updates.view?.step === 'ready' ? restart : startUpdate;
   return h(`button${variant === 'status' ? '.status-update' : '.btn.primary.small'}`, { type: 'button', id, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: run },
-    variant === 'status' ? icon(shown.busy ? 'clock' : 'circle-arrow-down', 14) : null, h('span.btn-label', {}, shown.label));
+    variant === 'status' ? icon(shown.busy ? 'clock' : shown.held ? 'triangle-alert' : 'circle-arrow-down', 14, shown.held ? 'tone-warning' : '') : null,
+    // A narrow status bar shows the short label (style.css); the tooltip has it all.
+    h('span.btn-label', {}, variant === 'status' && shown.short ? [h('span.update-long', {}, shown.label), h('span.update-short', {}, shown.short)] : shown.label));
 }
 
 /** Download progress, painted in place so a redraw never interrupts typing elsewhere on the page. */
@@ -98,9 +106,9 @@ export function statusEnd(version: string): Node[] {
     const words = tagWords(view.available.tag);
     return [h('button.status-update', { type: 'button', id: 'update-available', title: `${words} is available. ${view.reason.text} Open Settings for the release page.`,
       onclick: () => { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); } },
-      icon('circle-arrow-down', 14), h('span.btn-label', {}, 'Update available'))];
+      icon('circle-arrow-down', 14), h('span.btn-label', {}, h('span.update-long', {}, 'Update available'), h('span.update-short', {}, 'Update')))];
   }
-  return [h('span.status-name', {}, 'Central Knot'), document.createTextNode(' '), h('span', { id: 'status-version' }, view ? buildWords(view) : version)];
+  return [h('span.status-name', {}, 'Central Knot '), h('span', { id: 'status-version' }, view ? buildWords(view) : version)];
 }
 
 /** Main tells the page each step of a check or an update; the page asks once when it opens. */

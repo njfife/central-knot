@@ -249,7 +249,7 @@ export function startUpdater(host: UpdaterHost) {
     const pending = host.pending();
     if (pending) {
       if (pending.tag === tag) view.updated = { tag: pending.tag, page: pending.page };
-      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use.`;
+      else view.failed = `The update to ${tagWords(pending.tag)} didn’t finish. Central Knot ${buildWords(view)} is still in use. Try again from the Update button.`;
       await host.savePending(undefined);
     }
     tell();

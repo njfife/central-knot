@@ -69,7 +69,7 @@ const reasons: Record<UpdateReason, string> = {
   unsigned: 'This build isn’t signed by its developer, so it can’t update itself.',
   // The same words as Start at sign-in (signin.ts): a copy run from Downloads, a disk image or a translocated folder.
   applications: 'Move Central Knot to the Applications folder first.',
-  readonly: 'Your account can’t change apps in this Applications folder.',
+  readonly: 'Your account can’t change apps in this Applications folder. Download the new release and replace Central Knot by hand.',
 };
 
 /** Whether updates show at all: there are only Mac releases, so elsewhere nothing about them is shown. */
@@ -98,7 +98,7 @@ export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.t
  * `held`: why the page didn't restart by itself once the update was ready (something typed and not saved); `restarting`: the
  * page has asked main to restart.
  */
-export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean } | undefined {
+export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; short?: string; held?: boolean } | undefined {
   const next = view.available;
   if (!view.shown || !next || view.reason) return undefined;
   const words = tagWords(next.tag);
@@ -109,9 +109,9 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
   if (view.step === 'installing') return { label: 'Preparing update…', title: `Checking and unpacking ${words}.`, busy: true };
   if (view.step === 'ready') {
     if (restarting) return { label: 'Restarting…', title: `Restarting into ${words}.`, busy: true };
-    return { label: 'Restart to update', title: held ? `${words} is ready. ${held}` : `${words} is ready. Click to restart into it.`, busy: false };
+    return { label: 'Restart to update', title: held ? `${words} is ready. ${held} Click to restart anyway.` : `${words} is ready. Click to restart into it.`, busy: false, held: !!held };
   }
-  return { label: `Update to ${words}`, title: `Download ${words} and restart into it. Your settings and data stay as they are.`, busy: false };
+  return { label: `Update to ${words}`, short: 'Update', title: `Downloads ${words}, then restarts Central Knot. Your settings and data stay as they are.`, busy: false };
 }
 
 /** The Settings row's line about the last check or update, or nothing before the first check. */
@@ -125,7 +125,7 @@ export function updateStatus(view: UpdateView): { text: string; tone: 'done' | '
     if (view.step === 'downloading') return { text: `Downloading ${words}… ${Math.floor((view.progress ?? 0) * 100)}%`, tone: 'progress' };
     if (view.step === 'installing') return { text: `Preparing ${words}…`, tone: 'progress' };
     if (view.step === 'ready') return { text: `${words} is ready. It’s installed when Central Knot restarts.`, tone: 'info' };
-    return { text: `${words} is available.`, tone: 'info' };
+    return { text: view.reason ? `${words} is available.` : `${words} is available. Updating downloads it and restarts Central Knot.`, tone: 'info' };
   }
   if (view.checked) return { text: 'Up to date.', tone: 'done' };
   return undefined;

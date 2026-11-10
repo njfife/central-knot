@@ -1665,10 +1665,10 @@ async function updateFlow() {
     same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
     // The first check runs shortly after launch, on its own.
     for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
-    same('after the first check the version becomes the Update button', await a.text('#update-button'), 'Update to 0.5.0 preview 5');
+    same('after the first check the version becomes the Update button', [await a.text('#update-button .update-long'), await a.text('#update-button .update-short')], ['Update to 0.5.0 preview 5', 'Update']);
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
-    check('Settings › Updates names the build and what is available', row.includes('0.5.0 preview 4, from release v0.5.0-preview.4') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
     // Something chosen and not applied holds the restart.
     await a.click('#nav-skills');
     await a.click('#manage-all');
@@ -1680,8 +1680,8 @@ async function updateFlow() {
     same('changes waiting for Apply all hold the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
-    check('the status bar says why', /ready\. .*wait for Apply all/.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
-    check('so does the button', /wait for Apply all/.test(await a.run(`document.querySelector('#update-button').title`)), await a.run(`document.querySelector('#update-button').title`));
+    check('the status bar says what restarting loses, first', /^Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
+    check('so does the button', /waiting for Apply all\. Click to restart anyway\.$/.test(await a.run(`document.querySelector('#update-button').title`)), await a.run(`document.querySelector('#update-button').title`));
     same('no page errors while updating', a.pageErrors, []);
     // Clicking it is the person's choice: the app restarts (here: quits, the stub's install).
     const exited = new Promise(done => a.child.once('exit', done));
@@ -1714,7 +1714,7 @@ async function updateFlow() {
     await a.click('#update-button');
     for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
     check('an interrupted download is said, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.'), await a.text('#setting-updates'));
-    same('and the button offers it again', (await a.text('#update-button'))?.trim(), 'Update to 0.5.0 preview 6');
+    same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
     await a.quit();
     // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
