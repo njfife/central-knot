@@ -1,6 +1,6 @@
 // Plugins: the page's state and actions. Marketplaces, what is chosen, what the last Apply all did, and where the person
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
-import { announce, busy, rerender, state as app } from './app.ts';
+import { announce, busy, readQuietly, rerender, state as app } from './app.ts';
 import { plural } from './model.ts';
 import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
 import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
@@ -129,16 +129,19 @@ export function browse(patch: Partial<typeof market.nav>): void {
 
 /** Reads every marketplace and install; `fresh` (Refresh all) fetches each Git marketplace again. */
 export const loadPlugins = (fresh = false, quiet = false): Promise<void> => {
-  const read = async () => {
-    const view = await api().plugins(fresh);
+  const show = (view: PluginsView | null) => {
     market.problem = undefined;
     // Refresh all reads everything again; a folder marketplace is read from disk every time, so what was read from it may have changed.
     if (fresh) { market.readmes.clear(); market.details.clear(); }
     else for (const entry of view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
     showView(view, { replace: true });
   };
-  // In the background (a tool appeared or went away), without the busy state, so the page's result stays.
-  return quiet ? read().then(rerender, () => undefined) : act('reading', read);
+  if (!quiet) return act('reading', async () => show(await api().plugins(fresh)));
+  // In the background (a tool appeared or went away, or another home opened): the page says it is reading, without the
+  // app-wide busy state, so the page's result stays.
+  market.activity = 'reading';
+  rerender();
+  return readQuietly(() => api().plugins(fresh), show, 'Marketplaces').finally(() => { market.activity = undefined; rerender(); });
 };
 
 /** Runs an action with the page saying what it is doing. */

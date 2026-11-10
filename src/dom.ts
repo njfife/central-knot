@@ -177,18 +177,19 @@ export function fitBars(): void {
 
 /**
  * Cards side by side: the grid knows how many it holds (data-count), so style.css chooses the columns from the count and
- * the width; an odd last card keeps one column's width.
+ * the width, and no cell is left empty.
  */
 export const cardGrid = (cards: Node[]): HTMLElement => h('div.card-grid', { 'data-count': String(cards.length) }, cards);
 
 /**
- * Sets a table's tool column count: --tool-count through the style object (the page's security policy refuses inline
- * style attributes) for its grid, and data-tools for the narrow steps that depend on it (style.css).
+ * Tells an element laid out in tool columns (a table, a plugin's "Your tools") how many tools it has: --tool-count for its
+ * grid, set through the style object (the page's security policy refuses inline style attributes), and data-tools for
+ * the CSS steps that depend on it. Returns the element.
  */
-export function withToolCount(table: HTMLElement, count: number): HTMLElement {
-  table.style.setProperty('--tool-count', String(count));
-  table.dataset.tools = String(count);
-  return table;
+export function withToolCount(element: HTMLElement, count: number): HTMLElement {
+  element.style.setProperty('--tool-count', String(count));
+  element.dataset.tools = String(count);
+  return element;
 }
 
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */

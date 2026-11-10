@@ -79,9 +79,9 @@ test('a tool that appears gets the managed copies; when it disappears again, not
   } finally { await box.cleanup(); }
 });
 
-test('a kind no tool in the home can hold is absent; a home with no tools keeps every kind', () => {
-  assert.deepEqual(absentKinds(['pi-cli'], ['pi-cli'], []), ['agents', 'plugins']);
-  assert.deepEqual(absentKinds(['pi-cli', 'claude-cli'], ['pi-cli', 'claude-cli'], ['claude-cli']), []);
-  assert.deepEqual(absentKinds(['codex-cli'], [], ['codex-cli']), ['mcp']);
-  assert.deepEqual(absentKinds([], [], []), []);
+test('a kind no tool in the home can hold is absent; a home with no tools holds none', () => {
+  assert.deepEqual(absentKinds(['pi-cli'], ['pi-cli'], [], []), ['agents', 'plugins']);
+  assert.deepEqual(absentKinds(['pi-cli', 'claude-cli'], ['pi-cli', 'claude-cli'], ['claude-cli'], ['claude-cli']), []);
+  assert.deepEqual(absentKinds(['codex-cli'], [], ['codex-cli'], ['codex-cli']), ['mcp']);
+  assert.deepEqual(absentKinds([], [], [], []), ['skills', 'mcp', 'agents', 'instructions', 'plugins']);
 });

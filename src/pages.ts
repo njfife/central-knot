@@ -3,14 +3,13 @@ import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, isPresent } from './presence.ts';
+import { absentTools, isPresent, kindNames } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
-import { andList, orList } from './words.ts';
+import { andList, noToolsSentence, orList } from './words.ts';
 
 // ---------- Overview ----------
 
 const reading = () => h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
-/** Nothing of this kind in this home: what was looked for, and somewhere useful to go next. */
 /** The preview-only reason without its own "Preview only:" prefix or final stop, to sit inside a sentence. */
 export const previewReason = (reason?: string) => (reason ?? 'nothing is written here').replace(/^Preview only:\s*/i, '').replace(/\s*You can look around; nothing is written\.?\s*$/, '').replace(/\.\s*$/, '');
 
@@ -24,12 +23,15 @@ const emptyBands = () => {
 /** Opens another home: a folder chosen now (the Practice copy and this computer's home are in the sidebar too). */
 const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'folder-open', label: 'Choose another home…', id, onclick: () => void loadHome('custom') });
 
+/** A home with no tools, wherever it shows: one sentence, `more` if a page has more to say, and the way to another home. */
+export const noToolsState = (id: string, more?: string) => emptyState('boxes', noToolsSentence, more, chooseHomeButton(id));
+
 /** An empty page: what is missing and the way forward. In a home with no tools at all, that is another home. */
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {
-  const noTools = !homeTools().length;
-  return h('div.page', {}, emptyBands(), emptyState(glyph, noTools ? 'No tools were found in this home' : title, noTools ? 'Open another home, or install a tool and click Refresh.' : body,
+  if (!homeTools().length) return h('div.page', {}, emptyBands(), noToolsState(`${id}-choose-home`));
+  return h('div.page', {}, emptyBands(), emptyState(glyph, title, body,
     h('div.empty-actions', {},
-      noTools ? chooseHomeButton(`${id}-choose-home`) : button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
+      button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('tools') }),
       state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 };
 /**
@@ -48,7 +50,7 @@ const noSkills = (id: string) => nothingHere('wand-sparkles', 'No skills here ye
  */
 function leadSentence(home: HomeView): string {
   const tools = homeTools();
-  if (!tools.length) return 'No tools were found in this home.';
+  if (!tools.length) return noToolsSentence;
   const named = andList(tools.map(toolName));
   const kinds: [string, HarnessId[]][] = [['skills', tools], ['MCP servers', home.mcp.tools], ['agents', home.agents.tools]];
   const held = kinds.filter(([, holders]) => holders.length);
@@ -81,7 +83,7 @@ function practiceBanner() {
     button({ variant: 'ghost', size: 'small', icon: 'x', name: 'Hide this note', id: 'intro-dismiss', onclick: () => { setPracticeNote(false); rerender(); } }));
 }
 
-/** One card per kind: how many, how many are managed, and the one thing that needs attention, if any. */
+/** What a kind card needs from one item: whether it is managed, has edits waiting or differs, and which tools hold a copy. */
 interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown> }
 
 /**
@@ -100,16 +102,16 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
         : managed ? { tone: 'tone-success', glyph: 'check' as const, text: 'All in sync', title: 'Every managed one is the same in every tool it syncs to' }
           : undefined;
   const status = !attention ? null : differs
-    ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: (event: Event) => { event.stopPropagation(); showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
+    ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
     : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
   const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length;
   const tools = holders.map(tool => {
     const count = countFor(tool);
-    return h('span.kind-tool', { title: `${toolName(tool)} has ${plural(count, noun[0], noun[1])}` }, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));
+    return h('span.kind-tool', {}, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));
   });
-  // The whole card opens the page; its heading is the button a keyboard reaches.
-  return h('div.kind-card', { onclick: () => showPage(page) },
-    h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: (event: Event) => { event.stopPropagation(); showPage(page); } },
+  // The heading is the card's one button; its click area stretches over the whole card (style.css), under the differs link.
+  return h('div.kind-card', {},
+    h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
     h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`),
       status ? [h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status] : null),
@@ -135,7 +137,7 @@ export function overviewPage() {
   const pick = (list: typeof home.manage.skills): KindFact[] => list.map(fact => ({ managed: fact.managed, edited: fact.edited, differs: !fact.managed && differs(fact), copies: fact.copies }));
   // Kinds no tool here can hold have no card (app.ts absentKinds); they are named once, below.
   const absent = absentKinds();
-  const absentNames = absent.map(kind => (kind === 'mcp' ? 'MCP servers' : kind));
+  const noTools = !homeTools().length;
   const nothingManaged = ![...home.manage.skills, ...home.mcp.servers, ...(home.agents?.servers ?? [])].some(fact => fact.managed);
   const done = outcomeBand();
   return h('div.page', {},
@@ -146,12 +148,12 @@ export function overviewPage() {
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
       // A home with no tools has nothing to count: the way forward is another home.
-      !homeTools().length ? h('div.overview-actions', {}, chooseHomeButton('overview-choose-home')) : h('div.kind-cards', {},
+      noTools ? h('div.overview-actions', {}, chooseHomeButton('overview-choose-home')) : h('div.kind-cards', {},
         kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills), homeTools()),
         absent.includes('mcp') ? null : kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
         absent.includes('agents') ? null : kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []), home.agents.tools)),
       h('div.overview-more', {},
-        absent.length ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absentNames)}.`) : null,
+        absent.length && !noTools ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
         // Green only once something syncs; before that, sync is on and waiting, in the status bar's grey.
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
@@ -159,9 +161,9 @@ export function overviewPage() {
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
         nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in ${trayPlace}. Turn sync off${machine.signIn ? ', set it to start at sign-in,' : ''} or quit from there.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
-        // The two pages the cards don't cover, named once so a newcomer knows what they are.
-        // Plugins only where a tool here installs them.
-        h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
+        // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
+        // installs them, and neither in a home with no tools.
+        noTools ? null : h('p.overview-line', {}, icon('info', 14, 'tone-muted'), 'Also here: ', button({ variant: 'link', size: 'micro', label: 'Instructions', id: 'overview-instructions', onclick: () => showPage('instructions') }), ' (each tool’s own instruction file)',
           ...(!absent.includes('plugins') ? [' and ', button({ variant: 'link', size: 'micro', label: 'Plugins', id: 'overview-plugins', onclick: () => showPage('plugins') }), ' (install from a marketplace)'] : []), '.'))));
 }
 
@@ -331,6 +333,5 @@ export function toolsPage() {
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
     present.length ? [cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home, absent)]
-      : emptyState('boxes', home.mode === 'actual' ? `No tools found on ${thisMachine}` : 'No tool folders here',
-        home.mode === 'actual' ? notFoundText(absent) : `No tool folders were found in ${home.label}. Choose another home at the bottom left.`)));
+      : noToolsState('tools-choose-home', home.mode === 'actual' ? notFoundText(absent) : undefined)));
 }

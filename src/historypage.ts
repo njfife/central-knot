@@ -90,8 +90,10 @@ export function historyPage() {
     const fresh = index === 0 && Date.now() - Date.parse(event.at) < 8000;
     return [heading, h(`li.history-row${event.undoneBy ? '.history-undone' : ''}${fresh ? '.row-flash' : ''}`, { 'data-kind': event.kind },
       h('span.history-when', { title: new Date(event.at).toLocaleString() }, time(event.at)),
-      // The summary wraps in its own column; the actions keep a column of their own at the right, the same on every row.
-      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item), h('span', {}, about.text)),
+      // What changed, then what happened, wrapping in the flexible column; the actions keep a column of their own at the
+      // right, the same on every row. Narrow, what happened takes a line of its own beneath (style.css).
+      h('span.history-what', {}, icon(about.glyph, 14, 'tone-muted'), h('span.history-kind', {}, kindOf(event.key)), h('strong', { title: event.item }, event.item)),
+      h('span.history-about', {}, about.text),
       event.undoneBy ? h('span.history-actions', {}, h('span.history-done', {}, 'Undone'))
         : h('span.history-actions', {}, event.kind === 'edit' || event.kind === 'conflict' ? seeChangeLink(event.id, event.key, true) : null, actions(event, about.action)),
       changePanel(event.id))];

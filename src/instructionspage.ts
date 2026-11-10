@@ -1,10 +1,11 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { announce, draftFile, draftUnsaved, loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { announce, machine, draftFile, draftUnsaved, loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
-import { button, cardGrid, emptyState, h, icon, pathText } from './dom.ts';
+import { button, cardGrid, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
+import { noToolsState } from './pages.ts';
 import type { InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
@@ -28,7 +29,7 @@ const ago = (at: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
 
-const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+const keys = `Esc to cancel · ${machine.modifierKey}+Enter to review`;
 
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
@@ -182,5 +183,5 @@ export function instructionsPage() {
   return h('div.page', {}, done || preview || orphan ? h('div.bands', {}, orphan, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? cardGrid(files.map(card)) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
+      files.length ? cardGrid(files.map(card)) : noToolsState('instructions-choose-home')));
 }

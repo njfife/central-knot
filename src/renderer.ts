@@ -4,6 +4,7 @@ import packageInfo from '../package.json' with { type: 'json' };
 import { absentKinds, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
+import type { HomeKind } from './presence.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
@@ -65,21 +66,22 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 function renderSidebar() {
   const home = state.home;
   // A kind no tool here can hold has no row (app.ts absentKinds).
-  const absent = absentKinds() as Page[];
-  const row = (page: Page, ...rest: [string, IconName, number?]) => (absent.includes(page) ? null : navRow(page, ...rest));
+  const absent = absentKinds();
+  const row = (page: HomeKind, ...rest: [string, IconName, number?]) => (absent.includes(page) ? null : navRow(page, ...rest));
   region('nav').replaceChildren(...[
     navRow('overview', 'Overview', 'layout-grid'),
-    navRow('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
+    row('skills', 'Skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
     row('mcp', 'MCP servers', 'plug', designMode ? undefined : home?.mcp.servers.length),
     row('agents', 'Agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
-    navRow('instructions', 'Instructions', 'pencil-line'),
+    row('instructions', 'Instructions', 'pencil-line'),
     row('plugins', 'Plugins', 'puzzle'),
-    h('div.nav-divider', { role: 'separator' }),
+    absent.length < 5 ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
-  // This computer's home first: it is where a released app works. Only dev builds have the Practice copy.
+  // The homes: the Practice copy where this build offers it (dev builds and tests; a released build doesn't), then this
+  // computer's home, then a folder.
   region('homes').replaceChildren(...[
     h('p.homes-title', {}, 'Home'),
     state.home?.practice ? homeRow('fixture', 'Practice copy', 'flask-conical') : null,
@@ -148,7 +150,6 @@ function renderStatus() {
     home ? syncSwitch(home) : '',
   );
   region('status-version').textContent = packageInfo.version;
-  region('message-mark').replaceChildren(icon('info', 14));
   paintStatusMessage();
 }
 
@@ -169,6 +170,8 @@ function render() {
 }
 
 setRenderer(render);
+// The status bar's mark for a message too narrow to show (app.ts paintStatusMessage): drawn once.
+region('message-mark').replaceChildren(icon('info', 14));
 
 // The width a scroll area's scrollbar takes (0 for overlay scrollbars): padded scroll areas give it back from their
 // right padding (style.css --scrollbar), so their content ends where the header's and the tables' do.

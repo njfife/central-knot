@@ -19,20 +19,23 @@ export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cl
 /** Whether a tool (or a value from the page) is one that installs plugins. */
 export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.some(entry => entry === tool);
 
-/** A kind of item that only some tools hold. Skills and instruction files are in every tool. */
-export type OptionalKind = 'mcp' | 'agents' | 'plugins';
+/** A kind of item a home's tools hold, each with its own page. Every tool holds skills and an instruction file. */
+export type HomeKind = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins';
+
+/** Each kind as a sentence names it. */
+export const kindNames: Record<HomeKind, string> = { skills: 'skills', mcp: 'MCP servers', agents: 'agents', instructions: 'instruction files', plugins: 'plugins' };
 
 /**
- * The kinds no tool in this home can hold, given its tools and the tools among them that hold MCP servers and agents:
- * pages and wording leave them out, since what doesn't exist here shouldn't show as an option. A home with no tools at all
- * keeps every kind, each page saying so.
+ * The kinds no tool in this home can hold, given its tools and those among them that hold MCP servers, agents and
+ * plugins: pages and wording leave them out, since what doesn't exist here shouldn't show as an option. A home with no
+ * tools at all holds none of them.
  */
-export function absentKinds(tools: HarnessId[], mcpTools: HarnessId[], agentTools: HarnessId[]): OptionalKind[] {
-  if (!tools.length) return [];
-  const absent: OptionalKind[] = [];
+export function absentKinds(tools: HarnessId[], mcpTools: HarnessId[], agentTools: HarnessId[], pluginTools: HarnessId[]): HomeKind[] {
+  if (!tools.length) return ['skills', 'mcp', 'agents', 'instructions', 'plugins'];
+  const absent: HomeKind[] = [];
   if (!mcpTools.length) absent.push('mcp');
   if (!agentTools.length) absent.push('agents');
-  if (!tools.some(takesPlugins)) absent.push('plugins');
+  if (!pluginTools.length) absent.push('plugins');
   return absent;
 }
 

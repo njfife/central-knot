@@ -185,6 +185,8 @@ async function mainProcess(port) {
     failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the failed-Refresh test needs another way to make a request fail.'); globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
     /** Makes one request from the page take `ms` longer until `restore` runs. */
     slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
+    /** Makes one request's reply reach the page `ms` later (the work itself runs at once), until `restore` runs. */
+    slowReply: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => Promise.resolve(real(...args)).then(value => new Promise(done => setTimeout(() => done(value), ${Number(ms)})))); return true; })()`),
     /** Sends the page a message, as the main process does after a background pass. */
     tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
@@ -530,7 +532,16 @@ async function practiceFlow() {
   same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
   await a.click('#list-standup');
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
-  check('its folders and contents are shown', (await a.text('#detail-scroll .details')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
+  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
+  // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
+  // file's box spanning to meet it.
+  await sizeTo(a, 1728, 1117);
+  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .details .details-paths[open]')); tries++) await wait(50);
+  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .details').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .details .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
+  check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
+  await fullSize(a);
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
   await a.click('#detail-switch-standup');
   check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
@@ -724,6 +735,31 @@ async function practiceFlow() {
     renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
     await a.click('#header-refresh');
     for (let tries = 0; tries < 30 && (await columns()) !== 3; tries++) await wait(100);
+    // Two tool changes told back to back, on Skills (whose columns are the home's tools): the first read sees Codex gone,
+    // and the second change (Codex back) arrives while that read is still on its way. It is owed, and read as soon as the
+    // first ends, so the page ends right.
+    await a.click('#nav-skills');
+    const heads = () => a.all('.tool-head-button', 'e.id');
+    const all = (await heads()).length;
+    check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await wait(300);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await main.tellPage('sync:changed');
+    await main.restore('discovery:refresh');
+    for (let tries = 0; tries < 80 && (await heads()).length !== all - 1; tries++) await wait(50);
+    const between = (await heads()).length;
+    for (let tries = 0; tries < 80 && (await heads()).length !== all; tries++) await wait(100);
+    same('two tool changes told back to back: the first read shows, then the second', [between, (await heads()).length], [all - 1, all]);
+    // Nothing is left owed: a later action's result stays, rather than being wiped by a read that ran late.
+    await wait(2500);
+    await a.click('#header-refresh');
+    const result = await a.text('#announcement');
+    await wait(2500);
+    same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
+    check('that result says what was read', /^Read /.test(result ?? ''), result);
+    await a.click('#nav-plugins');
   }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
@@ -912,10 +948,14 @@ async function fewToolsFlow() {
   mkdirSync(home, { recursive: true });
   const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
   const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
-  same('a home with no tools keeps every page', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
-  same('its Overview says no tools were found, once, with another home to choose', [await a.text('.overview-lead'), await a.exists('#overview-choose-home')], ['No tools were found in this home.', true]);
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'history', 'tools', 'settings']);
+  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
   check('its status bar says no tools were found', /No tools were found/.test(await a.run(`document.querySelector('#announcement').textContent`) ?? ''));
   await fitsAtMinimum(a, 'a home with no tools');
+  await a.click('#nav-tools');
+  const toolsSays = await a.text('.page');
+  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays), toolsSays);
+  await a.click('#nav-overview');
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
@@ -929,6 +969,8 @@ async function fewToolsFlow() {
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   await a.click('#header-refresh');
   same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']]);
+  const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
+  check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
 }

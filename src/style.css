@@ -41,7 +41,6 @@
   --danger: #b91c1c;
   --danger-tint: #fef0f0;
   --warning: #b45309;
-  --warning-tint: #fef7eb;
   --success: #047857;
   --switch-off: #c9c9d0;
   --switch-on: #059669;
@@ -86,7 +85,6 @@
     --danger: #f87171;
     --danger-tint: #2f1313;
     --warning: #fbbf24;
-    --warning-tint: #30220a;
     --success: #34d399;
     --switch-off: rgb(255 255 255 / 18%);
     --switch-on: #10b981;
@@ -192,24 +190,27 @@ ul { list-style: none; }
 .title-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 1px 0 0 10px; padding: 2px 8px; vertical-align: top; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink-soft); font: inherit; font-size: 11.5px; font-weight: 400; line-height: 16px; cursor: pointer; }
 .title-tag:hover { color: var(--ink); border-color: var(--control-line); background: var(--hover); }
 
-#status { height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
+#status { container: status / inline-size; height: 28px; flex: none; display: flex; align-items: center; gap: 26px; padding: 0 16px 0 24px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; line-height: 16px; white-space: nowrap; }
 #status-facts { display: flex; align-items: center; gap: 26px; min-width: 0; flex: 0 1 auto; }
 .status-item { display: flex; align-items: center; gap: 6px; min-width: 0; white-space: pre; }
 .status-home { flex: none; }
 .status-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A message takes the room the facts leave and shortens with an ellipsis; its tooltip has it whole (app.ts announce). */
-#status { container: status / inline-size; }
 /* A narrow status bar gives a fact its short form (renderer.ts writeFact), the full sentence in its tooltip. */
 .fact-short { display: none; }
 @container status (width < 1000px) { .fact-long:has(+ .fact-short) { display: none; } .fact-short { display: inline; } }
-/* The message takes the room the facts leave and shortens with an ellipsis. With too little room for it to mean anything,
-   a small mark stands in, its tooltip the message; the message stays for screen readers (app.ts paintStatusMessage). */
+/*
+ * The message takes the room the facts leave. Its later sentences drop whole when they don't fit (they wrap onto a line
+ * out of sight), and only the first sentence shortens, with an ellipsis; the tooltip has it whole. With too little room
+ * for it to mean anything, a small mark stands in, its tooltip the message; the message stays for screen readers, at no
+ * width (app.ts paintStatusMessage).
+ */
 #status-message { flex: 1 1 0; min-width: 0; display: flex; align-items: center; container: message / inline-size; }
-#announcement { flex: 0 1 auto; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; }
-#announcement[data-quiet="true"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#announcement { flex: 0 1 auto; min-width: 0; height: 16px; margin: 0; overflow: hidden; display: flex; flex-wrap: wrap; }
+.said-first { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.said-rest { flex: none; white-space: pre; }
 #message-mark { display: none; color: var(--ink-soft); }
 @container message (width < 160px) {
-  #announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #announcement { flex: 0 0 0; width: 0; }
   #message-mark:not([hidden]) { display: inline-flex; }
 }
 #status-end { flex: none; margin-left: auto; }
@@ -551,6 +552,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-close:hover { background: var(--hover); color: var(--ink); }
 .details-head { display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
 .details-head:empty { display: none; }
+.details-bare:not(:has(> :not(:empty))) { display: none; }
 .details-status { font-size: 12px; font-weight: 500; color: var(--ink); }
 .details-pending { color: var(--ink-soft); }
 .details-description { max-width: var(--measure); font-size: 12px; color: var(--ink-soft); }
@@ -640,14 +642,24 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll > * { flex: none; min-width: 0; max-width: 100%; }
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
-.detail-scroll pre.content { max-width: 100ch; }
 .detail-files { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-/* A wide pane: the files at the left at their reading measure, the skill's details beside them. */
-@container detail (width >= 1200px) {
-  .detail-scroll { display: grid; grid-template-columns: minmax(0, 100ch) minmax(320px, 1fr); align-items: start; column-gap: 48px; }
+.files-tail { display: flex; flex-direction: column; gap: 12px; }
+.files-tail > .details-actions { margin-top: 0; }
+/*
+ * A wide pane (from 1040px, matrix.ts DETAIL_COLUMNS_FROM) has two tracks: the files take the free width, up to the
+ * skill's details in a steady column at the right edge. Below that the details sit above the files.
+ */
+@container detail (width >= 1040px) {
+  .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; column-gap: 32px; }
   .detail-scroll > .details { grid-column: 2; grid-row: 1; }
   .detail-scroll > .detail-files { grid-column: 1; grid-row: 1; }
+  /* In the column, each path has a line of its own under its tool. */
+  .detail-scroll > .details .details-path-line { grid-template-columns: 12px minmax(0, 1fr) auto; row-gap: 0; }
+  .detail-scroll > .details .details-path-line > .path-text { grid-column: 2 / -1; grid-row: 2; }
 }
+/* The Files view has room for every path whole: under "Where each copy is" a long one wraps rather than being shortened. */
+.detail-scroll .details-paths .path-text { display: block; white-space: normal; overflow-wrap: anywhere; }
+.detail-scroll .details-paths .path-text > * { display: inline; overflow: visible; }
 /* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
@@ -692,10 +704,13 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-cards { display: flex; flex-wrap: wrap; gap: 12px; }
 /* The kind cards share the content width as flexible tracks; each fills its width with a row of its tools. */
 .kind-cards > .kind-card { flex: 1 1 0; min-width: 200px; }
-.kind-card { display: flex; flex-direction: column; align-items: stretch; padding-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.kind-card { position: relative; display: flex; flex-direction: column; align-items: stretch; padding-bottom: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; }
 .kind-card:hover { background: var(--selected-row); }
-.kind-card-main { display: flex; align-items: center; padding: 14px 16px 4px; border: 0; border-radius: 10px 10px 0 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.kind-card-main:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* The heading's button opens the page; its ::after covers the card, so a click anywhere on it does too. */
+.kind-card-main { display: flex; align-items: center; padding: 14px 16px 4px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.kind-card-main::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.kind-card-main:focus-visible { outline: none; }
+.kind-card-main:focus-visible::after { border-radius: 10px; outline: 2px solid var(--focus); outline-offset: -2px; }
 /* The arrow sits right after the kind's name, never floating away from it. */
 .kind-card-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 /* The count, then what needs attention, on one line that wraps whole. */
@@ -706,7 +721,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .kind-tool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .kind-tool-count { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .kind-card-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12.5px; }
-.kind-card-link { padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
+.kind-card-link { position: relative; z-index: 1; padding: 0; border: 0; background: transparent; font: inherit; cursor: pointer; text-align: left; }
 .kind-card-link:hover { text-decoration: underline; }
 .overview-actions { display: flex; gap: 8px; }
 .overview-more { display: flex; flex-direction: column; gap: 8px; }
@@ -721,14 +736,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /*
  * Cards in equal columns, each row's cards matching its height. The columns come from the width and the count (dom.ts
  * cardGrid): two from 960px; three cards three across once each can be about 320px wide; four 2×2, then four across from
- * 2400px. No grid cell is left empty: where three cards sit in two columns, the third spans both and uses the room (a tool
+ * 2000px. No grid cell is left empty: where three cards sit in two columns, the third spans both and uses the room (a tool
  * card's two inner columns).
  */
 .card-grid { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; }
 @container cards (width >= 960px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
 @container cards (960px <= width < 992px) { .card-grid[data-count="3"] > :last-child { grid-column: 1 / -1; } }
 @container cards (width >= 992px) { .card-grid[data-count="3"] { --cols: 3; } }
-@container cards (width >= 2400px) { .card-grid[data-count="4"] { --cols: 4; } }
+@container cards (width >= 2000px) { .card-grid[data-count="4"] { --cols: 4; } }
 .tool-card { container-type: inline-size; }
 .tool-head { display: flex; align-items: center; gap: 8px; min-height: 53px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
@@ -743,9 +758,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .plain-list { display: flex; flex-direction: column; gap: 4px; }
 
 .ins-card { container: ins-card / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.ins-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+/* Each card keeps its own height (a card with no file stays short); its header is a pill's height, pill or not, so headers line up. */
+.card-grid:has(> .ins-card) { align-items: start; }
+.ins-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; min-height: 22px; }
 /* A card's status pill never wraps; with no room beside the name it moves under it. */
-.ins-missing { margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; color: var(--ink-soft); white-space: nowrap; }
+.ins-missing { margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; line-height: 18px; color: var(--ink-soft); white-space: nowrap; }
 /* A narrow card gives its file's path a line of its own under the name, rather than cutting it to a stub. */
 @container ins-card (width < 420px) { .ins-head > .path-text { order: 1; flex-basis: 100%; } }
 .ins-saved-group { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
@@ -791,19 +808,26 @@ span.ins-confirm { margin-top: 0; }
 .history-intro { margin: 12px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 .history-list { list-style: none; margin: 0; padding: 0; }
 .history-day { list-style: none; padding: 14px 16px 4px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
-/* A row is a grid: when, what happened (the flexible column, wrapping inside it), and its actions in a right-aligned column
-   of steady width, at the same place on every row. */
-.history-row { --history-actions: 250px; display: grid; grid-template-columns: 80px minmax(0, 1fr) var(--history-actions); align-items: start; gap: 12px 16px; padding: 10px var(--pad-end) 10px 16px; box-shadow: inset 0 -1px 0 var(--line); }
-@container content (width < 880px) { .history-row { --history-actions: 170px; } }
+/*
+ * A row is a grid: when, what changed, what happened (the flexible column, wrapping inside it), and its actions in a
+ * right-aligned column of steady width, at the same place on every row. In narrow content what happened takes its own
+ * line beneath, across to the row's end, so a row is two lines.
+ */
+.history-row { --history-actions: 250px; display: grid; grid-template-columns: 80px auto minmax(0, 1fr) var(--history-actions); align-items: start; gap: 12px 16px; padding: 10px var(--pad-end) 10px 16px; box-shadow: inset 0 -1px 0 var(--line); }
+.history-about { max-width: var(--measure); margin-left: -8px; }
+@container content (width < 880px) {
+  .history-row { --history-actions: auto; grid-template-columns: 80px minmax(0, 1fr) var(--history-actions); row-gap: 2px; }
+  .history-about { grid-column: 2 / -1; grid-row: 2; margin-left: 22px; }
+  .history-row > .change-panel { margin-top: 10px; }
+}
 .history-row > .history-when { padding-top: 2px; }
 .history-when { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
 .history-what { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .history-what > svg { flex: none; margin-top: 2px; }
-.history-what > strong { flex: none; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.history-what > span:last-child { max-width: var(--measure); }
+.history-what > strong { flex: 0 1 auto; min-width: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .history-kind { flex: none; font-size: 11px; color: var(--ink-faint); }
 .history-done { padding-right: 6px; font-size: 12px; color: var(--ink-faint); }
-.history-undone .history-what { color: var(--ink-faint); }
+.history-undone .history-what, .history-undone .history-about { color: var(--ink-faint); }
 .history-undone .history-what strong { color: var(--ink-soft); }
 .history-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: baseline; gap: 2px 12px; text-align: right; }
 .history-actions .btn.link { flex: 0 1 auto; min-width: 0; height: auto; padding: 0; white-space: normal; text-align: right; }
@@ -894,16 +918,25 @@ span.ins-confirm { margin-top: 0; }
 .plugin-row-open { all: unset; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .plugin-row-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .plugin-chip { padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; color: var(--ink-faint); }
-.plugin-row-about { font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-row-holds { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/*
+ * Under the name, one line: the description, then what it holds. When room runs out the description shortens, then steps
+ * aside with its "·" (below 700px of table); the facts keep their words. A wide table puts the line beside the name.
+ */
+.plugin-row-line { display: flex; align-items: baseline; min-width: 0; max-width: 100%; }
+.plugin-row-about { flex: 0 1 auto; min-width: 0; font-size: 12.5px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
+.plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-go { display: grid; place-items: center; }
-/* A wide table fills the name column with one line: the name, its description, then what it holds. */
 @container table (width >= 1100px) {
-  .plugin-row-name { flex-direction: row; flex-wrap: nowrap; align-items: baseline; column-gap: 14px; }
-  .plugin-row-open { flex: none; max-width: 50%; }
-  .plugin-row-about { flex: 0 1 auto; min-width: 0; }
-  .plugin-row-holds { flex: none; }
-  .plugin-row-about ~ .plugin-row-holds::before { content: "·"; margin-right: 14px; color: var(--ink-faint); }
+  .plugin-row-name { flex-direction: row; align-items: baseline; }
+  .plugin-row-line { flex: 0 1 auto; }
+  .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
+}
+/* The header's hint keeps to whole lines: a narrow table says only that nothing runs until Apply all. */
+.hint-short { display: none; }
+@container table (width < 700px) {
+  .plugin-row-about, .plugin-row-sep, .hint-long { display: none; }
+  .hint-short { display: inline; }
 }
 .cannot-dash { font-weight: 700; color: var(--ink-soft); }
 .plugin-add { border-color: color-mix(in oklab, var(--ink) 42%, transparent); color: var(--ink); }
@@ -923,13 +956,15 @@ span.ins-confirm { margin-top: 0; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
 .plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
-/* A wide page: each tool an equal column across the box, Choose all at its right end, so the box is filled on purpose. */
-@container plugin (width >= 1400px) {
-  .plugin-tool-rows { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)) auto; }
-}
-/* From 1400px of page, what it holds and how each tool takes it sit beside the README; below that, one above the other. */
+/* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
-@container plugin (width >= 1400px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+/* From about 900px of page each tool takes an equal column across the box, centred in it, with Choose all at its right
+   end: the box is filled on purpose. Below that the tools sit in a row from the left (pluginpage.ts markWrappedChoice). */
+@container plugin (width >= 900px) {
+  .plugin-tool-rows { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)) auto; justify-items: center; }
+  .plugin-tool-rows > .btn { justify-self: end; }
+}
+@container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
@@ -974,15 +1009,12 @@ span.ins-confirm { margin-top: 0; }
   .market-tabs { margin: 8px 0 6px; }
   .market-tab { padding: 5px 10px; }
   .plugin-table .ov-head .ov-tool-head { flex-direction: row; gap: 6px; }
-  .plugin-row-name { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 0; padding: 7px 12px 7px 0; }
-  .plugin-row-open { flex-basis: 100%; }
-  .plugin-row-holds { order: 1; flex: none; }
-  .plugin-row-about ~ .plugin-row-holds::after { content: "·"; margin: 0 6px; }
-  .plugin-row-about { order: 2; flex: 1 1 0; min-width: 0; }
+  .plugin-row-name { padding: 7px 12px 7px 0; }
   /* The strip above names the marketplace: the toolbar keeps only a result or the way back, and isn't drawn without one. */
   .market-title-line, .toolbar-title-only { display: none; }
-  /* With nothing at its left, a result reads from the left, its × at the right, like every band. */
-  .plugins-toolbar:has(> .market-title-line) > .toolbar-spacer { display: none; }
+  /* With nothing at its left, a result reads from the left, its × at the right, like every band. Changes waiting for Apply
+     all keep the right end, as on every page. */
+  .plugins-toolbar:has(> .market-title-line):has(> .toolbar-result) > .toolbar-spacer { display: none; }
   .plugins-toolbar:has(> .market-title-line) > .toolbar-result { flex: 1 1 auto; }
   .plugins-toolbar > .toolbar-result > .band-dismiss { margin-left: auto; }
   /* The plugins get the height: the hint wraps within the header's name column, the description moves under About. */
@@ -990,11 +1022,6 @@ span.ins-confirm { margin-top: 0; }
   .market-page > .market-page-about { display: none; }
   .about-only-narrow { display: block; }
   .market-item-meta { white-space: nowrap; }
-}
-/* A plugin table this narrow has no room for a description worth reading: the row keeps its facts, the page has the rest. */
-@container table (width < 700px) {
-  .plugin-row-about { display: none; }
-  .plugin-row-about ~ .plugin-row-holds::after { content: none; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */
@@ -1026,7 +1053,7 @@ span.ins-confirm { margin-top: 0; }
 .settings-why { flex-basis: 100%; font-size: 12px; color: var(--ink-soft); }
 .settings-hint { margin: 0 0 6px; max-width: var(--measure); font-size: 12.5px; color: var(--ink-soft); }
 .appearance-choices { display: flex; gap: 10px; }
-.appearance-choice { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1 1 0; min-width: 76px; max-width: 140px; padding: 14px 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink-soft); font-size: 13px; cursor: pointer; }
+.appearance-choice { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1 1 0; min-width: 76px; max-width: 240px; padding: 14px 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink-soft); font-size: 13px; cursor: pointer; }
 .appearance-choice:hover { border-color: var(--control-line); color: var(--ink); }
 .appearance-choice.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink); font-weight: 600; }
 .appearance-choice:disabled { opacity: .5; cursor: default; }

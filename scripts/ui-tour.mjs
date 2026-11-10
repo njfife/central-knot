@@ -61,10 +61,11 @@ let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
 const wanted = name => !only || only.includes(name);
-async function shot(a, name, caption) {
+/** Takes a screenshot. The pointer moves to the corner first, so no hover shows, unless `hover` keeps it where it is. */
+async function shot(a, name, caption, { hover = false } = {}) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
-  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: a.viewport.height - 2 });
+  if (!hover) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: a.viewport.height - 2 });
   await wait(120);
   const reply = await a.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
@@ -250,6 +251,9 @@ async function everyPage(tag) {
     const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
     if (files) {
       await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`);
+      // Where each copy is: open from the start in a wide pane, in its column beside the file; stacked, below the file.
+      if (await a.has('.details-paths:not([open]) summary')) { await a.click('.details-paths:not([open]) summary'); await shot(a, `${tag}-skills-files-where`, `Clicked "Where each copy is", below the file, ${at}: then Delete everywhere….`); }
+      else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
       const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
       if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-pending`, `Turned Managed for it in the Files view: the change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
       await a.click('#skills-table');
@@ -293,7 +297,8 @@ async function everyPage(tag) {
   // The pointer over the second row, so its full-width hover shows.
   const hovered = await a.run(`(() => { const row = document.querySelectorAll('.history-row')[1]?.getBoundingClientRect(); return row ? [row.left + row.width / 2, row.top + row.height / 2] : null; })()`);
   if (hovered) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hovered[0], y: hovered[1] });
-  await shot(a, `${tag}-history`, `History ${at}${hovered ? ', the pointer over the second row' : ''}.`);
+  const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
+  await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, { hover: true });
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
   await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
@@ -320,6 +325,15 @@ if (wanted('sizes')) {
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await a.size(width, height);
     await everyPage(`${width}`);
+    // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
+    if (width >= 1728) { await a.click('#sidebar-toggle'); await everyPage(`${width}-rail`); await a.click('#sidebar-toggle'); }
+    // Pi's mark as the window shows it at 100% zoom, on an Overview card and in the table's header.
+    if (width === 1280) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await a.click('#nav-overview'); await shot(a, '1280-overview-1x', 'The Overview at 1280×800 at 100% zoom (one screen pixel per pixel), where the tools\' small marks, Pi\'s among them, are drawn at 12px.');
+      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: the tool marks in the column headers.');
+      await a.size(width, height);
+    }
     // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
     if (width === 860) {
       await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
@@ -348,6 +362,7 @@ if (wanted('sizes')) {
   const box = await a.run(`document.querySelector('.plugin-row .cell-button:not([disabled])')?.id ?? ''`);
   if (box) await a.click(`#${box}`);
   await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, and chose one install, at 860×560.');
+  await a.click('#sidebar-toggle'); await shot(a, '860-sidebar-open-long-marketplace', 'The same with the sidebar open: the change waiting for Apply all keeps the toolbar\'s right end.'); await a.click('#sidebar-toggle');
   await a.size(1280, 800); await shot(a, '1280-long-marketplace', 'The same at 1280×800: the facts that don\'t fit beside the name drop whole.');
   if (await a.has('#plugins-discard')) await a.click('#plugins-discard');
   await a.click('#market-tab-about'); await shot(a, '1280-long-marketplace-about', 'Its About tab: every fact, where it comes from, and Remove.');
@@ -405,9 +420,10 @@ if (wanted('missing')) {
   await wait(500);
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
   a = await launch();
-  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: every page stays in the sidebar, and the Overview says no tools were found.');
-  await a.size(860, 560); await shot(a, 'no-tools-860-overview', 'The same at 860×560.');
-  await a.click('#nav-skills'); await shot(a, 'no-tools-860-skills', 'Its Skills page at 860×560.');
+  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action.');
+  await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
   await a.size(1280, 800);
 }
 

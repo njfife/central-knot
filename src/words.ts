@@ -28,3 +28,6 @@ export function toolsPhrase(touched: string[], inHome: string[]): string {
 
 /** The same, starting a label or a sentence: "All 3 tools", "Claude Code and Codex". */
 export const capitalToolsPhrase = (touched: string[], inHome: string[]): string => toolsPhrase(touched, inHome).replace(/^./, first => first.toUpperCase());
+
+/** What a home with no tools says, wherever it says it: one sentence (pages.ts noToolsState adds the way forward). */
+export const noToolsSentence = 'No tools were found in this home.';

@@ -1,11 +1,13 @@
 import { loadSettings } from './settingspage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
-import { andList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
+import { h } from './dom.ts';
+import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
+import { andList, noToolsSentence, orList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
-import { absentKinds as absentKindsOf, type OptionalKind } from './presence.ts';
+import { absentKinds as absentKindsOf, kindNames, takesPlugins, type HomeKind } from './presence.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
@@ -65,8 +67,8 @@ export const rerender = () => {
 
 /** The practice copy's note on the Overview, shown until the person hides it (kept per viewer, in this window's storage). */
 const PRACTICE_NOTE = 'ck-practice-banner-dismissed';
-export const practiceNoteOpen = (): boolean => { try { return localStorage.getItem(PRACTICE_NOTE) !== '1'; } catch { return true; } };
-export const setPracticeNote = (open: boolean): void => { try { if (open) localStorage.removeItem(PRACTICE_NOTE); else localStorage.setItem(PRACTICE_NOTE, '1'); } catch { /* shown again next time */ } };
+export const practiceNoteOpen = (): boolean => !readFlag(PRACTICE_NOTE);
+export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE, !open);
 
 /**
  * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. A quiet announcement is
@@ -85,17 +87,58 @@ export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
   const outcome = state.outcome?.page === state.page ? state.outcome : undefined;
   const told = outcome && saidInStatusBar(outcome) ? { text: outcome.text, quiet: false } : state.said;
-  if (region.textContent !== told.text) region.textContent = told.text;
+  // The first sentence, then the rest, so a narrow bar can drop the rest whole rather than cut a word (style.css).
+  if (region.dataset.text !== told.text) {
+    region.dataset.text = told.text;
+    const [, first, rest] = /^(.+?[.!?])(\s.+)?$/s.exec(told.text) ?? [told.text, told.text, ''];
+    region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
+  }
   region.title = told.text;
-  region.dataset.quiet = told.quiet ? 'true' : '';
-  region.classList.toggle('visually-hidden', (!!outcome && !saidInStatusBar(outcome)) || told.quiet);
+  // Only a message that repeats what the page shows (announced quiet) is for screen readers alone.
+  region.classList.toggle('visually-hidden', told.quiet);
   // A narrow status bar shows a small mark instead of a message cut to a stub; its tooltip has the message (style.css).
   const mark = document.getElementById('message-mark');
-  if (mark) { mark.title = told.text; mark.hidden = !told.text || told.quiet || region.classList.contains('visually-hidden'); }
+  if (mark) { mark.title = told.text; mark.hidden = !told.text || told.quiet; }
 }
 
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
 
+/**
+ * Takes a new view of the home. When its tools changed (one appeared or went away), the page follows: a page whose kind
+ * is no longer here gives way to the Overview, saying why, and a page with its own data reads it again in the background
+ * (unless `reload` is false: the caller reads it itself). Returns whether the tools changed.
+ */
+function setHome(view: HomeView | null | undefined, { reload = true } = {}): boolean {
+  if (!view) return false;
+  const before = state.home ? homeTools().join() : undefined;
+  state.home = view;
+  const changed = before !== undefined && homeTools().join() !== before;
+  if (changed) {
+    leaveAbsentPage();
+    if (reload) void loadPageData(state.page, { quiet: true });
+  }
+  return changed;
+}
+
+
+/** Moves on when an action starts or a background read begins; a background read whose epoch has passed is dropped. */
+let readEpoch = 0;
+
+/**
+ * A page's own read in the background: no busy state, so the page's result (and its Undo) stays. What it read is shown
+ * only if nothing started since (an action, or a newer read); a read that fails leaves the data unread, said quietly.
+ */
+export async function readQuietly<T>(fetch: () => Promise<T>, show: (value: T) => void, what: string): Promise<void> {
+  const epoch = ++readEpoch;
+  try {
+    const value = await fetch();
+    if (epoch !== readEpoch) return;
+    show(value);
+  } catch {
+    if (epoch === readEpoch) announce(`${what} could not be read.`, true);
+  }
+  rerender();
+}
 
 /**
  * One piece of work at a time: every mutating control is disabled while it runs. Its "Reading…" message gives way, when
@@ -103,6 +146,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
  * once it is done.
  */
 export async function busy(message: string, work: () => Promise<void>) {
+  readEpoch++;
   const focused = document.activeElement?.id;
   const before = state.said;
   state.outcome = undefined;
@@ -115,17 +159,21 @@ export async function busy(message: string, work: () => Promise<void>) {
   catch {
     announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
   }
-  if (state.said.text === message) announce(before.text, before.quiet);
+  // A result the work left on the page speaks for itself; otherwise what was said before comes back.
+  if (state.said.text === message) announce(state.outcome ? '' : before.text, before.quiet);
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
   focusById(focused);
-  if (refreshOwed) { refreshOwed = false; void backgroundRefresh(); }
+  drainOwedRefresh();
 }
 
 function accept(view: HomeView) {
-  state.home = view;
+  setHome(view, { reload: false });
   state.applied = undefined;
+  // The page's own data belonged to the home before: none of it shows here while this home's is read.
+  state.instructions = undefined;
+  state.history = undefined;
   state.item = undefined;
   // An unsaved Instructions draft outlives a home switch: the Instructions page offers to copy or discard it.
   if (!draftUnsaved()) state.instructionEdit = undefined;
@@ -135,22 +183,18 @@ function accept(view: HomeView) {
   void loadPageData(state.page, { quiet: true });
 }
 
-/** Sends the Overview's pending changes, then reads the home again so the page shows what is on disk. */
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
 export const flashRequests = new Set<string>();
 const flashRow = (item: string) => { if (item) flashRequests.add(item.toLowerCase()); };
 
-const readFlag = (key: string) => { try { return localStorage.getItem(key) === '1'; } catch { return false; } };
-const writeFlag = (key: string) => { try { localStorage.setItem(key, '1'); } catch { /* said again next time */ } };
-
 /** After the first Apply all on a page, its tip has done its job. */
-const retireTip = (kind: 'skills' | 'mcp' | 'agents') => { try { localStorage.setItem(`ck-help-dismissed-${kind}`, '1'); } catch { /* shows again */ } };
+const retireTip = (kind: 'skills' | 'mcp' | 'agents') => writeFlag(`ck-help-dismissed-${kind}`);
 
 export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const home = state.home!;
   const result = await api().apply(changes, home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.applied = result;
   if (!result.stopped) { onDone(); retireTip('skills'); }
   const managed = changes.filter(change => change.managed).length;
@@ -183,21 +227,31 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
 });
 
-/** After a read: what was found and where, so a home switch or Refresh says what it did. */
 /**
- * What a read found, naming only the kinds a tool in that home can hold ("Read 1 skill and 0 MCP servers"), or that it
- * found no tools at all. "Nothing changed" means nothing was written; a copy that stopped updating is still news.
+ * What a read found, naming only the kinds a tool in that home can hold ("Read 1 skill and 0 MCP servers from pi-only."),
+ * or that it found no tools at all. `from` names the home, for the status bar. "Nothing changed" means nothing was
+ * written; a copy that stopped updating is still news, so then it isn't said.
  */
-function readFound(view: HomeView): string {
-  if (!view.manage.tools.length) return 'No tools were found in this home.';
-  const absent = absentKindsOf(view.manage.tools, view.mcp.tools, view.agents.tools);
-  const parts = [plural(view.manage.skills.length, 'skill'), absent.includes('mcp') ? '' : plural(view.mcp.servers.length, 'MCP server'), absent.includes('agents') ? '' : plural(view.agents.servers.length, 'agent')].filter(Boolean);
+function readFound(view: HomeView, from?: string): string {
+  if (!view.manage.tools.length) return noToolsSentence;
+  const absent = absentKindsOf(view.manage.tools, view.mcp.tools, view.agents.tools, view.manage.tools.filter(takesPlugins));
+  const counts = [plural(view.manage.skills.length, 'skill'), absent.includes('mcp') ? '' : plural(view.mcp.servers.length, 'MCP server'), absent.includes('agents') ? '' : plural(view.agents.servers.length, 'agent')].filter(Boolean);
   const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
-  return `Read ${andList(parts)}.${stopped ? '' : ' Nothing changed.'}`;
+  return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped ? '' : ' Nothing changed.'}`;
 }
 
 /** A read said in the status bar: what it found, and in which home. */
-const readSummary = (view: HomeView) => (view.manage.tools.length ? readFound(view).replace(/^Read (.*?)\./, `Read $1 from ${view.label}.`) : `No tools were found in ${view.label}.`);
+const readSummary = (view: HomeView) => readFound(view, view.label);
+
+/**
+ * The kinds the open home's tools can hold, as a sentence names them: "skills, MCP servers and agents", or, for `one` of
+ * them, "skill, MCP server or agent".
+ */
+export function heldKindNames(count: 'all' | 'one' = 'all'): string {
+  const held = (['skills', 'mcp', 'agents'] as const).filter(kind => !absentKinds().includes(kind));
+  const one = { skills: 'skill', mcp: 'MCP server', agents: 'agent' } as const;
+  return count === 'one' ? orList(held.map(kind => one[kind])) || 'skill' : andList(held.map(kind => kindNames[kind])) || 'skills';
+}
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
@@ -221,16 +275,17 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
-  await busy('Reading skills, MCP servers and agents…', async () => {
+  await busy(`Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh();
     if (!view) return;
-    state.home = view;
     state.applied = undefined;
+    // Said first, so a page that leaves (setHome) adds its reason after what was read.
     announce(readSummary(view));
+    setHome(view, { reload: false });
     read = true;
   });
   // Only a new read goes on to the page's own data: after a failure its message stays, and the page keeps what it showed.
-  if (read) { leaveAbsentPage(); await loadPageData(state.page, { fresh: true }); }
+  if (read) await loadPageData(state.page, { fresh: true });
 }
 
 /**
@@ -248,14 +303,19 @@ function loadPageData(page: Page, { fresh = false, quiet = false } = {}): Promis
 
 /** When the open page's kind is no longer in this home (its last tool went), the Overview opens instead. */
 function leaveAbsentPage() {
-  if ((absentKinds() as Page[]).includes(state.page)) showPage('overview');
+  const gone = absentKinds().find(kind => kind === state.page);
+  if (!gone) return;
+  // What the status bar said (a Refresh's summary, say) stays, with the reason the page moved.
+  const said = state.said.text;
+  showPage('overview');
+  announce(`${said ? `${said} ` : ''}No tool here holds ${kindNames[gone]} now.`);
 }
 
 /** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
 export const homeTools = (): HarnessId[] => state.home?.manage.tools ?? [];
 
 /** The kinds no tool in the open home can hold (presence.ts absentKinds); none before a home is read. */
-export const absentKinds = (): OptionalKind[] => (state.home ? absentKindsOf(homeTools(), state.home.mcp.tools, state.home.agents.tools) : []);
+export const absentKinds = (): HomeKind[] => (state.home ? absentKindsOf(homeTools(), state.home.mcp.tools, state.home.agents.tools, homeTools().filter(takesPlugins)) : []);
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -307,8 +367,8 @@ export const shownPath = (path: string) => {
 
 /** Reads History; `quiet` in the background, without the busy state. */
 export const loadHistory = (quiet = false): Promise<void> => {
-  const read = async () => { state.history = await api().history(); };
-  return quiet ? read().then(rerender, () => undefined) : busy('Reading History…', read);
+  const show = (events: HistoryEvent[]) => { state.history = events; };
+  return quiet ? readQuietly(() => api().history(), show, 'History') : busy('Reading History…', async () => show(await api().history()));
 };
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
@@ -318,7 +378,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The notice for an undone event has done its job; its result band says what happened.
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.history = await api().history();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
@@ -355,7 +415,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const others = home.manage.tools.filter(tool => tool !== 'pi-cli');
   const applied = await api().apply([{ key: made.skill, managed: true, off: others }], home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   const from = toolName(made.origin ?? 'claude-cli');
   state.outcome = { page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be managed: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent. It syncs to Pi only; turn on other tools for it on the Skills page.` };
   announce(state.outcome.text, true);
@@ -406,12 +466,12 @@ function openDraft(file: InstructionFile, text: string, stage: InstructionDraft[
 
 /** Reads each tool's instruction file; `quiet` in the background, without the busy state. */
 export const loadInstructions = (quiet = false): Promise<void> => {
-  const read = async () => {
-    state.instructions = (await api().instructions()) ?? undefined;
+  const show = (files: InstructionFile[] | null) => {
+    state.instructions = files ?? undefined;
     // A draft whose file is gone (its tool left the home) is dropped only when it holds nothing unsaved.
     if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined;
   };
-  return quiet ? read().then(rerender, () => undefined) : busy('Reading instruction files…', read);
+  return quiet ? readQuietly(() => api().instructions(), show, 'The instruction files') : busy('Reading instruction files…', async () => show(await api().instructions()));
 };
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
@@ -488,7 +548,7 @@ const undoChoices = (ids: string[]) => busy('Undoing the choice…', async () =>
     if (result.stopped) { stopped = result.stopped; break; }
   }
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   const items = [...new Set((state.history ?? []).filter(event => ids.includes(event.id)).map(event => event.item))];
   state.outcome = stopped ? undefined : { page: state.page, items, text: 'Undone: each replaced copy is back in its own tool, and the skill is unmanaged again, with its copies differing as before.' };
   announce(stopped ?? state.outcome!.text, true);
@@ -505,7 +565,7 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
     results.push(...result.results);
   }
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.history = await api().history();
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
@@ -520,7 +580,7 @@ export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…
   const home = state.home!;
   const result = await api().deleteEverywhere(key, home.manage.gate.state === 'needs-resume', home.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.applied = result;
   announce(result.stopped ?? `Deleted from ${plural(result.harnessWrites, 'tool')}. Restore it from History.`);
 });
@@ -529,13 +589,13 @@ export const deleteEverywhereKey = (key: string) => busy('Deleting everywhere…
 
 export const setSync = (on: boolean) => busy(on ? 'Turning Sync on…' : 'Turning Sync off…', async () => {
   const view = await api().setSync(on);
-  if (view) state.home = view;
+  setHome(view);
   announce(on ? 'Automatic sync on.' : 'Automatic sync off.', true);
 });
 
 export const syncNow = () => busy('Syncing…', async () => {
   const view = await api().syncNow(state.home!.home);
-  if (view) state.home = view;
+  setHome(view);
   announce('Synced once. Automatic sync stays off.', true);
 });
 
@@ -559,10 +619,9 @@ async function backgroundRefresh() {
   // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
   // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
   try {
-    const toolsBefore = homeTools().join();
     const view = await api().refresh();
     if (view) {
-      state.home = view; announce('');
+      announce('');
       const outcome = state.outcome;
       if (!outcome?.act) state.outcome = undefined;
       // A sync notice is now the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
@@ -572,12 +631,21 @@ async function backgroundRefresh() {
         state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].map(notice => notice.history || notice.item) };
         state.outcome = undefined;
       }
+      // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
+      setHome(view);
       rerender();
-      // A tool appeared or went away: the page leaves a kind no longer here, and a page with its own data (Plugins'
-      // columns) reads it again, in the background, for the new set.
-      if (homeTools().join() !== toolsBefore) { leaveAbsentPage(); void loadPageData(state.page, { quiet: true }); }
     }
-  } finally { refreshing = false; }
+  } finally {
+    refreshing = false;
+    drainOwedRefresh();
+  }
+}
+
+/** A background refresh asked for while busy or while another ran: run it now, once, if nothing is running. */
+function drainOwedRefresh() {
+  if (!refreshOwed || state.busy || refreshing) return;
+  refreshOwed = false;
+  void backgroundRefresh();
 }
 
 // ---------- MCP servers ----------
@@ -585,7 +653,7 @@ async function backgroundRefresh() {
 export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const result = await api().applyMcp(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.mcpResult = result;
   if (!result.stopped) { onDone(); retireTip('mcp'); }
   if (!result.stopped) {
@@ -614,7 +682,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   const before = state.home?.agents?.servers ?? [];
   const result = await api().applyAgents(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.agentsResult = result;
   if (!result.stopped) { onDone(); retireTip('agents'); }
   if (!result.stopped) {
@@ -631,7 +699,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
       act: undo ? addedUndo(addedNow) : undefined };
     const resumed = changes.map(change => ({ change, was: before.find(server => server.key === change.key) })).filter(({ change, was }) => change.use && change.use !== 'separate' && was?.managed && was.stopped?.length);
     // A resumed copy receives updates again: an earlier "keep my edit" no longer stands for a later edit.
-    for (const { change, was } of resumed) for (const tool of was!.stopped!) { try { localStorage.removeItem(`ck-kept-edit:${state.home?.home ?? ''}:${change.key}:${tool}`); } catch { /* nothing kept */ } }
+    for (const { change, was } of resumed) for (const tool of was!.stopped!) writeFlag(keptEditFlag(state.home?.home ?? '', change.key, tool), false);
     if (resumed.length && resumed.length === changes.length && result.writes) {
       // The edit the resume replaced is one click back: its 'chosen' event restores it, and the copy stops again.
       const chosen = (await api().history()).filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
@@ -648,7 +716,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
 export const writeClaudeNow = (names: string[]) => { const earlier = state.outcome?.page === state.page ? state.outcome?.act?.label : undefined; return busy('Writing to Claude Code…', async () => {
   const result = await api().writeClaude(names, state.home!.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   state.mcpResult = result;
   const written = result.claudeWritten ?? [];
   if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
@@ -661,7 +729,7 @@ export const writeClaudeNow = (names: string[]) => { const earlier = state.outco
 const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
   const result = await api().unwriteClaude(written, state.home!.home);
   const view = await api().refresh();
-  if (view) state.home = view;
+  setHome(view);
   const names = written.map(write => write.name);
   state.outcome = result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` };
   announce(result.stopped ?? state.outcome!.text, true);

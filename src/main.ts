@@ -186,7 +186,7 @@ function trayMenu() {
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
-    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: process.platform !== 'linux',
+    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: machineNames(process.platform).signIn,
       click: item => void setStartAtSignIn(item.checked) },
     { type: 'separator' },
     { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
@@ -294,8 +294,9 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
-  // The home is read again only when the pass wrote skills to it; otherwise the first read is still what is there.
-  const snapshots = skills?.harnessWrites ? await read() : before;
+  // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
+  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
+  const snapshots = skills && (syncOn || explicit) ? await read() : before;
   latestSnapshots = snapshots;
   notePresent(snapshots);
   const writable = (await writeAccess(shared)).allowed;
@@ -321,19 +322,24 @@ let followUp: NodeJS.Timeout | undefined;
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
 
-/** The tools in the home as last noted (presence.ts), so a change is acted on once. */
-let lastPresent = '';
+/** The tools in the open home, read now: the one way the requests below learn them. */
+const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
+
+/** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
+let lastPresent = { home: '', tools: '' };
 
 /**
- * Notes which tools are in the home, from either a page's read or a background pass. When the set changed, the folders
- * are watched again, so a tool that appeared is watched like the rest. Returns whether it changed.
+ * Notes which tools are in the home, from either a page's read or a background pass. When the set changed in the same
+ * home, the folders are watched again, so a tool that appeared is watched like the rest; a home just opened is only
+ * noted, since opening it starts watching (selectHome). Returns whether the set changed.
  */
 function notePresent(snapshots: Snapshot[]): boolean {
-  const present = presentTools(snapshots).join();
-  if (present === lastPresent) return false;
-  lastPresent = present;
-  void startWatching();
-  return true;
+  const tools = presentTools(snapshots).join(), home = current?.home ?? '';
+  if (home === lastPresent.home && tools === lastPresent.tools) return false;
+  const sameHome = home === lastPresent.home;
+  lastPresent = { home, tools };
+  if (sameHome) void startWatching();
+  return sameHome;
 }
 
 /** One thing at a time: planning and writing never interleave. */
@@ -369,16 +375,23 @@ async function backgroundPass() {
 
 const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
 
-function stopWatching() {
+/** Stops watching the folders and the poll; passes already due (an edit's debounce, a deletion's settle) still run. */
+function closeWatchers() {
   for (const watcher of watchers) watcher.close();
   watchers = [];
-  clearInterval(poller); clearTimeout(soon); clearTimeout(followUp);
+  clearInterval(poller);
   poller = undefined;
+}
+
+/** Stops everything background work would do on the open home: the watch, the poll and any pass already due. */
+function stopWatching() {
+  closeWatchers();
+  clearTimeout(soon); clearTimeout(followUp);
 }
 
 /** Watches each tool's skills folders (an event only prompts a read, CON-04), with polling as the fallback (T-08: at most 30 s). */
 async function startWatching() {
-  stopWatching();
+  closeWatchers();
   if (!current || smoke) return;
   const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
   roots.add(join(current.home, '.agents/skills'));
@@ -425,6 +438,8 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
   current = next;
   try {
     const shown = await syncThenView();
+    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
+    stopWatching();
     void startWatching();
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     refreshTray();
@@ -563,7 +578,7 @@ app.whenReady().then(async () => {
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces({ handle, handleRead }, {
     home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
-    tools: async () => presentTools(latestSnapshots),
+    tools: presentNow,
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
@@ -575,7 +590,7 @@ app.whenReady().then(async () => {
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
-    ? convertAgentToSkill(context(), presentTools(await read()), key)
+    ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
@@ -585,7 +600,7 @@ app.whenReady().then(async () => {
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
-      const tools = (await manageView(context())).tools;
+      const tools = await presentNow();
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
@@ -599,10 +614,10 @@ app.whenReady().then(async () => {
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, resume, home) => (home === current?.home
-    ? applyMcp(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    ? applyMcp(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('agents:apply', async (list, resume, home) => (home === current?.home
-    ? applyAgents(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    ? applyAgents(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
@@ -612,7 +627,7 @@ app.whenReady().then(async () => {
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await presentNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })

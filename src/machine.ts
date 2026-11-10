@@ -12,6 +12,8 @@ export interface MachineNames {
   Tray: string;
   /** Whether Central Knot can start at sign-in here (not on Linux). */
   signIn: boolean;
+  /** The key a shortcut is held with: ⌘ on a Mac, Ctrl elsewhere. */
+  modifierKey: string;
 }
 
 /** The names for a platform, as `process.platform` spells it ('darwin', 'win32', 'linux'). */
@@ -23,6 +25,7 @@ export function machineNames(platform: string): MachineNames {
     tray: mac ? 'the menu bar' : 'the tray',
     Tray: mac ? 'The menu bar' : 'The tray',
     signIn: platform !== 'linux',
+    modifierKey: mac ? '⌘' : 'Ctrl',
   };
 }
 

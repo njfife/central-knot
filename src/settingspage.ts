@@ -1,7 +1,7 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows and changes them: how the app looks, and the two switches the
 // menus also carry (Automatic sync and Start at sign-in), each changed through the same path as there.
-import { announce, machine, rerender, setSync, state, trayPlace } from './app.ts';
+import { announce, heldKindNames, machine, rerender, setSync, state, trayPlace } from './app.ts';
 import { cardGrid, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { AppPreferences, Appearance } from './types.ts';
@@ -60,7 +60,7 @@ export function settingsPage(): HTMLElement {
           disabled: !current, onclick: () => void chooseAppearance(choice.value),
         }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
     // The same switch as the status bar's and the menu's: an edit to a managed item spreads on its own, window closed or not.
-    group('settings-sync', 'Automatic sync', `When it is on, an edit to a managed skill, MCP server or agent spreads to the other tools on its own, even with this window closed. The status bar and ${trayPlace} have the same switch.`,
+    group('settings-sync', 'Automatic sync', `When it is on, an edit to a managed ${heldKindNames('one')} spreads to the other tools on its own, even with this window closed. The status bar and ${trayPlace} have the same switch.`,
       switchRow(toggle(!!home?.syncOn && !syncWhy, 'Automatic sync', on => void setSync(on), !!syncWhy || !!state.busy, 'settings-sync-switch'), home?.syncOn && !syncWhy ? 'On' : 'Off', syncWhy)),
     signIn?.offered ? group('settings-sign-in', 'Start at sign-in', `Opens Central Knot in ${trayPlace} when you sign in, so automatic sync keeps running. ${machine.Tray} has the same switch.`,
       switchRow(toggle(signIn.on, 'Start at sign-in', on => void chooseSignIn(on), !signIn.available, 'settings-sign-in-switch'), signIn.on ? 'On' : 'Off',
