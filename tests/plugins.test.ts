@@ -389,6 +389,21 @@ test('A CLI that is a script finds its interpreter beside it, even when the app 
   } finally { process.env.PATH = savedPath; await box.cleanup(); }
 });
 
+test('Codex is told the chosen home outright, since on Windows it finds its own from the system', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  const saved = process.env.CODEX_HOME;
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const codex = join(box.base, 'bin/codex');
+    await put(codex, '#!/bin/sh\necho "$CODEX_HOME" >> "$HOME/calls.txt"\nexit 3\n');
+    execFileSync('chmod', ['755', codex]);
+    process.env.CODEX_HOME = join(box.base, 'elsewhere');
+    await install({ ...box.context, binaries: { 'codex-cli': codex } }, await parseCatalog(root, root, 'folder'), 'marker', 'codex-cli');
+    assert.equal((await readFile(join(box.home, 'calls.txt'), 'utf8')).split('\n')[0], join(box.home, '.codex'));
+  } finally { if (saved === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = saved; await box.cleanup(); }
+});
+
 test('A folder marketplace named through a link is the same marketplace, so it is listed once', { skip: noPosix }, async () => {
   const box = await sandbox();
   try {
