@@ -1504,6 +1504,79 @@ async function practiceFlow() {
   await a.quit();
 }
 
+/**
+ * The base instructions through a git repo, in two homes, as people click it: Push from one, Pull into the other, an edit, and
+ * a deletion, said before Pull, carried out by the base's own apply and undone from History (the base and its tools come back).
+ */
+async function repoBaseFlow() {
+  const git = (...rest) => spawnSync('git', rest, { encoding: 'utf8' });
+  if (git('--version').status !== 0) { console.log('repo base: skipped, no git on this machine'); return; }
+  const remote = join(scratch, 'base-repo.git');
+  git('init', '--quiet', '--bare', '--initial-branch=main', remote);
+  // Folder homes outside the HOME the app is given (that one counts as real, which Linux never writes).
+  const realHome = join(scratch, 'repo-real');
+  const homes = { first: join(scratch, 'repo-first'), second: join(scratch, 'repo-second') };
+  mkdirSync(realHome, { recursive: true });
+  for (const home of Object.values(homes)) { mkdirSync(join(home, '.claude'), { recursive: true }); writeFileSync(join(home, '.claude/CLAUDE.md'), 'My own notes.\n'); }
+  const open = async name => {
+    const data = join(scratch, `repo-${name}-data`);
+    mkdirSync(data, { recursive: true });
+    writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: homes[name] } }));
+    return launch(data, [], realHome);
+  };
+  const api = (a, body) => a.run(`(async () => { const api = window.centralKnot; const home = (await api.refresh()).home; ${body} })()`);
+  // As the Instructions page saves it: the base, with Claude Code getting it.
+  const setBase = (a, text) => api(a, `const base = await api.instructionBase(); const seen = Object.fromEntries((await api.instructions()).map(file => [file.tool, { path: file.path, hash: file.hash }]));
+    const done = await api.applyBase({ text: ${JSON.stringify(text)}, expected: base.hash, tools: ['claude-cli'], seen }, home); return done.stopped ?? 'saved';`);
+  const push = a => api(a, `const done = await api.pushRepo(home); return done.stopped ?? 'pushed';`);
+  const baseText = name => readNow(join(homes[name], '.central-knot/instructions/base.md'));
+  const claudeText = name => readNow(join(homes[name], '.claude/CLAUDE.md'));
+  const until = async (test, ms = 15000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await test()) return true; await wait(100); } return false; };
+  const baseRow = `.repo-row[data-key="instructions:base"]`;
+  /** Clicks Pull and waits for its work to reach base.md. */
+  const pull = async (a, wanted) => {
+    await until(() => a.exists('#repo-pull:not([disabled])'));
+    await a.click('#repo-pull');
+    if (!(await until(async () => baseText('second') === wanted))) console.error('repo base: Pull said', await a.text('.page'));
+  };
+  /** Opens the Git repo page (it checks the repo) and waits for the base's row to read `label`; returns the row's text. */
+  const rowSays = async (a, label) => {
+    await a.click('#nav-overview');
+    await a.click('#nav-repo');
+    await until(async () => (await a.text(baseRow) ?? '').includes(label));
+    return await a.text(baseRow) ?? '';
+  };
+
+  const first = await open('first');
+  same('the first home saves a base and pushes it', [await setBase(first, 'Be brief.\n'), await api(first, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`), await push(first)], ['saved', 'connected', 'pushed']);
+  const second = await open('second');
+  await setBase(second, 'Be thorough.\n');
+  await api(second, `return (await api.connectRepo(${JSON.stringify(remote)}, '', home)).stopped ?? 'connected';`);
+  check('the second home’s Git repo page lists the base as coming in', (await rowSays(second, 'in the repo')).includes('Base instructions'), await second.text('#repo-incoming'));
+  await pull(second, 'Be brief.\n');
+  same('Pull sets the base, and Claude Code, which gets it, has it', [baseText('second'), claudeText('second').includes('Be brief.')], ['Be brief.\n', true]);
+
+  same('an edit in the first home goes out', [await setBase(first, 'Be briefer.\n'), await push(first)], ['saved', 'pushed']);
+  check('and shows as changed in the repo', (await rowSays(second, 'Changed in the repo')).includes('Changed in the repo'), await second.text('#repo-incoming'));
+  await pull(second, 'Be briefer.\n');
+  same('Pull brings the edit in', [baseText('second'), claudeText('second').includes('Be briefer.')], ['Be briefer.\n', true]);
+
+  same('the first home deletes the base and pushes', [await setBase(first, ''), await push(first)], ['saved', 'pushed']);
+  const deleting = await rowSays(second, 'Removed in the repo');
+  check('before Pull, the page says the base is deleted in the repo and what Pull does', deleting.includes('Removed in the repo') && deleting.includes('Pull empties the base instructions'), deleting);
+  await pull(second, '');
+  same('Pull empties the base and takes it out of Claude Code, which keeps its own text', [baseText('second'), claudeText('second').includes('Be briefer.'), claudeText('second').includes('My own notes.')], ['', false, true]);
+  await second.click('#nav-history');
+  const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base')?.id ?? null;`);
+  await until(async () => second.exists(`#history-${event}`));
+  check('History has the deletion, with an Undo', event && /Pull emptied the base instructions/.test(await second.text('.history-list') ?? ''), await second.text('.history-list'));
+  await second.click(`#history-${event}`);
+  same('Undo puts the base back, and Claude Code gets it again', [baseText('second'), claudeText('second').includes('Be briefer.'), await api(second, `return (await api.instructionBase()).tools;`)], ['Be briefer.\n', true, ['claude-cli']]);
+  check('and the row reads as undone', await until(async () => (await second.text('.history-row.history-undone') ?? '').includes('Base instructions')), await second.text('.history-list'));
+  await second.quit();
+  await first.quit();
+}
+
 /** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
@@ -1783,6 +1856,7 @@ try {
   await practiceFlow();
   await releasedStartupFlow();
   await fewToolsFlow();
+  await repoBaseFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
   execChmod();
