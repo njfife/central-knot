@@ -698,6 +698,20 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
+  // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
+  const pinned = await a.run(`(() => {
+    const box = document.querySelector('#plugins-scroll'), head = document.querySelector('.plugin-table .ov-head'), top = () => box.getBoundingClientRect().top;
+    const style = box.style.cssText;
+    box.style.flex = 'none'; box.style.height = '160px';
+    box.scrollTop = head.getBoundingClientRect().top - top() + 20;
+    const gap = Math.round(head.getBoundingClientRect().top - top()), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+    box.scrollTop = 0; box.style.cssText = style;
+    return { gap, rowUnder };
+  })()`);
+  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { gap: 0, rowUnder: true });
+  await a.send('Emulation.clearDeviceMetricsOverride');
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
@@ -884,6 +898,28 @@ async function practiceFlow() {
   check('a refused install is reported as such', /Could not add the marketplace\. It stopped with exit code 9/.test(await a.text('.plugin-problems')), await a.text('.bands'));
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
+  // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
+  // document-tools:pdf-reader in config.toml. Codex has it installed as its record says.
+  const codexConfig = join(practice, '.codex/config.toml');
+  const codexCopy = join(practice, '.codex/plugins/cache/ck-test-market/document-tools/1.2.0');
+  mkdirSync(join(codexCopy, 'skills'), { recursive: true });
+  for (const name of ['pdf-reader', 'spreadsheet']) skill(join(codexCopy, 'skills'), name);
+  const configBefore = `${existsSync(codexConfig) ? readFileSync(codexConfig, 'utf8') : ''}\n[marketplaces.ck-test-market]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@ck-test-market"]\nenabled = true\n`;
+  writeFileSync(codexConfig, configBefore);
+  await a.click('#plugin-back');
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 60 && !(await a.run(`(document.querySelector('[data-plugin="document-tools"]')?.textContent ?? '').includes('Installed') || !!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`)); tries++) await wait(100);
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
+  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
+  await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
+  check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
+  await a.click('#plugins-apply');
+  check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
+  check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  await a.click('#plugins-undo');
+  same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
+  writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
   await a.click('#plugin-back');
   // About has every fact about the marketplace, and Remove.
   await a.click('#market-tab-about');

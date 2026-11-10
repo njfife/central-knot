@@ -184,7 +184,7 @@ function undoButton(): HTMLElement | null {
   const back = undoOps();
   if (!back.length) return null;
   const undo = button({ variant: 'outline', size: 'small', label: market.lastRun?.undo ? 'Undo the rest' : 'Undo', id: 'plugins-undo', disabled: !!app.busy, onclick: () => void applyPluginOps(back, true) });
-  undo.title = 'Reverses what changed, through each tool’s own command: uninstalls what was installed and reinstalls what was uninstalled.';
+  undo.title = 'Reverses what changed, through each tool’s own command or switch: uninstalls what was installed, reinstalls what was uninstalled and turns each skill back as it was.';
   return undo;
 }
 
@@ -196,12 +196,15 @@ const dismiss = (onclick: () => void, id?: string) => closeButton(() => { onclic
  */
 function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   const counts = summary(market.draft);
-  if (counts.plugins) {
-    const pending = [plural(counts.plugins, 'change'), counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
+  if (market.draft.size) {
+    // "1 skill to turn off in 2 tools": a skill is counted once, however many tools it changes in.
+    const switches = ({ skills, tools }: { skills: number; tools: number }, verb: string) => (skills ? `${plural(skills, 'skill')} to turn ${verb}${tools > 1 ? ` in ${tools} tools` : ''}` : '');
+    const pending = [counts.plugins ? plural(counts.plugins, 'change') : '', counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
+      switches(counts.skillsOff, 'off'), switches(counts.skillsOn, 'on')].filter(Boolean).join(' · ');
     return h('div.apply', {},
       // Narrow, the toolbar has nothing else at its left: the hint the table's header gives up sits there (style.css).
       h('span.apply-hint', {}, 'Nothing runs until Apply all.'),
-      pendingCount(pending, plural(counts.plugins, 'change')),
+      pendingCount(pending, plural(market.draft.size, 'change')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); announce('Changes discarded. Nothing was installed or removed.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, attrs: { title: `${pending}. Nothing runs until Apply all.` }, onclick: () => void applyPluginOps([...market.draft.values()]) }));
   }
@@ -209,14 +212,17 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   // status bar (app.ts saidInStatusBar).
   const last = market.lastRun;
   const back = undoButton();
-  const parts = last ? resultParts(lines, last.undo, { short: true }) : [];
+  const open = current()?.entry;
+  const parts = last ? resultParts(lines, last.undo, { short: true, here: open && market.nav.plugin ? { plugin: market.nav.plugin, source: open.source } : undefined }) : [];
   if (last && parts.length && back) {
     const link = (part: { plugin: string; source: string }, at: number) =>
       h('button.result-link', { type: 'button', id: `result-plugin-${at}`, title: `Open ${part.plugin}`, onclick: () => browse({ source: part.source, plugin: part.plugin, tab: 'plugins' }) }, part.plugin);
     // On another plugin's page the result is only named, so it never reads as being about the plugin on screen; an
     // Undo still says it was undone.
-    const elsewhere = market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin);
-    const changed = parts.filter(part => typeof part !== 'string');
+    // Once the tools were read again (Refresh) the run is only named, so its sentence never contradicts what the page now shows.
+    const elsewhere = last.reread || (market.nav.plugin && !lines.some(line => line.plugin === market.nav.plugin));
+    // Each plugin the run changed, once, whether or not the sentence names it (it leaves out the plugin on screen).
+    const changed = [...new Map(lines.filter(line => line.ok).map(line => [pluginKey(line.source, line.plugin), { plugin: line.plugin, source: line.source }])).values()];
     const sentence = elsewhere
       ? [last.undo ? 'Undone: ' : 'Last change: ', ...changed.flatMap((part, at) => [at ? ', ' : '', link(part, at)])]
       : parts.map((part, at) => (typeof part === 'string' ? part : link(part, at)));

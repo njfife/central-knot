@@ -70,6 +70,12 @@ export async function readmeIn(folder: string, root = folder): Promise<string | 
   return body === undefined ? undefined : body.length > README_LIMIT ? `${body.slice(0, README_LIMIT)}\n\n…` : body;
 }
 
+/** A skill as the tools read it, from its SKILL.md `body` in folder `dir`: its `name` (else the folder's) and description. */
+const skillPart = (body: string, dir: string): Pick<NamedPart, 'name' | 'description'> => { const meta = nameAndDescription(body); return { name: meta.name || basename(dir), description: meta.description ?? '' }; };
+/** A skill's name as the tools read it: its SKILL.md's `name`, else its folder's. */
+export const skillName = (body: string, dir: string) => skillPart(body, dir).name;
+
+
 /**
  * Skills from the given paths: each one a skill folder (with SKILL.md) or, with `subfolders`, a folder of skill folders.
  * Each part's `path` is its folder relative to the plugin's `folder` ("." for the folder itself), the same in every copy.
@@ -82,8 +88,7 @@ async function skillsIn(root: string, folder: string, paths: string[], subfolder
     if (found.some(part => part.path === path)) return true;
     const body = await partFile(root, join(dir, 'SKILL.md'));
     if (body === undefined) return false;
-    const meta = nameAndDescription(body);
-    found.push({ name: meta.name || basename(dir), description: meta.description ?? '', text: body, path });
+    found.push({ ...skillPart(body, dir), text: body, path });
     return true;
   };
   for (const path of paths) if (!(await add(path)) && subfolders) for (const name of await listInside(root, path)) await add(join(path, name));
@@ -140,8 +145,47 @@ async function section(root: string, folder: string, named: unknown, key: string
   return Object.assign({}, ...parts);
 }
 
-/** How to read a plugin's parts: as Codex does, by the one manifest it picks (`codex`); and whether the plugin is its marketplace's own root. */
-export interface ReadAs { codex?: Record<string, unknown>; atMarketplaceRoot?: boolean }
+/**
+ * How to read a plugin's parts: as Codex does, by the one manifest it picks (`codex`); as Copilot CLI does, where a listed
+ * skills folder replaces skills/ (`skillsListReplaces`); and whether the plugin is its marketplace's own root.
+ */
+export interface ReadAs { codex?: Record<string, unknown>; skillsListReplaces?: boolean; atMarketplaceRoot?: boolean }
+
+/** A plugin's manifest as `readAs` says it is read, and the entry that adds to it (none for Codex). */
+async function manifestOf(folder: string, entry: Record<string, unknown>, root: string, { codex }: ReadAs) {
+  return { own: codex ?? (await pluginManifest(folder, root)) ?? {}, added: codex ? {} : entry };
+}
+/** The files and folders lists name, each once, resolved in `folder`: paths, lists of paths, or (commands) a map of name to { source }. */
+const listedPaths = (folder: string, ...lists: unknown[]) =>
+  [...new Set(lists.flatMap(list => strings(list) ?? Object.values(record(list) ?? {}).map(item => text(record(item)?.source)).filter(Boolean)).map(path => resolve(folder, path)))];
+
+/** A plugin's skills, read by each tool's rule (see pluginContents). */
+async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs): Promise<NamedPart[]> {
+  const { own, added } = await manifestOf(folder, entry, root, readAs);
+  const skillsFolder = join(folder, 'skills');
+  const isListed = own.skills !== undefined || added.skills !== undefined;
+  const skillPaths = () => {
+    // Codex: its list, keeping only ./ paths as Codex does, replaces skills/; an empty one falls back to it.
+    if (readAs.codex) { const listed = listedPaths(folder, (strings(own.skills) ?? []).filter(path => path.startsWith('./'))); return listed.length ? listed : [skillsFolder]; }
+    // Copilot CLI: what is listed replaces skills/.
+    if (readAs.skillsListReplaces && isListed) return listedPaths(folder, own.skills, added.skills);
+    // A marketplace's root plugin whose entry lists skills: only those.
+    if (readAs.atMarketplaceRoot && added.skills !== undefined) return listedPaths(folder, added.skills);
+    // Otherwise skills/ is always read, with every listed folder added.
+    return listedPaths(folder, skillsFolder, own.skills, added.skills);
+  };
+  const listed = await skillsIn(root, folder, skillPaths());
+  // Claude Code: a plugin with no skills/ (an empty one counts as none) and no list may be one skill, SKILL.md at its root.
+  return listed.length || readAs.codex || isListed ? listed : skillsIn(root, folder, [folder], false);
+}
+
+/**
+ * The skills an installed copy of a plugin holds, by name, read as its page reads it (see pluginContents): with its
+ * marketplace `entry`, or as Codex reads it when `codex` gives the manifest Codex picks.
+ */
+export async function skillNamesIn(folder: string, entry: Record<string, unknown> = {}, readAs: ReadAs = {}): Promise<string[]> {
+  return (await skillsOf(folder, entry, folder, readAs)).map(part => part.name);
+}
 
 /**
  * What one plugin holds, by name, read as Claude Code reads it (or, with `codex`, as Codex does). `root` bounds every
@@ -157,34 +201,15 @@ export interface ReadAs { codex?: Record<string, unknown>; atMarketplaceRoot?: b
  * An entry with "strict": false that also lists parts beside a plugin.json is one Claude Code refuses; it is read merged.
  * Hooks and servers are read from their default files plus whatever plugin.json or the entry names.
  */
-export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, { codex, atMarketplaceRoot = false }: ReadAs = {}): Promise<PluginContents> {
-  const pluginJson = codex ? undefined : await pluginManifest(folder, root);
-  const own = codex ?? pluginJson ?? {};
-  const added = codex ? {} : entry;
+export async function pluginContents(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs = {}): Promise<PluginContents> {
+  const { own, added } = await manifestOf(folder, entry, root, readAs);
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
-  const named = (list: unknown) => strings(list) ?? Object.values(record(list) ?? {}).map(item => text(record(item)?.source)).filter(Boolean);
-  /** Each listed file or folder once, resolved in the plugin's folder. */
-  const paths = (...lists: unknown[]) => [...new Set(lists.flatMap(named).map(path => resolve(folder, path)))];
-  const isListed = (key: string) => own[key] !== undefined || added[key] !== undefined;
-  const listedOr = (key: string, fallback: string) => (isListed(key) ? paths(own[key], added[key]) : [fallback]);
-  const skillsFolder = join(folder, 'skills');
-  /** Where the skills are, by each tool's rule (see the list above). */
-  const skillPathsFor = () => {
-    // Codex: its list, keeping only ./ paths as Codex does, replaces skills/; an empty one falls back to it.
-    if (codex) { const listed = paths((strings(own.skills) ?? []).filter(path => path.startsWith('./'))); return listed.length ? listed : [skillsFolder]; }
-    // A marketplace's root plugin whose entry lists skills: only those.
-    if (atMarketplaceRoot && added.skills !== undefined) return paths(added.skills);
-    // Otherwise skills/ is always read, with every listed folder added.
-    return paths(skillsFolder, own.skills, added.skills);
-  };
-  const listedSkills = await skillsIn(root, folder, skillPathsFor());
-  // Claude Code: a plugin with no skills/ (an empty one counts as none) and no list may be one skill, SKILL.md at its root.
-  const skills = listedSkills.length || codex || isListed('skills') ? listedSkills : await skillsIn(root, folder, [folder], false);
+  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : listedPaths(folder, own[key], added[key]));
   const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
   const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
   const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
   return {
-    skills,
+    skills: await skillsOf(folder, entry, root, readAs),
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
     agents: await markdownIn(root, folder, listedOr('agents', join(folder, 'agents'))),
     hooks: Object.keys(hooks).sort(),
