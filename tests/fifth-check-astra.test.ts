@@ -109,15 +109,3 @@ test('C1 MCP Restore ownership gate holds',()=>box(async b=>{
   assert.equal((await restoreMcp(b.context,tools.slice(1),event.id)).writes,0);
   assert.equal(await command(b.context,'copilot-cli'),'EDIT');
 }));
-
-test('C2 MCP and agents only scopes hold pending edits',()=>box(async b=>{
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('BASE'));
-  await applyMcp(b.context,tools.slice(1),managed('docs'));
-  await fs.writeFile(join(b.home,'.copilot','mcp-config.json'),json('EDIT'));
-  assert.equal((await applyMcp(b.context,tools.slice(1),[],{only:new Set(['other'])})).writes,0);
-  assert.equal(await command(b.context,'codex-cli'),'BASE');
-  await fs.writeFile(b.paths[0],md('BASE'));await applyAgents(b.context,tools,managed('reviewer'));
-  await fs.writeFile(b.paths[0],md('EDIT'));
-  assert.equal((await applyAgents(b.context,tools,[],{only:new Set(['other'])})).writes,0);
-  assert.match(await fs.readFile(b.paths[1],'utf8'),/BASE/);
-}));

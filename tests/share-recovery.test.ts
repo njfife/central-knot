@@ -24,11 +24,11 @@ test('A moved-aside original goes back to an empty place; ones whose place is ta
   } finally { await rm(folder, { recursive: true, force: true }); }
 });
 
-for (const race of ['changed before the move', 'no hard links']) {
+for (const race of ['changed before the move', 'saved before the link', 'no hard links']) {
   test(`A moved-aside original that cannot go back is kept as a backup (${race})`, async () => {
     const folder = await mkdtemp(join(tmpdir(), 'ck-putback-'));
     const path = join(folder, 'settings.json');
-    const original = race === 'no hard links' ? 'expected\n' : 'edited\n';
+    const original = race === 'changed before the move' ? 'edited\n' : 'expected\n';
     const originalLink = fs.link;
     const originalRename = fs.rename;
     try {
@@ -39,7 +39,7 @@ for (const race of ['changed before the move', 'no hard links']) {
       };
       fs.link = async (source, destination) => {
         if (race === 'no hard links' && String(source).endsWith('.tmp')) throw Object.assign(new Error('no hard links'), { code: 'EPERM' });
-        if (race === 'no hard links' && String(destination) === path) await writeFile(path, 'later\n');
+        if (race !== 'changed before the move' && String(destination) === path) await writeFile(path, 'later\n');
         return originalLink(source, destination);
       };
       syncBuiltinESMExports();
