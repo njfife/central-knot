@@ -2,9 +2,10 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
+import { kindNouns } from './presence.ts';
 import { andList, capitalToolsPhrase, orList, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { saidInStatusBar, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { saidInStatusBar, tell, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
@@ -37,13 +38,12 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
 type Kind = 'skills' | 'mcp' | 'agents';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
-const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
-/** The kind's noun inside a sentence, one and many. */
-const sentenceNouns: Record<Kind, [string, string]> = { skills: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agents: ['agent', 'agents'] };
+/** The kind's column header ("Server") and its title ("MCP servers"), from presence.ts kindNouns. */
+const nouns = Object.fromEntries((['skills', 'mcp', 'agents'] as const).map(each => [each, [kindNouns[each].short[0].replace(/^./, first => first.toUpperCase()), kindNouns[each].title]])) as Record<Kind, [string, string]>;
 /** The kind's noun for `n` of them: "skill", "MCP servers". */
-const word = (n: number) => sentenceNouns[kind][n === 1 ? 0 : 1];
+const word = (n: number) => (n === 1 ? kindNouns[kind].one : kindNouns[kind].many);
 /** `n` of the kind, counted: "1 skill", "2 MCP servers". */
-const counted = (n: number) => plural(n, ...sentenceNouns[kind]);
+const counted = (n: number) => plural(n, kindNouns[kind].one, kindNouns[kind].many);
 let kind: Kind = 'skills';
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
@@ -405,7 +405,7 @@ function toolLine(skill: SampleSkill, tool: Tool): string {
   }
   // A copy that stops syncing on Apply all is said as what will happen; it still syncs until then.
   if (cellState === 'present' && stopsOnApply(skill, tool)) return 'Keeps its copy, which stops updating on Apply all.';
-  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : `Has its own copy. Central Knot is not managing this ${shortNoun[kind][0]}.`;
+  if (cellState === 'present') return skill.managed ? 'Has its own copy. Syncing to this tool is turned off.' : `Has its own copy. Central Knot is not managing this ${kindNouns[kind].short[0]}.`;
   return skill.managed ? 'No copy, and syncing here is turned off.' : 'No copy.';
 }
 
@@ -443,19 +443,28 @@ type Placement = 'row' | 'dock' | 'files';
  * while a copy choice is open, which has its own Read both copies, nor in the Files view itself), and Delete everywhere once it
  * is managed.
  */
-function itemActions(skill: SampleSkill, choosing: boolean, inFiles: boolean) {
+function itemActions(skill: SampleSkill, choosing: boolean) {
   if (designMode || kind !== 'skills') return null;
-  const files = choosing || inFiles ? null : smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); });
+  const files = choosing ? null : smallAction('Files and contents', `files-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); });
   const remove = deleteAction(skill);
   return files || remove ? h('div.details-actions', {}, files, remove) : null;
 }
 
-/** The Files view's stacked pane: where each copy is, then Delete everywhere, below the files. */
-function filesTail(skill: SampleSkill, where: Node[]) {
-  if (detailWide) return null;
-  const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
-  const parts = [wherePaths(skill, where, true), itemActions(skill, differs && !view.draft.get(skill.key), true)].filter(part => !!part);
-  return parts.length ? h('div.files-tail', {}, parts) : null;
+/** An item whose copies differ between tools, so the person chooses one (never one held as it is). */
+const isDiffering = (skill: SampleSkill) => !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
+
+/**
+ * The Files view's parts for one skill, in the order they read: its details (status, choices; none when every copy is
+ * the same, which the pane's header already says), then where each copy is, then Delete everywhere. A wide pane keeps all
+ * of them in its column beside the file; stacked, the details stay above the file and the rest goes below it, so nothing
+ * to delete sits above the file.
+ */
+function filesLayout(skill: SampleSkill, where: Node[]): { column: Node[]; tail: Node[] } {
+  const remove = deleteAction(skill);
+  const rest = [wherePaths(skill, where, true), remove ? h('div.details-actions', {}, remove) : null].filter((part): part is HTMLElement => !!part);
+  const head = details(skill, 'files');
+  const top = head ? [head] : [];
+  return detailWide ? { column: [...top, ...rest], tail: [] } : { column: top, tail: rest };
 }
 
 /** Delete everywhere (DEL-02) for a managed skill: two clicks, the second naming what goes. */
@@ -487,16 +496,24 @@ function groupedRows(skill: SampleSkill, toolRow: (tool: Tool) => HTMLElement) {
 }
 
 /** Where each copy lives, folded away: paths matter less than what each tool has. `extra` folds in more about them (Files view). */
-function wherePaths(skill: SampleSkill, extra: Node[] = [], inFiles = false) {
-  const shown = toolList().filter(tool => skill.paths?.[tool]);
-  if (!shown.length && !extra.length) return null;
+function wherePaths(skill: SampleSkill, entries: Node[] = [], inFiles = false) {
+  // The Files view names each copy once, with all it knows about it (pages.ts copyEntry); elsewhere a line per tool.
+  const shown = inFiles ? [] : toolList().filter(tool => skill.paths?.[tool]);
+  if (!shown.length && !entries.length) return null;
   // MCP: the settings files are where a server is changed, so they show open. Skills and agents fold them away, except in
   // the Files view's wide pane, whose details column has the room: there they start open, until the person says otherwise.
   const open = kind === 'mcp' || (inFiles && (view.whereOpen ?? detailWide));
   const paths = h('details.details-paths', open ? { open: true } : {}, h('summary', { onclick: () => { if (inFiles) view.whereOpen = !(paths as HTMLDetailsElement).open; } }, icon('chevron-right', 12, 'tone-faint'), kind === 'mcp' ? 'Settings files' : 'Where each copy is'),
-    shown.map(tool => pathLine(tool, skill.paths![tool]!)), extra);
+    shown.map(tool => pathLine(tool, skill.paths![tool]!)), entries);
   return paths;
 }
+
+/** A path shown whole, wrapping only after a "/", never inside a folder's name (unless one name is wider than its column). */
+export const wrappingPath = (path: string) => {
+  const parts = shownPath(path).split('/');
+  // Each folder name with its "/" is one unit (style.css .wrap-part): a line breaks only between them.
+  return h('span.wrap-path', { title: path }, ...parts.map((part, index) => h('span.wrap-part', {}, index < parts.length - 1 ? `${part}/` : part)));
+};
 
 /** One file: the tool's name, its path in full, and a way to find it in the file manager. */
 function pathLine(tool: Tool, path: string) {
@@ -547,9 +564,8 @@ function stoppedActions(skill: SampleSkill, tool: Tool, source: Tool, where = ''
     writeFlag(keptKey(skill, tool)); state.dismissed.add(`stopped:${skill.key}:${tool}`);
     // Keeping the edit is a lasting exception, so it is said with a way back, like every other choice here.
     const name = skill.name ?? skill.key;
-    state.outcome = { page: state.page, items: [name], text: `${names[tool]} keeps its own edit of ${name} and no longer receives updates from ${names[source]}. Nothing was written.`,
-      act: { label: 'Undo', id: 'outcome-undo-keep', title: `Back to deciding: ${names[tool]}’s copy shows as stopped again`, run: () => { writeFlag(keptKey(skill, tool), false); state.dismissed.delete(`stopped:${skill.key}:${tool}`); state.outcome = undefined; announce(`${names[tool]}’s copy of ${name} is waiting for a choice again.`); rerender(); } } };
-    announce(state.outcome.text);
+    tell({ page: state.page, items: [name], text: `${names[tool]} keeps its own edit of ${name} and no longer receives updates from ${names[source]}. Nothing was written.`,
+      act: { label: 'Undo', id: 'outcome-undo-keep', title: `Back to deciding: ${names[tool]}’s copy shows as stopped again`, run: () => { writeFlag(keptKey(skill, tool), false); state.dismissed.delete(`stopped:${skill.key}:${tool}`); state.outcome = undefined; announce(`${names[tool]}’s copy of ${name} is waiting for a choice again.`); rerender(); } } });
     rerender();
   } });
   keep.title = `Leave ${names[tool]}’s copy as you edited it; it stops receiving updates and the warning clears`;
@@ -603,10 +619,17 @@ function committedStatus(skill: SampleSkill, differs: boolean): string {
 }
 
 /** Everything about one item, opened in place under its row. Differing copies put the choice first. */
-function details(skill: SampleSkill, placement: Placement = 'row', where: Node[] = []) {
+function details(skill: SampleSkill, placement: 'files'): HTMLElement | null;
+function details(skill: SampleSkill, placement?: Exclude<Placement, 'files'>): HTMLElement;
+/**
+ * One item's details: its status, the choice when copies differ, each tool's line, and where each copy is. In the Files
+ * view (filesLayout) where each copy is and Delete everywhere are laid out apart, and nothing is drawn when nothing is
+ * left to say.
+ */
+function details(skill: SampleSkill, placement: Placement = 'row'): HTMLElement | null {
   const inFiles = placement === 'files';
   const draft = view.draft.get(skill.key);
-  const differs = !skill.held && toolList().some(tool => ['differs', 'present-differs'].includes(cellOf(skill, tool)));
+  const differs = isDiffering(skill);
   const pending = pendingStatus(skill);
   const status = pending ?? committedStatus(skill, differs);
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
@@ -614,12 +637,10 @@ function details(skill: SampleSkill, placement: Placement = 'row', where: Node[]
   const allSame = kind !== 'mcp' && skill.managed && !draft && toolList().every(tool => cellOf(skill, tool) === 'synced' && !skill.limits?.[tool]);
   // MCP: each tool's row is a grid of its settings file and Show in folder, the links in one column; its status and
   // Claude Code's Write step sit under them.
-  const settingsFile = (tool: Tool) => (kind === 'mcp' && skill.paths?.[tool] ? [pathText(shownPath(skill.paths[tool]!), skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
-  // In the Files view the status comes first and Delete everywhere last, after where each copy is. A wide pane keeps them in
-  // its details column; stacked, they go below the files (filesTail), so nothing to delete sits above the file.
-  const besideFiles = inFiles && detailWide;
-  const whereHere = inFiles && !besideFiles ? null : wherePaths(skill, where, inFiles);
-  const filesEnd = besideFiles ? itemActions(skill, differs && !draft, true) : null;
+  const settingsFile = (tool: Tool) => (kind === 'mcp' && skill.paths?.[tool] ? [wrappingPath(skill.paths[tool]!), showInFolder(skill.paths[tool]!)] : []);
+  const whereHere = inFiles ? null : wherePaths(skill);
+  // In the Files view, an item whose copies are all the same has nothing to add to the pane's header.
+  if (inFiles && allSame && !(skill.extra ?? []).length && !skill.converted) return null;
   const toolRow = (tool: Tool) => h('div.details-tool', {},
     h('div.details-tool-head', {}, h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])),
       ...settingsFile(tool),
@@ -638,7 +659,7 @@ function details(skill: SampleSkill, placement: Placement = 'row', where: Node[]
         : h('p.details-status', {}, allSame ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : status, draft && !pending && !inFiles ? h('span.details-pending', {}, ' · not applied yet') : null),
       kind !== 'mcp' && skill.description && !(differs && !draft) && !inFiles ? h('p.details-description', {}, skill.description) : null,
       kind === 'mcp' && skill.description ? definition(skill.description) : null,
-      inFiles ? null : itemActions(skill, differs && !draft, inFiles)),
+      inFiles ? null : itemActions(skill, differs && !draft)),
     differs ? compareChoices(skill) : null,
     // Agents: each tool runs an agent its own way; Central Knot moves the name, description and prompt (AGT-01).
     kind === 'agents' && !Object.keys(skill.limits ?? {}).length && Object.keys(skill.copies).length + toolList().filter(tool => skill.managed && !skill.off.includes(tool) && !skill.copies[tool]).length > 1
@@ -649,8 +670,7 @@ function details(skill: SampleSkill, placement: Placement = 'row', where: Node[]
     allSame ? whereHere
       : differs && !draft ? whereHere : [h('div.details-tools', {}, groupedRows(skill, toolRow)), kind === 'agents' && !skill.stopped?.length ? oneWayNote(skill) : null, kind === 'mcp' ? null : whereHere],
     kind === 'agents' ? convertBlock(skill) : null,
-    kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null,
-    filesEnd)
+    kind === 'skills' && skill.converted ? h('p.details-limits.details-note', {}, icon('info', 12, 'tone-muted'), `Converted from ${names[skill.converted.origin] ?? skill.converted.origin}’s agent “${skill.converted.agent}”, as a one-time copy; ${names[skill.converted.origin] ?? skill.converted.origin} keeps the agent, and edits here never change it. As a skill it has no ${andList(skill.converted.losses)}.`) : null)
 }
 
 /** The decision for differing copies: each choice says everything Apply all will do with it. */
@@ -799,7 +819,8 @@ function legend(list: SampleSkill[]) {
   const stops = list.some(skill => toolList().some(tool => stopsOnApply(skill, tool)));
   const source = kind === 'agents' && list.some(skill => skill.managed && skill.oneWay);
   const oneWay = list.some(skill => skill.managed && Object.keys(skill.limits ?? {}).length);
-  const oneWaySwatch = h('span.legend-cell.legend-plain', { 'aria-hidden': 'true' });
+  // Drawn as the cell it explains: a synced box with the one-way arrow at its corner.
+  const oneWaySwatch = swatch('synced', true);
   oneWaySwatch.classList.add('cell-oneway');
   oneWaySwatch.append(h('span.cell-oneway-mark', {}, icon('arrow-up-right', 8)));
   const fresh = list.some(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined));
@@ -988,7 +1009,6 @@ function shownStrip(shown: SampleSkill[]) {
     }));
 }
 
-const shortNoun: Record<Kind, [string, string]> = { skills: ['skill', 'skills'], mcp: ['server', 'servers'], agents: ['agent', 'agents'] };
 
 /** Whether the table draws a Managed section, so a move is told on it rather than on Unmanaged. */
 let managedDrawn = false;
@@ -1072,7 +1092,7 @@ function helpBand(): HTMLElement | null {
   // Shown until dismissed, so it does not come and go as rows change.
   const key = `ck-help-dismissed-${kind}`;
   if (designMode || !list.length || readFlag(key) || state.skillsView === 'files' || (kind === 'mcp' && view.draft.size)) return null;
-  const one = kind === 'mcp' ? 'an MCP server' : kind === 'agents' ? 'an agent' : 'a skill';
+  const one = kindNouns[kind].a;
   return h('div.band.band-help', { role: 'note' }, icon('info', 14, 'tone-muted'),
     h('span.band-text.band-lines', {},
       h('span', {}, `Turn on Managed to keep ${one} the same in every tool you include. Nothing is written until Apply all.`),
@@ -1444,15 +1464,26 @@ const listWatcher = new ResizeObserver(entries => {
 });
 
 /**
- * Whether the Files view's detail pane is wide enough for its two columns (style.css, @container detail from 1040px).
+ * Whether the Files view's detail pane is wide enough for its two columns (from 1040px; style.css keys off data-columns).
  * Watched, so crossing that width redraws: "Where each copy is" starts open only there.
  */
 let detailWide = false;
 const DETAIL_COLUMNS_FROM = 1040;
-const detailWatcher = new ResizeObserver(([entry]) => {
-  const wide = (entry?.contentRect.width ?? 0) >= DETAIL_COLUMNS_FROM;
-  if (wide !== detailWide) { detailWide = wide; rerender(); }
-});
+const detailWatcher = new ResizeObserver(() => { if (settleFilesColumns()) rerender(); });
+
+/**
+ * Decides the Files view's columns from its pane's width (data-columns, which style.css keys off), and says whether that
+ * changed, so the page is drawn again. The renderer calls it right after drawing, before the page is painted, so a wide
+ * window never shows the stacked layout first; the watcher calls it when the pane changes width.
+ */
+export function settleFilesColumns(): boolean {
+  const pane = document.getElementById('skill-detail');
+  if (!pane) return false;
+  const wide = pane.clientWidth >= DETAIL_COLUMNS_FROM;
+  if (wide === detailWide) return false;
+  detailWide = wide;
+  return true;
+}
 
 /** A list of every skill beside (or, in narrow content, above) one skill's details: the same choices as the table, and the same Apply all. `more` adds files and contents. */
 export function skillsBrowser(more: (key: string) => { where: Node[]; contents: (Node | null | false)[] }, select: (key: string | undefined) => void) {
@@ -1486,6 +1517,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
     const pane = document.getElementById('skill-detail'); if (pane) detailWatcher.observe(pane);
   });
   const { where, contents } = more(skill.key);
+  const layout = filesLayout(skill, where);
   return h('div.page.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
@@ -1493,7 +1525,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
       h('div.scroll.list-scroll', { id: 'skills-list' },
         h('div.list-head', { 'aria-hidden': 'true' }, h('span', {}, 'Skill'), h('span.list-cells', {}, toolList().map(tool => h('span.list-head-tool', { title: names[tool] }, brandMark(tool, 12))))),
         list)),
-    h('section.detail-column', { id: 'skill-detail', 'aria-label': 'Skill details' },
+    h('section.detail-column', { id: 'skill-detail', 'data-columns': detailWide ? '2' : '1', 'aria-label': 'Skill details' },
       h('div.pane-header.fit-bar', {},
         h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Waits for Apply all')
           : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : skill.managed ? 'Managed' : 'Unmanaged')),
@@ -1504,7 +1536,10 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         h('div.detail-pending', {}, changeBar(false))),
       notices(),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.
-      h('div.scroll.detail-scroll', { id: 'detail-scroll' }, details(skill, 'files', where), h('div.detail-files', {}, ...contents), filesTail(skill, where))));
+      h('div.scroll.detail-scroll', { id: 'detail-scroll' },
+        layout.column.length ? h('div.files-details', {}, layout.column) : null,
+        h('div.detail-files', {}, ...contents),
+        layout.tail.length ? h('div.files-tail', {}, layout.tail) : null)));
 }
 
 // Escape in a find box clears it.

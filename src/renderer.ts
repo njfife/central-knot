@@ -1,7 +1,7 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
@@ -9,6 +9,8 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
+import { settleFilesColumns } from './matrix.ts';
+import { settlePluginTools } from './pluginpage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -75,7 +77,7 @@ function renderSidebar() {
     row('agents', 'Agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
     row('instructions', 'Instructions', 'pencil-line'),
     row('plugins', 'Plugins', 'puzzle'),
-    absent.length < 5 ? h('div.nav-divider', { role: 'separator' }) : null,
+    !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', 'History', 'history'),
     navRow('tools', 'Tools', 'boxes'),
     navRow('settings', 'Settings', 'settings'),
@@ -126,6 +128,11 @@ function writeFact(manage: ManageView): { glyph: IconName; text: string; short?:
  */
 function syncSwitch(home: HomeView) {
   const label = h('span.sync-label', {}, 'Automatic sync');
+  // With no tools there is nothing to sync: the switch is shown, not offered.
+  if (!home.manage.tools.length) {
+    return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: 'No tools were found in this home, so there is nothing to sync.' },
+      label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Nothing to sync'));
+  }
   if (!home.manage.access.allowed) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: home.manage.access.reason ?? 'Preview only: nothing is written here' },
       label, h('span.sync-track.idle', { 'aria-hidden': 'true' }, h('span.sync-knob')), h('span.sync-state', {}, 'Paused'));
@@ -162,6 +169,9 @@ function render() {
   renderSidebar();
   renderHeader(rail);
   renderPage();
+  // Columns that depend on a pane's width are decided now, before the page is painted, and drawn again if they changed.
+  if (settleFilesColumns()) renderPage();
+  settlePluginTools();
   renderStatus();
   fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }

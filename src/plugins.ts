@@ -10,7 +10,7 @@ import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, 
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
-import { pluginTools, type PluginTool } from './presence.ts';
+import type { PluginTool } from './presence.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';

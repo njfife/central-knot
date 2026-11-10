@@ -14,14 +14,16 @@ import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, P
 import { writeDurably } from './share.ts';
 import { heldReason } from './pluginstatus.ts';
 import { isFolder, isHttps } from './values.ts';
-import { toolNames } from './words.ts';
 
 /** What the marketplace feature needs from the app around it. */
 export interface MarketplaceHost {
   /** The home on screen, or undefined before one is open. */
-  home(): { home: string; snapshots: Snapshot[]; overrides?: Partial<Record<HarnessId, string>> } | undefined;
-  /** This home's tools, in the order the page shows them. */
-  tools(): Promise<HarnessId[]>;
+  home(): { home: string; overrides?: Partial<Record<HarnessId, string>> } | undefined;
+  /**
+   * This home's tools, in the order the page shows them, and the snapshots they were found in: one read (or the read a
+   * Refresh made a moment ago), so the columns and what each tool's install says always agree.
+   */
+  read(): Promise<{ tools: HarnessId[]; snapshots: Snapshot[] }>;
   /** Whether writing is allowed in this home, and why not. */
   writeAccess(): Promise<{ allowed: boolean; reason?: string }>;
   /** Central Knot's own data folder: the added list here, Git copies under plugins/. */
@@ -146,7 +148,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   /** Every marketplace: added here, or already added in a tool. `fresh`: every Git source fetched again. */
   async function view(fresh = false): Promise<PluginsView> {
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), reads: new Map() };
-    const tools = toolIds(await host.tools());
+    const read = await host.read();
+    const tools = toolIds(read.tools);
     const writing = await host.writeAccess();
     const known: { source: string; origins: MarketplaceView['origins'] }[] = [];
     const note = (source: string, origin: MarketplaceView['origins'][number]) => {
@@ -159,8 +162,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const marketplaces: MarketplaceView[] = [];
     // All at once: one unreachable source doesn't hold up the others.
     marketplaces.push(...await Promise.all(known.map(({ source, origins }) => entryView(ctx, tools, source, origins, fresh))));
-    const snapshots = host.home()?.snapshots ?? [];
-    const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
+    const desktopOnly = tools.filter(tool => !ctx.binaries[tool] && read.snapshots.find(snapshot => snapshot.harness === tool)?.probe.bundled);
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly };
   }
 

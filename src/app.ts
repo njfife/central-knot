@@ -1,5 +1,5 @@
 import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { plural } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
@@ -7,12 +7,15 @@ import { andList, noToolsSentence, orList, toolName, toolNames as namedTools, to
 import { machineNames, pagePlatform } from './machine.ts';
 import { loadPlugins, resetMarket } from './pluginstate.ts';
 import { nextDraft, unsaved, type InstructionDraft } from './drafts.ts';
-import { absentKinds as absentKindsOf, kindNames, takesPlugins, type HomeKind } from './presence.ts';
+import { absentKindsIn, heldKinds, kindNames, kindNouns, type HomeKind } from './presence.ts';
+import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 
 declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
-export type Page = 'overview' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'tools' | 'settings';
+/** Every page, in the sidebar's order. */
+export const pages = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'] as const;
+export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
 export const machine = machineNames(pagePlatform(navigator.userAgent));
@@ -30,18 +33,21 @@ export const state = {
   /** What the last MCP Apply all or Write now did. */
   mcpResult: undefined as McpResult | undefined,
   agentsResult: undefined as McpResult | undefined,
-  /** What sync did on its own, newest last, read when the History page opens. */
-  history: undefined as HistoryEvent[] | undefined,
+  /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
+  history: pageData<HistoryEvent[]>(),
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
-  /** What the status bar says (announce): the last message, and whether it is for screen readers only. */
-  said: { text: '', quiet: false } as { text: string; quiet: boolean },
+  /**
+   * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
+   * the order messages were said, so the newest always wins.
+   */
+  said: { text: '', quiet: false, seq: 0 },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
-  /** Each tool's instruction file, read when the Instructions page opens. */
-  instructions: undefined as InstructionFile[] | undefined,
+  /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
+  instructions: pageData<InstructionFile[]>(),
   /** The one instruction file being edited (InstructionDraft). */
   instructionEdit: undefined as InstructionDraft | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
@@ -71,22 +77,29 @@ export const practiceNoteOpen = (): boolean => !readFlag(PRACTICE_NOTE);
 export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE, !open);
 
 /**
- * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. A quiet announcement is
- * for screen readers only: the page already shows the same thing.
+ * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. The newest message is
+ * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band).
  */
 export function announce(text: string, quiet = false) {
-  state.said = { text, quiet };
+  state.said = { text, quiet, seq: state.said.seq + 1 };
   paintStatusMessage();
 }
 
 /**
- * Paints the status bar's message from state: a result that only tells (saidInStatusBar), else the last announcement.
- * A result with a band of its own isn't said twice. The message keeps its whole text as its tooltip.
+ * Sets what the last action did (or clears it, saying `otherwise`), and says it. A result with nothing to offer (no
+ * button, Undo or History link) is said in the status bar; one with a band is heard by screen readers, since the band
+ * already shows it.
  */
+export function tell(outcome: Outcome | undefined, otherwise = ''): void {
+  state.outcome = outcome;
+  if (!outcome) announce(otherwise);
+  else announce(outcome.text, !saidInStatusBar(outcome));
+}
+
+/** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
 export function paintStatusMessage() {
   const region = document.getElementById('announcement')!;
-  const outcome = state.outcome?.page === state.page ? state.outcome : undefined;
-  const told = outcome && saidInStatusBar(outcome) ? { text: outcome.text, quiet: false } : state.said;
+  const told = state.said;
   // The first sentence, then the rest, so a narrow bar can drop the rest whole rather than cut a word (style.css).
   if (region.dataset.text !== told.text) {
     region.dataset.text = told.text;
@@ -104,40 +117,17 @@ export function paintStatusMessage() {
 const focusById = (id?: string | null) => (id ? document.getElementById(id) : null)?.focus();
 
 /**
- * Takes a new view of the home. When its tools changed (one appeared or went away), the page follows: a page whose kind
- * is no longer here gives way to the Overview, saying why, and a page with its own data reads it again in the background
- * (unless `reload` is false: the caller reads it itself). Returns whether the tools changed.
+ * Takes a new view of the home. When its tools changed (one appeared or went away), or there was no home before, the
+ * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
+ * reads it again (unless `reload` is false: the caller reads it itself).
  */
-function setHome(view: HomeView | null | undefined, { reload = true } = {}): boolean {
-  if (!view) return false;
+function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
+  if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
   state.home = view;
-  const changed = before !== undefined && homeTools().join() !== before;
-  if (changed) {
-    leaveAbsentPage();
-    if (reload) void loadPageData(state.page, { quiet: true });
-  }
-  return changed;
-}
-
-
-/** Moves on when an action starts or a background read begins; a background read whose epoch has passed is dropped. */
-let readEpoch = 0;
-
-/**
- * A page's own read in the background: no busy state, so the page's result (and its Undo) stays. What it read is shown
- * only if nothing started since (an action, or a newer read); a read that fails leaves the data unread, said quietly.
- */
-export async function readQuietly<T>(fetch: () => Promise<T>, show: (value: T) => void, what: string): Promise<void> {
-  const epoch = ++readEpoch;
-  try {
-    const value = await fetch();
-    if (epoch !== readEpoch) return;
-    show(value);
-  } catch {
-    if (epoch === readEpoch) announce(`${what} could not be read.`, true);
-  }
-  rerender();
+  if (before !== undefined && homeTools().join() === before) return;
+  leaveAbsentPage();
+  if (reload) void loadPageData(state.page);
 }
 
 /**
@@ -146,7 +136,6 @@ export async function readQuietly<T>(fetch: () => Promise<T>, show: (value: T) =
  * once it is done.
  */
 export async function busy(message: string, work: () => Promise<void>) {
-  readEpoch++;
   const focused = document.activeElement?.id;
   const before = state.said;
   state.outcome = undefined;
@@ -154,13 +143,14 @@ export async function busy(message: string, work: () => Promise<void>) {
   state.busy = message;
   document.body.dataset.busy = 'true';
   announce(message);
+  const working = state.said.seq;
   rerender();
   try { await work(); }
   catch {
     announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
   }
-  // A result the work left on the page speaks for itself; otherwise what was said before comes back.
-  if (state.said.text === message) announce(state.outcome ? '' : before.text, before.quiet);
+  // When the work said nothing since its "Reading…", what was said before comes back.
+  if (state.said.seq === working) announce(before.text, before.quiet);
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
@@ -168,19 +158,25 @@ export async function busy(message: string, work: () => Promise<void>) {
   drainOwedRefresh();
 }
 
+/**
+ * Opens a home (a switch, or the first at launch), where setHome only takes a newer view of the same one. Everything
+ * read or chosen for the home before is let go: its pages' data (each starts over at reading, and is read for this home
+ * at once), the marketplace choices and the open skill. An unsaved Instructions draft is kept: the Instructions page
+ * offers to copy or discard it.
+ */
 function accept(view: HomeView) {
-  setHome(view, { reload: false });
+  state.home = undefined;
   state.applied = undefined;
-  // The page's own data belonged to the home before: none of it shows here while this home's is read.
-  state.instructions = undefined;
-  state.history = undefined;
   state.item = undefined;
-  // An unsaved Instructions draft outlives a home switch: the Instructions page offers to copy or discard it.
   if (!draftUnsaved()) state.instructionEdit = undefined;
+  resetPageData(state.instructions);
+  resetPageData(state.history);
   resetMarket();
-  // The page's own data (Plugins, Instructions, History, Settings) belonged to the home before: read it for this one.
-  leaveAbsentPage();
-  void loadPageData(state.page, { quiet: true });
+  setHome(view, { reload: false });
+  void loadInstructions();
+  void loadHistory();
+  if (!absentKinds().includes('plugins')) void loadPlugins();
+  if (state.page === 'settings') void loadSettings();
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -220,11 +216,9 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
   const firstApply = !readFlag('ck-applied-once');
   writeFlag('ck-applied-once');
-  if (!result.stopped) state.outcome = { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : ''), item: singleName, items: newItems,
-    act: addedNow.length ? addedUndo(addedNow) : chosenNow.length ? choiceUndo(chosenNow) : undefined };
   const failed = result.results.filter(entry => entry.outcome === 'failed').length;
-  const written = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
-  announce(result.stopped ?? [result.harnessWrites ? `${plural(result.harnessWrites, 'copy', 'copies')} written${written.length <= 3 ? `: ${written.join(', ')}` : ''}.` : 'Applied. Nothing needed copying.', failed ? `${failed} failed.` : ''].filter(Boolean).join(' '));
+  tell(result.stopped ? undefined : { page: state.page, history: replacedSome && !chosenNow.length, text: `${what}.` + (managed && firstApply ? ' Edits now spread between tools.' : '') + (failed ? ` ${failed} failed.` : ''), item: singleName, items: newItems,
+    act: addedNow.length ? addedUndo(addedNow) : chosenNow.length ? choiceUndo(chosenNow) : undefined }, result.stopped);
 });
 
 /**
@@ -234,8 +228,8 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
  */
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
-  const absent = absentKindsOf(view.manage.tools, view.mcp.tools, view.agents.tools, view.manage.tools.filter(takesPlugins));
-  const counts = [plural(view.manage.skills.length, 'skill'), absent.includes('mcp') ? '' : plural(view.mcp.servers.length, 'MCP server'), absent.includes('agents') ? '' : plural(view.agents.servers.length, 'agent')].filter(Boolean);
+  const found = { skills: view.manage.skills.length, mcp: view.mcp.servers.length, agents: view.agents.servers.length };
+  const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped ? '' : ' Nothing changed.'}`;
 }
@@ -245,12 +239,11 @@ const readSummary = (view: HomeView) => readFound(view, view.label);
 
 /**
  * The kinds the open home's tools can hold, as a sentence names them: "skills, MCP servers and agents", or, for `one` of
- * them, "skill, MCP server or agent".
+ * them, "skill, MCP server or agent". Empty in a home with no tools (noTools).
  */
 export function heldKindNames(count: 'all' | 'one' = 'all'): string {
-  const held = (['skills', 'mcp', 'agents'] as const).filter(kind => !absentKinds().includes(kind));
-  const one = { skills: 'skill', mcp: 'MCP server', agents: 'agent' } as const;
-  return count === 'one' ? orList(held.map(kind => one[kind])) || 'skill' : andList(held.map(kind => kindNames[kind])) || 'skills';
+  const held = state.home ? heldKinds(state.home) : [];
+  return count === 'one' ? orList(held.map(kind => kindNouns[kind].one)) : andList(held.map(kind => kindNouns[kind].many));
 }
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
@@ -260,8 +253,11 @@ export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Readin
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
-  if (view) { accept(view); state.outcome = { page: state.page, carry: true, text: (nothing && view.manage.tools.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`) + leftText,
-    act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined }; announce(readSummary(view) + leftText, true); } else announce('');
+  if (!view) { announce(''); return; }
+  accept(view);
+  // An empty home (no tools, or nothing in them) says only that it opened; the page says the rest.
+  tell({ page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`) + leftText,
+    act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined });
 }));
 
 /** At launch: the home last opened (so sync resumes where it was), else this computer's home (dev builds: the practice copy). */
@@ -269,13 +265,17 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
   const view = await api().startHome();
   // The first read is said the same way as a home switch: a band, not a passing status line.
   const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
-  if (view) { accept(view); if (!practiceNote) state.outcome = { page: state.page, carry: true, text: `Opened ${view.label}. ${readFound(view)}` }; announce(readSummary(view), true); } else announce('');
+  if (!view) { announce(''); return; }
+  accept(view);
+  const nothing = !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
+  if (practiceNote) announce(readSummary(view), true);
+  else tell({ page: state.page, carry: true, text: nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}` });
 });
 
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
 export async function readAgain() {
   let read = false;
-  await busy(`Reading ${heldKindNames()}…`, async () => {
+  await busy(noTools() ? 'Reading…' : `Reading ${heldKindNames()}…`, async () => {
     const view = await api().refresh();
     if (!view) return;
     state.applied = undefined;
@@ -289,15 +289,15 @@ export async function readAgain() {
 }
 
 /**
- * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins. An unsaved Instructions
- * draft stays, still checked against the file it was opened from. `fresh` reads each marketplace anew; `quiet` reads in
- * the background, without the busy state, so the page's result (and its Undo) stays.
+ * Reads what a page shows beyond the home itself: History, Settings, Instructions or Plugins, into its slot
+ * (pagedata.ts), never as an action: the page says it is reading, and anything else can go on meanwhile. `fresh` reads
+ * each marketplace anew.
  */
-function loadPageData(page: Page, { fresh = false, quiet = false } = {}): Promise<void> {
-  if (page === 'history') return loadHistory(quiet);
+function loadPageData(page: Page, { fresh = false } = {}): Promise<void> {
+  if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings();
-  if (page === 'instructions') return loadInstructions(quiet);
-  if (page === 'plugins') return loadPlugins(fresh, quiet);
+  if (page === 'instructions') return loadInstructions();
+  if (page === 'plugins') return loadPlugins(fresh);
   return Promise.resolve();
 }
 
@@ -314,8 +314,11 @@ function leaveAbsentPage() {
 /** The open home's tools, as the main process decided them from the same read (presence.ts): page wording names only these. */
 export const homeTools = (): HarnessId[] => state.home?.manage.tools ?? [];
 
-/** The kinds no tool in the open home can hold (presence.ts absentKinds); none before a home is read. */
-export const absentKinds = (): HomeKind[] => (state.home ? absentKindsOf(homeTools(), state.home.mcp.tools, state.home.agents.tools, homeTools().filter(takesPlugins)) : []);
+/** The kinds no tool in the open home can hold (presence.ts absentKindsIn); none before a home is read. */
+export const absentKinds = (): HomeKind[] => (state.home ? absentKindsIn(state.home) : []);
+
+/** The open home has no tools at all: every page says so, and offers another home. False before a home is read. */
+export const noTools = (): boolean => !!state.home && !homeTools().length;
 
 /** The open home's tools by name, for sentences: "Claude Code and Codex". */
 export const homeToolNames = (): string[] => homeTools().map(toolName);
@@ -329,7 +332,10 @@ export function showPage(page: Page) {
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  if (page !== state.page) {
+    state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table';
+    tell(carried);
+  }
   if (!stays) void loadPageData(page);
   state.page = page;
   state.find = '';
@@ -365,10 +371,11 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
-/** Reads History; `quiet` in the background, without the busy state. */
-export const loadHistory = (quiet = false): Promise<void> => {
-  const show = (events: HistoryEvent[]) => { state.history = events; };
-  return quiet ? readQuietly(() => api().history(), show, 'History') : busy('Reading History…', async () => show(await api().history()));
+/** Reads History into its slot; the page redraws once the answer is the newest. */
+export const loadHistory = async (): Promise<void> => {
+  const reading = readPageData(state.history, () => api().history());
+  rerender();
+  if (await reading !== 'dropped') rerender();
 };
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
@@ -379,30 +386,30 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   setHome(view);
-  state.history = await api().history();
+  putPageData(state.history, await api().history());
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
-  const past = state.history?.find(event => event.id === eventId);
+  const past = state.history.data?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
   const everywhere = touchedToolsPhrase(where);
   const item = restored[0]?.item ?? past?.item ?? '';
   const removedFrom = [...new Set(result.results.filter(entry => entry.outcome === 'removed').map(entry => toolName(entry.harness ?? '') ?? ''))].filter(Boolean);
   if (past?.kind === 'added') {
     const stayed = result.results.filter(entry => entry.outcome === 'held');
-    if (!result.stopped) { state.outcome = { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andList(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ` ${past.item} is unmanaged again.`}` }; flashRow(past.item); }
-    announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
+    tell(result.stopped ? undefined : { page: state.page, item: past.item, text: `Removed the new copies of ${past.item}${removedFrom.length ? ` from ${andList(removedFrom)}` : ''}.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ` ${past.item} is unmanaged again.`}` }, result.stopped);
+    if (!result.stopped) flashRow(past.item);
     return;
   }
   const text = past?.kind === 'deleted' ? `${item} is back in ${everywhere}.`
     : past?.kind === 'restored' ? `Redone: ${item} is as it was before the undo, in ${everywhere}.`
       : `Undid ${past?.winner ? `${toolName(past.winner.tool) ?? past.winner.tool}’s ${past.kind === 'chosen' ? 'chosen copy' : 'edit'}` : 'the change'} to ${item}. The earlier version is back in ${everywhere}.`;
   const label = past?.kind === 'deleted' ? `Delete again in ${everywhere}` : past?.kind === 'restored' ? 'Undo again' : `Redo edit in ${everywhere}`;
-  if (!result.stopped && restored.length) state.outcome = { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text };
-  // Screen readers hear the same sentence the band shows; the restored row flashes like a synced one.
-  if (!result.stopped && restored.length) flashRow(item);
-  announce(result.stopped ?? (restored.length ? text : `Restored in ${plural(restored.length, 'tool')}.`), !result.stopped && !!restored.length);
+  const done = !result.stopped && restored.length > 0;
+  tell(done ? { page: state.page, item, history: !undoneBy, undo: undoneBy ? { id: undoneBy, label } : undefined, text } : undefined, result.stopped ?? `Restored in ${plural(0, 'tool')}.`);
+  // The restored row flashes like a synced one.
+  if (done) flashRow(item);
 });
 
 // ---------- Convert to skill ----------
@@ -417,8 +424,7 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
   const view = await api().refresh();
   setHome(view);
   const from = toolName(made.origin ?? 'claude-cli');
-  state.outcome = { page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be managed: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent. It syncs to Pi only; turn on other tools for it on the Skills page.` };
-  announce(state.outcome.text, true);
+  tell({ page: state.page, item: name, text: applied.stopped ? `Converted ${name} to a Pi skill, but it could not be managed: ${applied.stopped}` : `Converted ${name} to a skill for Pi. ${from} keeps the agent. It syncs to Pi only; turn on other tools for it on the Skills page.` });
 });
 
 // ---------- Results ----------
@@ -453,7 +459,7 @@ export const draftUnsaved = (): boolean => unsaved(state.instructionEdit);
 /** The file the open draft belongs to, while it is on the page: the same home and the same tool. */
 export const draftFile = (): InstructionFile | undefined => {
   const edit = state.instructionEdit;
-  return edit && edit.from.home === state.home?.home ? state.instructions?.find(file => file.tool === edit.tool) : undefined;
+  return edit && edit.from.home === state.home?.home ? state.instructions.data?.find(file => file.tool === edit.tool) : undefined;
 };
 
 /** Every draft that replaces the open one comes through here: one with unsaved changes stays, and the page says why. */
@@ -464,45 +470,48 @@ function openDraft(file: InstructionFile, text: string, stage: InstructionDraft[
   return !next.refused;
 }
 
-/** Reads each tool's instruction file; `quiet` in the background, without the busy state. */
-export const loadInstructions = (quiet = false): Promise<void> => {
-  const show = (files: InstructionFile[] | null) => {
-    state.instructions = files ?? undefined;
-    // A draft whose file is gone (its tool left the home) is dropped only when it holds nothing unsaved.
-    if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined;
-  };
-  return quiet ? readQuietly(() => api().instructions(), show, 'The instruction files') : busy('Reading instruction files…', async () => show(await api().instructions()));
+/** A draft whose file is gone (its tool left the home) is dropped once the files are read, unless it holds something unsaved. */
+const settleDraft = () => { if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined; };
+
+/** Reads each tool's instruction file into its slot; the page redraws once the answer is the newest. */
+export const loadInstructions = async (): Promise<void> => {
+  const reading = readPageData(state.instructions, () => api().instructions());
+  rerender();
+  const result = await reading;
+  if (result === 'dropped') return;
+  if (result === 'ready') settleDraft();
+  rerender();
 };
+
+/** The files again after a save, as an action read them. */
+const rereadInstructions = async () => { const files = await api().instructions(); if (files) { putPageData(state.instructions, files); settleDraft(); } };
 
 /** A checked save of one file: it must still hold what was opened; the replaced text is kept as an earlier version. */
 export const saveInstructionText = (file: InstructionFile, text: string) => busy('Saving…', async () => {
   const result = await api().saveInstruction(file.tool, text, state.instructionEdit?.hash ?? file.hash, state.home!.home);
-  state.instructions = (await api().instructions()) ?? state.instructions;
+  await rereadInstructions();
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
   if (result.stopped) {
     state.outcome = undefined;
-    const now = state.instructions?.find(entry => entry.tool === file.tool);
+    const now = state.instructions.data?.find(entry => entry.tool === file.tool);
     // Changed outside: the draft stays, now checked against the file as it is, and the review compares with that.
     if (state.instructionEdit && now && now.hash !== state.instructionEdit.hash) { Object.assign(state.instructionEdit, { hash: now.hash, stage: 'review', conflict: true }); announce(`${name} changed outside Central Knot. Your draft is kept; review it against the current file.`); return; }
     announce(result.stopped); if (state.instructionEdit) state.instructionEdit.stage = 'edit'; return;
   }
   state.instructionEdit = undefined;
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
-  const saved = state.instructions?.find(entry => entry.tool === file.tool);
+  const saved = state.instructions.data?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page: 'instructions', item: name, kind: file.exists && result.saved ? 'saved' : undefined, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.` : `${name} already said that; nothing was written.`,
-    act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
-  announce(state.outcome.text, true);
+  tell({ page: 'instructions', item: name, kind: file.exists && result.saved ? 'saved' : undefined, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${toolName(file.tool)} session to use the change.` : `${name} already said that; nothing was written.`,
+    act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined });
 });
 
 /** Puts back the text a save replaced: a checked save against what was just written. */
 const undoInstruction = (file: InstructionFile, before: string) => busy('Undoing the save…', async () => {
   const result = await api().saveInstruction(file.tool, before, file.hash, state.home!.home);
-  state.instructions = (await api().instructions()) ?? state.instructions;
+  await rereadInstructions();
   const name = file.path.split(/[\\/]/).pop() ?? file.path;
-  if (result.stopped) { state.outcome = undefined; announce(result.stopped); return; }
-  state.outcome = { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` };
-  announce(state.outcome.text, true);
+  tell(result.stopped ? undefined : { page: 'instructions', item: name, text: `${name} is back as it was before your save. The text you saved is under Earlier versions.` }, result.stopped);
 });
 
 /** Opens one file in the editor; any earlier result band belongs to the last task, not this one. */
@@ -549,9 +558,8 @@ const undoChoices = (ids: string[]) => busy('Undoing the choice…', async () =>
   }
   const view = await api().refresh();
   setHome(view);
-  const items = [...new Set((state.history ?? []).filter(event => ids.includes(event.id)).map(event => event.item))];
-  state.outcome = stopped ? undefined : { page: state.page, items, text: 'Undone: each replaced copy is back in its own tool, and the skill is unmanaged again, with its copies differing as before.' };
-  announce(stopped ?? state.outcome!.text, true);
+  const items = [...new Set((state.history.data ?? []).filter(event => ids.includes(event.id)).map(event => event.item))];
+  tell(stopped ? undefined : { page: state.page, items, text: 'Undone: each replaced copy is back in its own tool, and the skill is unmanaged again, with its copies differing as before.' }, stopped);
 });
 
 /** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */
@@ -566,13 +574,12 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   }
   const view = await api().refresh();
   setHome(view);
-  state.history = await api().history();
+  putPageData(state.history, await api().history());
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
   const items = [...new Set(results.map(entry => entry.item))];
-  if (!stopped) state.outcome = { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andList(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` };
+  tell(stopped ? undefined : { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andList(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` }, stopped);
   for (const item of items) flashRow(item);
-  announce(stopped ?? state.outcome?.text ?? '', !stopped);
 });
 
 /** Delete everywhere: offered when an edit was kept over a deletion with order unknown. */
@@ -603,38 +610,43 @@ export const syncNow = () => busy('Syncing…', async () => {
 let refreshing = false;
 let refreshOwed = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
-const pages: Page[] = ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings'];
-api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
+const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
+api().onNavigate(page => { if (isPage(page)) showPage(page); });
 
 api().onSyncChanged(() => void backgroundRefresh());
 
+/** Each page's sync notices in a view: what changed on its own, with its History event. */
+const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.manage.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];
+
 /**
  * A background pass changed something: read again quietly, keeping drafts. In the middle of an action it waits, and runs
- * when the action is done, so a change (a tool appearing, say) is never lost.
+ * when the action is done, so a change (a tool appearing, say) is never lost; an action that starts while the read is on
+ * its way goes first, and the read runs again after it. What the status bar says stays, unless the view brings a notice
+ * the page didn't have: then that is the news.
  */
 async function backgroundRefresh() {
   if (!state.home) return;
   if (state.busy || refreshing) { refreshOwed = true; return; }
   refreshing = true;
-  // Something happened on its own: its notice tells it, so an earlier action's message no longer stands beside it.
-  // A result that still offers its Undo stays: the notice appears beside it, and Undo only removes copies that are unchanged.
   try {
     const view = await api().refresh();
-    if (view) {
-      announce('');
+    if (state.busy) { refreshOwed = true; return; }
+    if (!view) return;
+    const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
+    const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
+    if (fresh.length) {
+      // A new sync notice is the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
+      // different events, one above the other, is the one thing here that would mislead; the notice says where it went.
       const outcome = state.outcome;
-      if (!outcome?.act) state.outcome = undefined;
-      // A sync notice is now the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for
-      // different events, one above the other, is the one thing here that would mislead.
-      else if ([...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].length) {
-        // Tied to the notices that pushed it aside: the line goes with them, and never outlives a later Apply.
-        state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: [...view.manage.notices, ...view.mcp.notices, ...view.agents.notices].map(notice => notice.history || notice.item) };
-        state.outcome = undefined;
-      }
-      // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
-      setHome(view);
-      rerender();
+      if (outcome?.act) state.undoMoved = { page: outcome.page, label: outcome.act.label, items: outcome.items ?? (outcome.item ? [outcome.item] : []), notices: noticesByPage(view).flatMap(([, notices]) => notices.map(notice => notice.history || notice.item)) };
+      state.outcome = undefined;
+      const items = [...new Set(fresh.flatMap(([, notices]) => notices.map(notice => notice.item)))];
+      // On the page whose notice says it, screen readers hear it; elsewhere the status bar says it, beside the sidebar's dot.
+      announce(`Sync changed ${andList(items)}.`, fresh.some(([page]) => page === state.page));
     }
+    // A tool appeared or went away: the page leaves a kind no longer here and reads its own data again (setHome).
+    setHome(view);
+    rerender();
   } finally {
     refreshing = false;
     drainOwedRefresh();
@@ -670,9 +682,8 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const wrote = copied.length ? `${andList(copied)} copied to ${andList(to)}` : 'Nothing needed writing';
     const already = matched.length && copied.length ? `; ${andList(matched)} ${matched.length === 1 ? 'was' : 'were'} already in ${andList(to)}` : '';
     const takeBack = undoable ? '' : ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.';
-    state.outcome = { page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...matched], text: `${done}. ${wrote}${already}.${takeBack}` };
-  }
-  announce(result.stopped ?? (result.writes ? 'Applied.' : 'Applied. Nothing needed writing.'), !result.stopped);
+    tell({ page: state.page, act: undoable ? addedUndo(addedNow) : undefined, items: [...copied, ...matched], text: `${done}. ${wrote}${already}.${takeBack}` });
+  } else tell(undefined, result.stopped);
 });
 
 // ---------- Agents ----------
@@ -689,13 +700,12 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     // One-way agents are said apart: an edit spreads from their source only.
     const managed = changes.filter(change => change.managed).map(change => state.home?.agents?.servers.find(server => server.key === change.key)).filter(server => !!server);
     const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
-    const twoWay = managed.filter(server => !Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
     const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.replaced);
     const undo = addedNow.length && !replacedAny;
-    state.outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${server.oneWay ? toolName(server.oneWay.from) : 'its source'}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
+    let outcome: Outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${server.oneWay ? toolName(server.oneWay.from) : 'its source'}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
       act: undo ? addedUndo(addedNow) : undefined };
     const resumed = changes.map(change => ({ change, was: before.find(server => server.key === change.key) })).filter(({ change, was }) => change.use && change.use !== 'separate' && was?.managed && was.stopped?.length);
     // A resumed copy receives updates again: an earlier "keep my edit" no longer stands for a later edit.
@@ -704,12 +714,12 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
       // The edit the resume replaced is one click back: its 'chosen' event restores it, and the copy stops again.
       const chosen = (await api().history()).filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
       const back = [...new Set(chosen.flatMap(event => event.losers.map(loser => toolName(loser.tool) ?? loser.tool)))];
-      state.outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
+      outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
         text: resumed.map(({ change, was }) => `${andList(was!.stopped!.map(tool => toolName(tool) ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolName(change.use!) ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.',
         act: chosen.length === 1 && back.length ? { label: `Restore ${andList(back)}’s edit`, id: 'outcome-restore-edit', title: `Puts ${andList(back)}’s edited copy back; it stops updating again`, run: () => void restoreEvent(chosen[0]!.id, 'narrow') } : undefined };
     }
-  }
-  announce(result.stopped ?? (result.writes ? `${plural(result.writes, 'agent file', 'agent files')} written.` : 'Applied. Nothing needed writing.'));
+    tell(outcome);
+  } else tell(undefined, result.stopped);
 });
 
 /** Write now: Claude Code's entries, once the person has quit Claude Code (MCP-02). */
@@ -719,11 +729,10 @@ export const writeClaudeNow = (names: string[]) => { const earlier = state.outco
   setHome(view);
   state.mcpResult = result;
   const written = result.claudeWritten ?? [];
-  if (!result.stopped) state.outcome = { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
+  tell(result.stopped ? undefined : { page: state.page, item: names.length === 1 ? names[0] : undefined, items: names, text: state.home?.mode === 'fixture' ? `${names.join(', ')} written to the practice copy of Claude Code’s settings.` : `${names.join(', ')} written to Claude Code. Start Claude Code again to use ${names.length === 1 ? 'it' : 'them'}.`,
     // The result this replaces offered its own Undo: say where it went, so the way back from the bigger step is not lost.
     note: earlier && earlier !== 'Undo write' ? `${earlier} is in History.` : undefined,
-    act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined };
-  announce(result.stopped ?? `${plural(result.writes, 'server')} written to Claude Code.`);
+    act: written.length ? { label: 'Undo write', id: 'outcome-undo-write', title: `Puts back what Claude Code had before (${written.map(write => `${write.name}: ${write.before ? 'its earlier entry' : 'removed'}`).join(', ')}). Quit Claude Code first.`, run: () => void unwriteClaudeNow(written) } : undefined }, result.stopped);
 }); };
 
 const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…', async () => {
@@ -731,6 +740,5 @@ const unwriteClaudeNow = (written: ClaudeWrite[]) => busy('Undoing the write…'
   const view = await api().refresh();
   setHome(view);
   const names = written.map(write => write.name);
-  state.outcome = result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` };
-  announce(result.stopped ?? state.outcome!.text, true);
+  tell(result.stopped ? undefined : { page: state.page, items: names, text: `Undone: Claude Code has what it had before. ${names.join(', ')} ${names.length === 1 ? 'waits' : 'wait'} for Write to Claude Code again.` }, result.stopped);
 });

@@ -51,7 +51,7 @@ export function settingsPage(): HTMLElement {
   const chosen = current?.appearance;
   const home = state.home;
   const signIn = current?.signIn;
-  const syncWhy = !home ? 'Open a home first.' : home.manage.access.allowed ? undefined : 'Paused: this home is preview only.';
+  const syncWhy = !home ? 'Open a home first.' : !home.manage.tools.length ? 'No tools were found in this home, so there is nothing to sync.' : home.manage.access.allowed ? undefined : 'Paused: this home is preview only.';
   return h('div.page', {}, h('div.scroll.settings-scroll', {}, cardGrid([
     group('settings-appearance', 'Appearance', 'System follows your computer’s light or dark setting.',
       h('div.appearance-choices', { role: 'radiogroup', 'aria-labelledby': 'settings-appearance' },
@@ -60,7 +60,7 @@ export function settingsPage(): HTMLElement {
           disabled: !current, onclick: () => void chooseAppearance(choice.value),
         }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
     // The same switch as the status bar's and the menu's: an edit to a managed item spreads on its own, window closed or not.
-    group('settings-sync', 'Automatic sync', `When it is on, an edit to a managed ${heldKindNames('one')} spreads to the other tools on its own, even with this window closed. The status bar and ${trayPlace} have the same switch.`,
+    group('settings-sync', 'Automatic sync', `When it is on, an edit to a managed ${heldKindNames('one') || 'item'} spreads to the other tools on its own, even with this window closed: closing it keeps Central Knot running in ${trayPlace}, which has the same switch and Quit. The status bar has the switch too.`,
       switchRow(toggle(!!home?.syncOn && !syncWhy, 'Automatic sync', on => void setSync(on), !!syncWhy || !!state.busy, 'settings-sync-switch'), home?.syncOn && !syncWhy ? 'On' : 'Off', syncWhy)),
     signIn?.offered ? group('settings-sign-in', 'Start at sign-in', `Opens Central Knot in ${trayPlace} when you sign in, so automatic sync keeps running. ${machine.Tray} has the same switch.`,
       switchRow(toggle(signIn.on, 'Start at sign-in', on => void chooseSignIn(on), !signIn.available, 'settings-sign-in-switch'), signIn.on ? 'On' : 'Off',

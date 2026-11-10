@@ -10,12 +10,23 @@
 
 /*
  * Layout rule: every region spans the window and grows with it. Only running prose stops at a reading measure (80ch).
- * A few breakpoints adapt the frame instead of clipping it:
- *   - window narrower than 968px: the sidebar folds to its icon rail (renderer.ts decides, so the toggle can override it);
+ * Breakpoints adapt the layout instead of clipping it. Decided by the script, from measured widths:
+ *   - window narrower than 968px: the sidebar folds to its icon rail (renderer.ts, so the toggle can override it);
+ *   - content from 1200px: an open row's details dock beside its table (renderer.ts);
+ *   - the Files view's pane from 1040px: the file and the skill's details in two columns (matrix.ts, data-columns);
+ *   - a plugin's "Your tools": a column per tool once they and Choose all fit (pluginpage.ts, data-layout).
+ * In this stylesheet, by window, content (#main, beside the sidebar) or component width:
  *   - window shorter than 640px: sidebar rows tighten so every page and home fits without scrolling;
- *   - content narrower than 880px: two-pane pages stack, the list above its detail;
- *   - a table narrower than 780px: its Managed and tool columns tighten, so four tools fit beside an open sidebar.
- * "Content" is #main, the area beside the sidebar, so the rail's choice and the window's width are both accounted for.
+ *   - content narrower than 880px: two-pane pages stack, the list above its detail, and the marketplaces become a strip;
+ *     narrow History rows put what happened on its own line;
+ *   - content from 1000px: History stripes its rows;
+ *   - a table narrower than 900px with four tools, or 780px: its Managed and tool columns tighten (--narrow);
+ *   - a table from 1000px: the skills tables stripe their rows (the plugin table from 700px);
+ *   - a plugin table from 1100px puts each description beside its name, and below 700px leaves descriptions out;
+ *   - a plugin's page from 1100px puts the README beside what it holds;
+ *   - cards: two (four 2×2) from 960px, three across from 992px, four across from 2000px;
+ *   - an instruction card narrower than 420px gives its path a line of its own;
+ *   - the status bar narrower than 1000px uses short facts; its message under 160px becomes a mark.
  * Toolbars have no breakpoint: dom.ts fitBars adapts a .fit-bar only when it overflows (.bar-short, .bar-icons, .bar-wrap).
  */
 :root {
@@ -175,6 +186,9 @@ ul { list-style: none; }
 .rail .wordmark, .rail .nav-label, .rail .nav-count { display: none; }
 .rail .homes-title { height: 0; padding: 0; margin: 4px 10px 8px; border-top: 1px solid var(--line); overflow: hidden; }
 .rail .nav-row, .rail .home-row { justify-content: center; padding: 0; }
+/* On the rail the unseen dot sits at the icon's top right, so the icons stay in one straight column. */
+.rail .nav-row { position: relative; }
+.rail .nav-unseen { position: absolute; top: 5px; left: calc(50% + 4px); margin: 0; }
 
 /* A short window: tighter rows, and each home on one line, so nothing in the sidebar scrolls. */
 @media (max-height: 640px) {
@@ -367,7 +381,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .matrix { container: table / inline-size; position: relative; }
 .ov { --ov-columns: minmax(200px, 1fr) 84px repeat(var(--tool-count, 3), 120px); }
 /* A narrow table: tighter columns, so names keep their room, and a chosen copy shows as its tool's mark and Change, the
-   full choice in its tooltip; the description stays in the name's tooltip. Four tools need it sooner (dom.ts data-tools). */
+   full choice in its tooltip. The description stays on its line while a few words fit beside the name (shortened, whole
+   in its tooltip), and steps aside after that; the name never shortens for it. Four tools need it sooner (dom.ts data-tools). */
 @container table (width < 780px) { .ov { --narrow: 1; } }
 @container table (width < 900px) { .ov[data-tools="4"] { --narrow: 1; } }
 .decided-short, .decided-undo-icon { display: none; }
@@ -375,7 +390,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
   .decided-undo-text { display: none; }
   .decided-undo-icon { display: block; }
   .ov-row { --ov-columns: minmax(160px, 1fr) 72px repeat(var(--tool-count, 3), 92px); }
-  .ov-name-about, .decided-uses, .decided-what { display: none; }
+  .ov-name-about { min-width: 5em; }
+  .decided-uses, .decided-what { display: none; }
   .decided-short { display: inline; }
 }
 
@@ -384,15 +400,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A row's hover and focus tint spans the full width, in the tables and in History, so the eye can follow it to its actions. */
 .ov-row:not(.ov-head):hover, .ov-row:not(.ov-head):has(:focus-visible), .history-row:hover, .history-row:has(:focus-visible) { background: var(--row-hover); }
 /*
- * A wide table stripes every other row, so the eye can follow a row from its name across to its tools. The plugin table
- * stripes sooner: its taller rows sit further apart, and beside the list of marketplaces it is narrower at the same window.
+ * A wide table stripes every other row, so the eye can follow a row from its name across to its tools; so does a wide
+ * History, from its description across to its actions. (The plugin table has its own, below.)
  */
-.plugin-table { container: table / inline-size; }
 @container table (width >= 1000px) {
   [role="rowgroup"] > .ov-row:nth-child(even of .ov-row):not(:hover):not(.open):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
-@container table (width >= 700px) {
-  .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
+@container content (width >= 1000px) {
+  .history-row:nth-child(even of .history-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .ov-row.open { background: var(--chrome); }
 .ov-row.changed { box-shadow: inset 3px 0 0 var(--accent), inset 0 -1px 0 var(--line); }
@@ -477,7 +492,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* "On Apply all:" and what follows it: kept together on one line, wrapping inside only when wider than the whole key. */
 .legend-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; max-width: 100%; }
 .legend-first { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
-.legend-plain { border: 1px solid var(--control-line); border-radius: 5px; background: transparent; }
 .legend-switch { position: relative; display: inline-block; width: 22px; height: 12px; border-radius: 999px; border: 1px dashed color-mix(in oklab, var(--accent) 60%, white); background: var(--accent); }
 .legend-switch > .switch-knob { top: 1px; left: auto; right: 1px; width: 8px; height: 8px; box-shadow: none; }
 
@@ -552,7 +566,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-close:hover { background: var(--hover); color: var(--ink); }
 .details-head { display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
 .details-head:empty { display: none; }
-.details-bare:not(:has(> :not(:empty))) { display: none; }
 .details-status { font-size: 12px; font-weight: 500; color: var(--ink); }
 .details-pending { color: var(--ink-soft); }
 .details-description { max-width: var(--measure); font-size: 12px; color: var(--ink-soft); }
@@ -585,10 +598,15 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-path-tool { color: var(--ink-soft); }
 .details-path-line > .path-text, .details-mcp .details-tool-head > .path-text { color: var(--ink); }
 .details-path-show { font-size: 12px; white-space: nowrap; }
-.details-mcp .details-tool-head { grid-template-columns: 150px minmax(0, 1fr) auto; }
-.details-mcp .details-tool-head > .details-tool-line { grid-column: 2 / -1; }
+/*
+ * MCP: each tool's row names the tool (a column as wide as its longest name) with Show in folder at the right, then its
+ * settings file whole on a line of its own, wrapping after a "/", then its status.
+ */
+.details-mcp .details-tool-head { grid-template-columns: max-content minmax(0, 1fr) auto; row-gap: 2px; }
+.details-mcp .details-tool-head > .wrap-path { grid-column: 1 / -1; grid-row: 2; }
+.details-mcp .details-tool-head > .details-path-show { grid-column: 3; grid-row: 1; }
+.details-mcp .details-tool-head > .details-tool-line { grid-column: 1 / -1; }
 .details-mcp .details-tool-head > .details-tool-line:empty { display: none; }
-.where-cards { margin: 8px 0 0 16px; }
 .convert-block { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 /* A skill's own actions, together under its heading. */
 .details-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 6px; }
@@ -630,7 +648,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .list-name { flex: 1; font-weight: 500; }
 .list-cells { flex: none; display: inline-flex; gap: 4px; }
 .mini-cell { width: 16px; height: 16px; }
-.detail-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; container: detail / inline-size; }
+.detail-column { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .pane-header { flex: none; min-height: 61px; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .pane-title { flex: 0 1 auto; min-width: 0; }
 .pane-title h2 { font-size: 14px; line-height: 20px; font-weight: 600; }
@@ -643,23 +661,28 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .detail-scroll p { overflow-wrap: anywhere; }
 .detail-scroll pre { overflow-wrap: anywhere; white-space: pre-wrap; }
 .detail-files { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
-.files-tail { display: flex; flex-direction: column; gap: 12px; }
-.files-tail > .details-actions { margin-top: 0; }
+/* The Files view's details (matrix.ts filesLayout): its status and choices, where each copy is, then Delete everywhere. */
+.files-details, .files-tail { display: flex; flex-direction: column; gap: 12px; }
+.files-details > .details-actions, .files-tail > .details-actions { margin-top: 0; }
 /*
- * A wide pane (from 1040px, matrix.ts DETAIL_COLUMNS_FROM) has two tracks: the files take the free width, up to the
- * skill's details in a steady column at the right edge. Below that the details sit above the files.
+ * A wide pane has two tracks: the file takes the free width, up to the details in a column at the right edge that grows
+ * a little with the window. The script decides it from the pane's width (matrix.ts settleFilesColumns, data-columns);
+ * below that the details sit above the file and the rest below it.
  */
-@container detail (width >= 1040px) {
-  .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) 320px; align-items: start; column-gap: 32px; }
-  .detail-scroll > .details { grid-column: 2; grid-row: 1; }
-  .detail-scroll > .detail-files { grid-column: 1; grid-row: 1; }
-  /* In the column, each path has a line of its own under its tool. */
-  .detail-scroll > .details .details-path-line { grid-template-columns: 12px minmax(0, 1fr) auto; row-gap: 0; }
-  .detail-scroll > .details .details-path-line > .path-text { grid-column: 2 / -1; grid-row: 2; }
-}
-/* The Files view has room for every path whole: under "Where each copy is" a long one wraps rather than being shortened. */
-.detail-scroll .details-paths .path-text { display: block; white-space: normal; overflow-wrap: anywhere; }
-.detail-scroll .details-paths .path-text > * { display: inline; overflow: visible; }
+.detail-column[data-columns="2"] .detail-scroll { display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 26%, 480px); align-items: start; column-gap: 32px; }
+.detail-column[data-columns="2"] .files-details { grid-column: 2; grid-row: 1; }
+.detail-column[data-columns="2"] .detail-files { grid-column: 1; grid-row: 1; }
+/* One copy under "Where each copy is": its tool with Show in folder and Copy, then its paths whole, wrapping after a "/". */
+.copy-entry { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0 16px; }
+.copy-entry-head { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.copy-entry-tool { flex: 1 1 auto; min-width: 0; color: var(--ink); }
+.copy-entry-show { font-size: 12px; white-space: nowrap; }
+.detail-scroll .copy-entry p { overflow-wrap: break-word; }
+.copy-entry-path, .copy-entry-more { padding-left: 18px; }
+.copy-entry-label { color: var(--ink-faint); }
+.wrap-path { font-family: var(--mono); font-size: 11.5px; color: var(--ink); }
+/* A folder name moves to the next line whole; only one wider than the whole line breaks inside. */
+.wrap-part { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 /* Stacked, the list shows its header and four whole rows and scrolls; the chosen skill's detail takes the rest. */
 @container content (width < 880px) {
   .split { flex-direction: column; }
@@ -670,18 +693,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .section { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .eyebrow { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-soft); }
 .eyebrow-file { text-transform: none; letter-spacing: 0; }
-.stack { display: flex; flex-direction: column; gap: 8px; }
 .card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); min-width: 0; }
-.path-card { padding-bottom: 8px; }
-.path-top { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 6px 8px 2px 12px; }
-.path-top .middle { flex: 1; }
-.path-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-height: 34px; padding: 3px 12px; }
-.tag { display: inline-flex; align-items: center; gap: 4px; }
-.tag-note { color: var(--ink-soft); font-size: 12px; line-height: 16px; }
 .facts { display: grid; grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 .facts dt { color: var(--ink-soft); min-width: 0; }
 .facts dd { min-width: 0; }
-.facts-compact { grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; padding: 0 12px 4px; }
 .content { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
 .content-owner { margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
 .content-block + .content-block { margin-top: 8px; }
@@ -716,6 +731,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* The count, then what needs attention, on one line that wraps whole. */
 .kind-card-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 2px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 .kind-card-dot { color: var(--ink-faint); }
+.kind-card-status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 /* Each tool that holds the kind, with its count: entries wrap whole. */
 .kind-card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 10px 16px 0; font-size: 12.5px; color: var(--ink-soft); }
 .kind-tool { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -735,13 +751,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cards-scroll > * { flex: none; }
 /*
  * Cards in equal columns, each row's cards matching its height. The columns come from the width and the count (dom.ts
- * cardGrid): two from 960px; three cards three across once each can be about 320px wide; four 2×2, then four across from
- * 2000px. No grid cell is left empty: where three cards sit in two columns, the third spans both and uses the room (a tool
- * card's two inner columns).
+ * cardGrid): two (or four, 2×2) from 960px; three go from one column to three across at 992px, once each can be about
+ * 320px wide; four across from 2000px. No grid cell is left empty.
  */
 .card-grid { --cols: 1; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: 16px; }
-@container cards (width >= 960px) { .card-grid:not([data-count="1"]) { --cols: 2; } }
-@container cards (960px <= width < 992px) { .card-grid[data-count="3"] > :last-child { grid-column: 1 / -1; } }
+@container cards (width >= 960px) { .card-grid:not([data-count="1"]):not([data-count="3"]) { --cols: 2; } }
 @container cards (width >= 992px) { .card-grid[data-count="3"] { --cols: 3; } }
 @container cards (width >= 2000px) { .card-grid[data-count="4"] { --cols: 4; } }
 .tool-card { container-type: inline-size; }
@@ -749,6 +763,8 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A narrow card leaves its header's folder out rather than cut it to a stub; "Config folder" below says it whole. */
 @container (width < 440px) { .tool-head > .path-text { display: none; } }
 .tool-head .middle { flex: 1; color: var(--ink-soft); }
+/* Copy folder path keeps the right end, also when a narrow card leaves the path out. */
+.tool-head > .btn:last-child { margin-left: auto; }
 .tool-title { flex: none; font-size: 14px; line-height: 20px; font-weight: 600; }
 .tool-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 24px; padding: 16px; }
 @container (min-width: 704px) { .tool-body { grid-template-columns: minmax(0, 1.6fr) minmax(220px, 1fr); } }
@@ -760,7 +776,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .ins-card { container: ins-card / inline-size; display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
 /* Each card keeps its own height (a card with no file stays short); its header is a pill's height, pill or not, so headers line up. */
 .card-grid:has(> .ins-card) { align-items: start; }
-.ins-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; min-height: 22px; }
+/*
+ * The header's first row is one fixed height with its contents centred, so a pill (No file yet, Saved with Undo save,
+ * Unsaved changes) never moves the title or the path; a narrow card's path takes a line of its own, the same height.
+ */
+.ins-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
+.ins-head > :not(svg, [hidden], .ins-missing) { flex-shrink: 0; height: 24px; display: inline-flex; align-items: center; }
+.ins-head > .path-text { flex-shrink: 1; }
+.ins-head .btn, .ins-head .ins-missing { height: 22px; }
 /* A card's status pill never wraps; with no room beside the name it moves under it. */
 .ins-missing { margin-left: auto; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 11.5px; line-height: 18px; color: var(--ink-soft); white-space: nowrap; }
 /* A narrow card gives its file's path a line of its own under the name, rather than cutting it to a stub. */
@@ -843,6 +866,7 @@ span.ins-confirm { margin-top: 0; }
 .market-item.selected { background: var(--selected-row); }
 .market-item-name { font-size: 13px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .market-item-meta { font-size: 11.5px; color: var(--ink-faint); }
+.apply-hint, .hint-plain { display: none; }
 .market-add { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 10px 0 0; border-top: 1px solid var(--line); }
 .market-add > .btn { align-self: flex-start; }
 .market-add.market-add-open { padding-left: 6px; padding-right: 6px; }
@@ -910,6 +934,11 @@ span.ins-confirm { margin-top: 0; }
 .result-link:hover { text-decoration-color: currentColor; }
 .result-link:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
 /* The plugin table: the plugin takes the free width, each tool a steady column. */
+.plugin-table { container: table / inline-size; }
+/* It stripes sooner than the skills table: its taller rows sit further apart, and beside the marketplaces it is narrower. */
+@container table (width >= 700px) {
+  .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
+}
 .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .plugin-row { cursor: pointer; }
@@ -956,14 +985,11 @@ span.ins-confirm { margin-top: 0; }
 .plugin-panel h3, .plugin-section h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .plugin-tool-rows { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; }
 .plugin-tool-rows > .btn.choice-wrapped { margin-left: auto; }
+/* With room for them (pluginpage.ts settlePluginTools): a column per tool from the left, capped, and Choose all at the right end. */
+.plugin-tool-rows[data-layout="columns"] { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(170px, 260px)) minmax(0, 1fr) auto; column-gap: 24px; }
+.plugin-tool-rows[data-layout="columns"] > .btn { grid-column: -2 / -1; }
 /* What it holds and how each tool takes it sit beside the README from about 1100px of page; below that, one above the other. */
 .plugin-columns { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 48px; }
-/* From about 900px of page each tool takes an equal column across the box, centred in it, with Choose all at its right
-   end: the box is filled on purpose. Below that the tools sit in a row from the left (pluginpage.ts markWrappedChoice). */
-@container plugin (width >= 900px) {
-  .plugin-tool-rows { display: grid; grid-template-columns: repeat(var(--tool-count, 3), minmax(0, 1fr)) auto; justify-items: center; }
-  .plugin-tool-rows > .btn { justify-self: end; }
-}
 @container plugin (width >= 1100px) { .plugin-columns:has(> .plugin-readme) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
@@ -972,7 +998,7 @@ span.ins-confirm { margin-top: 0; }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.plugin-outcome-row { display: grid; grid-template-columns: minmax(200px, auto) minmax(0, 1fr); gap: 4px 16px; align-items: center; padding: 8px 12px; }
+.plugin-outcome-row { display: grid; grid-template-columns: minmax(200px, auto) minmax(0, 1fr); gap: 4px 16px; align-items: baseline; padding: 8px 12px; }
 .plugin-outcome-row + .plugin-outcome-row { border-top: 1px solid var(--line); }
 .plugin-outcome-list.plugin-outcome-plain { border: 0; background: transparent; }
 .plugin-outcome-plain .plugin-outcome-row { padding: 3px 0; border-top: 0; }
@@ -1021,7 +1047,15 @@ span.ins-confirm { margin-top: 0; }
   .plugin-table .ov-head .plugin-hint { white-space: normal; line-height: 15px; padding-right: 12px; }
   .market-page > .market-page-about { display: none; }
   .about-only-narrow { display: block; }
-  .market-item-meta { white-space: nowrap; }
+  /* A tab short of room shortens its counts first, then its name; both are whole in its tooltip. */
+  .market-item-name { flex: 0 1 auto; min-width: 0; }
+  .market-item-meta { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Changes waiting: the toolbar's left holds the hint, so the row isn't half empty, and the table's header says only "Plugin". */
+  .plugins-toolbar:has(> .apply) > .toolbar-spacer { display: none; }
+  .plugins-toolbar > .apply { flex: 1 1 auto; }
+  .apply-hint { display: inline; margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-soft); }
+  .plugins-page:has(.apply-hint) .plugin-hint > .hint-long, .plugins-page:has(.apply-hint) .plugin-hint > .hint-short { display: none; }
+  .plugins-page:has(.apply-hint) .plugin-hint > .hint-plain { display: inline; }
 }
 
 /* README text: a reading measure inside a page that spans the window. */

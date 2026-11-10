@@ -22,22 +22,39 @@ export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.s
 /** A kind of item a home's tools hold, each with its own page. Every tool holds skills and an instruction file. */
 export type HomeKind = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins';
 
-/** Each kind as a sentence names it. */
-export const kindNames: Record<HomeKind, string> = { skills: 'skills', mcp: 'MCP servers', agents: 'agents', instructions: 'instruction files', plugins: 'plugins' };
+/**
+ * Each kind's words, the one place they are spelled: one of it and many as a sentence names them, the page's title, the
+ * short noun a count uses ("2 servers"), and one of it with its article ("an MCP server").
+ */
+export const kindNouns: Record<HomeKind, { one: string; many: string; title: string; short: [string, string]; a: string }> = {
+  skills: { one: 'skill', many: 'skills', title: 'Skills', short: ['skill', 'skills'], a: 'a skill' },
+  mcp: { one: 'MCP server', many: 'MCP servers', title: 'MCP servers', short: ['server', 'servers'], a: 'an MCP server' },
+  agents: { one: 'agent', many: 'agents', title: 'Agents', short: ['agent', 'agents'], a: 'an agent' },
+  instructions: { one: 'instruction file', many: 'instruction files', title: 'Instructions', short: ['file', 'files'], a: 'an instruction file' },
+  plugins: { one: 'plugin', many: 'plugins', title: 'Plugins', short: ['plugin', 'plugins'], a: 'a plugin' },
+};
+
+/** Each kind as a sentence names it, many of it: "MCP servers". */
+export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.many])) as Record<HomeKind, string>;
+
+/** What a home's view says about its tools: all of them, and those that hold MCP servers and agents. */
+interface ToolsHeld { manage: { tools: HarnessId[] }; mcp: { tools: HarnessId[] }; agents: { tools: HarnessId[] } }
 
 /**
- * The kinds no tool in this home can hold, given its tools and those among them that hold MCP servers, agents and
- * plugins: pages and wording leave them out, since what doesn't exist here shouldn't show as an option. A home with no
- * tools at all holds none of them.
+ * The kinds no tool in this home can hold: pages and wording leave them out, since what doesn't exist here shouldn't show
+ * as an option. A home with no tools at all holds none of them.
  */
-export function absentKinds(tools: HarnessId[], mcpTools: HarnessId[], agentTools: HarnessId[], pluginTools: HarnessId[]): HomeKind[] {
-  if (!tools.length) return ['skills', 'mcp', 'agents', 'instructions', 'plugins'];
+export function absentKindsIn(view: ToolsHeld): HomeKind[] {
+  if (!view.manage.tools.length) return ['skills', 'mcp', 'agents', 'instructions', 'plugins'];
   const absent: HomeKind[] = [];
-  if (!mcpTools.length) absent.push('mcp');
-  if (!agentTools.length) absent.push('agents');
-  if (!pluginTools.length) absent.push('plugins');
+  if (!view.mcp.tools.length) absent.push('mcp');
+  if (!view.agents.tools.length) absent.push('agents');
+  if (!view.manage.tools.some(takesPlugins)) absent.push('plugins');
   return absent;
 }
+
+/** The kinds a home's tools hold that sync keeps the same (skills, MCP servers, agents), in that order. */
+export const heldKinds = (view: ToolsHeld): ('skills' | 'mcp' | 'agents')[] => (['skills', 'mcp', 'agents'] as const).filter(kind => !absentKindsIn(view).includes(kind));
 
 /** The tools looked for and not found here, in discovery order: only the Tools page names them, as information. */
 export const absentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(snapshot => !isPresent(snapshot)).map(snapshot => snapshot.harness);

@@ -10,6 +10,8 @@ export interface MachineNames {
   /** Where Central Knot's icon keeps running: "the menu bar" on a Mac, "the tray" elsewhere; `Tray` starts a sentence. */
   tray: string;
   Tray: string;
+  /** The icon itself: "menu bar icon" on a Mac, "tray icon" elsewhere. */
+  trayIcon: string;
   /** Whether Central Knot can start at sign-in here (not on Linux). */
   signIn: boolean;
   /** The key a shortcut is held with: ⌘ on a Mac, Ctrl elsewhere. */
@@ -24,6 +26,7 @@ export function machineNames(platform: string): MachineNames {
     machine: mac ? 'this Mac' : 'this computer',
     tray: mac ? 'the menu bar' : 'the tray',
     Tray: mac ? 'The menu bar' : 'The tray',
+    trayIcon: mac ? 'menu bar icon' : 'tray icon',
     signIn: platform !== 'linux',
     modifierKey: mac ? '⌘' : 'Ctrl',
   };

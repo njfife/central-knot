@@ -274,6 +274,14 @@ async function practiceFlow() {
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
   check('the Overview sums up every kind', (await a.exists('#overview-skills')) && (await a.exists('#overview-mcp')) && (await a.exists('#overview-agents')), await a.text('#page'));
   check('the practice copy explains itself', (await a.text('.intro') ?? '').includes('practice copy'), await a.text('#page'));
+  // The newest message wins: Discard right after opening a home says so, rather than the home's "Opened …" standing.
+  await a.click('#home-fixture');
+  await a.click('#nav-skills');
+  const opened = await a.run(`document.querySelector('#announcement').dataset.text`);
+  await a.click('#manage-all');
+  await a.click('#discard');
+  same('Discard right after opening a home says so', [/^Opened Practice copy\./.test(opened ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`)], [true, 'Changes discarded. Nothing was written.']);
+  await a.click('#nav-overview');
   await a.click('#overview-skills');
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is managed at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
@@ -531,15 +539,15 @@ async function practiceFlow() {
   await a.click('#files-standup');
   same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
   await a.click('#list-standup');
-  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
+  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
   // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
   same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
   // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
   // file's box spanning to meet it.
   await sizeTo(a, 1728, 1117);
-  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .details .details-paths[open]')); tries++) await wait(50);
-  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .details').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .details .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
+  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .files-details .details-paths[open]')); tries++) await wait(50);
+  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-details').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-details .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
   check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
   await fullSize(a);
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
@@ -719,17 +727,17 @@ async function practiceFlow() {
   console.log(`(the poll found Codex after ${Math.round((Date.now() - polled) / 1000)} s)`);
   rmSync(join(practice, '.codex-away'), { recursive: true, force: true });
   await a.click('#sync-switch');
-  // A tool change told while the page is busy (here, reading marketplaces slowly after a Refresh) is kept, and read once
-  // the work is done, with no second Refresh.
+  // A tool change told while the page is busy (here, a Refresh reading the home slowly) is kept, and read once the work is
+  // done, with no second Refresh.
   if (main) {
     const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
-    check('the marketplace request is slowed', await main.slowRequest('plugins:view', 3000));
+    check('the refresh request is slowed', await main.slowRequest('discovery:refresh', 3000));
     await a.run(`(document.querySelector('#header-refresh').click(), true)`);
     await wait(1000);
     const busyThen = await a.run(`document.body.dataset.busy`);
     renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
     await main.tellPage('sync:changed');
-    await main.restore('plugins:view');
+    await main.restore('discovery:refresh');
     for (let tries = 0; tries < 80 && (await columns()) !== 2; tries++) await wait(100);
     same('a tool change told while the page is busy is read once the work is done', [busyThen, await columns()], ['true', 2]);
     renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
@@ -758,7 +766,24 @@ async function practiceFlow() {
     const result = await a.text('#announcement');
     await wait(2500);
     same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
-    check('that result says what was read', /^Read /.test(result ?? ''), result);
+    check('that result says what was read', /^Read \d/.test(result ?? ''), result);
+    // A sync:changed right after an action keeps that action's message: the read it starts brings no new notice.
+    await a.click('#nav-skills');
+    await a.run(`(document.querySelector('.ov-row[data-key] .cell-button:not([disabled])').click(), true)`);
+    await a.click('#discard');
+    await main.tellPage('sync:changed');
+    await wait(1500);
+    same('a sync:changed right after an action keeps its message', await a.run(`document.querySelector('#announcement').dataset.text`), 'Changes discarded. Nothing was written.');
+    // After a home switch, History says it is reading while it reads (never that it couldn't), then shows what it read.
+    await a.click('#nav-history');
+    check('the History request is slowed', await main.slowRequest('history:list', 1500));
+    await a.run(`(document.querySelector('#home-fixture').click(), true)`);
+    for (let tries = 0; tries < 40 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(50);
+    const whileReading = await a.text('#page');
+    await main.restore('history:list');
+    for (let tries = 0; tries < 60 && !(await a.exists('.history-row')); tries++) await wait(100);
+    check('after a home switch History says it is reading, then shows its rows', /Reading History…/.test(whileReading ?? '') && !/could not be read/.test(whileReading ?? '') && await a.exists('.history-row'), whileReading);
+    await a.click('#nav-plugins');
     await a.click('#nav-plugins');
   }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
@@ -950,11 +975,15 @@ async function fewToolsFlow() {
   const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
   same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'history', 'tools', 'settings']);
   same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
-  check('its status bar says no tools were found', /No tools were found/.test(await a.run(`document.querySelector('#announcement').textContent`) ?? ''));
+  check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
+  same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
   await fitsAtMinimum(a, 'a home with no tools');
   await a.click('#nav-tools');
   const toolsSays = await a.text('.page');
-  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays), toolsSays);
+  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays) && !(await a.exists('.tools-note')), toolsSays);
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('#history-choose-home')); tries++) await wait(100);
+  check('History says the same, in the same place, rather than offering Skills', await a.exists('#history-choose-home') && !(await a.exists('#history-go-skills')), await a.text('.page'));
   await a.click('#nav-overview');
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));

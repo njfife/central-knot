@@ -61,8 +61,10 @@ async function read(): Promise<Snapshot[]> {
   })));
 }
 
-/** The tools as last read, for features that need what was detected (the Plugins page: bundled-only copies). */
-let latestSnapshots: Snapshot[] = [];
+/** The home as last read by a page's request or a background pass, and when: a request right after can use it (readRecent). */
+let latest = { home: '', snapshots: [] as Snapshot[], at: 0 };
+/** How old a read can be and still serve the next request: Refresh reads the home, then the page's marketplaces at once. */
+const RECENT_MS = 3_000;
 
 function context(): ShareContext {
   return {
@@ -297,16 +299,16 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
   // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
   const snapshots = skills && (syncOn || explicit) ? await read() : before;
-  latestSnapshots = snapshots;
-  notePresent(snapshots);
   const writable = (await writeAccess(shared)).allowed;
-  if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   const made: HomeView = {
     mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
     manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
+  // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
+  noteRead(snapshots);
+  if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;
@@ -325,15 +327,29 @@ let touched = false;
 /** The tools in the open home, read now: the one way the requests below learn them. */
 const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
 
+/** The home as read a moment ago (a Refresh's read), else read now; either way kept as the latest read. */
+async function readRecent(): Promise<Snapshot[]> {
+  if (current && latest.home === current.home && Date.now() - latest.at < RECENT_MS) return latest.snapshots;
+  const snapshots = await read();
+  noteRead(snapshots);
+  return snapshots;
+}
+
 /** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
 let lastPresent = { home: '', tools: '' };
 
+/** Keeps a read of the open home as the latest, and notes its tools (toolsChangedHere). */
+function noteRead(snapshots: Snapshot[]): boolean {
+  latest = { home: current?.home ?? '', snapshots, at: Date.now() };
+  return toolsChangedHere(snapshots);
+}
+
 /**
- * Notes which tools are in the home, from either a page's read or a background pass. When the set changed in the same
- * home, the folders are watched again, so a tool that appeared is watched like the rest; a home just opened is only
- * noted, since opening it starts watching (selectHome). Returns whether the set changed.
+ * Notes which tools are in the open home and says whether they changed while that home stayed open. Then the folders
+ * are watched again, so a tool that appeared is watched like the rest. A home just opened is only noted (false): opening
+ * it starts watching (selectHome), and the page reads it anyway.
  */
-function notePresent(snapshots: Snapshot[]): boolean {
+function toolsChangedHere(snapshots: Snapshot[]): boolean {
   const tools = presentTools(snapshots).join(), home = current?.home ?? '';
   if (home === lastPresent.home && tools === lastPresent.tools) return false;
   const sameHome = home === lastPresent.home;
@@ -351,26 +367,29 @@ async function backgroundPass() {
   const fromEvent = touched;
   touched = false;
   // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
-  // A tool installed or removed changes every page's columns: the page is told (it keeps the news until it can read).
+  // Whatever the pass finds, the page is told once, at the end (it keeps the news until it can read).
   const snapshots = await read();
-  if (notePresent(snapshots)) tell('sync:changed');
+  // A tool installed or removed changes every page's columns.
+  let changed = noteRead(snapshots);
   const { skills, mcpAndAgents } = await pass(snapshots);
   keepMcpAndAgents(mcpAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
-  if (fromEvent && !syncOn) tell('sync:changed');
+  if (fromEvent && !syncOn) changed = true;
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
   if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
-    tell('sync:changed');
+    changed = true;
   }
   lastStopped = skills?.stopped;
-  if (!skills || (!skills.harnessWrites && !skills.notices?.length && !mcpAndAgents?.changed)) return;
-  pendingResults.push(...skills.results);
-  pendingNotices.push(...(skills.notices ?? []));
-  tell('sync:changed');
-  // Nobody saw it: the window is closed, gone or behind other windows (D-36).
-  if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
+  const wrote = !!skills && !!(skills.harnessWrites || skills.notices?.length || mcpAndAgents?.changed);
+  if (wrote) {
+    pendingResults.push(...skills!.results);
+    pendingNotices.push(...(skills!.notices ?? []));
+    // Nobody saw it: the window is closed, gone or behind other windows (D-36).
+    if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
+  }
+  if (changed || wrote) tell('sync:changed');
 }
 
 const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
@@ -512,12 +531,12 @@ function createWindow(show: boolean) {
     // show the sign-in start it turned on, so neither a hidden window nor a login item is a surprise.
     if (!appSettings.closeExplained && !smoke) {
       void saveAppSettings({ closeExplained: true });
-      const icon = process.platform === 'darwin' ? 'menu bar' : 'tray';
+      const icon = machineNames(process.platform).trayIcon;
       const syncing = syncOn && homeWritable && lastManagedCount > 0;
       void dialog.showMessageBox({
         type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
         message: syncing ? 'Central Knot keeps syncing in the background' : 'Central Knot is still running',
-        detail: syncing ? `Open it again from its ${icon} icon, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
+        detail: syncing ? `Open it again from its ${icon}, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
         ...(canStartAtSignIn() ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: startsAtSignIn() } : {}),
       }).then(({ response, checkboxChecked }) => {
         if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void setStartAtSignIn(checkboxChecked);
@@ -577,8 +596,8 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces({ handle, handleRead }, {
-    home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
-    tools: presentNow,
+    home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
+    read: async () => { const snapshots = await readRecent(); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },

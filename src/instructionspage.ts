@@ -174,8 +174,10 @@ function orphanDraft() {
 }
 
 export function instructionsPage() {
-  const files = state.instructions;
-  if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading instruction files…' : 'Instruction files could not be read.')));
+  // From the files' own read (pagedata.ts): what it found, else that it is reading or could not read.
+  const files = state.instructions.data;
+  if (!files) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.instructions.state === 'failed' ? 'Instruction files could not be read.' : 'Reading instruction files…')));
+  if (!files.length) return h('div.page', {}, noToolsState('instructions-choose-home'));
   const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
@@ -183,5 +185,5 @@ export function instructionsPage() {
   return h('div.page', {}, done || preview || orphan ? h('div.bands', {}, orphan, done, preview) : null,
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? cardGrid(files.map(card)) : noToolsState('instructions-choose-home')));
+      cardGrid(files.map(card))));
 }

@@ -208,6 +208,7 @@ if (wanted('instructions')) {
   // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
   await a.size(1240, 800);
   await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain; the headers line up.');
   await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
   await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
   await a.click('#ins-review-discard-yes-copilot-cli');
@@ -278,6 +279,12 @@ async function everyPage(tag) {
   const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
   if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
   await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
+  const server = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (server) {
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${server}`);
+    if (await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`)) await shot(a, `${tag}-mcp-details`, `Opened the first MCP server's details ${at} (docked beside the table from 1200px of content).`);
+    if (await a.has('.ov-row.open')) await a.click(`#${server}`);
+  }
   await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
   const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
   if (agent) {
@@ -324,6 +331,12 @@ if (wanted('sizes')) {
   await editMcpOutside();
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
     await a.size(width, height);
+    if (width === 860) {
+      // An edit made outside the app while the Overview is open: the rail marks Skills with a dot until it is seen.
+      await a.click('#nav-overview');
+      edit(join(practice, '.codex/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex for the rail.\n'));
+      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Codex) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
+    }
     await everyPage(`${width}`);
     // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
     if (width >= 1728) { await a.click('#sidebar-toggle'); await everyPage(`${width}-rail`); await a.click('#sidebar-toggle'); }
@@ -421,7 +434,8 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
-  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action.');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
   await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
   await a.size(1280, 800);

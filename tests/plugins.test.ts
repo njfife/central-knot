@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -37,6 +37,22 @@ async function marketplace(root: string, extra: unknown[] = []) {
   await put(join(full, 'hooks/hooks.json'), JSON.stringify({ hooks: { SessionStart: [] } }));
   await put(join(full, '.mcp.json'), JSON.stringify({ mcpServers: { local: { command: '${CLAUDE_PLUGIN_ROOT}/server' } } }));
   await put(join(root, 'plugins/marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Marker.\n---\nReply ck-mk-1.\n');
+}
+
+
+/** The fixture server's base URL: its whole first line, however the output arrives in chunks. */
+function servedAt(server: ChildProcess): Promise<string> {
+  return new Promise(done => {
+    let out = '';
+    const read = (chunk: Buffer) => { out += String(chunk); if (out.includes('\n')) { server.stdout!.off('data', read); done(out.split('\n')[0]!.trim()); } };
+    server.stdout!.on('data', read);
+  });
+}
+
+/** Stops the fixture server and waits until it has exited, so a request made next can't still reach it. */
+function stopped(server: ChildProcess): Promise<void> {
+  if (server.exitCode !== null || server.signalCode !== null) return Promise.resolve();
+  return new Promise(done => { server.once('exit', () => done()); server.kill(); });
 }
 
 test('A catalog lists its plugins and what each holds, and reads nothing outside the marketplace', async () => {
@@ -167,7 +183,7 @@ test('Before a tool is told to fetch a Git marketplace, access is checked; a fai
     git(['init', '-q'], root); git(['add', '-A'], root); git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'v1'], root);
     await mkdir(join(box.base, 'served'), { recursive: true });
     git(['clone', '-q', '--bare', root, join(box.base, 'served/market.git')], box.base);
-    const base = await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())));
+    const base = await servedAt(server);
     const bin = join(box.base, 'bin');
     await mkdir(bin, { recursive: true });
     await writeFile(join(bin, 'claude'), '#!/bin/sh\necho "$*" >> "$HOME/calls.txt"\necho "add failed" >&2\nexit 1\n', { mode: 0o755 });
@@ -183,8 +199,7 @@ test('Before a tool is told to fetch a Git marketplace, access is checked; a fai
     assert.deepEqual(reachable.runs.map(run => run.command), [`claude plugin marketplace add ${base}/market.git`]);
     assert.deepEqual([reachable.outcome, reachable.message], ['failed', 'Could not add the marketplace. add failed'], 'the tool’s own result decides');
 
-    server.kill();
-    await new Promise(done => server.once('exit', done));
+    await stopped(server);
     const unreachable = await install(context, await parseCatalog(root, `${base}/market.git`, 'git'), 'marker', 'claude-cli');
     assert.match(unreachable.message, /Can’t reach the marketplace/);
     assert.equal((await calls()).trim().split('\n').length, 1, 'only the passed check let the tool run');
@@ -268,7 +283,7 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     git(['init', '-q'], root); git(['add', '-A'], root); git(['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'v1'], root);
     await mkdir(join(box.base, 'served'), { recursive: true });
     git(['clone', '-q', '--bare', root, join(box.base, 'served/market.git')], box.base);
-    const base = await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())));
+    const base = await servedAt(server);
     const url = `${base}/market.git`;
     assert.deepEqual(await checkAccess(box.context, url), { state: 'ok' });
     const catalog = await readCatalog(box.context, url);
@@ -283,7 +298,7 @@ test('A Git marketplace is checked, then read from a fresh shallow copy; the las
     assert.match((await readCatalog(box.context, url)).problem ?? '', /could not be read as JSON/);
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the good copy was kept');
     assert.equal((await readdir(join(box.context.dataDir, 'catalogs'))).length, 1, 'and no stage was left');
-    server.kill();
+    await stopped(server);
     // A refresh is one clone, with no access check first: its failure is classified in words a person can act on.
     assert.match((await readCatalog(box.context, url)).problem ?? '', /Can’t reach the marketplace/);
     assert.equal((await cachedCatalog(box.context, url))?.plugins.length, 3, 'the last fetched catalog stays browsable');

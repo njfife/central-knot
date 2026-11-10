@@ -1,10 +1,10 @@
-import { absentKinds, announce, machine, trayPlace, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showPage, startHome, state, syncNow, type Page } from './app.ts';
+import { absentKinds, announce, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
 import { button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, isPresent, kindNames } from './presence.ts';
-import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
+import { absentTools, isPresent, kindNames, kindNouns } from './presence.ts';
+import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, noToolsSentence, orList } from './words.ts';
 
 // ---------- Overview ----------
@@ -23,8 +23,14 @@ const emptyBands = () => {
 /** Opens another home: a folder chosen now (the Practice copy and this computer's home are in the sidebar too). */
 const chooseHomeButton = (id: string) => button({ variant: 'outline', icon: 'folder-open', label: 'Choose another home…', id, onclick: () => void loadHome('custom') });
 
-/** A home with no tools, wherever it shows: one sentence, `more` if a page has more to say, and the way to another home. */
-export const noToolsState = (id: string, more?: string) => emptyState('boxes', noToolsSentence, more, chooseHomeButton(id));
+/**
+ * A home with no tools, wherever it shows: one sentence, `more` if a page has more to say, and the way to another home,
+ * at the top left, as the Overview's lead sits.
+ */
+const noToolsLead = (id: string, more?: string) => [h('p.overview-lead', {}, noToolsSentence, more ? ` ${more}` : ''), h('div.overview-actions', {}, chooseHomeButton(id))];
+
+/** A page with nothing to show in a home with no tools: the same lead and action as the Overview's, in its place. */
+export const noToolsState = (id: string, more?: string) => h('div.scroll.overview-scroll.no-tools', { id: `${id}-scroll` }, noToolsLead(id, more));
 
 /** An empty page: what is missing and the way forward. In a home with no tools at all, that is another home. */
 const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, body: string, id: string) => {
@@ -91,7 +97,8 @@ interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; cop
  * ("1 differs"), on one summary line; under it, each tool here that holds this kind with its count, the entries wrapping
  * whole. The card opens the kind's page; "differs" is its own link, to the page narrowed to those.
  */
-function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Parameters<typeof icon>[0], noun: [string, string], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
+function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
+  const { title, short: noun } = kindNouns[page];
   const total = facts.length;
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
@@ -114,7 +121,8 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', title: string, glyph: Param
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
     h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`),
-      status ? [h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status] : null),
+      // The "·" goes with the status, so a narrow card moves both to the next line and never ends a line on it.
+      status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
     total ? h('div.kind-card-tools', {}, tools) : null);
 }
 
@@ -144,14 +152,14 @@ export function overviewPage() {
     done ? h('div.bands', {}, done) : null,
     h('div.scroll.overview-scroll', { id: 'overview-scroll' },
       practiceBanner(),
-      h('p.overview-lead', {}, leadSentence(home),
+      // A home with no tools has nothing to count: the way forward is another home.
+      noTools ? noToolsLead('overview-choose-home') : h('p.overview-lead', {}, leadSentence(home),
         // The next step only where it can be taken: something to manage, and a home that can be written.
         nextStep(home, nothingManaged)),
-      // A home with no tools has nothing to count: the way forward is another home.
-      noTools ? h('div.overview-actions', {}, chooseHomeButton('overview-choose-home')) : h('div.kind-cards', {},
-        kindCard('skills', 'Skills', 'wand-sparkles', ['skill', 'skills'], pick(home.manage.skills), homeTools()),
-        absent.includes('mcp') ? null : kindCard('mcp', 'MCP servers', 'plug', ['server', 'servers'], pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
-        absent.includes('agents') ? null : kindCard('agents', 'Agents', 'bot', ['agent', 'agents'], pick(home.agents?.servers ?? []), home.agents.tools)),
+      noTools ? null : h('div.kind-cards', {},
+        kindCard('skills', 'wand-sparkles', pick(home.manage.skills), homeTools()),
+        absent.includes('mcp') ? null : kindCard('mcp', 'plug', pick(home.mcp.servers), home.mcp.tools, home.mcp.claudePending.length),
+        absent.includes('agents') ? null : kindCard('agents', 'bot', pick(home.agents?.servers ?? []), home.agents.tools)),
       h('div.overview-more', {},
         absent.length && !noTools ? h('p.overview-line', { id: 'overview-absent' }, icon('info', 14, 'tone-muted'), `No tool here holds ${orList(absent.map(kind => kindNames[kind]))}.`) : null,
         !home.manage.access.allowed ? h('p.overview-line', {}, icon('lock', 14, 'tone-warning'), `Automatic sync is paused. Preview only: ${previewReason(home.manage.access.reason)}.`)
@@ -159,7 +167,6 @@ export function overviewPage() {
         : home.syncOn && nothingManaged ? null : h('p.overview-line', {}, icon(home.syncOn ? 'refresh-cw' : 'circle-minus', 14, home.syncOn ? (nothingManaged ? 'tone-muted' : 'tone-success') : 'tone-warning'),
           ...(home.syncOn ? [nothingManaged ? 'Automatic sync is on. Once something is managed, edits spread between tools in seconds, with Undo.' : 'Automatic sync is on: edits spread between tools in seconds, with a notice and Undo.']
             : ['Automatic sync is off: edits wait until you turn it on or ', button({ variant: 'link', size: 'micro', label: 'Sync once', id: 'overview-sync-now', onclick: () => void syncNow() }), '.'])),
-        nothingManaged && home.manage.access.allowed && h('p.overview-line', {}, icon('info', 14, 'tone-muted'), `Closing the window keeps Central Knot running in ${trayPlace}. Turn sync off${machine.signIn ? ', set it to start at sign-in,' : ''} or quit from there.`),
         h('p.overview-line', {}, icon('history', 14, 'tone-muted'), 'Every change Central Knot makes is kept in ', button({ variant: 'link', size: 'micro', label: 'History', id: 'overview-history', onclick: () => showPage('history') }), ', with Undo.'),
         // The two pages the cards don't cover, named once so a newcomer knows what they are; Plugins only where a tool here
         // installs them, and neither in a home with no tools.
@@ -194,15 +201,18 @@ const copiesOf = (home: HomeView, key: string): Found[] => home.snapshots.filter
   .filter(skill => skill.folder.normalize('NFC').toLowerCase() === key)
   .map(skill => ({ tool: snapshot.harness, skill })));
 
-const extraFacts = ({ skill }: Found) => skill.realDirectory !== skill.directory || skill.metadataKeys.length > 0;
-
-function fileCard(key: string, { tool, skill }: Found, index: number) {
-  return h('div.card.path-card', {},
-    h('div.path-top', {}, pathText(shownPath(skill.directory), skill.directory), copyButton(skill.directory, `path for ${toolName(tool)}`, `copy-${key}-${index}`)),
-    h('div.path-tags', {}, h('span.tag', {}, toolName(tool)), h('span.tag-note', {}, skill.rootLabel)),
-    h('dl.facts.facts-compact', {},
-      ...(skill.realDirectory !== skill.directory ? fact('Real folder', pathText(shownPath(skill.realDirectory), skill.realDirectory)) : []),
-      ...(skill.metadataKeys.length ? fact('Fields of note', skill.metadataKeys.join(', ')) : [])));
+/**
+ * One copy under "Where each copy is", the one place its paths show: its tool, its folder (with Show in folder and Copy),
+ * the real folder when a link leads elsewhere, and its fields of note.
+ */
+function copyEntry(key: string, { tool, skill }: Found, index: number) {
+  return h('div.copy-entry', {},
+    h('div.copy-entry-head', {}, brandMark(tool, 12), h('span.copy-entry-tool', {}, toolName(tool)),
+      h('button.inline-link.copy-entry-show', { type: 'button', title: 'Show this folder in the file manager; nothing is opened or changed', onclick: () => showFile(skill.directory) }, 'Show in folder'),
+      copyButton(skill.directory, `path for ${toolName(tool)}`, `copy-${key}-${index}`)),
+    h('p.copy-entry-path', {}, wrappingPath(skill.directory)),
+    skill.realDirectory !== skill.directory ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Real folder '), wrappingPath(skill.realDirectory)) : null,
+    skill.metadataKeys.length ? h('p.copy-entry-more', {}, h('span.copy-entry-label', {}, 'Fields of note '), skill.metadataKeys.join(', ')) : null);
 }
 
 /** One block per distinct content, named by the copies that hold it. */
@@ -228,8 +238,8 @@ export function skillsPage() {
     const copies = copiesOf(home, key);
     const notes = [...new Set(copies.flatMap(copy => copy.skill.notes))];
     return {
-      // A copy's real folder and fields of note fold under "Where each copy is", so the contents come first.
-      where: copies.some(extraFacts) ? [h('div.stack.where-cards', {}, copies.filter(extraFacts).map((copy, index) => fileCard(key, copy, index)))] : [],
+      // Each copy once, under "Where each copy is" (matrix.ts filesLayout), so the contents come first.
+      where: copies.map((copy, index) => copyEntry(key, copy, index)),
       contents: [
         notes.length > 0 && section('Notes', notes.map(note => h('p', {}, note))),
         h('section.section', {}, h('h3.eyebrow.eyebrow-file', {}, 'SKILL.md'), contents(key, copies)),
@@ -329,9 +339,10 @@ export function toolsPage() {
   const done = outcomeBand();
   const present = home.snapshots.filter(isPresent);
   const absent = absentTools(home.snapshots);
+  // No tools at all: the same lead and action as the Overview's, and on This Mac's home which tools were looked for.
+  if (!present.length) return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('tools-choose-home', home.mode === 'actual' ? notFoundText(absent) : undefined));
   return h('div.page', {}, done ? h('div.bands', {}, done) : null, h('div.scroll.cards-scroll', { id: 'tools-scroll' },
     home.mode !== 'actual' ? h('p.tools-note', {}, icon('info', 14, 'tone-muted'), home.mode === 'fixture' ? 'This is the practice copy: sample folders, so Central Knot doesn’t look for installed apps here. Open ' : 'This is a folder, not this computer, so Central Knot doesn’t look for installed apps here. Open ',
       button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' to see your installed tools and versions.') : null,
-    present.length ? [cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home, absent)]
-      : noToolsState('tools-choose-home', home.mode === 'actual' ? notFoundText(absent) : undefined)));
+    cardGrid(present.map(snapshot => toolCard(snapshot, home))), notFoundLine(home, absent)));
 }

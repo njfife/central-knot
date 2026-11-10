@@ -103,7 +103,7 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   const reasons = view.tools.map(tool => blocked(view, entry, tool)).filter((why): why is string => !!why);
   const someCan = view.canWrite && reasons.length < view.tools.length;
   // The hint heads the name column, wrapping within it when the column is narrow.
-  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'Click a box; nothing runs until Apply all.'), h('span.hint-short', {}, 'Nothing runs until Apply all.')] : 'Plugin'),
+  const head = h('div.ov-row.ov-head', { role: 'row' }, h('div.ov-name.plugin-hint', { role: 'columnheader' }, someCan ? [h('span.hint-long', {}, 'Click a box; nothing runs until Apply all.'), h('span.hint-short', {}, 'Nothing runs until Apply all.'), h('span.hint-plain', {}, 'Plugin')] : 'Plugin'),
     view.tools.map(tool => h('div.ov-cell.ov-tool-head', { role: 'columnheader' }, brandMark(tool, 16), h('span', {}, names[tool]))), h('div.ov-cell.plugin-row-go', { role: 'columnheader' }));
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${reasons.join(' ')} `,
@@ -191,6 +191,8 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   if (counts.plugins) {
     const pending = [plural(counts.plugins, 'change'), counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : ''].filter(Boolean).join(' · ');
     return h('div.apply', {},
+      // Narrow, the toolbar has nothing else at its left: the hint the table's header gives up sits there (style.css).
+      h('span.apply-hint', {}, 'Nothing runs until Apply all.'),
       pendingCount(pending, plural(counts.plugins, 'change')),
       button({ variant: 'ghost', size: 'small', label: 'Discard', name: 'Discard these changes', id: 'plugins-discard', disabled: !!app.busy, onclick: () => { market.draft.clear(); announce('Changes discarded. Nothing was installed or removed.'); rerender(); } }),
       button({ variant: 'primary', size: 'small', label: 'Apply all', id: 'plugins-apply', disabled: !!app.busy || !market.view?.canWrite, attrs: { title: `${pending}. Nothing runs until Apply all.` }, onclick: () => void applyPluginOps([...market.draft.values()]) }));
@@ -267,7 +269,8 @@ const EXAMPLES = ['anthropics/skills', 'github/copilot-plugins'];
 
 export function pluginsPage() {
   const view = market.view;
-  if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.activity ? 'Reading marketplaces…' : 'Marketplaces could not be read.')));
+  // From the marketplaces' own read (pagedata.ts): what it found, else that it is reading or could not read.
+  if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.read.state === 'failed' ? 'Marketplaces could not be read.' : 'Reading marketplaces…')));
   // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
   if (!homeTools().length) return h('div.page', {}, noToolsState('plugins-choose-home'));
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
@@ -284,7 +287,7 @@ export function pluginsPage() {
     shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
       view.canWrite ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.reason ?? 'Preview only here.')),
-      market.activity && market.activity !== 'reading' ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band)) : null,
+      market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band)) : null,
       problemBand(lines)),
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),

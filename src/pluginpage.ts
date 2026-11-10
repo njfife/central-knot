@@ -65,8 +65,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   }) : null;
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
-    // The tools in a row from the left, a steady gap apart, the button for all of them after them; a wide page gives each
-    // tool an equal column across the box, the button at its right end (style.css).
+    // The tools from the left under the heading, each in a column of capped width, and the button for all of them at the
+    // right end; a box too narrow for that puts them in a row that wraps (settlePluginTools).
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => {
       const why = unavailable(view, entry, plugin.name, tool) ?? limits(tool).map(outcome => `${outcome.component} ${outcome.text}`).join('; ');
       return h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex),
@@ -94,23 +94,31 @@ function markClamped(): void {
   }
 }
 
+/** The narrowest a tool's column in "Your tools" gets, and the gap between columns (style.css data-layout="columns"). */
+const TOOL_COLUMN_MIN = 170, TOOL_COLUMN_GAP = 24;
+
 /**
- * "Choose all" follows the last tool with the same gap; when it no longer fits on that line and wraps, it moves to the
- * right edge, where a lone button reads as belonging to the whole row (style.css .choice-wrapped).
+ * Lays out "Your tools" by the box's width, decided here once (data-layout, which style.css keys off). With room for a
+ * column per tool and the button, each tool gets one from the left, and "Choose all" sits at the right end. Otherwise
+ * they wrap in a row, and a "Choose all" that wraps onto a line of its own moves to the right edge, where a lone button
+ * reads as belonging to the whole row (.choice-wrapped). The renderer calls it right after drawing, before the page is
+ * painted, and the watcher whenever the page changes width.
  */
-function markWrappedChoice(): void {
+export function settlePluginTools(): void {
   const rows = document.querySelector<HTMLElement>('.plugin-tool-rows'), all = rows?.querySelector<HTMLElement>(':scope > .btn');
   const first = rows?.firstElementChild as HTMLElement | null;
-  if (!rows || !all || !first) return;
-  all.classList.remove('choice-wrapped');
-  all.classList.toggle('choice-wrapped', all.offsetTop > first.offsetTop + first.offsetHeight / 2);
+  if (!rows || !first) return;
+  const tools = Number(rows.dataset.tools ?? 1);
+  const columns = rows.clientWidth >= tools * (TOOL_COLUMN_MIN + TOOL_COLUMN_GAP) + (all?.offsetWidth ?? 0);
+  rows.dataset.layout = columns ? 'columns' : 'wrap';
+  all?.classList.toggle('choice-wrapped', !columns && all.offsetTop > first.offsetTop + first.offsetHeight / 2);
 }
 
 /**
  * Lays out what depends on width once the page is drawn, and again whenever it changes width (a window resize, or the
- * README moving beside the contents at 1400px): which descriptions are cut, and where Choose all sits.
+ * README moving beside the contents): which descriptions are cut, and how "Your tools" sits.
  */
-const layoutWatcher = new ResizeObserver(() => { markClamped(); markWrappedChoice(); });
+const layoutWatcher = new ResizeObserver(() => { markClamped(); settlePluginTools(); });
 function watchLayout(page: HTMLElement): HTMLElement {
   layoutWatcher.disconnect();
   layoutWatcher.observe(page);

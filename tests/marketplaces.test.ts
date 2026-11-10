@@ -19,8 +19,8 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
   const host: MarketplaceHost = {
-    home: () => ({ home, snapshots: [] }),
-    tools: async () => ['claude-cli', 'copilot-cli', 'codex-cli'],
+    home: () => ({ home }),
+    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,

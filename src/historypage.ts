@@ -1,6 +1,7 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
 import { clockTime } from './model.ts';
-import { restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
+import { homeTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
+import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
 import { button, emptyState, h, icon } from './dom.ts';
@@ -20,12 +21,12 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
     case 'added': return { glyph: 'plus', text: event.undoneBy ? `Apply all started managing it and added copies to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}; they were removed again.` : `Apply all started managing it and added ${event.losers.length === 1 ? 'a copy' : 'copies'} to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
     case 'restored': {
       // Name the change this undid, so Redo says what comes back.
-      const undone = state.history?.find(other => other.undoneBy === event.id);
+      const undone = state.history.data?.find(other => other.undoneBy === event.id);
       const named = (past: HistoryEvent) => ({ edit: `${who(past.winner?.tool)}’s edit`, conflict: `${who(past.winner?.tool)}’s winning edit`, deleted: 'the deletion', 'kept-edit': 'the kept edit', chosen: `your choice of ${who(past.winner?.tool)}’s copy`, restored: 'an undo', added: 'the copies Apply all added' } as const)[past.kind];
       const where = event.losers.length ? ` in ${touchedToolsPhrase([...event.losers.map(loser => loser.tool), ...(event.winner ? [event.winner.tool] : [])])}` : '';
       // Undoing an undo is a redo: say what came back, and offer to take it away again.
       if (undone?.kind === 'restored') {
-        const first = state.history?.find(other => other.undoneBy === undone.id);
+        const first = state.history.data?.find(other => other.undoneBy === undone.id);
         return { glyph: 'undo-2', text: `Redid ${first ? named(first) : 'the change'}; it is back${where}.`, action: first?.kind === 'deleted' ? 'Restore' : 'Undo edit' };
       }
       if (undone?.kind === 'deleted') return { glyph: 'undo-2', text: `Restored after it was deleted${where}.`, action: 'Delete again' };
@@ -76,8 +77,10 @@ function actions(event: HistoryEvent, action?: string) {
 }
 
 export function historyPage() {
-  const events = state.history;
-  if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading History…' : 'History could not be read.')));
+  // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
+  const events = state.history.data;
+  if (!events) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.history.state === 'failed' ? 'History could not be read.' : 'Reading History…')));
+  if (!events.length && !homeTools().length) return h('div.page', {}, noToolsState('history-choose-home'));
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   // The row's own button redoes; the band only confirms.

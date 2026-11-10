@@ -78,8 +78,9 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
 export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string): Promise<InstructionSave> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
+  // Only a tool in this home (presence.ts): a save never recreates the folder of a tool that has gone.
   const snapshot = snapshots.find(entry => entry.harness === tool);
-  if (!snapshot) return { stopped: 'That tool is not in this home.' };
+  if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
   const { path } = await bind(tool, snapshot.root);
   const current = await readText(path);
   if ((current === undefined ? '' : sha(current)) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
