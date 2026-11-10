@@ -848,7 +848,7 @@ app.whenReady().then(async () => {
       const key = past?.key ?? '';
       // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
       if (past?.settingsFile) return undoSettingsChange(context(), eventId);
-      // A Pull that deleted the base instructions: the base's own Undo puts the base and its tools back.
+      // A Pull that edited or deleted the base instructions: the base's own Undo puts the earlier base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await presentNow();
       if (key.startsWith('mcp:')) {
