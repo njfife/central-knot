@@ -185,7 +185,8 @@ export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugi
 }
 
 /** The oldest build of each tool its switch for one plugin skill was exercised on (capability data, Appendix B). */
-export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'codex-cli': '0.142.3', 'copilot-cli': '1.0.107' };
+// Copilot's switch was also exercised on the GitHub Copilot app's own copy, a pre-release of 1.0.102.
+export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'codex-cli': '0.142.3', 'copilot-cli': '1.0.102-0' };
 
 /**
  * A quiet note beside a tool's plugin skill switches when its `version` is older than the switch was exercised on, or

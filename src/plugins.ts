@@ -732,8 +732,9 @@ const lastLines = (output: string) => output.split('\n').filter(Boolean).slice(-
 
 /** What to do for a change to reach the tool: `purpose` says what for ("to use it"). */
 const nextStepFor = (tool: PluginTool, purpose = 'to use it'): string => ({
-  'claude-cli': `Start a new Claude Code session, or run /reload-plugins, ${purpose}.`,
-  'copilot-cli': `Start a new Copilot CLI session ${purpose}.`,
+  // Said for either route: the change may have gone in through the CLI or through the desktop app's own copy.
+  'claude-cli': `Start a new Claude Code session (CLI or Claude desktop’s Code tab), or run /reload-plugins, ${purpose}.`,
+  'copilot-cli': `Start a new Copilot session (CLI or the GitHub Copilot app) ${purpose}.`,
   'codex-cli': `Start a new Codex session ${purpose}; restart the ChatGPT desktop app if it is open.`,
 })[tool];
 
