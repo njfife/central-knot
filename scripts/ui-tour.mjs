@@ -475,10 +475,18 @@ if (wanted('parts')) {
   await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
   await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
+  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: My own triage.\n---\nMine.\n');
+  await a.click('#header-refresh'); await waitFor(a, `/Not the skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
   await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Pi and Codex as ordinary items.');
+  await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Codex as ordinary items; Pi got the MCP server, its own triage skill kept the name.');
+  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
+  await a.click('#header-refresh'); await waitFor(a, `/Can go in now/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-can-go-in-now', 'Removed Pi’s own triage skill and clicked Refresh: the plugin’s triage can go in now, with Update parts.');
+  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.click('#plugin-back');
   await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
