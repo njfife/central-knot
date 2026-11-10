@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
@@ -33,6 +33,8 @@ function log(line: string) {
   try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
+// Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
+void searchPath();
 const BUILD = 'com.centralknot.firstlook';
 let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
@@ -74,9 +76,10 @@ const overrideFor = (id: HarnessId) => (current?.mode === 'actual' ? process.env
 
 async function read(): Promise<Snapshot[]> {
   const { mode, home } = current!;
+  const path = mode === 'actual' ? await searchPath() : '';
   return Promise.all(harnessIds.map(id => discover({
     home, mode, harness: id, configOverride: overrideFor(id),
-    binaries: mode === 'actual' ? executableCandidates(home, process.env.PATH ?? '', harnesses[id].binary) : [],
+    binaries: mode === 'actual' ? executableCandidates(home, path, harnesses[id].binary) : [],
     apps: mode === 'actual' ? appCandidates(home, harnesses[id].binary) : [],
     runProbes: mode === 'actual',
   })));
@@ -394,7 +397,7 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
  * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
   if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
@@ -422,7 +425,7 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
-  const shared = context();
+  const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);
@@ -838,7 +841,7 @@ app.whenReady().then(async () => {
   let drafters: Partial<Record<HarnessId, string>> = {};
   handle('instructions:base', async () => {
     if (!current) return null;
-    drafters = await draftTools(homedir());
+    drafters = await draftTools(homedir(), await searchPath());
     return baseView(context(), harnessIds.filter(tool => drafters[tool]));
   });
   // The files are read in turn with everything else; the tool then writes its draft outside the queue (it can take minutes,
@@ -870,7 +873,12 @@ app.whenReady().then(async () => {
       // A Pull that deleted the base instructions: the base's own Undo puts the base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await presentNow();
-      if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      if (key.startsWith('mcp:')) {
+        const result = await restoreMcp(context(), tools, eventId);
+        // Undo of a server's Disable or Enable is a choice made by hand too.
+        await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
+        return { stopped: result.stopped, results: result.results, harnessWrites: result.writes };
+      }
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
       // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
@@ -902,9 +910,14 @@ app.whenReady().then(async () => {
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
-  handle('mcp:apply', async (list, resume, home) => (home === current?.home
-    ? applyMcp(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+  handle('mcp:apply', async (list, resume, home) => {
+    if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 };
+    const asked = changes(list);
+    const result = await applyMcp(context(), await presentNow(), asked, { resume: resume === true, ...(syncOn ? {} : { only: new Set(asked.map(change => change.key)) }) });
+    // A Disable or Enable chosen here takes that switch over from profiles, as a skill's does.
+    await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results, 'mcp'));
+    return result;
+  });
   handle('agents:apply', async (list, resume, home) => (home === current?.home
     ? applyAgents(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));

@@ -11,15 +11,15 @@ import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, parseObject, pluginCon
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
-import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
-import type { PluginTool } from './presence.ts';
-import { errorCode, writeFileChecked } from './share.ts';
+import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason, samePart } from './pluginstatus.ts';
+import { takesPlugins, type PluginTool } from './presence.ts';
+import { errorCode, readParts, writeFileChecked } from './share.ts';
 import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
 export { SAFE_NAME };
 import { toolNames } from './words.ts';
-import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, SkillOff } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, PartKind, SkillOff, ThroughPlugin } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -463,6 +463,106 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
   }
 }
 
+
+/** One plugin a tool has installed for its person, as the tool records it; `off`: turned off there, so nothing of it loads. */
+export interface InstalledPlugin { plugin: string; marketplace: string; off?: true }
+
+/**
+ * Every plugin a tool has installed for its person, from the same records `installState` reads: Claude Code's
+ * installed_plugins.json (user scope), Copilot CLI's config.json and the plugins it has turned on from a folder
+ * marketplace, and Codex's `[plugins."ID"]` tables. A record alone: `installState` says whether its files are there.
+ */
+export async function installedPlugins(context: PluginContext, tool: PluginTool): Promise<InstalledPlugin[]> {
+  const root = configRootOf(context, tool);
+  const found = new Map<string, boolean>();
+  switch (tool) {
+    case 'claude-cli': {
+      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
+      for (const [id, listed] of Object.entries(record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {})) {
+        if ((Array.isArray(listed) ? listed : []).some(entry => record(entry)?.scope === 'user')) found.set(id, switches?.[id] === false);
+      }
+      break;
+    }
+    case 'copilot-cli': {
+      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
+      const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
+      for (const item of (Array.isArray(listed) ? listed : []).map(record)) if (text(item?.name) && text(item?.marketplace)) found.set(`${text(item?.name)}@${text(item?.marketplace)}`, item?.enabled === false);
+      for (const [id, on] of Object.entries(switches ?? {})) if (on === true && !found.has(id)) found.set(id, false);
+      break;
+    }
+    case 'codex-cli':
+      for (const [id, table] of Object.entries((await codexTables(context, root)).plugins)) found.set(id, table.enabled === false);
+  }
+  return [...found].flatMap(([id, off]) => {
+    const at = id.lastIndexOf('@');
+    return at > 0 && at < id.length - 1 ? [{ plugin: id.slice(0, at), marketplace: id.slice(at + 1), ...(off ? { off: true as const } : {}) }] : [];
+  });
+}
+
+/** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
+export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
+
+/**
+ * What each of a tool's installed plugins gives it, by name: its skills in every tool, and its agents and MCP servers
+ * where the tool loads a plugin's (Claude Code and Copilot CLI; Codex ignores a plugin's agents and may not start its
+ * servers). With each, the plugin, the marketplace as the tool added it and the copy's version. For Claude Code, which
+ * adds a marketplace entry's parts to the plugin's own, the entry is read from the marketplace's manifest where Claude
+ * Code keeps it. `off`: the plugin, or that one skill, is turned off there.
+ */
+export async function pluginParts(context: PluginContext, tool: PluginTool): Promise<PluginPart[]> {
+  const root = configRootOf(context, tool);
+  const given: PluginPart[] = [];
+  for (const { plugin, marketplace, off } of await installedPlugins(context, tool)) {
+    let entry: Record<string, unknown> | undefined, atMarketplaceRoot = false;
+    if (tool === 'claude-cli') {
+      const known = record((await recordJson(context, join(root, 'plugins/known_marketplaces.json')))?.[marketplace]);
+      const kept = text(known?.installLocation) || text(record(known?.source)?.path);
+      const listed = kept ? (await recordJson(context, join(kept, MANIFEST)))?.plugins : undefined;
+      entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin);
+      atMarketplaceRoot = !!kept && typeof entry?.source === 'string' && resolve(kept, entry.source) === resolve(kept);
+    }
+    const state = await installState(context, tool, marketplace, plugin, entry);
+    if (state.state !== 'installed') continue;
+    // Read as that tool reads its copy (see pluginContents).
+    const contents = await pluginContents(state.path, entry ?? {}, state.path, tool === 'codex-cli' ? { codex: await codexManifest(state.path) } : tool === 'copilot-cli' ? { skillsListReplaces: true } : { atMarketplaceRoot });
+    const source = await registeredSource(context, tool, marketplace);
+    const from = { plugin, marketplace, ...(source ? { source } : {}), ...(state.version ? { version: state.version } : {}) };
+    const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });
+    for (const skill of contents.skills) add('skill', skill.name, { off: state.skillsOff?.some(entry => entry.skill === skill.name), text: skill.text });
+    if (tool === 'codex-cli') continue;
+    for (const agent of contents.agents) add('agent', agent.name);
+    for (const server of contents.mcpServers) add('mcp', server.name);
+  }
+  return given;
+}
+
+/** What a tool has through a plugin, as the pages ask: `asParts`, the item is on record as that plugin's part in some tool; a skill comes with its SKILL.md. */
+export type GivenByPlugin = ThroughPlugin & { asParts: boolean; text?: string };
+
+/**
+ * What each of `tools` has through its installed plugins, of one kind: by tool, then by the item's key on its page
+ * (`keyOf` its name). A name alone doesn't make two items one: the caller counts an item as the plugin's when it is
+ * `asParts` (Central Knot installed it elsewhere as that plugin's part) or, for a skill, when its SKILL.md is the same.
+ * A name two plugins hold goes by the one it is a part of, else the first listed. Read once where `home` carries `reads`
+ * (one pass or one view), since the Skills, MCP servers and Agents pages all ask.
+ */
+export async function throughPlugins(home: { home: string; overrides?: Partial<Record<HarnessId, string>>; reads?: Map<string, Promise<unknown>> }, tools: HarnessId[], kind: PartKind, keyOf: (name: string) => string): Promise<Map<HarnessId, Map<string, GivenByPlugin>>> {
+  const context: PluginContext = { home: home.home, dataDir: '', binaries: {}, overrides: home.overrides, reads: home.reads ?? new Map() };
+  const found = new Map<HarnessId, Map<string, GivenByPlugin>>();
+  const installs = await once(context, 'plugin-parts-record', () => readParts(home.home));
+  for (const tool of tools.filter(takesPlugins)) {
+    // Records that can't be read give nothing: the tool then shows what its own folders hold, as before.
+    const parts = await once(context, `plugin-parts:${tool}`, () => pluginParts(context, tool).catch((): PluginPart[] => []));
+    const byKey = new Map<string, GivenByPlugin>();
+    for (const { kind: partKind, name, ...plugin } of parts) {
+      if (partKind !== kind) continue;
+      const asParts = installs.some(install => install.plugin === plugin.plugin && (!plugin.source || sameSource(install.source, plugin.source)) && install.items.some(item => !item.removed && samePart(item, { kind, name })));
+      if (!byKey.has(keyOf(name)) || (asParts && !byKey.get(keyOf(name))!.asParts)) byKey.set(keyOf(name), { ...plugin, asParts });
+    }
+    if (byKey.size) found.set(tool, byKey);
+  }
+  return found;
+}
 
 /**
  * The version folder Codex loads of a cached plugin (core-plugin-common `active_plugin_version`): `local` when there is

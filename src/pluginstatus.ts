@@ -64,6 +64,16 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
 }
 
 /**
+ * A plugin's place among its marketplace's: 0 when every tool that can take it has it, 1 when some tool has it, 2 when no
+ * tool has it. Having it means installed whole or as parts; a tool that can't take the plugin doesn't hold it back from 0.
+ */
+export function pluginPlace(view: PluginsView, entry: MarketplaceView, plugin: string): 0 | 1 | 2 {
+  const has = (tool: HarnessId) => installed(entry, plugin, tool) || !!partsOf(entry, plugin, tool);
+  if (!view.tools.some(has)) return 2;
+  return view.tools.every(tool => has(tool) || !!unavailable(view, entry, plugin, tool)) ? 0 : 1;
+}
+
+/**
  * Why this plugin can't be uninstalled from this tool here, if it can't (only asked of an installed plugin): the tool
  * holds another marketplace of this name, its CLI is missing, or writing isn't allowed in this home.
  */

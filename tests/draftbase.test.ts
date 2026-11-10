@@ -166,16 +166,14 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
 
 test('The tools that can write a draft are those with a CLI on this computer', async () => {
   const box = await sandbox();
-  const path = process.env.PATH;
   try {
     await mkdir(box.file('.local/bin'), { recursive: true });
     for (const name of ['claude', 'pi']) { await writeFile(box.file(`.local/bin/${name}`), '#!/bin/sh\n'); await chmod(box.file(`.local/bin/${name}`), 0o755); }
     // A file that can't be run is no CLI.
     await writeFile(box.file('.local/bin/codex'), '#!/bin/sh\n');
-    process.env.PATH = '';
-    const found = await draftTools(box.home);
+    const found = await draftTools(box.home, '');
     assert.deepEqual(Object.keys(found).filter(tool => found[tool as HarnessId]!.startsWith(box.home)), ['claude-cli', 'pi-cli']);
-  } finally { process.env.PATH = path; await box.cleanup(); }
+  } finally { await box.cleanup(); }
 });
 
 test('A file’s lines a draft carries nowhere word for word are found, whichever part would have held them', () => {

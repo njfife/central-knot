@@ -183,7 +183,8 @@ function notes(list: SwitchItem[], view: TableView) {
   if (view.profile) for (const item of list.filter(entry => view.profile!.items.includes(entry.id))) {
     const hand = offByHand(item, view.offByProfile);
     if (!hand.length) continue;
-    const where = item.kind === 'skill' ? ['Enable it there on the ', h('button.inline-link', { type: 'button', id: `pf-to-skills-${item.key}`, onclick: () => showPage('skills') }, 'Skills page'), '.'] : [`Turn it on in ${hand.length === 1 ? 'that tool’s' : 'those tools’'} own MCP settings.`];
+    const where = item.kind === 'skill' ? ['Enable it there on the ', h('button.inline-link', { type: 'button', id: `pf-to-skills-${item.key}`, onclick: () => showPage('skills') }, 'Skills page'), '.']
+      : ['Enable it there on the ', h('button.inline-link', { type: 'button', id: `pf-to-mcp-${item.key}`, onclick: () => showPage('mcp') }, 'MCP servers page'), '.'];
     lines.push(h('li', {}, looks.hand.mark(), h('span', {}, h('strong', {}, item.name), ` is disabled in ${andList(hand.map(toolName))}: profiles leave it off. `, ...where)));
   }
   return lines.length ? h('ul.pf-blocked', { 'aria-live': 'polite' }, lines) : null;

@@ -5,6 +5,7 @@ import { readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
+import { searchPath } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
@@ -60,8 +61,9 @@ export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Pa
  */
 async function findClis(): Promise<Routes> {
   const routes: Routes = { binaries: {}, apps: {} };
+  const path = await searchPath();
   for (const tool of pluginTools) {
-    const found = await findBinary(tool, homedir());
+    const found = await findBinary(tool, homedir(), path);
     if (!found) continue;
     routes.binaries[tool] = found.binary;
     if (found.app) routes.apps[tool] = found.app;

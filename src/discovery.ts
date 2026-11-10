@@ -102,12 +102,13 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
 }
 
 /**
- * The binary that runs a tool on this computer: its own CLI, from the same candidate list version probes use; with no CLI,
+ * The binary that runs a tool on this computer: its own CLI, from the same candidate list version probes use (`searchPath`:
+ * platform.ts's, the folders the person's terminal looks in); with no CLI,
  * the copy of the tool its desktop app carries (Claude desktop's Code tab, the GitHub Copilot app's runtime, ChatGPT
  * desktop's Codex), with that app. That copy never counts as a CLI install (CD §3).
  */
-export async function findBinary(tool: HarnessId, home: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
-  for (const candidate of executableCandidates(home, process.env.PATH ?? '', harnesses[tool].binary)) {
+export async function findBinary(tool: HarnessId, home: string, searchPath: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
+  for (const candidate of executableCandidates(home, searchPath, harnesses[tool].binary)) {
     if (await runnable(candidate)) return { binary: candidate };
   }
   const app = await findApp(appCandidates(home, harnesses[tool].binary));

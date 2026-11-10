@@ -1,3 +1,5 @@
+import { execFile } from 'node:child_process';
+import { userInfo } from 'node:os';
 import { delimiter, dirname, isAbsolute, join } from 'node:path';
 
 /**
@@ -6,14 +8,44 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path';
  */
 export const pathBeside = (binary: string) => [dirname(binary), process.env.PATH].filter(Boolean).join(delimiter);
 
+/** How many folders are searched for a CLI: a terminal's PATH is a few dozen at most. */
+const SEARCHED = 40;
+
 export function executableCandidates(home: string, searchPath: string, binary = 'claude'): string[] {
   const fixed = [join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'];
   const directories = [...fixed, ...searchPath.split(':').filter(isAbsolute)];
-  const candidates = [...new Set(directories)].slice(0, 12).map(directory => join(directory, binary));
+  const candidates = [...new Set(directories)].slice(0, SEARCHED).map(directory => join(directory, binary));
   // Pi installs itself under its own folder (CD §3): a config folder alone does not mean a CLI.
   if (binary === 'pi') candidates.push(join(home, '.pi/agent/bin/pi'));
   return candidates;
 }
+
+const PATH_MARK = '__central_knot_path__';
+
+/**
+ * The PATH the person's terminal has, asked of their login shell: its startup files add the folders that nvm, npm's own
+ * prefix, bun, mise and the like install CLIs into, which an app opened from Finder or a launcher never sees. Read between
+ * two marks, since startup files may print anything. Undefined on Windows (every app gets the whole PATH there), with
+ * no usable shell, or when the shell doesn't answer in time.
+ */
+export function shellPath(shell = process.env.SHELL || userInfo().shell || '', timeoutMs = 4000): Promise<string | undefined> {
+  if (process.platform === 'win32' || !isAbsolute(shell)) return Promise.resolve(undefined);
+  return new Promise(done => {
+    // Interactive and login, so both kinds of startup file are read; the two settings keep oh-my-zsh from asking to update or starting tmux.
+    const child = execFile(shell, ['-ilc', `printf '%s%s%s' ${PATH_MARK} "$PATH" ${PATH_MARK}`],
+      { env: { ...process.env, DISABLE_AUTO_UPDATE: 'true', ZSH_TMUX_AUTOSTART: 'false' }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, encoding: 'utf8' },
+      (_error, stdout) => done(String(stdout).split(PATH_MARK)[1] || undefined));
+    child.stdin?.end();
+  });
+}
+
+let searched: Promise<string> | undefined;
+/**
+ * Where CLIs are looked for: this app's own PATH, then the folders only the person's terminal has. Asked once per run
+ * (a shell's startup can take a second); every search for a CLI uses this one answer.
+ */
+export const searchPath = (): Promise<string> =>
+  (searched ??= shellPath().then(fromShell => [process.env.PATH, fromShell].filter(Boolean).join(':')));
 
 /**
  * Where a tool's desktop app may be, where the version of the tool it carries is written, and where that copy of the tool

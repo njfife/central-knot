@@ -103,13 +103,14 @@ export async function deleteProfile(context: ShareContext, id: string): Promise<
 }
 
 /**
- * The skill switches an explicit Disable, Enable or their Undo flipped (outcome 'switched' in `results`, for one of `changes`'
- * skills), as profile items: profiles stop holding these, since the person set them by hand. A skill's result names it by its
- * folder (manage.ts), whose itemKey is the change's key.
+ * The switches an explicit Disable, Enable or their Undo flipped (outcome 'switched' in `results`, for one of `changes`' items),
+ * as profile items: profiles stop holding these, since the person set them by hand. A skill's result names it by its folder
+ * (manage.ts), whose itemKey is the change's key; an MCP server's names the server, which is its key.
  */
-export function switchedByHand(changes: { key: string }[], results: DestinationResult[]): { item: string; tool: HarnessId }[] {
-  return results.filter(result => result.outcome === 'switched' && result.harness && changes.some(change => change.key === itemKey(result.item)))
-    .map(result => ({ item: itemId('skill', itemKey(result.item)), tool: result.harness! }));
+export function switchedByHand(changes: { key: string }[], results: DestinationResult[], kind: 'skill' | 'mcp' = 'skill'): { item: string; tool: HarnessId }[] {
+  const keyOf = (result: DestinationResult) => (kind === 'mcp' ? result.item : itemKey(result.item));
+  return results.filter(result => result.outcome === 'switched' && result.harness && changes.some(change => change.key === keyOf(result)))
+    .map(result => ({ item: itemId(kind, keyOf(result)), tool: result.harness! }));
 }
 
 /** Lets go of profile holds on switches the person has since set by hand. Changes nothing when there are none or profiles can't be read. */

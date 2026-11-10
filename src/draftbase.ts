@@ -34,8 +34,8 @@ export function draftCommand(tool: HarnessId, answerFile: string): { args: strin
 }
 
 /** The tools on this computer that can write a draft: those with a CLI, or with a desktop app that carries a copy of one. */
-export async function draftTools(home: string): Promise<Partial<Record<HarnessId, string>>> {
-  const found = await Promise.all(harnessIds.map(async tool => [tool, (await findBinary(tool, home))?.binary] as const));
+export async function draftTools(home: string, searchPath: string): Promise<Partial<Record<HarnessId, string>>> {
+  const found = await Promise.all(harnessIds.map(async tool => [tool, (await findBinary(tool, home, searchPath))?.binary] as const));
   return Object.fromEntries(found.filter(([, binary]) => binary));
 }
 
