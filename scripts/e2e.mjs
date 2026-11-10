@@ -2,11 +2,12 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -95,41 +96,40 @@ function seedHome() {
 }
 
 // ---------- App ----------
+// On Linux the file manager the app opens is this stand-in: it notes what it was asked to open.
+const opened = join(scratch, 'opened.txt');
+if (process.platform === 'linux') {
+  mkdirSync(join(scratch, 'bin'));
+  writeFileSync(join(scratch, 'bin/xdg-open'), `#!/bin/sh\necho "$*" >> '${opened}'\n`);
+  chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
+}
 let app;
-async function launch(userData = join(scratch, 'data')) {
+async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
   const port = 9400 + randomInt(500);
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  const child = spawn(command, [...(flag('--electron') ? [root] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
+  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
     await wait(200);
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page'); if (!targets.length) targets = undefined; } catch { /* still starting */ }
   }
   if (!targets) { child.kill('SIGKILL'); throw new Error('The app did not open a debug port.'); }
-  const socket = new WebSocket(targets[0].webSocketDebuggerUrl);
-  await new Promise((done, fail) => { socket.onopen = done; socket.onerror = fail; });
-  const pending = new Map();
   const pageErrors = [];
-  let id = 0;
-  socket.onmessage = message => {
-    const data = JSON.parse(message.data);
-    if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); }
+  const page = await connect(targets[0].webSocketDebuggerUrl, data => {
     if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text);
     if (data.method === 'Log.entryAdded' && data.params.entry.level === 'error') pageErrors.push(data.params.entry.text);
-  };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
+  });
+  const { send, run } = page;
   await send('Runtime.enable');
   await send('Log.enable');
-  const run = async expression => {
-    const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-    if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text);
-    return reply.result.result.value;
-  };
   const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
+    inspect, main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
@@ -139,11 +139,50 @@ async function launch(userData = join(scratch, 'data')) {
     expand: async () => { await run(`[...document.querySelectorAll('button')].filter(b => /^Show \\d+ skill/.test(b.textContent.trim()) && b.getAttribute('aria-expanded') !== 'true').forEach(b => b.click())`); await settle(); },
     plan: () => run(`Object.fromEntries([...document.querySelectorAll('.plan-card')].map(e => [e.dataset.key, e.dataset.state]))`),
     pages: async () => (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page').length,
-    quit: async () => { socket.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
-    crash: () => new Promise(done => { socket.close(); child.once('exit', done); child.kill('SIGKILL'); }),
+    quit: async () => { page.close(); child.kill('SIGTERM'); await new Promise(done => { child.once('exit', done); setTimeout(done, 5000); }); },
+    crash: () => new Promise(done => { page.close(); child.once('exit', done); child.kill('SIGKILL'); }),
   };
   await settle();
   return app;
+}
+
+/**
+ * The main process's own debugger, for a development run launched with --inspect=port. A test uses it only to do what a
+ * person does outside the window (click an item in the menu bar menu), or to make one request fail.
+ */
+/** The branch's own handles on main (debugger on `port`): the menu, and one request slowed, failed or answered late. */
+async function mainHelpers(port) {
+  let target;
+  for (let attempt = 0; attempt < 100 && !target; attempt++) {
+    try { [target] = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { /* still starting */ }
+    if (!target) await wait(100);
+  }
+  if (!target) throw new Error('The main process did not open its debug port.');
+  const { send, run, close } = await connect(target.webSocketDebuggerUrl);
+  const electron = `process.mainModule.require('electron')`;
+  return {
+    /** Clicks the checkbox item `label` in the live menu bar menu, where it now reads `checked`; returns how many it clicked. */
+    clickMenu: async (label, checked) => {
+      await send('HeapProfiler.collectGarbage');
+      const prototype = await send('Runtime.evaluate', { expression: `${electron}.Menu.prototype` });
+      if (!prototype.result?.result?.objectId) throw new Error('No Electron Menu in the main process: the menu test cannot find the menu bar menu.');
+      const menus = await send('Runtime.queryObjects', { prototypeObjectId: prototype.result.result.objectId });
+      const clicked = await send('Runtime.callFunctionOn', { objectId: menus.result.objects.objectId, arguments: [{ value: label }, { value: checked }], returnByValue: true,
+        // Every object with Menu's prototype comes back, not only menus: only a menu has .items.
+        functionDeclaration: `function (label, checked) { const items = this.filter(menu => Array.isArray(menu.items)).flatMap(menu => menu.items).filter(item => item.label === label && item.checked === checked); for (const item of items) item.click({}, undefined, undefined); return items.length; }` });
+      return clicked.result.result.value;
+    },
+    /** Makes one request from the page fail until `restore` runs; the real handler stays aside meanwhile. */
+    failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the failed-Refresh test needs another way to make a request fail.'); globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
+    /** Makes one request from the page take `ms` longer until `restore` runs. */
+    slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
+    /** Makes one request's reply reach the page `ms` later (the work itself runs at once), until `restore` runs. */
+    slowReply: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => Promise.resolve(real(...args)).then(value => new Promise(done => setTimeout(() => done(value), ${Number(ms)})))); return true; })()`),
+    /** Sends the page a message, as the main process does after a background pass. */
+    tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close,
+  };
 }
 
 // ---------- Flows ----------
@@ -152,13 +191,87 @@ const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
+// ---------- Fit: nothing is cut off ----------
+// In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
+// ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
+// still be visible within every clipping boundary outside it, up to the window. Also each region that scrolls sideways,
+// each bar the app's own fitting (dom.ts fitBars) marks as still too wide, and an open menu outside its scroll area.
+// Empty when everything fits.
+const CUT_OFF = `(() => {
+  const out = [];
+  const label = node => node.id || node.getAttribute('aria-label') || (node.textContent || '').trim().slice(0, 40) || String(node.className);
+  const inside = (box, edge, axis) => axis === 'x' ? box.left >= edge.left - 1 && box.right <= edge.right + 1 : box.top >= edge.top - 1 && box.bottom <= edge.bottom + 1;
+  const overflow = (style, axis) => style[axis === 'x' ? 'overflowX' : 'overflowY'];
+  const scrolls = (node, style, axis) => ['auto', 'scroll'].includes(overflow(style, axis)) && (axis === 'x' ? node.scrollWidth > node.clientWidth + 1 : node.scrollHeight > node.clientHeight + 1);
+  const view = { left: 0, right: innerWidth, top: 0, bottom: innerHeight };
+  for (const node of document.querySelectorAll('button, [role="switch"], input:not(.hidden-input), .chip, .ov-tool-head, .plugin-tool-name')) {
+    const own = node.getBoundingClientRect();
+    if (own.width < 2 || own.height < 2) continue;
+    // What must be visible on each axis: the control itself, until a scroll area can bring it into view; then that area.
+    const subject = { x: own, y: own };
+    let cut = '';
+    for (let up = node.parentElement; up && up !== document.body && !cut; up = up.parentElement) {
+      const style = getComputedStyle(up), edge = up.getBoundingClientRect();
+      for (const axis of ['x', 'y']) {
+        if (cut || overflow(style, axis) === 'visible') continue;
+        if (scrolls(up, style, axis)) subject[axis] = edge;
+        else if (!inside(subject[axis], edge, axis)) cut = (axis === 'x' ? 'cut sideways by ' : 'cut off below or above by ') + (up.id || up.className);
+      }
+    }
+    for (const axis of ['x', 'y']) if (!cut && !inside(subject[axis], view, axis)) cut = axis === 'x' ? 'off the window' : 'below or above the window';
+    if (cut) out.push(cut + ': ' + label(node));
+  }
+  for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
+  for (const bar of document.querySelectorAll('.fit-bar[data-overflows]')) out.push('too wide even when fitted: ' + bar.className);
+  for (const menu of document.querySelectorAll('.tool-menu')) {
+    const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
+    if (!inside(box, area, 'x') || !inside(box, area, 'y')) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
+  }
+  return out;
+})()`;
+
+/** Sizes the page as the window would be, and lets the app hear the resize. */
+async function sizeTo(a, width, height) {
+  await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+async function fullSize(a) {
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+
+/**
+ * At the smallest window, first with the sidebar folded to its rail and then open, nothing on this page is cut off.
+ * `again` puts back what the sidebar toggle's click closes, such as an open menu.
+ */
+async function fitsAtMinimum(a, where, again = async () => {}) {
+  await sizeTo(a, 860, 560); await again();
+  same(`nothing cut off at 860×560 with the rail: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle'); await again();
+  same(`nothing cut off at 860×560 with the sidebar open: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle');
+  await fullSize(a);
+}
+
 async function practiceFlow() {
-  const a = await launch();
+  // A development run also opens the main process's debugger, for the menu bar menu and a failed Refresh.
+  const a = await launch(undefined, ['--practice-copy']);
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
   await wait(1500);
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
   check('the Overview sums up every kind', (await a.exists('#overview-skills')) && (await a.exists('#overview-mcp')) && (await a.exists('#overview-agents')), await a.text('#page'));
   check('the practice copy explains itself', (await a.text('.intro') ?? '').includes('practice copy'), await a.text('#page'));
+  // The newest message wins: Discard right after opening a home says so, rather than the home's "Opened …" standing.
+  await a.click('#home-fixture');
+  await a.click('#nav-skills');
+  const openedSaid = await a.run(`document.querySelector('#announcement').dataset.text`);
+  await a.click('#manage-all');
+  await a.click('#discard');
+  same('Discard right after opening a home says so', [/^Opened Practice copy\./.test(openedSaid ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`)], [true, 'Changes discarded. Nothing was written.']);
+  await a.click('#nav-overview');
   await a.click('#overview-skills');
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is managed at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
@@ -170,6 +283,26 @@ async function practiceFlow() {
   const reviewClaude = readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8');
   const reviewCopilot = readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8');
 
+  // The sweep itself: a button in a scroll area that an outer clipping box hides must be reported, not passed as scrollable.
+  const fixture = await a.run(`(() => {
+    const outer = document.createElement('div'), inner = document.createElement('div'), tall = document.createElement('div'), button = document.createElement('button');
+    for (const [node, props] of [[outer, { position: 'fixed', left: '0', top: '0', width: '200px', height: '40px', overflow: 'hidden' }], [inner, { marginTop: '60px', height: '120px', overflow: 'auto' }], [tall, { height: '400px' }]]) Object.assign(node.style, props);
+    button.id = 'clip-fixture-button'; button.textContent = 'Hidden';
+    tall.append(button); inner.append(tall); outer.append(inner); document.body.append(outer);
+    const found = ${CUT_OFF};
+    outer.remove();
+    return found;
+  })()`);
+  check('the cut-off sweep reports a scroll area its outer box clips', fixture.some(line => line.endsWith('clip-fixture-button')), fixture);
+  // An open column menu fits at the smallest window, and keeps fitting while the window shrinks and grows under it.
+  await fitsAtMinimum(a, 'Skills with Codex’s menu open', async () => { if (!(await a.exists('.tool-menu'))) await a.click('#tool-codex-cli'); });
+  await a.click('#tool-codex-cli');
+  for (const [width, height] of [[860, 560], [1728, 1117], [860, 560], [1280, 800]]) {
+    await sizeTo(a, width, height);
+    same(`the open menu still fits after resizing to ${width}×${height}`, [await a.exists('.tool-menu'), ...(await a.run(CUT_OFF))], [true]);
+  }
+  await a.press('Escape');
+  await fullSize(a);
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + (group.dataset.count ?? '1'))`);
@@ -232,6 +365,18 @@ async function practiceFlow() {
   await a.settle();
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
 
+  // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
+  // tool present, so Pi is no column, box or menu, and Tools shows no card for it.
+  mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
+  writeFileSync(join(practice, '.agents/skills/shared-only/SKILL.md'), text('shared-only'));
+  await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  check('a tool not in this home has no column or box', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
+  await a.click('#nav-tools');
+  check('nor a card on Tools', !(await a.exists('.tool-card[aria-label^="Pi"]')) && await a.exists('.tool-card[aria-label^="Codex"]'));
+  // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
+  rmSync(join(practice, '.agents'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
   await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
@@ -279,7 +424,7 @@ async function practiceFlow() {
 
   // Details open under a row.
   await a.click('#open-release-notes');
-  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in Claude Code, Copilot CLI and Codex'), await a.text('.details'));
+  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in all 3 tools'), await a.text('.details'));
   await a.click('#open-release-notes');
 
   // Choose which copy to use.
@@ -290,6 +435,20 @@ async function practiceFlow() {
   check('the choice waits for Apply all', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   same('the choice previews as a pending sync', [await cellState(a, 'review', 'claude-cli'), await cellState(a, 'review', 'copilot-cli')], ['synced', 'synced']);
   check('the pill gives way to the choice', !(await a.exists('#decide-review')) && (await a.exists('#undo-review')));
+  // With four tools beside an open sidebar the name column is narrowest: the chosen copy still fits, Change included.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#header-refresh');
+  check('a Pi folder makes Pi a fourth column', await a.exists('#tool-pi-cli') && await a.exists('#undo-review'));
+  await fitsAtMinimum(a, 'a chosen copy waiting, with four tools');
+  // Keeping separate copies is a choice waiting too; its short form keeps Change in the narrowest table.
+  await a.click('#undo-review');
+  await a.click('#separate-review');
+  check('keeping separate waits for Apply all', ((await a.text('.ov-row[data-key="review"] .decided')) ?? '').includes('Keeping separate'));
+  await fitsAtMinimum(a, 'keeping separate copies waiting, with four tools');
+  await a.click('#undo-review');
+  await a.click('#use-review-copilot-cli');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   const nameFits = await a.run(`(() => { const cell = document.querySelector('.ov-row[data-key="review"] .ov-name'); return cell.scrollWidth <= cell.clientWidth + 1 && cell.getBoundingClientRect().height < 44; })()`);
   check('the name cell does not overflow or wrap', nameFits);
   await a.shot('practice-choice-made');
@@ -370,13 +529,56 @@ async function practiceFlow() {
   await a.click('#files-standup');
   same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
   await a.click('#list-standup');
-  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
-  check('its folders and contents are shown', (await a.text('#detail-scroll .details')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
+  check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
+  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
+  // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
+  // file's box spanning to meet it.
+  await sizeTo(a, 1728, 1117);
+  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .files-tail .details-paths[open]')); tries++) await wait(50);
+  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-tail').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-tail .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
+  check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
+  await fullSize(a);
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
   await a.click('#detail-switch-standup');
   check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
+  await fitsAtMinimum(a, 'the Files view with a change waiting');
   await a.shot('practice-skills');
-  await a.click('#skills-table');
+  await a.press('Escape');
+  check('Escape leaves the Files view for the table', !(await a.exists('.split')) && await a.exists('.ov-row[data-key="standup"]'));
+  // A later skill chosen in the side-by-side Files view stays in view when the window narrows into the stacked list.
+  for (let n = 1; n <= 6; n++) { mkdirSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true }); writeFileSync(join(practice, `.claude/skills/zz-${n}/SKILL.md`), text(`zz-${n}`)); }
+  await a.click('#header-refresh');
+  if (!(await a.exists('#files-standup'))) await a.click('#open-standup');
+  await a.click('#files-standup');
+  await a.click('#list-zz-6');
+  await sizeTo(a, 860, 560);
+  check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
+  await fullSize(a);
+  await a.press('Escape');
+  // A scrolled table keeps its place when the window crosses the dock's breakpoint (a redraw), both ways.
+  const tableTop = () => a.run(`document.querySelector('#table-skills')?.scrollTop ?? -1`);
+  await sizeTo(a, 1280, 560);
+  // Partway down, so the same position exists however tall the table's area is at either width.
+  await a.run(`(() => { const table = document.querySelector('#table-skills'); table.scrollTop = Math.min(100, table.scrollHeight - table.clientHeight); })()`);
+  const scrolled = await tableTop();
+  await sizeTo(a, 2560, 560);
+  const docked = await tableTop();
+  await sizeTo(a, 1280, 560);
+  check('a scrolled table keeps its place across the dock breakpoint, both ways', scrolled > 0 && docked === scrolled && await tableTop() === scrolled, { scrolled, docked, back: await tableTop() });
+  await fullSize(a);
+  for (let n = 1; n <= 6; n++) rmSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  // A large display docks an open row's details beside the table, and nothing on it is cut off; laptop full screen docks too.
+  await sizeTo(a, 2560, 1440);
+  if (!(await a.exists('.ov-row.open[data-key="standup"]'))) await a.click('#open-standup');
+  check('at 2560 the details dock beside the table', await a.exists('.ov-page.docked .dock .details') && !(await a.exists('.ov-row + .details')));
+  same('nothing cut off at 2560×1440 with details docked', await a.run(CUT_OFF), []);
+  await sizeTo(a, 1728, 1117);
+  check('at 1728 the details dock too', await a.exists('.dock .details'));
+  await a.click('#dock-close');
+  await fullSize(a);
   same('the table shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
@@ -443,6 +645,8 @@ async function practiceFlow() {
   let mcpSpread = false;
   for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readFileSync(join(practice, '.codex/config.toml'), 'utf8').includes('command = "npx-edited"'); }
   check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
+  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
+  await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
 
   // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
   await a.click('#nav-agents');
@@ -488,11 +692,131 @@ async function practiceFlow() {
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
-  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
+  // A tool that goes away while Plugins is open leaves its column on Refresh, and comes back with its folder.
+  const codexKept = join(scratch, 'codex-kept');
+  cpSync(join(practice, '.codex'), codexKept, { recursive: true });
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 2; tries++) await wait(100);
+  same('Refresh on Plugins drops a tool that went away', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 2);
+  // It comes back as a new folder while Automatic sync is off, and nothing else changes: no folder being watched sees it,
+  // so the background poll alone (no Refresh, no file event) finds the tool, and Plugins follows.
+  await a.click('#sync-switch');
+  same('Automatic sync is off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
+  // Passes still due from the folder going away (a deletion's settle window) run out first, so only a later pass can find it.
+  await wait(5000);
+  cpSync(codexKept, join(practice, '.codex'), { recursive: true });
+  const polled = Date.now();
+  for (let tries = 0; tries < 300 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
+  same('with sync off, the background poll brings its column back on Plugins', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  console.log(`(the poll found Codex after ${Math.round((Date.now() - polled) / 1000)} s)`);
+  rmSync(join(practice, '.codex-away'), { recursive: true, force: true });
+  await a.click('#sync-switch');
+  // A tool change told while the page is busy (here, a Refresh reading the home slowly) is kept, and read once the work is
+  // done, with no second Refresh.
+  if (main) {
+    const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
+    check('the refresh request is slowed', await main.slowRequest('discovery:refresh', 3000));
+    await a.run(`(document.querySelector('#header-refresh').click(), true)`);
+    await wait(1000);
+    const busyThen = await a.run(`document.body.dataset.busy`);
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await main.restore('discovery:refresh');
+    for (let tries = 0; tries < 80 && (await columns()) !== 2; tries++) await wait(100);
+    same('a tool change told while the page is busy is read once the work is done', [busyThen, await columns()], ['true', 2]);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 30 && (await columns()) !== 3; tries++) await wait(100);
+    // Two tool changes told back to back, on Skills (whose columns are the home's tools): the first read sees Codex gone,
+    // and the second change (Codex back) arrives while that read is still on its way. It is owed, and read as soon as the
+    // first ends, so the page ends right.
+    await a.click('#nav-skills');
+    const heads = () => a.all('.tool-head-button', 'e.id');
+    const all = (await heads()).length;
+    check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await wait(300);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await main.tellPage('sync:changed');
+    await main.restore('discovery:refresh');
+    for (let tries = 0; tries < 80 && (await heads()).length !== all - 1; tries++) await wait(50);
+    const between = (await heads()).length;
+    for (let tries = 0; tries < 80 && (await heads()).length !== all; tries++) await wait(100);
+    same('two tool changes told back to back: the first read shows, then the second', [between, (await heads()).length], [all - 1, all]);
+    // Nothing is left owed: a later action's result stays, rather than being wiped by a read that ran late.
+    await wait(2500);
+    await a.click('#header-refresh');
+    const result = await a.text('#announcement');
+    await wait(2500);
+    same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
+    check('that result says what was read', /^Read \d/.test(result ?? ''), result);
+    // A sync:changed right after an action keeps that action's message: the read it starts brings no new notice.
+    await a.click('#nav-skills');
+    await a.run(`(document.querySelector('.ov-row[data-key] .cell-button:not([disabled])').click(), true)`);
+    await a.click('#discard');
+    await main.tellPage('sync:changed');
+    await wait(1500);
+    same('a sync:changed right after an action keeps its message', await a.run(`document.querySelector('#announcement').dataset.text`), 'Changes discarded. Nothing was written.');
+    // A tool that appears is noticed by whichever read sees it first. Opening Plugins before the poll reads the home for
+    // its columns, and the page as a whole hears of the new tool: Skills gets its column too, with no Refresh.
+    await a.click('#nav-skills');
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await heads()).length !== all - 1; tries++) await wait(100);
+    const without = (await heads()).length;
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    const back = Date.now();
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 50 && (await columns()) !== 3; tries++) await wait(100);
+    const pluginColumns = await columns();
+    await a.click('#nav-skills');
+    for (let tries = 0; tries < 50 && (await heads()).length !== all; tries++) await wait(100);
+    same('opening Plugins first: its columns and then Skills follow the tool that came back', [without, pluginColumns, (await heads()).length], [all - 1, 3, all]);
+    console.log(`(Skills followed the returned tool after ${Math.round((Date.now() - back) / 100) / 10} s)`);
+    // After a home switch, History says it is reading while it reads (never that it couldn't), then shows what it read.
+    await a.click('#nav-history');
+    check('the History request is slowed', await main.slowRequest('history:list', 1500));
+    await a.run(`(document.querySelector('#home-fixture').click(), true)`);
+    for (let tries = 0; tries < 40 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(50);
+    const whileReading = await a.text('#page');
+    await main.restore('history:list');
+    for (let tries = 0; tries < 60 && !(await a.exists('.history-row')); tries++) await wait(100);
+    check('after a home switch History says it is reading, then shows its rows', /Reading History…/.test(whileReading ?? '') && !/could not be read/.test(whileReading ?? '') && await a.exists('.history-row'), whileReading);
+    // A read again that fails keeps the last read on screen, and says so.
+    check('the History request is made to fail', await main.failRequest('history:list'));
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && !(await a.exists('.reread-failed')); tries++) await wait(100);
+    const failedAgain = [await a.exists('.history-row'), await a.text('.reread-failed')];
+    await main.restore('history:list');
+    same('a failed read again keeps the last read and says so', failedAgain, [true, 'Could not read again; showing the last read.']);
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && await a.exists('.reread-failed'); tries++) await wait(100);
+    check('and a read that works again clears it', !(await a.exists('.reread-failed')));
+    // Plugins after Refresh: while the marketplaces are read again, the last read stays with a quiet band saying so.
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 30 && !(await a.exists('[data-plugin="document-tools"]')); tries++) await wait(100);
+    check('the marketplace request is slowed', await main.slowRequest('plugins:view', 2000));
+    await a.click('#header-refresh');
+    const rereading = [await a.exists('.rereading'), await a.exists('[data-plugin="document-tools"]')];
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 50 && await a.exists('.rereading'); tries++) await wait(100);
+    same('Plugins says it is reading again, keeping what it showed, until the read is done', [...rereading, await a.exists('.rereading')], [true, true, false]);
+  }
+  // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
+  if (main) {
+    check('the refresh request is made to fail', await main.failRequest('discovery:refresh'));
+    await a.click('#header-refresh');
+    const said = await a.text('#announcement');
+    await main.restore('discovery:refresh');
+    check('a failed Refresh keeps its message, and Plugins what it showed', /could not finish/.test(said ?? '') && await a.exists('[data-plugin="document-tools"]'), said);
+  }
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
@@ -504,9 +828,26 @@ async function practiceFlow() {
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   check('and shows the plugin’s own README and skill descriptions', (await a.text('.plugin-page')).includes('Two skills for everyday documents') && (await a.text('.plugin-page')).includes('Reads PDF files'), await a.text('.plugin-page'));
+  // A description cut at two lines offers Show more; a width change with the page open, and no redraw, measures it again.
+  // Narrower than any window here, with the sidebar open, so the description is held to its two lines; then wide enough
+  // for it, still below the sidebar's and the dock's breakpoints, so nothing redraws the page.
+  const pdfCut = () => a.run(`(() => { const li = [...document.querySelectorAll('.plugin-parts li')].find(li => li.textContent.includes('pdf-reader')); const what = li?.querySelector('.plugin-part-what'); return [li?.classList.contains('clamped') ?? null, what?.clientWidth]; })()`);
+  await sizeTo(a, 720, 560); await a.click('#sidebar-toggle'); await wait(200);
+  const narrow = await pdfCut();
+  await sizeTo(a, 960, 560); await wait(200);
+  const wide = await pdfCut();
+  same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
+  if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
+  await a.click('#sidebar-toggle'); await fullSize(a);
   await a.click('#pinstall-0-document-tools');
   same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
-  check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  check('the change bar counts what will run', /1 change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  await fitsAtMinimum(a, 'a plugin page with changes waiting for Apply all');
+  await a.click('#plugin-back');
+  await fitsAtMinimum(a, 'the plugin table with its tool labels and changes waiting');
+  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('3 installs'); })()`));
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   await a.click('#pcell-0-document-tools-codex-cli');
   same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
   await a.click('#pcell-0-document-tools-codex-cli');
@@ -538,8 +879,27 @@ async function practiceFlow() {
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   await a.click('#plugin-back');
+  // About has every fact about the marketplace, and Remove.
+  await a.click('#market-tab-about');
+  check('About names who made the marketplace and where it comes from', /By Platform team[\s\S]*market/.test(await a.text('.market-about-head') ?? ''), await a.text('.market-about-head'));
   await a.click('#forget-0');
   check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  // A marketplace with a long name and long facts, with a change waiting: nothing is cut off at the smallest window, and
+  // where the facts don't fit beside the name they drop whole rather than being cut mid-word.
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await a.click('#pcell-0-document-tools-claude-cli');
+  await fitsAtMinimum(a, 'a long-named marketplace with a change waiting');
+  await sizeTo(a, 1280, 800);
+  const factsWhole = `(() => { const line = document.querySelector('.market-title-line'); if (!line) return 'no title line'; const box = line.getBoundingClientRect();
+    return [...line.querySelectorAll('.market-fact')].every(fact => { const at = fact.getBoundingClientRect(); return at.top >= box.bottom - 1 || (at.right <= box.right + 1 && at.bottom <= box.bottom + 1); }); })()`;
+  same('the long marketplace’s facts show whole or not at all', await a.run(factsWhole), true);
+  await fullSize(a);
+  await a.click('#plugins-discard');
+  await a.click('#market-tab-about');
+  await a.click('#forget-0');
   // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
@@ -563,13 +923,42 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // A card's edit, review and discard-confirm rows wrap by its width: nothing spills out around the cards' column breakpoints.
+  await a.click('#ins-edit-copilot-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const insFits = async state => { for (const width of [1180, 1240, 1320]) { await sizeTo(a, width, 800); same(`nothing cut off in Instructions (${state}) at ${width}×800`, await a.run(CUT_OFF), []); } };
+  await insFits('editing');
+  await a.click('#ins-review-copilot-cli');
+  await insFits('review');
+  await a.click('#ins-review-discard-copilot-cli');
+  await insFits('discard confirmation');
+  await a.shot('instructions-discard-confirm');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await fullSize(a);
+  // A draft whose tool leaves the home is kept, offered to copy or discard, and never silently replaced by another edit.
+  await a.click('#ins-edit-codex-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value = area.value + 'Codex draft.'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-orphan')); tries++) await wait(100);
+  check('a draft whose tool left the home is offered to copy or discard', await a.exists('#ins-orphan-copy') && /Codex is no longer in this home/.test(await a.text('#ins-orphan') ?? '') && !(await a.exists('#ins-text-codex-cli')), await a.text('#ins-orphan'));
+  check('and no other edit can replace it', await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`));
+  await a.shot('instructions-orphan-draft');
+  await a.click('#ins-orphan-discard');
+  check('Discard draft lets it go', !(await a.exists('#ins-orphan')) && !(await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`)));
+  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-edit-codex-cli')); tries++) await wait(100);
   // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);
   check('Settings shows the three appearances, System chosen', await a.exists('#appearance-system[aria-checked="true"]') && await a.exists('#appearance-light') && await a.exists('#appearance-dark'));
-  await a.click('#appearance-dark');
-  await wait(200);
-  check('Dark makes the page dark', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]'));
+  // The cards are one radio group: the chosen card is the only Tab stop, and arrow keys move on and choose (focus stays put
+  // through the save's redraw, so the second press works).
+  await a.run(`document.querySelector('#appearance-system').focus()`);
+  for (let press = 0; press < 2; press++) { await a.press('ArrowRight', 'ArrowRight'); await wait(200); }
+  check('arrow keys choose Dark, which makes the page dark', await dark() === true && await a.exists('#appearance-dark[aria-checked="true"]')
+    && await a.run(`document.activeElement.id === 'appearance-dark' && [...document.querySelectorAll('[role="radio"]')].filter(card => card.tabIndex === 0).map(card => card.id).join() === 'appearance-dark'`));
   await a.shot('settings-dark');
   await a.click('#appearance-light');
   await wait(200);
@@ -577,6 +966,195 @@ async function practiceFlow() {
   await a.shot('settings-light');
   await a.click('#appearance-system');
   check('System can be chosen again', await a.exists('#appearance-system[aria-checked="true"]'));
+  same('Settings rows use the page width, each control at the row end, text 16px in as on other pages', await a.run(`(() => {
+    const page = document.querySelector('.settings-scroll'), style = getComputedStyle(page), row = document.querySelector('#setting-log'), box = row.getBoundingClientRect();
+    return [Math.round(page.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - box.width),
+      Math.round(box.right - parseFloat(getComputedStyle(row).paddingRight) - document.querySelector('#show-log').getBoundingClientRect().right),
+      Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
+  })()`), [0, 0, 16]);
+  const appSettings = join(scratch, 'data/app-settings.json');
+  // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
+  const savedSettings = () => { for (let tries = 0; ; tries++) { try { return JSON.parse(readFileSync(appSettings, 'utf8')); } catch (error) { if (tries > 50) throw error; } } };
+  // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
+  // They bypass the page, so the open page (showing System) can only come to show Light by hearing that main saved it.
+  await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
+  let followed = false;
+  for (let tries = 0; tries < 20 && !followed; tries++) { await wait(100); followed = await a.exists('#appearance-light[aria-checked="true"]'); }
+  check('settings saved at once keep the other settings, and the open page follows the last', followed && savedSettings().appearance === 'light' && savedSettings().home?.mode === 'fixture', savedSettings());
+  chmodSync(appSettings, 0o444);
+  await a.click('#appearance-dark');
+  check('a save that fails says why in plain words in its row, and the saved choice stays', await dark() === false && await a.exists('#appearance-light[aria-checked="true"]')
+    && await a.text('#setting-appearance .setting-failure') === 'Couldn’t save: Central Knot can’t write its settings file. Light is still in use. Check the file’s permissions, then try again.', await a.text('#setting-appearance'));
+  chmodSync(appSettings, 0o644);
+  await a.click('#appearance-system');
+  check('the next save clears the failure', !(await a.exists('.setting-failure')) && savedSettings().appearance === 'system');
+  // Show log file opens the folder the log is in, and says so (macOS and Windows select the file: the Mac check covers that).
+  if (process.platform === 'linux') {
+    await a.click('#show-log');
+    for (let tries = 0; tries < 30 && !existsSync(opened); tries++) await wait(100);
+    same('Show log file opens the log’s folder and names the file', [existsSync(opened) && readFileSync(opened, 'utf8').trim(), await a.text('#setting-log .setting-note')],
+      [join(scratch, 'data'), 'Opened the log’s folder. The file is central-knot.log.']);
+  }
+  // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
+  // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
+  const historyFile = join(practice, '.central-knot/history.json');
+  writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
+    ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
+  const agedIn = events => events.map(event => event.key).filter(key => key.startsWith('aged-'));
+  const agedOnFile = () => agedIn(JSON.parse(readFileSync(historyFile, 'utf8')).events);
+  const agedShown = async () => agedIn((await a.run('window.centralKnot.history()')).events);
+  same('History is kept for 30 days at first: it shows what that covers, and reading alone removes nothing',
+    [await a.run(`document.querySelector('#history-days').value`), await agedShown(), agedOnFile()], ['30', ['aged-20', 'aged-5'], ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(a, 90);
+  same('a longer window saves at once, with no question, and History shows what it now covers',
+    [savedSettings().historyDays, await a.exists('#history-shorten'), await agedShown()], [90, false, ['aged-60', 'aged-20', 'aged-5']]);
+  await keepFor(a, 7);
+  const question = await a.text('#history-shorten-text') ?? '';
+  same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
+  await a.shot('settings-history-confirm');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await a.settle();
+  const escaped = await a.exists('#history-shorten');
+  await keepFor(a, 7);
+  await a.click('#history-shorten-cancel');
+  same('Escape or Cancel closes the question and writes nothing', [escaped, await a.exists('#history-shorten'), savedSettings().historyDays, agedOnFile(), await a.run(`document.activeElement.id`)], [false, false, 90, ['aged-60', 'aged-20', 'aged-5'], 'history-days']);
+  // A window change waits its turn behind whatever main is doing (here a held queue standing in for a long sync pass). Meanwhile
+  // the row says so and takes no other change, and other rows still work. Newer requests that arrive meanwhile win: the
+  // confirmed shorter window they overtook neither saves nor removes anything, and main reports nothing pruned for it. History
+  // opened while they wait shows the window that won with the events it covers, never the window from before.
+  if (a.main) {
+    const main = await a.main();
+    const held = await holdQueue(main, a);
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    await a.run(`void (window.ckOvertaken = window.centralKnot.setHistoryDays(7))`);
+    await a.run(`void (window.ckNewest = window.centralKnot.setHistoryDays(30).then(saved => (window.ckNewestDone = true, saved)))`);
+    await a.click('#appearance-light');
+    const during = [await a.run(`document.querySelector('#history-days').disabled`), (await a.text('#setting-history-notice'))?.trim(), await a.exists('#history-shorten'),
+      await a.run(`window.ckNewestDone === true`), savedSettings().historyDays, await a.exists('#appearance-light[aria-checked="true"]')];
+    // Not a.click: it waits for the page to be idle, and History's read waits behind the held queue.
+    await a.run(`document.querySelector('#nav-history').click()`);
+    await held.release();
+    const [overtaken, newest] = [await a.run('window.ckOvertaken'), await a.run('window.ckNewest')];
+    await a.settle();
+    const listedMeanwhile = await a.text('#history-scroll') ?? '';
+    same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
+      [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days. Change in Settings.']);
+    await a.click('#nav-settings');
+    same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
+    await a.click('#appearance-system');
+    main.close();
+  }
+  // Shorten. Where main can be reached the change is held in its queue, and the window refocused meanwhile, so the page re-reads
+  // the settings (still 30 days) before main saves. The re-read main asks for once it has saved can land either side of the
+  // save's answer; it is muted here, so the save's answer must stand on its own: it is still the newer one, and the row reports it.
+  await keepFor(a, 7);
+  const shortenMain = a.main && await a.main();
+  const shortenHeld = shortenMain && await holdQueue(shortenMain, a);
+  await a.click('#history-shorten');
+  if (shortenHeld) {
+    await refocus(shortenMain); await a.settle();
+    await shortenMain.run(`(contents => { const send = contents.send; globalThis.ckUnmute = () => { contents.send = send; }; contents.send = (channel, ...rest) => channel === 'settings:changed' ? undefined : send.call(contents, channel, ...rest); })(electron.BrowserWindow.getAllWindows()[0].webContents)`);
+    await shortenHeld.release();
+  }
+  for (let tries = 0; tries < 30 && savedSettings().historyDays !== 7; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && agedOnFile().length > 1; tries++) await wait(100);
+  for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
+  const removedNote = await a.text('#setting-history-message') ?? '';
+  if (shortenHeld) { await shortenMain.run('ckUnmute()'); shortenMain.close(); }
+  // Another row acting clears the note: the page says one finished thing at a time.
+  await a.click('#appearance-light');
+  const noteAfterOtherRow = await a.exists('#setting-history-message');
+  await a.click('#appearance-system');
+  await a.click('#nav-history');
+  const listed = await a.text('#history-scroll') ?? '';
+  const intro = await a.text('.history-intro');
+  await a.click('#history-intro-settings');
+  same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
+    [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
+    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
+  // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
+  // in its hint's place. Main refuses a change too, and nothing about it is saved.
+  const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
+  const refused = await a.run(`window.centralKnot.setStartAtSignIn(true).then(() => 'saved', error => String(error))`);
+  same('Start at sign-in that can’t be changed is off and disabled, says why, and main refuses a change', [
+    await a.run(`(({ disabled, ariaChecked }) => [ariaChecked, disabled])(document.querySelector('#start-at-sign-in'))`),
+    await a.run(`document.getElementById(document.querySelector('#start-at-sign-in').getAttribute('aria-describedby'))?.textContent`),
+    refused.includes(signInReason), 'startAtSignIn' in savedSettings()], [['false', true], signInReason, true, false]);
+  // The installed-app checks below stand in main's platform and login items, which only works where they are Linux's own: elsewhere a
+  // stood-in packaged app could reach the real system's login items.
+  if (a.main && process.platform === 'linux') {
+    // Main stands in as an installed app on Windows (see standIn): its login items keep what they are asked for unless told to
+    // ignore it, it keeps every menu it builds from here on, and the system's settings pages and the first-close dialog are stand-ins.
+    const main = await a.main();
+    await standIn(main, 'win32');
+    const until = async (expected, read) => { let seen; for (let tries = 0; tries < 30; tries++) { seen = await read(); if (JSON.stringify(seen) === JSON.stringify(expected)) break; await wait(100); } return seen; };
+    // The switch, the row's message and its action.
+    const row = () => a.run(`(message => [document.querySelector('#start-at-sign-in').getAttribute('aria-checked'), message?.querySelector('.setting-message-text').textContent ?? null, message?.querySelector('.text-action')?.textContent ?? null])(document.querySelector('#setting-sign-in .setting-message'))`);
+    // Coming back to the window: the row can be changed now.
+    await refocus(main);
+    await until(false, () => a.run(`document.querySelector('#start-at-sign-in').disabled`));
+    await a.click('#start-at-sign-in');
+    const fromSettings = await until(['true', null, null], row);
+    // The menu's item turns it off while Settings is open: the row follows.
+    await main.run(`ck.menus.at(-1).find(item => item.label === 'Start at sign-in').click({ checked: false })`);
+    const fromMenu = await until(['false', null, null], row);
+    // A system that ignores the change: the row says so, with the way to its settings; once it is put right there, coming back clears it.
+    const unchanged = ['false', 'Your system didn’t change this.', 'Open Startup apps'];
+    await main.run(`ck.login.ignore = true`);
+    await a.click('#start-at-sign-in');
+    const ignored = await until(unchanged, row);
+    // The action keeps the keyboard focus while the page redraws for something else (the appearance changed from elsewhere).
+    const action = '#setting-sign-in .setting-message .text-action';
+    await a.run(`document.querySelector('${action}').focus()`);
+    await a.run(`window.centralKnot.setAppearance('dark')`);
+    const redrawn = await until(true, () => a.exists('#appearance-dark[aria-checked="true"]'));
+    const focused = await a.run(`document.activeElement.matches('${action}')`);
+    await a.run(`window.centralKnot.setAppearance('system')`);
+    await a.click(action);
+    await main.run(`Object.assign(ck.login, { ignore: false, on: true })`);
+    await refocus(main);
+    const putRight = await until(['true', null, null], row);
+    same('Start at sign-in on an installed Windows app (stand-in system): Settings and the menu change it and the row shows the system’s answer; a change the system ignored is said, its action keeps focus through a redraw, opens Startup apps, and the line clears once put right',
+      [fromSettings, fromMenu, ignored, redrawn && focused, putRight, await main.run(`[ck.asked, ck.opened]`)],
+      [['true', null, null], ['false', null, null], unchanged, true, ['true', null, null], [[true, false, true], ['ms-settings:startupapps']]]);
+    // As an installed app on Linux: coming back to the window reads it again.
+    await main.run(`(ck.as('linux'), ck.asked = [])`);
+    const saved = savedSettings().startAtSignIn;
+    await refocus(main);
+    const reread = await until('Not available on Linux yet.', () => a.text('#setting-sign-in-hint'));
+    const menuItem = await main.run(`(({ label, visible, enabled, checked }) => ({ label, visible, enabled, checked }))(ck.menus.at(-1).find(item => item.label?.startsWith('Start at sign-in')))`);
+    // The first close explains where the app went; on Linux it offers no start at sign-in.
+    await main.run(`electron.BrowserWindow.getAllWindows()[0].close()`);
+    for (let tries = 0; tries < 20 && !savedSettings().closeExplained; tries++) await wait(100);
+    const dialogs = await main.run(`ck.dialogs.map(options => 'checkboxLabel' in options)`);
+    // The rest of the run has the real system back: platform, packaging, login items, menus, dialogs and links.
+    await main.run(`(ck.restore(), electron.BrowserWindow.getAllWindows()[0].show())`);
+    same('an installed app on Linux: the row (read again on focus), the menu (hidden) and the first-close dialog agree it isn’t available; no login-item call, nothing saved',
+      [reread, menuItem, dialogs, await main.run(`ck.asked`), savedSettings().startAtSignIn === saved],
+      ['Not available on Linux yet.', { label: 'Start at sign-in (not on Linux yet)', visible: false, enabled: false, checked: false }, [false], [], true]);
+    main.close();
+  }
+  await a.click('#nav-skills');
+  // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
+  await sizeTo(a, 2560, 1440);
+  for (const page of ['overview', 'history', 'plugins']) {
+    await a.click(`#nav-${page}`);
+    await wait(300);
+    same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
+  }
+  // Every card grid at full screen: as many columns as its cards, up to four, so four tools sit in one row. (Settings is rows.)
+  for (const page of ['tools', 'instructions']) {
+    await a.click(`#nav-${page}`);
+    for (let tries = 0; tries < 30 && !(await a.exists('.card-grid')); tries++) await wait(100);
+    const rows = await a.run(`(() => { const cards = [...document.querySelectorAll('.card-grid > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
+    same(`at 2560×1440 the ${page} cards (${rows[0]}) sit in one row`, rows[1], 1);
+  }
+  await fullSize(a);
   await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
@@ -589,6 +1167,58 @@ async function practiceFlow() {
   let spreadClosed = false;
   for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Edited with no window.'); }
   check('an agent edit spreads in the background with no window', spreadClosed);
+  main?.close();
+  await a.quit();
+}
+
+/** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
+async function releasedStartupFlow() {
+  // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
+  const a = await launch(join(scratch, 'released-data'), flag('--electron') ? ['--as-released'] : []);
+  const realHome = process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home';
+  same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], [realHome, false]);
+  same('and its main process refuses the practice copy', await a.run(`window.centralKnot.selectHome('fixture').then(() => 'opened', () => 'refused')`), 'refused');
+  await a.quit();
+}
+
+/**
+ * A home with no tools, then with Pi alone, then with Claude Code too. With no tools every page stays, each saying so; a
+ * kind no tool here can hold (agents, plugins with Pi alone) is left out of the sidebar and the Overview, named once; a
+ * tool that holds it brings it back.
+ */
+async function fewToolsFlow() {
+  const home = join(scratch, 'home-few');
+  mkdirSync(home, { recursive: true });
+  const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
+  const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'history', 'tools', 'settings']);
+  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
+  check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
+  same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
+  await fitsAtMinimum(a, 'a home with no tools');
+  await a.click('#nav-tools');
+  const toolsSays = await a.text('.page');
+  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays) && !(await a.exists('.tools-note')), toolsSays);
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('#history-choose-home')); tries++) await wait(100);
+  check('History says the same, in the same place, rather than offering Skills', await a.exists('#history-choose-home') && !(await a.exists('#history-go-skills')), await a.text('.page'));
+  await a.click('#nav-overview');
+  mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
+  writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
+  await a.click('#header-refresh');
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']);
+  check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  await a.click('#header-refresh');
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
+  await a.click('#nav-agents');
+  rmSync(join(home, '.claude'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']]);
+  const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
+  check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
+  same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
 }
 
@@ -603,7 +1233,9 @@ async function realHomeFlow() {
   const tools = await a.text('#tools-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
   check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
-  await a.click('#nav-skills');
+  // A tool card's skill count opens Skills.
+  await a.click('#tool-skills-claude-cli');
+  same('a tool’s skill count opens the Skills page', await a.text('.page-title'), 'Skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
@@ -611,6 +1243,13 @@ async function realHomeFlow() {
   same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
   check('a skill with a link inside is held', await a.exists('.ov-row[data-key="has-link"] .held-pill'));
+  // Changes waiting for Apply all fill the toolbar most: still nothing is cut off at the smallest window.
+  await a.click('#manage-all');
+  await fitsAtMinimum(a, 'Skills with changes waiting for Apply all');
+  await sizeTo(a, 860, 560);
+  check('the pending count stays at the smallest window, its full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.toolbar .apply-count'); return !!count && count.getBoundingClientRect().width > 0 && /\\d+ changes?/.test(count.title); })()`));
+  await fullSize(a);
+  await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
   const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);
@@ -624,6 +1263,23 @@ async function realHomeFlow() {
     same('main process refuses too', refused.harnessWrites, 0);
     check('with a reason', /Preview only/.test(refused.stopped ?? ''), refused);
     check('no copy and no store', !existsSync(join(COPILOT, 'rich')) && !existsSync(join(HOME, '.central-knot')));
+    // The History window chosen in the practice run survives the restart. Shortening it here, a preview-only home, writes nothing.
+    mkdirSync(join(HOME, '.central-knot'));
+    const previewHistory = join(HOME, '.central-knot/history.json');
+    writeFileSync(previewHistory, JSON.stringify({ events: [{ id: 'aged', at: new Date(Date.now() - 20 * DAY).toISOString(), key: 'aged', item: 'aged', kind: 'edit', losers: [], orderProved: true }] }));
+    const before = readFileSync(previewHistory, 'utf8');
+    const restarted = (await a.run('window.centralKnot.getSettings()')).historyDays;
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    await a.click('#nav-settings');
+    await keepFor(a, 7);
+    await a.click('#history-shorten');
+    for (let tries = 0; tries < 30 && !(await a.exists('#setting-history-message')); tries++) await wait(100);
+    const previewNote = (await a.text('#setting-history-message') ?? '').trim();
+    same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says another copy removes the older History later rather than that it was removed',
+      [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote],
+      [7, true, 0, 7, 'Saved. Older History in this home is removed the next time Central Knot records a change in it.']);
+    await a.run('window.centralKnot.setHistoryDays(30)');
+    rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();
     return;
   }
@@ -736,6 +1392,8 @@ const started = Date.now();
 try {
   seedHome();
   await practiceFlow();
+  await releasedStartupFlow();
+  await fewToolsFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
   execChmod();

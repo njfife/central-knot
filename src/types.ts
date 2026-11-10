@@ -56,20 +56,20 @@ export type SyncGate =
   | { state: 'needs-resume'; reason: string }
   | { state: 'stopped'; reason: string };
 
-export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string }
+export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
-  history(): Promise<HistoryEvent[]>;
-  applyMcp(changes: Change[], home: string): Promise<McpResult>;
+  history(): Promise<HistoryList>;
+  applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
   unwriteClaude(written: ClaudeWrite[], home: string): Promise<McpResult>;
-  applyAgents(changes: Change[], home: string): Promise<McpResult>;
+  applyAgents(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   /** The home last opened, else this computer's home (dev builds: the practice copy). */
   startHome(): Promise<HomeView | null>;
   setSync(on: boolean): Promise<HomeView | null>;
@@ -79,6 +79,16 @@ export interface DesktopApi {
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
+  /** Turns starting at sign-in on or off. Returns the settings as saved, with the system's answer. */
+  setStartAtSignIn(on: boolean): Promise<AppPreferences>;
+  /** How long History keeps things. A shorter window also removes what is now older from the open home's History. Returns the settings as saved, and what became of that older History. */
+  setHistoryDays(days: HistoryDays): Promise<HistoryWindowSaved>;
+  /** Opens the system's own sign-in settings: Login Items on macOS, Startup apps on Windows. */
+  openSignInSettings(): Promise<void>;
+  /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
+  onSettingsChanged(callback: () => void): void;
+  /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
+  showLog(): Promise<ShownLog>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
@@ -101,10 +111,10 @@ export interface DesktopApi {
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
-  plugins(fresh?: boolean): Promise<PluginsView | null>;
+  /** Marketplaces and installs; `readId` (a view's) reuses the read that view was built from, when it is the latest. */
+  plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
-  refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
@@ -160,6 +170,7 @@ export interface SkillFacts {
   choiceBlocks: Partial<Record<HarnessId, { tool: HarnessId; reason: string }[]>>;
   /** Agents: for each tool that cannot hold every field, the With limits label naming what it lacks (TRN-01). */
   limits?: Partial<Record<HarnessId, string>>;
+  oneWay?: { from: HarnessId; lost: string[] };
   /** Agents: the source's own settings that stay in its tool, with their values as written ("tools: Read, Grep"). */
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
@@ -399,6 +410,30 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
+/** Why starting at sign-in can't be changed here, or why the system has it off (see signin.ts for each one's words). */
+export type SignInReason = 'testing' | 'dev' | 'linux' | 'applications' | 'approval' | 'startupApps';
+/** The system's own place for start at sign-in, in its words: the action that opens it, and what the page says around it. */
+export interface SignInPlace { open: string; unopened: string; unchanged: string }
+/**
+ * Whether Central Knot starts at sign-in, as the system has it. `reason`: why it can't be changed here (`available` false) or,
+ * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
+ */
+export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance }
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+/** How many days History keeps changes and deleted items (Settings); the choices are in model.ts. */
+export type HistoryDays = 7 | 30 | 90;
+/**
+ * What a shorter History window did to the History already recorded. The window is saved in every case. `done`: removed from
+ * the open home at once. `later`: this build doesn't sync the open home yet, and applies the window there with its next History
+ * write. `elsewhere`: the open home is preview-only here, or another Central Knot build syncs it; whichever copy next records a
+ * change there removes its older History, by its own window. `no-home`: no home is open. `failed`: tried and couldn't (the log says why).
+ */
+export type HistoryPrune = 'done' | 'later' | 'elsewhere' | 'no-home' | 'failed';
+/** History as main reads it: the events the window covers, and the window, read together so they always agree. */
+export interface HistoryList { events: HistoryEvent[]; days: HistoryDays }
+/** A saved History window: the settings as saved, and `pruned` when it was shorter; none when nothing was shorter or a newer request overtook it. */
+export interface HistoryWindowSaved { settings: AppPreferences; pruned?: HistoryPrune }
+/** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
+export interface ShownLog { selected: boolean; logged: boolean }
 

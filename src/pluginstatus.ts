@@ -2,10 +2,9 @@
 // it, whether it is installed there, and a short summary of what it holds.
 import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
+import { takesPlugins } from './presence.ts';
 import { toolNames as names } from './words.ts';
 
-/** Tools that take Claude plugins through their own CLI (capability data, Appendix C). */
-export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 /**
  * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
  * Copilot CLI when their plugin route is blocked here. Claude Code always takes the plugin itself.
@@ -23,7 +22,7 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
-  if (!pluginTools.includes(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
+  if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
@@ -83,7 +82,7 @@ export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: st
  * several tools]. "Pi takes no plugins", "Copilot CLI and Codex have no command-line tool here".
  */
 export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
-  if (!pluginTools.includes(tool)) return ['takes no plugins', 'take no plugins'];
+  if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
   // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
   return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
@@ -133,7 +132,7 @@ export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin
 export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourceLabel;
 
 /** Tools that can still take this plugin: available there and not installed yet. */
-export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
+export const toolsWithoutPlugin = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool) && !partsOf(entry, plugin, tool));
 
 /**

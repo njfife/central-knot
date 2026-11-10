@@ -7,6 +7,7 @@ import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
 import { isBundledCli } from './platform.ts';
 import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
+import { machineNames } from './machine.ts';
 
 function errorCode(error: unknown): string {
   return typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : 'UNKNOWN';
@@ -127,8 +128,8 @@ export async function discover(options: {
   const root = configRoot(definition, home, options.configOverride);
   const snapshot: Snapshot = {
     harness: definition.id, harnessName: definition.name, surface: definition.surface,
-    mode: options.mode, label: options.mode === 'actual' ? (process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home') : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
-    root, detection: 'Not found', probe: { state: 'not-run', detail: 'System probes run only when you select this Mac’s home.' },
+    mode: options.mode, label: options.mode === 'actual' ? machineNames(process.platform).home : options.mode === 'fixture' ? 'Practice copy' : 'Selected folder',
+    root, detection: 'Not found', probe: { state: 'not-run', detail: `System probes run only when you select ${machineNames(process.platform).home}.` },
     discovery: 'missing', skills: [], issues: [],
   };
   if (!isAbsolute(root)) {

@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { agentText, fileFor, fromMarkdown, keyOf, readAgentRecord, safeName } from './agents.ts';
+import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, readAgentRecord, safeName } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
@@ -195,6 +195,11 @@ const skillDir = (context: ShareContext, tool: HarnessId, name: string) => join(
  * For an MCP entry `seen` covers the tool's own settings on it too (a Codex `enabled = false`, a narrowed Copilot `tools`),
  * so an edit to those counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against.
  */
+/** An agent part's file in a tool. Only tools with agents get agent parts (planParts), so any other tool is a bug, not a state. */
+const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
+  if (!isAgentTool(tool)) throw new Error(`${toolNames[tool]} has no agents.`);
+  return fileFor(context, tool, name);
+};
 type OnDisk = { state: 'absent' } | { state: 'unreadable' } | { state: 'there'; seen: string; neutralHash?: string };
 async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartItem, 'kind' | 'name'>): Promise<OnDisk> {
   if (item.kind === 'skill') {
@@ -209,7 +214,7 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
     const entry = read.entries.find(candidate => candidate.name === item.name);
     return entry ? { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(entry.extras)])), neutralHash: entry.hash } : { state: 'absent' };
   }
-  const text = await readFile(fileFor(context, tool, item.name), 'utf8').catch(error => (errorCode(error) === 'ENOENT' ? undefined : null));
+  const text = await readFile(agentFile(context, tool, item.name), 'utf8').catch(error => (errorCode(error) === 'ENOENT' ? undefined : null));
   return text === undefined ? { state: 'absent' } : text === null ? { state: 'unreadable' } : { state: 'there', seen: sha256(text) };
 }
 type There = Extract<OnDisk, { state: 'there' }>;
@@ -287,7 +292,7 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
     return;
   }
   const text = await readFile(agentTextPath(context.home, item.hash), 'utf8');
-  const file = fileFor(context, tool, item.name);
+  const file = agentFile(context, tool, item.name);
   const now = replacing ? await readFile(file, 'utf8') : undefined;
   if (replacing && sha256(now!) !== replacing.seen) throw changedWhileSyncing();
   await writeFileChecked(file, text, now);
@@ -297,7 +302,7 @@ async function put(context: ShareContext, tool: HarnessId, item: PartItem, repla
 async function take(context: ShareContext, tool: HarnessId, item: PartItem, was: There) {
   if (item.kind === 'skill') { await removeChecked(context, skillDir(context, tool, item.name), was.seen); return; }
   if (item.kind === 'mcp') { const problem = await editEntry(context, tool, item.name, was.neutralHash, undefined); if (problem) throw new Error(problem); return; }
-  const file = fileFor(context, tool, item.name);
+  const file = agentFile(context, tool, item.name);
   const text = await readFile(file, 'utf8');
   if (sha256(text) !== was.seen) throw changedWhileSyncing();
   await removeFileChecked(file, text);

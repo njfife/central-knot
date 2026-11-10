@@ -7,8 +7,8 @@ import { withoutBom } from './values.ts';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, errorCode, readRecord, sha256, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { configRoot, harnessIds, harnesses } from './harnesses.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
@@ -38,19 +38,21 @@ export interface McpRecordItem { state: 'shared' | 'dont-share'; off: HarnessId[
   displaced?: { tool: HarnessId; hash: string }[] }
 export interface McpRecord { formatVersion: number; items: Record<string, McpRecordItem> }
 
-export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
+export const mcpTools: HarnessId[] = harnessIds;
 
 // ---------- Files ----------
 
-const configRoot = (context: ShareContext, tool: HarnessId) => context.overrides?.[tool] ?? join(context.home, harnesses[tool].defaultConfig);
+const rootOf = (context: ShareContext, tool: HarnessId) => configRoot(harnesses[tool], context.home, context.overrides?.[tool]);
 
 /** Where each tool keeps user-wide MCP servers. Claude Code's moves with CLAUDE_CONFIG_DIR. */
 export function mcpFile(context: ShareContext, tool: HarnessId): string {
-  if (tool === 'claude-cli') return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
-  if (tool === 'copilot-cli') return join(configRoot(context, tool), 'mcp-config.json');
-  // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
-  if (tool === 'pi-cli') return join(configRoot(context, tool), 'mcp.json');
-  return join(configRoot(context, tool), 'config.toml');
+  switch (tool) {
+    case 'claude-cli': return context.overrides?.[tool] ? join(context.overrides[tool]!, '.claude.json') : join(context.home, '.claude.json');
+    case 'copilot-cli': return join(rootOf(context, tool), 'mcp-config.json');
+    // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
+    case 'pi-cli': return join(rootOf(context, tool), 'mcp.json');
+    case 'codex-cli': return join(rootOf(context, tool), 'config.toml');
+  }
 }
 
 /** A value with object keys sorted (and undefined left out), so the same settings hash the same however they were written. */
@@ -235,9 +237,25 @@ export async function kept(context: ShareContext, name: string, hash: string): P
 // ---------- Record ----------
 
 const recordPath = (home: string) => join(storeDirectory(home), 'mcp.json');
+const MCP_FORMAT_VERSION = 1;
+const validMcpItems = (items: unknown) => !!items && typeof items === 'object' && !Array.isArray(items)
+  && Object.values(items as Record<string, Partial<McpRecordItem> | null>).every(item => !!item && typeof item === 'object' && typeof item.state === 'string' && Array.isArray(item.off) && Array.isArray(item.copies));
+/** Missing is a first run. Unreadable, damaged or newer stops every write, as sync.json does; the file is never touched. */
+async function inspectMcpRecord(home: string): Promise<{ record?: McpRecord; problem?: string }> {
+  let text: string;
+  try { text = await readFile(recordPath(home), 'utf8'); }
+  catch (error) { return errorCode(error) === 'ENOENT' ? {} : { problem: `The MCP record could not be read. ${NOTHING_CHANGED}` }; }
+  const damaged = { problem: `The MCP record is damaged. ${NOTHING_CHANGED}` };
+  try {
+    const record = JSON.parse(text) as McpRecord | null;
+    const version = record?.formatVersion;
+    if (!Number.isInteger(version) || version! < 1) return damaged;
+    if (version! > MCP_FORMAT_VERSION) return { problem: `The MCP record was written by a newer Central Knot. ${NOTHING_CHANGED}` };
+    return validMcpItems(record?.items) ? { record: record! } : damaged;
+  } catch { return damaged; }
+}
 export async function readMcpRecord(home: string): Promise<McpRecord> {
-  try { const parsed = JSON.parse(await readFile(recordPath(home), 'utf8')); if (parsed && typeof parsed.items === 'object') return parsed; } catch { /* first time */ }
-  return { formatVersion: 1, items: {} };
+  return (await inspectMcpRecord(home)).record ?? { formatVersion: MCP_FORMAT_VERSION, items: {} };
 }
 const saveMcpRecord = (home: string, record: McpRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
@@ -278,7 +296,8 @@ function claudeWaits(item: McpRecordItem | undefined, slot: Partial<Record<Harne
 export async function mcpView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(tool => mcpTools.includes(tool));
   const { byName, problems } = await gatherAll(context, present);
-  const record = await readMcpRecord(context.home);
+  const { record = { formatVersion: MCP_FORMAT_VERSION, items: {} }, problem } = await inspectMcpRecord(context.home);
+  if (problem) problems.unshift(problem);
   const servers: SkillFacts[] = [];
   const claudePending: string[] = [];
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
@@ -294,7 +313,7 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
   }
-  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: await syncGate(context), problems, notices };
+  return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
 
 // ---------- Apply ----------
@@ -303,11 +322,13 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
  */
-export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
+export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; resume?: boolean } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  if (gate.state === 'stopped' || (gate.state === 'needs-resume' && !options.resume)) return { stopped: gate.reason, results: [], writes: 0 };
+  const recordProblem = (await inspectMcpRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
   // The sync record is the one place ownership lives: make it now if this is the first thing Central Knot manages.
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
@@ -349,7 +370,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const slot = byName.get(change.key);
     if (!slot) continue;
     // A choice of a copy that changed after the page showed it is refused: what replaces the others is only ever what was seen.
-    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.` }); continue; }
+    if (change.use && change.use !== 'separate' && change.useHash && slot[change.use]?.hash !== change.useHash) { results.push({ item: change.key, outcome: 'held', message: `The copy you chose changed since you chose it. Nothing was changed; choose again.`, chooseAgain: true }); continue; }
     const item: McpRecordItem = record.items[change.key] ?? { state: 'dont-share', off: [], hash: '', copies: [] };
     if (change.managed && change.use !== 'separate' && item.state !== 'shared') newlyManaged.add(change.key);
     item.state = change.managed && change.use !== 'separate' ? 'shared' : 'dont-share';
@@ -469,7 +490,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (here) replaced.push({ tool, hash: here.hash, kept: ref });
       else if (newlyManaged.has(name)) addedHere.push({ tool, hash: source.hash });
       if (tool === 'claude-cli') claudeWritten.push({ name, before: claudeBefore, after: source.hash });
-      results.push({ item: name, harness: tool, outcome: 'written', message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
+      results.push({ item: name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version.` : 'Added.'} ${harnesses[tool].name === 'Codex' ? 'Start a new Codex session to use it.' : 'Start a new session to use it.'}` });
     }
     const key = `mcp:${name}`;
     if (addedHere.length) event({ key, item: name, kind: 'added', losers: addedHere, orderProved: true, previous: source.hash });
@@ -552,21 +573,14 @@ function restorable(past: HistoryEvent): string | undefined {
 }
 
 /**
- * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
- * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
- */
-/**
- * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
- * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
- */
-/**
  * Undo of Write to Claude Code, right after it: each entry goes back to what Claude Code held before (removed when it was new),
  * and the server waits for Write again. All or nothing: an entry changed since stops it. Claude Code must be closed, as for Write.
  */
 export async function undoClaudeWrite(context: ShareContext, written: ClaudeWrite[]): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
-  const record = await readMcpRecord(context.home);
+  const { record = { formatVersion: MCP_FORMAT_VERSION, items: {} }, problem } = await inspectMcpRecord(context.home);
+  if (problem) return { stopped: problem, results: [], writes: 0 };
   const entries = (await readTool(context, 'claude-cli')).entries;
   for (const write of written) {
     const entry = entries.find(candidate => candidate.name === write.name);
@@ -592,6 +606,10 @@ export async function undoClaudeWrite(context: ShareContext, written: ClaudeWrit
   return { results, writes };
 }
 
+/**
+ * Undo of the entries an Apply all added: each is removed again while it is exactly the entry written (an edit since keeps it); the
+ * server is unmanaged as before, or, if an entry had to stay, that tool keeps syncing.
+ */
 async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<McpResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], writes: 0 };
   const name = past.key.replace(/^mcp:/, '');
@@ -620,13 +638,19 @@ async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past
   return { results, writes };
 }
 
+/**
+ * Undo or Restore of an MCP event: the kept version becomes the managed baseline and is written to every tool it syncs to, each with
+ * its own kept settings. Claude Code gets it through Write now, as always (MCP-02).
+ */
 export async function restoreMcp(context: ShareContext, tools: HarnessId[], eventId: string): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
   const gate = await syncGate(context);
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
-  const history = await readHistory(context.home);
+  const recordProblem = (await inspectMcpRecord(context.home)).problem;
+  if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
+  const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');

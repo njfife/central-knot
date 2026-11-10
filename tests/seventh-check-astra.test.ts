@@ -84,7 +84,7 @@ test('R5 historical native MCP fields are immutable per event', () => box(async 
   await applyMcp(context, tools, managed());
   await fs.writeFile(copilot, json('B'));
   await applyMcp(context, tools, []);
-  const firstEdit = (await readHistory(context.home)).find(event => event.kind === 'edit')!;
+  const firstEdit = (await readHistory(context)).find(event => event.kind === 'edit')!;
   await fs.writeFile(copilot, json('A'));
   await applyMcp(context, tools, []);
   await fs.writeFile(codex, '[mcp_servers.docs]\ncommand="A"\nenabled=true\n');
