@@ -131,6 +131,9 @@ async function saveSyncSetting(on: boolean) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
   refreshTray();
+  // Plugin updates pause with Automatic sync (off means nothing is written to the tools in the background): Settings says so,
+  // and turned on again, a check that came due meanwhile runs now.
+  if (pluginUpdates) { send('plugin-updates:changed', await pluginUpdates.view()); if (on) void pluginUpdates.tick().catch(error => logFailure('plugin updates', error)); }
 }
 
 /** Sends the page a message, when there is a window to send it to. */
@@ -947,7 +950,7 @@ app.whenReady().then(async () => {
   });
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
   // Apply all, and is logged as one; none starts once the app is quitting (a tool's command already running finishes).
-  const noPluginUpdates: PluginUpdatesView = { on: false, checking: false, every: CHECK_EVERY_MS, updated: [], failed: [] };
+  const noPluginUpdates: PluginUpdatesView = { on: false, paused: false, checking: false, every: CHECK_EVERY_MS, updated: [], failed: [], first: false };
   if (!smoke) {
     const recordPath = join(app.getPath('userData'), 'plugin-updates.json');
     const step = (channel: string, args: unknown[], work: () => Promise<PluginActionResult>): Promise<PluginActionResult> =>
@@ -957,7 +960,7 @@ app.whenReady().then(async () => {
     const paced = process.env.CK_PLUGIN_UPDATES_EVERY_MS;
     const every = Number(paced) || CHECK_EVERY_MS;
     pluginUpdates = autoUpdates({
-      home: () => current?.home, on: pluginUpdatesOn, log, now: Date.now, every,
+      home: () => current?.home, on: pluginUpdatesOn, paused: () => !syncOn, log, now: Date.now, every,
       pending: home => queued(() => markets.pendingUpdates(home)),
       api: {
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),

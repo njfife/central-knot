@@ -513,7 +513,7 @@ esac
   await atSizes('settings-checked', 'Clicked "Check now" (what the schedule does by itself every four hours): one update was made, one couldn’t be.');
   await a.click('#setting-plugin-updates-notice-action');
   await waitFor(a, `!!document.querySelector('#plugin-updates-updated')`, 20000); await a.settle();
-  await atSizes('plugins-note', 'Clicked "See Plugins": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words.');
+  await atSizes('plugins-note', 'Clicked "See Plugins": the note says issue-tracker was updated to 2.0.0 in Claude Code, and that document-tools couldn’t be, in Claude Code’s own words. Being the first such note, it says once that plugins now update by themselves and that Settings turns that off.');
   await a.click('#popen-0-release-helper'); await waitFor(a, `!!document.querySelector('.plugin-page')`); await a.settle();
   await shot(a, 'plugin-no-longer-offered', 'Opened release-helper, which the marketplace dropped: its page says so, shows what Claude Code still holds, and can still uninstall it.');
   await a.size(860, 560); await shot(a, 'plugin-no-longer-offered-860', 'The same at 860×560.'); await a.size(1280, 800);
@@ -523,6 +523,10 @@ esac
   await a.click('#plugin-updates-failed-close'); await a.settle();
   await shot(a, 'note-closed', 'Closed that one too.');
   await a.click('#nav-settings');
+  await a.click('#sync-switch'); await waitFor(a, `/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
+  await shot(a, 'settings-paused', 'Turned Automatic sync off in the status bar: plugin updates pause with it, and the row says so. Check now still works.');
+  await a.size(860, 560); await shot(a, 'settings-paused-860', 'The same at 860×560.'); await a.size(1280, 800);
+  await a.click('#sync-switch'); await waitFor(a, `!/Paused/.test(document.querySelector('#setting-plugin-updates')?.textContent ?? '')`); await a.settle();
   await a.click('#plugin-updates-on'); await waitFor(a, `document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked') === 'false'`); await a.settle();
   await shot(a, 'settings-off', 'Turned "Update plugins automatically" off: plugins are updated only with Update on the Plugins page.');
 }

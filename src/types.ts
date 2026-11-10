@@ -660,15 +660,18 @@ export interface AppPreferences { appearance: Appearance; signIn: SignIn; histor
 /** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
 export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true }
 /**
- * Automatic plugin updates as the main process has them, for the open home. `checking`: a check is under way; `every`: the
- * time between checks. `checked`: the last check: when, how many updates it made, how many are failing now, the marketplaces
- * it couldn't read, and why it did nothing (`stopped`). The note: `updated`, what was updated since the note was last
- * closed, oldest first, and `failed`, the updates that couldn't be made (each is tried again).
+ * Automatic plugin updates as the main process has them, for the open home. `on`: the switch in Settings; `paused`:
+ * Automatic sync is off, so nothing is updated by itself whatever the switch says. `checking`: a check is under way; `every`:
+ * the time between checks. `checked`: the last check: when, how many updates it made, how many are failing now, the
+ * marketplaces it couldn't read (`offline`: every Git one, so it is tried again sooner), and why it did nothing (`stopped`).
+ * The note: `updated`, what was updated since the note was last closed, oldest first, and `failed`, the updates that couldn't
+ * be made (each is tried again). `first`: no note of updates has been closed in this home yet, so the note says once that
+ * plugins update by themselves now.
  */
 export interface PluginUpdatesView {
-  on: boolean; checking: boolean; every: number;
-  checked?: { at: number; updated: number; failed: number; unread: string[]; stopped?: string };
-  updated: PluginUpdateLine[]; failed: PluginUpdateLine[];
+  on: boolean; paused: boolean; checking: boolean; every: number;
+  checked?: { at: number; updated: number; failed: number; unread: string[]; offline?: true; stopped?: string };
+  updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
 }
 /** Why this copy can't update itself (see updates.ts for each one's words). */
 export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';

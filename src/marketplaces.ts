@@ -428,10 +428,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * same version counts. Each op carries the version offered. Nothing here writes to a tool.
    *
    * A marketplace that couldn't be read now gives nothing and is named in `unread`: its last copy says nothing about what
-   * it offers today. A plugin its catalog dropped is left as it is. One turned off in a tool is still updated there, and
-   * update() keeps it off.
+   * it offers today (`offline`: every Git marketplace did, so the next try can come sooner). A plugin its catalog dropped
+   * is left as it is. One turned off in a tool is still updated there, and update() keeps it off.
    */
-  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; view?: PluginsView }> {
+  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; offline?: true }> {
     const stopped = await guard(home);
     if (stopped) return { stopped, ops: [], unread: [] };
     const shown = await view(true);
@@ -450,7 +450,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
         ops.push(...behind.plugin.map(tool => op(tool, 'update')), ...behind.parts.map(tool => op(tool, 'install-parts')));
       }
     }
-    return { ops, unread, view: shown };
+    // Every Git marketplace failed to read: most likely this computer is offline just now.
+    const git = shown.marketplaces.filter(entry => entry.kind === 'git');
+    return { ops, unread, ...(git.length && git.every(entry => entry.problem) ? { offline: true as const } : {}) };
   }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */

@@ -7,9 +7,14 @@ import { resultLines, runPlan, succeeded, type PlanApi, type PluginDone, type Pl
 import type { PluginUpdateLine, PluginUpdatesView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
-/** How often the marketplaces are checked. */
+/** How often the marketplaces are checked: the app's own update rhythm. A plugin release is never urgent, and each check fetches every Git marketplace again. */
 export const CHECK_EVERY_MS = 4 * 60 * 60_000;
-/** Whether plugins are updated automatically before the person has chosen in Settings. */
+/** After a check that reached no Git marketplace (offline, most likely: a laptop just woken), the next one comes this soon. */
+const OFFLINE_RETRY_MS = 30 * 60_000;
+/**
+ * Whether plugins are updated automatically before the person has chosen in Settings. On: these are plugins the person
+ * installed, from marketplaces they chose, updated by each tool's own command; the note and the log say what changed.
+ */
 export const PLUGIN_UPDATES_DEFAULT = true;
 /** A failed update is tried again at the next check, then after two, four… checks' time, and at least once a day. */
 const RETRY_CAP_MS = 24 * 60 * 60_000;
@@ -29,6 +34,8 @@ export interface UpdatesRecord {
   /** What was updated since the note was last closed, oldest first. */
   updated: PluginUpdateLine[];
   failures: Failure[];
+  /** A note of updates was closed here once: it no longer says that plugins update by themselves now. */
+  told?: true;
 }
 
 /** What the automatic updates need from the app around them. */
@@ -37,8 +44,10 @@ export interface AutoUpdateHost {
   home(): string | undefined;
   /** Whether the switch in Settings is on. */
   on(): boolean;
+  /** Automatic sync is off: Central Knot then writes nothing to the tools in the background, plugin updates included. A check the person asks for still runs. */
+  paused(): boolean;
   /** What is due now (marketplaces.pendingUpdates): reads every marketplace again; `stopped` when nothing may be changed in this home. */
-  pending(home: string): Promise<{ stopped?: string; ops: DueUpdate[]; unread: string[] }>;
+  pending(home: string): Promise<{ stopped?: string; ops: DueUpdate[]; unread: string[]; offline?: true }>;
   /** The calls an update makes, as Apply all makes them (an update without the reinstall route: see plugins.update). */
   api: Required<Pick<PlanApi, 'update' | 'parts'>>;
   /** The record as last saved, if there is one that can be read. */
@@ -75,8 +84,8 @@ export function autoUpdates(host: AutoUpdateHost) {
 
   const shown = (): PluginUpdatesView => {
     const mine = record && record.home === host.home() ? record : undefined;
-    return { on: host.on(), checking: !!running, every: host.every, checked: mine?.checked, updated: mine?.updated ?? [],
-      failed: (mine?.failures ?? []).filter(failure => !failure.closed).map(({ at, source, plugin, text }) => ({ at, source, plugin, text })) };
+    return { on: host.on(), paused: host.paused(), checking: !!running, every: host.every, checked: mine?.checked, updated: mine?.updated ?? [],
+      failed: (mine?.failures ?? []).filter(failure => !failure.closed).map(({ at, source, plugin, text }) => ({ at, source, plugin, text })), first: !mine?.told };
   };
 
   /** The view, with the saved record read if it hasn't been yet. */
@@ -128,7 +137,7 @@ export function autoUpdates(host: AutoUpdateHost) {
     const { done, stopped } = ops.length ? await runPlan(ops, api, home) : { done: [] as PluginDone[], stopped: undefined };
     if (stopped) host.log(`plugin updates: stopped: ${stopped}`);
     const news = keep(mine, ops, done, at);
-    mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: mine.failures.length, unread: due.unread, ...(stopped ? { stopped } : {}) };
+    mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: mine.failures.length, unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped } : {}) };
     await save(news);
   }
 
@@ -154,12 +163,15 @@ export function autoUpdates(host: AutoUpdateHost) {
     return lines.length > 0 || failedNew;
   }
 
-  /** The schedule's turn (main calls it every few minutes): a check, when the switch is on and the last one in this home is long enough ago. */
+  /**
+   * The schedule's turn (main calls it every few minutes, so a computer that slept through a check's time checks soon after
+   * it wakes): a check, when the switch is on, Automatic sync is too, and the last check in this home is long enough ago.
+   */
   async function tick(): Promise<void> {
     const home = host.home();
-    if (!host.on() || running || !home) return;
-    const last = (await recordFor(home)).checked?.at;
-    if (last !== undefined && host.now() - last < host.every) return;
+    if (!host.on() || host.paused() || running || !home) return;
+    const last = (await recordFor(home)).checked;
+    if (last && host.now() - last.at < (last.offline ? Math.min(host.every, OFFLINE_RETRY_MS) : host.every)) return;
     await check();
   }
 
@@ -168,7 +180,7 @@ export function autoUpdates(host: AutoUpdateHost) {
     const home = host.home();
     if (!home) return shown();
     const mine = await recordFor(home);
-    if (what === 'updated') mine.updated = [];
+    if (what === 'updated') { mine.updated = []; mine.told = true; }
     else for (const failure of mine.failures) failure.closed = true;
     await save();
     return shown();

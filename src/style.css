@@ -1739,3 +1739,4 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* A plugin its marketplace dropped that a tool still has. */
 .plugin-chip-gone { border-color: color-mix(in oklab, var(--warning) 55%, var(--line)); color: var(--ink-soft); white-space: nowrap; font-weight: 500; }
 .plugin-head h2 .plugin-chip-gone { margin-left: 10px; vertical-align: middle; }
+.plugin-auto-new .text-action { padding: 0; }

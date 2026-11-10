@@ -30,6 +30,8 @@ export function checkedWords(view: PluginUpdatesView | undefined): { text: strin
   if (!view?.on) return undefined;
   if (view.checking) return { text: 'Checking your marketplaces…', tone: 'progress' };
   const checked = view.checked;
+  // Off means Central Knot writes nothing to the tools in the background; a check the person asks for still runs.
+  if (view.paused) return { text: `Paused while Automatic sync is off: nothing is updated by itself. Check now still updates what is behind.${checked ? ` Last checked ${at(checked.at)}.` : ''}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
   if (!checked) return { text: 'Not checked yet in this home. The first check comes soon after Central Knot opens.', tone: 'info' };
   if (checked.stopped) return { text: `Last checked ${at(checked.at)}. Nothing was updated: ${checked.stopped}`, tone: 'attention' };
   const unread = checked.unread.length ? ` ${andList(checked.unread)} couldn’t be read, so ${checked.unread.length > 1 ? 'their' : 'its'} plugins weren’t checked.` : '';
@@ -82,7 +84,7 @@ async function closeNote(what: 'updated' | 'failed') {
 }
 
 /** One group of the note: what it is about, then a line per plugin (its name opens its page), and the way to close it. */
-function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: string): HTMLElement | null {
+function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: string, more?: HTMLElement): HTMLElement | null {
   if (!lines.length) return null;
   // The newest check first; within one check, the order the updates ran in.
   const newest = [...lines].sort((first, second) => second.at - first.at);
@@ -96,7 +98,8 @@ function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: s
       shown.map((line, index) => h('span', {},
         shown.length > 1 ? null : [h('span.plugin-auto-lead', {}, lead), ' '],
         h('button.result-link', { type: 'button', id: `plugin-updates-${what}-${index}`, title: `Open ${line.plugin}`, onclick: () => open(line) }, line.plugin), `: ${line.text}`, h('span.plugin-auto-when', {}, ` · ${at(line.at)}`))),
-      newest.length > shown.length ? h('button.text-action', { type: 'button', id: `plugin-updates-${what}-all`, onclick: () => { pluginUpdates.all[what] = true; rerender(); } }, `Show all ${newest.length}`) : null),
+      newest.length > shown.length ? h('button.text-action', { type: 'button', id: `plugin-updates-${what}-all`, onclick: () => { pluginUpdates.all[what] = true; rerender(); } }, `Show all ${newest.length}`) : null,
+      more),
     closeButton(() => void closeNote(what), { id: `plugin-updates-${what}-close`, label: 'Close this note' }));
 }
 
@@ -104,8 +107,11 @@ function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: s
 export function pluginUpdateNotes(): (HTMLElement | null)[] {
   const view = pluginUpdates.view;
   if (!view) return [];
+  // Said once, until a note of updates is first closed: this is new, and where it is turned off.
+  const isNew = view.first ? h('span.plugin-auto-new', { id: 'plugin-updates-new' }, 'Plugins now update by themselves. ',
+    h('button.text-action', { type: 'button', id: 'plugin-updates-settings', onclick: () => showPage('settings') }, 'Settings'), ' turns that off.') : undefined;
   return [
-    noteBand('updated', view.updated, 'Updated automatically.'),
-    noteBand('failed', view.failed, view.on ? 'Couldn’t update automatically; Central Knot tries again later.' : 'Couldn’t update automatically.'),
+    noteBand('updated', view.updated, 'Updated automatically.', isNew),
+    noteBand('failed', view.failed, view.on && !view.paused ? 'Couldn’t update automatically; Central Knot tries again later.' : 'Couldn’t update automatically.'),
   ];
 }

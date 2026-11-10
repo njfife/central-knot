@@ -9,13 +9,13 @@ const due = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'upd
 /** A stand-in app: what is due, what each tool answers (by `plugin tool`), the clock, and everything the updates said or saved. */
 function setup(options: { on?: boolean; every?: number } = {}) {
   const box = {
-    home: '/home/a' as string | undefined, on: options.on ?? true, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined,
+    home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined,
     answers: new Map<string, Partial<ActionReport>>(), calls: [] as string[], logs: [] as string[], said: [] as { view: PluginUpdatesView; news: boolean }[], saved: undefined as UpdatesRecord | undefined,
   };
   const report = (plugin: string, tool: HarnessId): ActionReport => ({ tool, outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated to 2.0.0.', runs: [], ...box.answers.get(`${plugin} ${tool}`) });
   const host: AutoUpdateHost = {
-    home: () => box.home, on: () => box.on, now: () => box.clock, every: options.every ?? 4 * HOUR, log: line => box.logs.push(line),
-    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread }),
+    home: () => box.home, on: () => box.on, paused: () => box.paused, now: () => box.clock, every: options.every ?? 4 * HOUR, log: line => box.logs.push(line),
+    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, ...(box.offline ? { offline: true as const } : {}) }),
     api: {
       update: async (_source, _market, plugin, tools) => { box.calls.push(`update ${plugin} ${tools.join(',')}`); return { reports: tools.map(tool => report(plugin, tool)) }; },
       parts: async (_source, _market, plugin, tool, mode) => { box.calls.push(`parts ${mode} ${plugin} ${tool}`); return { reports: [{ ...report(plugin, tool), outcome: 'installed', partsUpdated: true, partsRun: 'r1', message: 'Parts updated.' }] }; },
@@ -159,4 +159,50 @@ test('A part left alone by a parts update is in the note as a line to read; a se
   const view = await again.updates.check();
   assert.deepEqual(view.updated.map(line => [line.text, line.warn]), [['only some parts updated in Pi', undefined], ['Pi: The skill triage was edited since it went in, so it was left as it is.', true]]);
   assert.deepEqual(view.failed, []);
+});
+
+test('With Automatic sync off nothing is updated by itself, though a check the person asks for still runs; back on, a check that came due runs', async () => {
+  const { box, updates } = setup();
+  box.due = [due('document-tools', 'claude-cli')];
+  box.paused = true;
+  await updates.tick();
+  assert.deepEqual([box.calls, (await updates.view()).paused, (await updates.view()).checked], [[], true, undefined]);
+  await updates.check(true);
+  assert.deepEqual(box.calls, ['update document-tools claude-cli'], 'Check now is the person’s own action');
+  box.calls.length = 0;
+  box.due = [due('issue-tracker', 'claude-cli')];
+  box.clock += 4 * HOUR;
+  await updates.tick();
+  assert.deepEqual(box.calls, []);
+  box.paused = false;
+  await updates.tick();
+  assert.deepEqual(box.calls, ['update issue-tracker claude-cli']);
+});
+
+test('A check that reached no Git marketplace is tried again in half an hour, not at the next check’s time', async () => {
+  const { box, updates } = setup();
+  box.offline = true;
+  box.unread = ['team-tools'];
+  await updates.tick();
+  assert.deepEqual((await updates.view()).checked, { at: 1_000_000, updated: 0, failed: 0, unread: ['team-tools'], offline: true });
+  box.offline = false;
+  box.unread = [];
+  box.due = [due('document-tools', 'claude-cli')];
+  box.clock += 29 * 60_000;
+  await updates.tick();
+  assert.deepEqual(box.calls, []);
+  box.clock += 60_000;
+  await updates.tick();
+  assert.deepEqual(box.calls, ['update document-tools claude-cli']);
+});
+
+test('The note says once that plugins update by themselves now: until a note of updates is first closed in that home', async () => {
+  const { box, updates } = setup();
+  box.due = [due('document-tools', 'claude-cli')];
+  assert.equal((await updates.check()).first, true);
+  assert.equal((await updates.close('failed')).first, true, 'closing the other half doesn’t count');
+  assert.equal((await updates.close('updated')).first, false);
+  box.due = [due('issue-tracker', 'claude-cli')];
+  assert.equal((await updates.check(true)).first, false);
+  assert.equal(box.saved?.told, true, 'kept across restarts');
 });

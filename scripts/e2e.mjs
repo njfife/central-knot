@@ -2329,7 +2329,7 @@ async function draftFlow() {
  * (CK_PLUGIN_UPDATES_EVERY_MS). With the window closed, the marketplace moves on and drops a plugin: Claude Code's copies are
  * updated through its own command, the plugin turned off there is off afterwards, Codex (which never had them) gets nothing,
  * and the dropped plugin stays, marked. The note and the Settings row say so after a restart; a failure is said and tried
- * again; with the switch off nothing runs.
+ * again; with the switch off, or Automatic sync off, nothing runs.
  */
 async function pluginUpdatesFlow() {
   const home = join(scratch, 'home-auto'), data = join(scratch, 'auto-data'), market = join(scratch, 'market-auto'), tools = join(scratch, 'tools-auto'), stage = join(scratch, 'stage-auto');
@@ -2413,6 +2413,7 @@ esac
   await a.settle();
   const note = await a.text('#plugin-updates-updated') ?? '';
   check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code, which can’t be undone · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code, which can’t be undone · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
+  check('the first note says once that plugins update by themselves now, and where that is turned off', (await a.text('#plugin-updates-new')) === 'Plugins now update by themselves. Settings turns that off.', note);
   same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code',
     [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('[data-plugin="release-helper"] .plugin-chip-gone'), await a.run(`document.querySelector('#pcell-0-release-helper-claude-cli')?.dataset.state`), await a.run(`document.querySelector('#pcell-0-release-helper-codex-cli')?.dataset.state`)],
     ['installed', 'No longer offered', 'installed', 'cannot']);
@@ -2448,9 +2449,17 @@ esac
   const whileOff = calls().length;
   await wait(6000);
   check('turned off, the schedule runs nothing, though an update is waiting', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0', JSON.stringify(calls()));
+  // Automatic sync off pauses it too: off means nothing is written to the tools in the background.
+  await a.run(`window.centralKnot.setSync(false).then(() => true)`);
   await a.click('#nav-settings');
   await a.click('#plugin-updates-on');
-  check('turned on again, the update that failed goes through by itself, and its note goes', await until(() => versions()['issue-tracker'] === '3.0.0' && noted().failures?.length === 0) && noted().updated.some(line => line.plugin === 'issue-tracker' && /updated to 3\.0\.0 in Claude Code/.test(line.text)), JSON.stringify([versions(), noted()]));
+  await wait(6000);
+  check('turned on with Automatic sync off, it is paused and says so; nothing runs', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0' && /Paused while Automatic sync is off: nothing is updated by itself\. Check now still updates what is behind\./.test(await a.text('#setting-plugin-updates-notice') ?? ''), [calls(), await a.text('#setting-plugin-updates')]);
+  await a.run(`window.centralKnot.setSync(true).then(() => true)`);
+  check('with Automatic sync on again, the update that failed goes through by itself, and its note goes', await until(() => versions()['issue-tracker'] === '3.0.0' && noted().failures?.length === 0) && noted().updated.some(line => line.plugin === 'issue-tracker' && /updated to 3\.0\.0 in Claude Code/.test(line.text)), JSON.stringify([versions(), noted()]));
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
+  check('a later note no longer says that this is new', /issue-tracker: updated to 3\.0\.0 in Claude Code/.test(await a.text('#plugin-updates-updated') ?? '') && !(await a.exists('#plugin-updates-new')), await a.text('#plugin-updates-updated'));
   same('no page errors, plugin updates on a schedule', a.pageErrors, []);
   await a.quit();
 }
