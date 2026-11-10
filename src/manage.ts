@@ -11,7 +11,7 @@ import {
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
-import { isDisabled, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
+import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
 import { problemText, toolName } from './words.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
@@ -934,7 +934,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const target = await liveSwitchTarget(context, entry, tool);
       if (!target) { if (disabled) results.push({ item: name, harness: tool, outcome: 'held', message: `${toolName(tool)} has no copy to disable.` }); continue; }
       let flipped: { changed: boolean; previous?: string };
-      try { flipped = await setDisabled(context, tool, target, disabled); }
+      try { flipped = await setDisabled(context, tool, target, disabled, disabled ? undefined : await overrideBeforeDisable(context, change.key, tool, target)); }
       catch (error) {
         results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${toolName(tool)}: ${switchFailure(error)}` });
         continue;
@@ -1297,6 +1297,17 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
     await saveHistory(context, history);
   }
   return { results, harnessWrites: writes };
+}
+
+/**
+ * A Claude Code override (say "name-only") that 0.4.0-preview.1 recorded only in History, for an Enable to put back. Undefined
+ * when the store keeps a value for the folder (setDisabled uses that), or the latest Disable on record replaced nothing.
+ */
+async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
+  if (tool !== 'claude-cli' || (await readKeptOverrides(context))[target.folder] !== undefined) return undefined;
+  const disables = (await readHistory(context)).filter(event => event.kind === 'switched' && event.key === key)
+    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target.folder === target.folder));
+  return disables.at(-1)?.before;
 }
 
 /** Puts a stored revision of a skill into a tool's own skills folder under `folder`; nothing may be there yet. */

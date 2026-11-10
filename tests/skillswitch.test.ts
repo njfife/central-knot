@@ -250,3 +250,17 @@ test('Enable puts back the Claude Code override a Disable replaced, after Histor
     assert.equal(await readFile(switchPath(context, 'claude-cli'), 'utf8'), original);
   } finally { await box.cleanup(); }
 });
+
+test('Enable puts back a Claude Code override 0.4.0-preview.1 recorded only in History', async () => {
+  const box = await sandbox(['claude-cli']);
+  try {
+    await skill(box.home, 'claude-cli', 'pager');
+    const original = '{\n  "skillOverrides": { "pager": "name-only" }\n}\n';
+    await writeFile(switchPath(box.context, 'claude-cli'), original);
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
+    // That release kept the replaced value only in the Disable's History event.
+    await rm(join(box.home, '.central-knot/skill-overrides.json'));
+    await applyChanges(box.context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    assert.equal(await readFile(switchPath(box.context, 'claude-cli'), 'utf8'), original);
+  } finally { await box.cleanup(); }
+});

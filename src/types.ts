@@ -316,6 +316,8 @@ export interface HistoryEvent {
    * what Undo puts back), and a hash of what it wrote (Undo goes ahead only while the file still holds that).
    */
   settingsFile?: { path: string; kept: string; wrote: string };
+  /** 'deleted' by Pull, of the base instructions (key 'instructions:base'): what the base's own Undo puts back, the base and its tools. */
+  base?: BaseUndo;
 }
 
 // ---------- Marketplaces and plugins ----------

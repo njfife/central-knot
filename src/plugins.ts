@@ -102,14 +102,17 @@ export const runGit = (args: string[], timeoutMs = 60_000) => git(args, timeoutM
 export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
 
 /** Why a Git command failed, in classes a person can act on (MKT-05). Where the server's answer fits more than one cause, the message names each. */
+/** Git's words, without what it quotes (an address, a path): a port or folder there such as 40123 is no HTTP status. */
+const gitSaid = (output: string) => output.toLowerCase().replace(/'[^'\n]*'/g, "''");
+
 export function gitFailure(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): Exclude<AccessResult, { state: 'ok' }> {
-  const text = output.toLowerCase();
+  const text = gitSaid(output);
   if (code === 'missing') return { state: 'git-missing', message: `Git is not installed, so this ${place} cannot be read. Install Git, then try again.` };
   if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.` };
   if (/host key verification failed/.test(text)) return { state: 'unknown-host', message: 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.' };
   if (/passphrase/.test(text)) return { state: 'passphrase', message: 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.' };
-  if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
-  if (/repository not found|not found|404|does not appear to be a git repository|access denied/.test(text)) return { state: 'no-access', message: 'No access, or no repository there: the server doesn’t say which. Check the address and that your account can read it.' };
+  if (/authentication failed|could not read username|terminal prompts disabled|\b40[13]\b|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
+  if (/repository not found|not found|\b404\b|does not appear to be a git repository|access denied/.test(text)) return { state: 'no-access', message: 'No access, or no repository there: the server doesn’t say which. Check the address and that your account can read it.' };
   return { state: 'unclassified', message: output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.' };
 }
 
@@ -134,7 +137,7 @@ export function checkAccess(context: PluginContext, source: string): Promise<Acc
 
 /** Why a push failed: the repo moved on, or this account can't write there; anything else as whyGitFailed says. */
 export function whyPushFailed(code: number | 'timeout' | 'missing', output: string, place = 'repo'): string {
-  const text = output.toLowerCase();
+  const text = gitSaid(output);
   // Refusals first: a protected branch also says "rejected", and pulling again would not help.
   if (/read-only|\b403\b|denied|not allowed|protected branch|pre-receive hook declined/.test(text)) return `The ${place} did not accept the push: your account may only be able to read it, or the branch is protected. Nothing changed here.`;
   if (/non-fast-forward|fetch first|stale info/.test(text)) return `The ${place} changed just now. Pull, then push again.`;
