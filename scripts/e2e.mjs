@@ -462,7 +462,8 @@ async function practiceFlow() {
   // stays; and the switch's result shows over the pending changes, with its Undo.
   const switchFromBar = async name => { await a.click('#status-profile'); await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
   const statusShown = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
-  await a.click('#open-notes'); await a.click('#enable-notes-claude-cli');
+  if (!(await a.run(`!!document.querySelector('#enable-notes-claude-cli')`))) await a.click('#open-notes');
+  await a.click('#enable-notes-claude-cli');
   await a.click('#open-standup'); await a.click('#enable-standup-claude-cli');
   await switchFromBar('Incident');
   check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));

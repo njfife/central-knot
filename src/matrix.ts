@@ -189,7 +189,7 @@ export function openItem(which: Kind, name: string) {
 }
 let view = views.skills;
 /** The page the tables were last drawn on. */
-let tablesPage: string | undefined;
+let tablesVisit = -1;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
 // A click elsewhere or Escape closes a tool menu.
@@ -1807,7 +1807,7 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  */
 function useTable(which: Kind, harness?: Tool) {
   // An armed Delete everywhere belongs to the visit it was clicked on: another page disarms it.
-  if (state.page !== tablesPage) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesPage = state.page; }
+  if (state.visit !== tablesVisit) { for (const each of Object.values(views)) each.confirmDelete = undefined; tablesVisit = state.visit; }
   kind = which;
   view = views[which];
   focus = harness;

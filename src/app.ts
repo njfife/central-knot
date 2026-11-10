@@ -73,6 +73,8 @@ export const state = {
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
   skillsView: 'table' as 'table' | 'files',
+  /** Counts moves to another page, so what belongs to one visit (an armed Delete everywhere) can tell it has ended. */
+  visit: 0,
   /**
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
@@ -440,7 +442,7 @@ export function showPage(page: Page) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) { state.skillsView = 'table'; forgetRepoPrompts(); }
+  if (page !== state.page) { state.skillsView = 'table'; state.visit += 1; forgetRepoPrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
