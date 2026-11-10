@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
 import { whyPushFailed } from '../src/plugins.ts';
-import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, sourceTool, undoSettingsChange, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
+import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, sourceTool, undoPulledBase, undoSettingsChange, type BaseInstructions, type SideItem } from '../src/gitrepo.ts';
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
@@ -424,7 +424,7 @@ test('The base instructions travel as instructions/base.md: Push reads the base 
   try {
     let refuse = false;
     // The real base instructions (~/.central-knot/instructions/base.md), as main.ts hands them over.
-    const baseFor = (context: ShareContext): BaseInstructions => { const real = repoBase(context, context.read); return { read: real.read, apply: async text => (refuse ? 'Busy.' : real.apply(text)) }; };
+    const baseFor = (context: ShareContext): BaseInstructions => { const real = repoBase(context, context.read); return { read: real.read, apply: async text => (refuse ? { stopped: 'Busy.' } : real.apply(text)) }; };
     const setBase = async (context: ShareContext, text: string) => {
       const files = await instructionsView(context, await context.read());
       const seen = Object.fromEntries(files.map(file => [file.tool, { path: file.path, hash: file.hash }]));
@@ -451,6 +451,24 @@ test('The base instructions travel as instructions/base.md: Push reads the base 
     assert.match(claude.text, /Be brief\./);
     assert.ok((await baseView(second)).versions.length >= 1, 'the base it replaced is kept as an earlier version');
     assert.deepEqual(live(await repoView(second, { base: baseFor(second) })).incoming, []);
+    // An edit made in the first home comes in the same way.
+    await setBase(first, 'Be briefer.\n');
+    await pushRepo(first, { base: baseFor(first) });
+    await pullRepo(second, { base: baseFor(second) });
+    assert.equal(await readFile(join(second.home, '.central-knot/instructions/base.md'), 'utf8'), 'Be briefer.\n');
+    // Deleted there: said before Pull, applied through the base's own apply, and in History with an Undo that puts it all back.
+    await setBase(first, '');
+    await pushRepo(first, { base: baseFor(first) });
+    assert.deepEqual(rows(live(await repoView(second, { base: baseFor(second), check: true })).incoming), ['Base instructions:removed']);
+    await pullRepo(second, { base: baseFor(second) });
+    const claudeText = async () => (await instructionsView(second, await second.read())).find(file => file.tool === 'claude-cli')!;
+    assert.deepEqual([(await baseView(second)).text, (await baseView(second)).tools, (await claudeText()).base?.state], ['', [], 'missing']);
+    assert.ok((await baseView(second)).versions.some(version => version.firstLine === 'Be briefer.'), 'the deleted base is kept as an earlier version');
+    const deletion = (await readHistory(second)).find(event => event.key === 'instructions:base')!;
+    assert.deepEqual([deletion.kind, deletion.via, deletion.base?.text], ['deleted', 'repo', 'Be briefer.\n']);
+    assert.equal((await undoPulledBase(second, await second.read(), deletion.id)).stopped, undefined);
+    assert.deepEqual([(await baseView(second)).text, (await baseView(second)).tools, (await claudeText()).base?.state], ['Be briefer.\n', ['claude-cli'], 'same']);
+    assert.equal((await undoPulledBase(second, await second.read(), deletion.id)).stopped, 'That change was already undone.');
   } finally { await box.cleanup(); }
 });
 

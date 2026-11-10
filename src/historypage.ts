@@ -15,6 +15,7 @@ function describe(event: HistoryEvent): { glyph: IconName; text: string; action?
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
   // Pull from the git repo: said as a pull, whichever way sync carried it.
   if (event.via === 'repo' && !event.undoneBy) {
+    if (event.base) return { glyph: 'git-branch', text: `Deleted in the git repo, so Pull emptied the base instructions${event.base.list.tools.length ? ` and took them out of ${touchedToolsPhrase(event.base.list.tools)}` : ''}.`, action: 'Undo' };
     if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
     if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
     if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Undo' };
@@ -70,7 +71,7 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
 }
 
 /** Skills, MCP servers, agents and profile switches share History; each row says which it is. */
-const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
+const kindOf = (event: HistoryEvent) => (event.kind === 'profile' ? 'Profile' : event.base ? 'Instructions' : event.key.startsWith('mcp:') ? 'MCP server' : event.key.startsWith('agent:') ? 'Agent' : 'Skill');
 /** The overwritten edits a skill conflict or kept edit can put back, one per content (mirrors restorableChoices in manage.ts). */
 function choices(event: HistoryEvent) {
   if (event.key.startsWith('mcp:') || (event.kind !== 'conflict' && event.kind !== 'kept-edit')) return [];
@@ -88,6 +89,7 @@ const day = (iso: string) => {
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
 const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
+  : event.base ? 'Put the base instructions back as they were before this Pull, and in the tools that got them (where their file is unchanged since)'
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
   : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
@@ -104,7 +106,7 @@ function actions(event: HistoryEvent, action?: string) {
   // The scope is the tools the event touched, as the notices say it.
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
   // Only an 'added' undo is narrower: it removes the copies Apply all (or Pull) added, in those tools alone.
-  const touched = event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
+  const touched = event.base ? event.base.list.tools : event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : 'in all tools';
   // A switch's Undo says what it does: Enable where it was disabled, Disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));

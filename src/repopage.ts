@@ -233,6 +233,7 @@ function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLE
   if (change.alsoHere === 'removed') return plain('Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.', true);
   if (change.alsoHere === 'unmanaged') return plain(`${kinds[change.kind].a} named ${change.name} is already in your tools, not Managed. Pull replaces it; yours stays in History.`, true);
   if (change.alsoHere) return plain('Changed here too. Pull uses the repo’s version; yours stays in History.', true);
+  if (change.change === 'removed' && change.kind === 'base') return plain('Pull empties the base instructions and takes them out of the tools that get them. History can undo it.');
   return change.change === 'removed' ? plain('Pull deletes it from your tools. History can restore it.') : undefined;
 }
 

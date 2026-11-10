@@ -26,10 +26,11 @@ import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpTools, m
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { presentTools } from './presence.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
+import { undoBase } from './instructions.ts';
+import type { BaseUndo, Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts, Snapshot } from './types.ts';
 
 /** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
-export interface BaseInstructions { read(): Promise<string | undefined>; apply(text: string | undefined): Promise<string | undefined> }
+export interface BaseInstructions { read(): Promise<string | undefined>; apply(text: string | undefined): Promise<{ stopped?: string; undo?: BaseUndo }> }
 /** What every repo call may be given: the base-instructions seam, and whether Automatic sync is on (off: MCP and agent deletions wait for it). */
 export interface RepoOptions { base?: BaseInstructions; syncOn?: boolean }
 
@@ -864,10 +865,36 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
   return { results: [{ item: past.item, harness: winner.tool, outcome: 'written', message: 'Its earlier Claude Code settings are back.' }], harnessWrites: 1 };
 }
 
-/** The base instructions: handed to the base-instructions feature to apply (only reached when this build has it, so `base` is set). */
-async function pullBase(dir: string, change: RepoChange, item: SideItem | undefined, base: BaseInstructions | undefined): Promise<DestinationResult[]> {
-  const failed = await base?.apply(item ? await readFile(join(dir, item.paths[0]), 'utf8') : undefined);
-  return failed ? [notIn(change.name, failed)] : [{ item: change.name, outcome: 'written', message: 'Base instructions updated.' }];
+/**
+ * The base instructions: handed to the base-instructions feature to apply (only reached when this build has it, so `base` is set).
+ * A deletion is in History, with the base's own Undo, which puts the base and its tools back.
+ */
+async function pullBase(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, base: BaseInstructions | undefined): Promise<DestinationResult[]> {
+  const done = await base?.apply(item ? await readFile(join(dir, item.paths[0]), 'utf8') : undefined);
+  if (done?.stopped) return [notIn(change.name, done.stopped)];
+  if (item) return [{ item: change.name, outcome: 'written', message: 'Base instructions updated.' }];
+  if (done?.undo) await appendHistory(context, [{ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'deleted', losers: [], orderProved: true, base: done.undo }]);
+  return [{ item: change.name, outcome: 'written', message: 'Deleted in the repo, so the base instructions were emptied and taken out of the tools that got them. History can undo it.' }];
+}
+
+/** Undo of a Pull that deleted the base instructions: the base's own Undo, said per tool. Only once, and only while the base is still empty. */
+export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[], eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
+  const history = await readHistory(context);
+  const past = history.find(event => event.id === eventId);
+  if (!past?.base) return { stopped: 'That change can’t be restored.', results: [], harnessWrites: 0 };
+  if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
+  const done = await undoBase(context, snapshots, past.base);
+  if (done.stopped) return { stopped: done.stopped, results: [], harnessWrites: 0 };
+  // No event of its own: the base keeps every text it replaces as an earlier version on the Instructions page.
+  past.undoneBy = randomUUID();
+  await replaceHistory(context, history);
+  const results: DestinationResult[] = [
+    { item: past.item, outcome: 'written', message: 'The base instructions are back.' },
+    ...done.written.map(file => ({ item: past.item, harness: file.tool, outcome: 'written' as const, message: `Back in ${harnesses[file.tool].name}.` })),
+    ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : `${harnesses[file.tool].name}’s file could not be written.` })),
+    ...(done.problem ? [notIn(past.item, done.problem)] : []),
+  ];
+  return { results, harnessWrites: done.written.length };
 }
 
 /**
@@ -996,7 +1023,7 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
             : change.kind === 'skill' ? await pullSkill(context, dir, change, item, wrote)
             : change.kind === 'mcp' ? await pullServer(context, dir, change, item, wrote)
             : change.kind === 'agent' ? await pullAgent(context, dir, change, item, wrote)
-            : await pullBase(dir, change, item, options.base);
+            : await pullBase(context, dir, change, item, options.base);
         } catch (error) { outcome = [notIn(change.name, `It could not finish. ${plainError(error)}`)]; }
         // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
         for (const event of await readHistory(context)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
