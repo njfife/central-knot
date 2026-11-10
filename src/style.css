@@ -1217,3 +1217,59 @@ span.ins-confirm { margin-top: 0; }
 .appearance-choice:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
 /* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */
 .keep-together { white-space: nowrap; }
+
+/* Disable and Remove, per tool (skills). A disabled copy keeps its cell's state, outlined instead of filled, with a corner mark. */
+.cell-disabled { position: relative; }
+/* Only once applied: a queued disable keeps the pending look, and the corner mark alone says Disabled. */
+.cell-disabled.cell-on:not(.cell-pending-edit) { background: transparent; border-color: var(--control-line); }
+.cell-disabled.cell-synced:not(.cell-pending-edit) { color: var(--ink-soft); }
+.cell-disabled-mark { position: absolute; top: -4px; right: -4px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--ink-faint); }
+.cell-disabled-mark svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.mini-cell.cell-disabled { position: relative; }
+.legend-cell.mini-cell .cell-disabled-mark { top: -5px; right: -5px; width: 11px; height: 11px; }
+.legend-cell.mini-cell .cell-disabled-mark svg { width: 8px; height: 8px; }
+.legend-cell .cell-disabled-mark { top: -5px; right: -5px; width: 12px; height: 12px; }
+.legend-cell .cell-disabled-mark svg { width: 9px; height: 9px; }
+.legend-item > .legend-cell.cell-disabled { margin-right: 5px; }
+.cell-removing, .legend-cell.cell-removing { color: var(--danger); border: 1px dashed color-mix(in oklab, var(--danger) 60%, transparent); background: var(--danger-tint); }
+/* Skills: every tool's row has the same three columns (tool, what happens there, its switch and Remove), so the switches line up. */
+.details.details-skills .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
+.details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
+.details-tools { container-type: inline-size; }
+/* In a narrow pane (the dock, the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
+@container (max-width: 560px) {
+  .details.details-skills .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .details.details-skills .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details.details-skills .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details.details-skills .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details.details-skills .details-tool-head > .details-tool-line:empty { display: none; }
+}
+.tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
+/* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
+.details-tool-actions .tool-switch .switch { height: 18px; }
+.delete-armed { display: inline-flex; align-items: center; gap: 8px; }
+.tool-switch-word { min-width: 56px; text-align: right; }
+/* Queued, like the Managed switch: a dashed outline, never a ring that reads as focus. */
+.tool-switch-pending .switch { box-shadow: none; outline: 1.5px dashed var(--accent); outline-offset: 2px; }
+.tool-switch-pending .tool-switch-word { color: var(--accent-ink); }
+/* A switch queued in a skill's details shows in its cell too: the queued dash around the cell, and the mark in accent. */
+.cell-switch-queued { outline: 1.5px dashed var(--accent); outline-offset: 1px; }
+.cell-switch-queued .cell-disabled-mark { color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
+.tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
+/* What Disabled and Remove mean, right under the rows they belong to. */
+.details-switch-note { margin: 0; }
+/* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
+.text-action.tool-remove { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+.text-action.tool-remove:hover, .text-action.tool-remove:focus-visible { color: var(--danger); }
+.tool-remove, .tool-remove-slot { min-width: 60px; text-align: center; }
+.tool-remove-slot { display: inline-block; }
+/* Differing copies hide an empty foot, but not one holding Delete everywhere. */
+.details-differs .compare-foot:has(.compare-foot-start:empty):has(> .text-action, > .delete-armed) { display: flex; }
+/* Queued changes never shrink out of sight: when the change bar doesn't fit beside the filters, it takes its own line. */
+.ov-page > .toolbar:has(.apply-count) { flex-wrap: wrap; }
+/* On its own line the breakdown may still be long: it wraps within the bar rather than run past the edge. */
+.toolbar-end > .apply { min-width: 0; }
+.toolbar-end .apply-count { white-space: normal; min-width: 0; }
+.ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
+/* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
+.tool-switch .switch:focus-visible, .managed-pending .switch:focus-visible, .cell-switch-queued:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

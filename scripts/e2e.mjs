@@ -335,6 +335,28 @@ async function practiceFlow() {
   same('Codex is a column and gets its copies too', [await a.exists('#tool-codex-cli'), existsSync(join(practice, '.codex/skills/notes/SKILL.md')), existsSync(join(practice, '.codex/skills/standup/SKILL.md'))], [true, true, true]);
   check('Codex’s own .system skills stay untouched and unlisted', existsSync(join(practice, '.codex/skills/.system/openai-docs/SKILL.md')) && !(await rowKeys(a)).includes('openai-docs'));
 
+  // Disable and Remove, per tool: Codex's own switch turns standup off there while its copy stays; Undo flips it back, byte for byte.
+  // Remove takes only Codex's copy of notes out, and Restore puts it back.
+  const switchConfig = join(practice, '.codex/config.toml');
+  const switchBefore = readFileSync(switchConfig, 'utf8');
+  await a.click('#open-standup');
+  await a.click('#enable-standup-codex-cli');
+  check('Disable waits for Apply all', readFileSync(switchConfig, 'utf8') === switchBefore && (await a.text('.apply-count') ?? '').includes('1 copy to disable'), await a.text('.apply-count'));
+  await applyAll(a);
+  check('Disable writes Codex’s own switch and keeps the copy', readFileSync(switchConfig, 'utf8').endsWith(`[[skills.config]]\npath = ${JSON.stringify(join(practice, '.codex/skills/standup/SKILL.md'))}\nenabled = false\n`) && existsSync(join(practice, '.codex/skills/standup/SKILL.md')), readFileSync(switchConfig, 'utf8'));
+  same('the Codex cell is marked disabled, the others are not', [await a.exists('.ov-row[data-key="standup"] [data-tool="codex-cli"] .cell-disabled'), await a.exists('.ov-row[data-key="standup"] [data-tool="claude-cli"] .cell-disabled')], [true, false]);
+  await a.click('#outcome-undo-switch');
+  same('Undo enables it again and leaves config.toml as it was', readFileSync(switchConfig, 'utf8'), switchBefore);
+  await a.click('#open-notes');
+  await a.click('#remove-notes-codex-cli');
+  await applyAll(a);
+  same('Remove takes out only Codex’s copy', [existsSync(join(practice, '.codex/skills/notes')), existsSync(join(practice, '.claude/skills/notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/notes/SKILL.md'))], [false, true, true]);
+  await a.click('#nav-history');
+  await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
+  await a.settle();
+  same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
+  await a.click('#nav-skills');
+
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
   const standupBefore = readFileSync(standupPath('claude'), 'utf8');
@@ -531,8 +553,9 @@ async function practiceFlow() {
   await a.click('#list-standup');
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
-  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
-  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
+  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file (an unmanaged
+  // skill's Delete everywhere comes last).
+  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where', 'delete']);
   // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
   // file's box spanning to meet it.
   await sizeTo(a, 1728, 1117);
@@ -1039,6 +1062,7 @@ async function practiceFlow() {
   }
   // Keep history for: 30 days at first, and History shows only what the window covers. A longer window saves at once; a shorter
   // one asks first (Cancel writes nothing), then removes what is older from this home's History file and from the History page.
+  // This home's History also holds the removals made above, so its intro names Restore too.
   const historyFile = join(practice, '.central-knot/history.json');
   writeFileSync(historyFile, JSON.stringify({ events: [...JSON.parse(readFileSync(historyFile, 'utf8')).events, ...[60, 20, 5].map(days =>
     ({ id: `aged-${days}`, at: new Date(Date.now() - days * DAY).toISOString(), key: `aged-${days}`, item: `aged-${days}-days`, kind: 'edit', winner: { tool: 'claude-cli', hash: '0'.repeat(64) }, losers: [], orderProved: true }))] }));
@@ -1085,7 +1109,7 @@ async function practiceFlow() {
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
       [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 30 days. Change in Settings.']);
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
@@ -1118,7 +1142,7 @@ async function practiceFlow() {
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
-    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
+    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
