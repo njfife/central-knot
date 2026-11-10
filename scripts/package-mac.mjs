@@ -15,9 +15,11 @@ if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the se
 // `--release` refuses to fall back: a release must be Developer ID signed and notarized.
 // The optional build inputs (ORG-01; listed at the top of scripts/custom-build.mjs). Any one of them makes this a custom
 // build: its own name and identity, and with --marketplace, that marketplace packed inside. None: the standard app.
-const { inputs, rest } = buildInputs(process.argv.slice(2));
+const plainly = message => { console.error(message); process.exit(2); };
+let inputs, rest;
+try { ({ inputs, rest } = buildInputs(process.argv.slice(2))); } catch (error) { plainly(error.message); }
 const unknown = rest.filter(arg => arg !== '--release');
-if (unknown.length) throw new Error(`Not a build input: ${unknown.join(' ')}. The inputs are listed at the top of scripts/custom-build.mjs.`);
+if (unknown.length) plainly(`Not a build input: ${unknown.join(' ')}. The inputs are listed at the top of scripts/custom-build.mjs.`);
 const release = rest.includes('--release');
 const findIdentity = () => {
   try {
@@ -37,7 +39,7 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
 // A custom build is staged first (its identity file, the marketplace it carries, its pictures and its report), then the
 // app's code is built again around it: it calls itself by its own name and carries the staged files (scripts/build.mjs).
-const custom = isCustom(inputs) ? await stage(inputs) : undefined;
+const custom = isCustom(inputs) ? await stage(inputs).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }) : undefined;
 const appName = custom?.build.name ?? 'Central Knot';
 let icon = 'assets/icon.icns';
 if (custom) {

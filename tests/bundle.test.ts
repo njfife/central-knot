@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { activeBundle, bundledMarketplace, customBuild, openBundle, readRelease, releaseLabel } from '../src/bundle.ts';
+import { aboutBuild, activeBundle, bundledMarketplace, customBuild, openBundle, readRelease, releaseDate, releaseLabel } from '../src/bundle.ts';
 import { STANDARD_NAME, buildInputs, describeBuild, isCustom, packRelease, stageCustomBuild } from '../src/bundlepack.ts';
 import { parseCatalog } from '../src/plugins.ts';
 
@@ -71,6 +71,9 @@ test('build inputs that describe no build are refused in plain words', () => {
   assert.throws(() => describeBuild({ appName: 'Acme', appId: 'central-knot' }), /--app-id/);
   assert.throws(() => describeBuild({ appName: 'Acme', appId: 'Has Space' }), /--app-id/);
   assert.throws(() => describeBuild({ appName: 'a/b' }), /--app-name/);
+  // Names the app's file couldn't keep as written.
+  for (const name of ['Acme Inc.', 'What?', 'A*', 'Say "hi"', 'a|b', '.hidden']) assert.throws(() => describeBuild({ appName: name }), /--app-name/, name);
+  assert.equal(describeBuild({ appName: 'Acme’s Knot & Co' }).id, 'acme-s-knot-co');
   assert.throws(() => describeBuild({ appName: '東京' }), /--app-id/);
   assert.throws(() => describeBuild({ appName: 'Acme', appIcon: '/x/icon.svg' }), /--app-icon takes a \.png or \.icns/);
 });
@@ -94,9 +97,15 @@ test('packing: every plugin’s files go in as they are, a plugin kept elsewhere
     assert.equal(release.from, 'Folder: source');
     assert.deepEqual(release.plugins, [{ name: 'docs', version: '1.0.0' }, { name: 'elsewhere', version: '2.0.0' }, { name: 'release', version: '0.4.1' }]);
     assert.deepEqual(release.unpackaged.map(item => item.name), ['packaged']);
-    assert.match(release.unpackaged[0]!.reason, /npm: @acme\/packaged/);
+    assert.equal(release.unpackaged[0]!.reason, 'Its files are an npm package (@acme/packaged), which a build can’t carry.');
     assert.deepEqual(await readRelease(join(base, 'out/release.json')), release);
     assert.equal(releaseLabel(release), 'November 10, 2026 (Folder: source)');
+    assert.equal(releaseDate(release), 'November 10, 2026');
+    // What Settings says of the build: the date only, since where it was made from means nothing to whoever was handed the app.
+    assert.deepEqual(aboutBuild({ id: 'acme-knot', name: 'Acme Knot', bundleId: 'x' }, '0.5.0', { name: 'Acme plugins', date: releaseDate(release) }), [
+      'Acme Knot is a custom build of Central Knot 0.5.0, with its own settings apart from the standard app’s.',
+      'It doesn’t update itself.',
+      'It comes with the Acme plugins marketplace as of November 10, 2026, which changes only with a new build of Acme Knot.']);
 
     // Opened as the app opens it: the folder the tools are given holds the marketplace, without the fetch's .git folders.
     const data = join(base, 'data');
@@ -135,6 +144,27 @@ test('a marketplace with nothing kept elsewhere is packed byte for byte', async 
     await openBundle(join(base, 'data'), join(base, 'out'));
     assert.equal(await readFile(join(bundledMarketplace(join(base, 'data')), '.claude-plugin/marketplace.json'), 'utf8'), manifest);
   } finally { await cleanup(); }
+});
+
+test('a marketplace folder given by a relative path is carried as it is on disk, never fetched as a repository', async () => {
+  const { base, source, cleanup } = await setup();
+  const before = process.cwd();
+  try {
+    // Only the plugins kept in it, so nothing is fetched; one of them is an empty folder, as a submodule arrives.
+    const manifest = JSON.parse(await readFile(join(source, '.claude-plugin/marketplace.json'), 'utf8'));
+    await mkdir(join(source, 'plugins/sub'));
+    await writeFile(join(source, '.claude-plugin/marketplace.json'), JSON.stringify({ ...manifest, plugins: [...manifest.plugins.filter((plugin: { source: unknown }) => typeof plugin.source === 'string'), { name: 'sub', source: './plugins/sub' }] }));
+    process.chdir(base);
+    for (const given of ['./source', 'source']) {
+      const packed = await packRelease({ source: given, out: join(base, 'out'), work: join(base, 'work') });
+      assert.ok('release' in packed, `${given}: ${JSON.stringify(packed)}`);
+      assert.equal(packed.release.from, 'Folder: source', given);
+      assert.deepEqual(packed.release.plugins.map(plugin => plugin.name), ['docs', 'release'], given);
+      // The empty folder is no plugin to install: it is named, with why.
+      assert.deepEqual(packed.release.unpackaged.map(item => item.name), ['sub'], given);
+      assert.match(packed.release.unpackaged[0]!.reason, /is empty in the marketplace/);
+    }
+  } finally { process.chdir(before); await cleanup(); }
 });
 
 test('a source that isn’t a marketplace makes no release', async () => {
@@ -195,6 +225,9 @@ test('opening: a release that can’t be used leaves the last working content in
     const bad = await openBundle(data, join(base, 'two'));
     assert.match(bad.problem ?? '', /could not be unpacked/);
     assert.equal(bad.active?.release.sequence, 1);
+    // What a stopped unpack left behind is cleared by the next one.
+    await mkdir(join(data, 'bundled/incoming-left-behind'));
+    await openBundle(data, join(base, 'two'));
     // No manifest at all.
     await rm(join(base, 'two/release.json'));
     assert.match((await openBundle(data, join(base, 'two'))).problem ?? '', /no manifest/);
@@ -245,6 +278,11 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.equal(plain.release, undefined);
     assert.deepEqual((await readdir(out)).sort(), ['build-report.txt', 'custom-build.json']);
     assert.match(plain.report, /Marketplace: none/);
+    // Staging clears a folder staged before, never a folder holding someone's other files.
+    await mkdir(join(base, 'mine'));
+    await writeFile(join(base, 'mine/notes.txt'), 'keep');
+    await assert.rejects(stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'mine'), work: join(base, 'work') }), /holds other files/);
+    assert.equal(await readFile(join(base, 'mine/notes.txt'), 'utf8'), 'keep');
     // Inputs that can't be built stop before anything is fetched or written.
     await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'nothing.png') }, { out, work: join(base, 'work') }), /--app-icon: there is no file/);
     await assert.rejects(stageCustomBuild({ marketplace: join(base, 'nowhere'), appName: 'Acme Knot' }, { out, work: join(base, 'work') }), /could not be read/);

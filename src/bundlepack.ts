@@ -3,7 +3,8 @@
 // runs in a local build, in CI and in tests. What a marketplace holds is copied as it is: only the fetch's own .git folders
 // stay behind, and an entry is rewritten only to point at files that were fetched from elsewhere for it.
 import { execFile } from 'node:child_process';
-import { copyFile, cp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
 import { BUILD_ID, CARRIED_FOLDER, CUSTOM_FILE, RELEASE_FILE, fileDigest, packArchive, releaseLabel, type BundleRelease, type CustomBuild } from './bundle.ts';
 import { CODEX_MANIFEST, MANIFEST, parseObject, sourceLabel } from './catalogdetail.ts';
@@ -73,7 +74,8 @@ export function describeBuild(inputs: BuildInputs): CustomBuild {
   if (!inputs.marketplace && inputs.sequence !== undefined) throw new Error('--sequence orders a carried marketplace’s releases: add --marketplace.');
   if (inputs.appName === undefined) throw new Error(`A custom build needs its own name: add --app-name "<name>". Under the standard app’s name it would take that app’s place in Applications.`);
   const name = inputs.appName.trim();
-  if (!name || name.length > 60 || /[\\/:\n\r\t]/.test(name) || name.startsWith('.')) throw new Error('--app-name is the app’s name as people see it: up to 60 characters, without / \\ : or line breaks.');
+  // The name is also the app's file name, so nothing a file name can't hold as written.
+  if (!name || name.length > 60 || /[\\/:?*"<>|\n\r\t]/.test(name) || name.startsWith('.') || name.endsWith('.')) throw new Error('--app-name is the app’s name as people see it, and its file’s name: up to 60 characters, without / \\ : ? * " < > | or line breaks, and not starting or ending with a period.');
   const id = inputs.appId ?? slug(name);
   if (!BUILD_ID.test(id) || id === 'central-knot') throw new Error(inputs.appId ? '--app-id is lower-case letters, digits, dots and dashes (not “central-knot”, the standard app’s).' : 'Give the build an identity with --app-id: lower-case letters, digits, dots and dashes.');
   for (const [option, file, kinds] of [['--app-icon', inputs.appIcon, ['.png', '.icns']], ['--marketplace-logo', inputs.marketplaceLogo, ['.png', '.svg', '.jpg', '.jpeg', '.webp']]] as const) {
@@ -96,14 +98,31 @@ const gitCommit = (folder: string) => new Promise<string>(done => execFile('git'
   execFile('git', ['-C', folder, 'status', '--porcelain'], { encoding: 'utf8' }, (failed, changes) => done(`${head.slice(0, 10)}${!failed && changes.trim() ? ' with changes not committed' : ''}`));
 }));
 
+/**
+ * The folder a `--marketplace` value names, as a full path, or undefined when it names a Git source. A folder may be given
+ * by a relative path: one that says so (./market, ../market, ~/market) or one that is a marketplace folder here. Otherwise
+ * `acme/plugins` is the GitHub repository.
+ */
+async function folderGiven(source: string): Promise<string | undefined> {
+  const given = source.trim();
+  if (isFolder(given)) return resolve(given);
+  if (/^~([\\/]|$)/.test(given)) return resolve(homedir(), given.slice(2));
+  if (/^\.\.?([\\/]|$)/.test(given)) return resolve(given);
+  if (/^[\w.-]+@|:\/\//.test(given)) return undefined;
+  const here = resolve(given);
+  return (await exists(join(here, MANIFEST))) || (await exists(join(here, CODEX_MANIFEST))) ? here : undefined;
+}
+
 /** Copies a folder as it is (modes and links kept), without the .git folder at its top: the fetch's own, never content. */
 const copyTree = (from: string, to: string) => cp(from, to, { recursive: true, verbatimSymlinks: true, filter: source => resolve(source) !== resolve(from, '.git') });
 
-/** Why a plugin whose files aren't in the marketplace can't be fetched for packing, from its entry. */
+/** Why a plugin whose files aren't in the marketplace can't be packed, from its entry. */
 function whyNotFetched(plugin: CatalogPlugin): string {
-  const kind = text(record(plugin.entry?.source)?.source);
+  const source = record(plugin.entry?.source);
+  const kind = text(source?.source);
   if (typeof plugin.entry?.source === 'string') return `Its folder (${plugin.entry.source}) is not in the marketplace.`;
-  return plugin.from ? `Its files are kept elsewhere (${plugin.from.label}), in a form that can’t be fetched here.` : kind ? `Its files are kept elsewhere (${kind}), in a form that can’t be fetched here.` : 'Its entry doesn’t say where its files are.';
+  if ((kind === 'npm' || kind === 'pip') && text(source?.package)) return `Its files are ${kind === 'npm' ? 'an npm' : 'a pip'} package (${text(source?.package)}), which a build can’t carry.`;
+  return plugin.from ? `Its files are kept at ${plugin.from.label}, where a build can’t fetch them.` : 'Its entry doesn’t say where its files are.';
 }
 
 /**
@@ -115,7 +134,7 @@ function whyNotFetched(plugin: CatalogPlugin): string {
  */
 export async function packRelease({ source, out, work, sequence, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease } | { problem: string }> {
   const context: PluginContext = { home: work, dataDir: join(work, 'fetched'), binaries: {} };
-  const where = isFolder(source) ? resolve(source) : source.trim();
+  const where = (await folderGiven(source)) ?? source.trim();
   const catalog = await readCatalog(context, where);
   if (catalog.problem || !catalog.root) return { problem: `The marketplace (${source}) could not be read: ${catalog.problem ?? 'it has no files.'}` };
   const commit = await gitCommit(catalog.root);
@@ -129,7 +148,12 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
   const moved = new Map<string, string>();
   const unpackaged: BundleRelease['unpackaged'] = [];
   for (const plugin of catalog.plugins) {
-    if (plugin.folder) { if (!(await exists(plugin.folder))) unpackaged.push({ name: plugin.name, reason: whyNotFetched(plugin) }); continue; }
+    if (plugin.folder) {
+      // A folder that is there but empty (a submodule, which a fetch leaves empty) holds nothing to install.
+      const files = await readdir(plugin.folder).catch(() => undefined);
+      if (!files?.length) unpackaged.push({ name: plugin.name, reason: files ? `Its folder (${plugin.entry?.source}) is empty in the marketplace; a plugin kept as a Git submodule isn’t fetched.` : whyNotFetched(plugin) });
+      continue;
+    }
     if (!plugin.remote) { unpackaged.push({ name: plugin.name, reason: whyNotFetched(plugin) }); continue; }
     const copy = await fetchPlugin(context, plugin.remote);
     if ('problem' in copy) { unpackaged.push({ name: plugin.name, reason: `Its files couldn’t be fetched from ${plugin.from?.label ?? plugin.remote.url}: ${copy.problem}` }); continue; }
@@ -181,6 +205,9 @@ export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: 
   for (const [option, file] of [['--app-icon', inputs.appIcon], ['--marketplace-logo', inputs.marketplaceLogo]] as const) {
     if (file && !(await stat(file).then(found => found.isFile(), () => false))) throw new Error(`${option}: there is no file at ${file}.`);
   }
+  // Only a folder staged before (or an empty one) is cleared: any other folder is someone's own.
+  const there = await readdir(out).catch(() => [] as string[]);
+  if (there.length && !there.includes(CUSTOM_FILE)) throw new Error(`${out} holds other files. Stage into an empty folder, or one staged before.`);
   await rm(out, { recursive: true, force: true });
   await mkdir(out, { recursive: true });
   let release: BundleRelease | undefined;

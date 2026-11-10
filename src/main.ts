@@ -27,7 +27,7 @@ import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
-import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseLabel, type ActiveBundle } from './bundle.ts';
+import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -51,7 +51,8 @@ function trimLog() {
 const custom = readCustomBuildSync(__dirname);
 if (custom) {
   app.setName(custom.name);
-  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), custom.id));
+  // Named by its bundle id, which no other app's folder is (a build named after a company could otherwise land in that company's own app's folder).
+  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), custom.bundleId));
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 // Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
@@ -215,7 +216,7 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
   return { settings: preferences(), pruned };
 }
 const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(),
-  ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, release: releaseLabel(bundle.release) }) } : {}) });
+  ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
  * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
@@ -882,10 +883,11 @@ app.whenReady().then(async () => {
   void clearDraftFolders();
   // A bundled build unpacks the marketplace it carries before the window asks for it. What was in use stays if that fails.
   if (custom?.marketplace && !smoke) {
+    const began = Date.now();
     const opened = await openBundle(app.getPath('userData'), join(__dirname, CARRIED_FOLDER));
     bundle = opened.active;
     if (opened.problem) log(`bundle: ${opened.problem}`);
-    else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence})`);
+    else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
   }
   applyAppearance();
   await firstSignIn();
@@ -951,7 +953,7 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
-    bundled: () => (bundle && custom ? { source: bundle.folder, view: { app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`, release: releaseLabel(bundle.release), unpackaged: bundle.release.unpackaged } } : undefined),
+    bundled: () => (bundle && custom ? { source: bundle.folder, view: { app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`, release: releaseDate(bundle.release), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged } } : undefined),
   });
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
   handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')

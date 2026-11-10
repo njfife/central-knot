@@ -34,7 +34,7 @@ const HOME = join(scratch, 'home');
 // Where the build keeps its settings: beside the standard app's, under its own identity. On a Mac that is the account's own
 // Application Support folder whatever HOME says, so the build's folder there is removed before and after.
 const appData = process.platform === 'darwin' ? join(userInfo().homedir, 'Library/Application Support') : join(HOME, '.config');
-const dataDir = join(appData, ID);
+const dataDir = join(appData, `com.centralknot.custom.${ID}`);
 rmSync(dataDir, { recursive: true, force: true });
 const launched = new Set();
 process.on('exit', () => {
@@ -76,7 +76,7 @@ check('the app’s own words carry the build’s name', mainCode.includes(`Quit 
 check('the markers written into instruction files keep the product’s name', mainCode.includes('base instructions: start') && !mainCode.includes(`${NAME} base instructions`) && !mainCode.includes(`${NAME}: update`));
 check('report: identity', report.includes(`Identity: ${ID} (com.centralknot.custom.${ID})`), report);
 check('report: the plugins kept in the marketplace are packed', ['document-tools 1.2.0', 'issue-tracker 2.0.0', 'release-helper 0.4.1', 'starter-skills'].every(name => /Plugins packed \(\d\): (.*)/.exec(report)?.[1].includes(name)), report);
-check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are kept elsewhere \(npm: @example\/npm-thing\)/.test(report), report);
+check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are an npm package \(@example\/npm-thing\), which a build can’t carry\./.test(report), report);
 check('report: no update location and no feed are said', report.includes('App updates: not met.') && report.includes('Content feed: not met.'), report);
 // Whether the plugin kept on GitHub was fetched depends on the network: either way it must be accounted for.
 const sparkPacked = /Plugins packed \(\d\): .*spark/.test(report);
@@ -136,6 +136,7 @@ const rows = await a.run(`[...document.querySelectorAll('.plugin-row')].map(row 
 check('every listed plugin has a row', JSON.stringify(rows) === JSON.stringify(['document-tools', 'issue-tracker', 'npm-thing', 'release-helper', 'spark', 'starter-skills']), rows);
 check('a packed plugin says what it holds, read with the source gone', await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-holds')?.textContent`) === '2 skills');
 check('the plugin that couldn’t be packed can’t be chosen, and says why', await a.run(`(() => { const box = document.querySelector('[data-plugin="npm-thing"] .ov-cell button, [data-plugin="npm-thing"] .ov-cell [title]'); return (box?.getAttribute('title') ?? '') + '|' + (box?.getAttribute('aria-label') ?? ''); })()`).then(text => text.includes('This build doesn’t carry its files')), await a.run(`document.querySelector('[data-plugin="npm-thing"]').outerHTML.slice(0, 900)`));
+check('its row says it is not in this build, and leads to About', await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-left')?.textContent`) === 'Not in this build · see About');
 check('nor are its parts offered in any tool', await a.run(`document.querySelectorAll('[data-plugin="npm-thing"] .cell-parts-offer').length`) === 0);
 check('the Plugins page fits at 1280', await a.fits());
 await a.shot('plugins-1280');
@@ -146,8 +147,8 @@ await a.settle();
 await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
-check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*As of .+ \(Folder: market\)\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
-check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes('npm-thing') && text.includes('npm: @example/npm-thing')));
+check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*As of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
+check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
 check('About shows the marketplace’s README', await a.until(`document.querySelector('.plugin-readme-body')?.textContent.includes('What is inside')`));
 await a.shot('about-1280');
 for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
@@ -162,12 +163,14 @@ await a.size(1280, 800);
 
 await a.click('#nav-settings');
 const about = await a.run(`document.querySelector('#setting-build-hint')?.textContent ?? ''`);
-check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes('doesn’t update itself') && about.includes('It carries the marketplace Acme plugins') && about.includes('no content feed'), about);
+check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes('It doesn’t update itself.') && about.includes('It comes with the Acme plugins marketplace as of') && about.includes('changes only with a new build of Acme Knot'), about);
 check('Settings offers no updates from the standard app', await a.run(`!document.querySelector('#setting-updates') && !document.querySelector('#check-updates')`));
 await a.shot('settings-1280');
-await a.size(860, 560);
-check('Settings fits at 860', await a.fits());
-await a.shot('settings-860');
+for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+  await a.size(width, height);
+  check(`Settings fits at ${width}`, await a.fits());
+  await a.shot(`settings-${width}`);
+}
 check('no page error', a.errors.length === 0, a.errors);
 const before = statSync(marketFolder).ino;
 a.quit();

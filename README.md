@@ -106,7 +106,7 @@ A build made from a preview is offered newer previews and finals; one made from 
 
 ## Custom builds
 
-A custom build is Central Knot made by someone for their own group, under its own name. It installs beside the standard app and keeps its own settings (`~/Library/Application Support/<its id>/` on a Mac), so the two never share or overwrite each other's settings, and it never takes the standard app's updates. Settings › **This build** says what it is.
+A custom build is Central Knot made by someone for their own group, under its own name. It installs beside the standard app and keeps its own settings (`~/Library/Application Support/com.centralknot.custom.<its id>/` on a Mac), so the two never share or overwrite each other's settings, and it never takes the standard app's updates. Settings › **This build** says what it is.
 
 A **bundled build** also carries a marketplace, with every plugin's files inside the app. Whoever opens it needs no access to where the marketplace came from:
 
@@ -158,9 +158,9 @@ npm run package:mac -- --marketplace acme/plugins --app-name "Acme Knot" \
 
 | Input | What it sets |
 |---|---|
-| `--marketplace <owner/repo, Git URL or folder>` | The marketplace to carry. It is fetched with this computer's own Git sign-in, and every plugin's files are packed, including plugins the marketplace keeps in other Git repositories. |
+| `--marketplace <owner/repo, Git URL or folder>` | The marketplace to carry. A Git source is fetched with this computer's own Git sign-in; a folder is carried as it is on disk, uncommitted changes included. Every plugin's files are packed, including plugins the marketplace keeps in other Git repositories. |
 | `--app-name "<name>"` | The app's name, everywhere the app says it. Required: under its own name the app sits beside the standard one in Applications, where a second "Central Knot" would take the standard app's place. |
-| `--app-id <id>` | Its identity: the name of its settings folder, and its bundle id `com.centralknot.custom.<id>`. Made from the app's name when left out ("Acme Knot" is `acme-knot`). |
+| `--app-id <id>` | Its identity: its bundle id is `com.centralknot.custom.<id>`, which also names its settings folder. Made from the app's name when left out ("Acme Knot" is `acme-knot`). |
 | `--app-icon <file.png or file.icns>` | The app's icon (a 1024 by 1024 .png, or a Mac .icns), also shown in the sidebar. |
 | `--marketplace-name "<name>"` | The marketplace's name in the app. The tools still know it by the name in its `marketplace.json`. |
 | `--marketplace-logo <file.png, .svg or .jpg>` | Its picture in the app. |
