@@ -719,4 +719,4 @@ SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag 
 - **b148013:** the same for MCP servers and agents a tool has through a plugin (Claude Code and Copilot CLI).
 - **3420601:** only an item that is the plugin's counts as held through it: one Central Knot installed elsewhere as that plugin's part, or a skill whose SKILL.md is the same. An item that merely shares a name stays an ordinary item.
 
-**Validation on 3420601.** 352 unit tests. Linux e2e 401/401. Mac packaged e2e passed on 0c2c44e (CI run 42878348454) and is run again on this commit.
+**Validation on f910dfc** (with next at 87de0bc merged in). 354 unit tests. Linux e2e 408/408; Mac packaged e2e 503/503 (CI run 42881619568). The Mac count moves with how many crash rounds land mid-copy.
