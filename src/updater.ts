@@ -48,8 +48,8 @@ export interface UpdaterHost {
   queued<T>(work: () => Promise<T>): Promise<T>;
   pending(): PendingUpdate | undefined;
   savePending(pending: PendingUpdate | undefined): Promise<void>;
-  /** Marks the app as quitting, so closing its window really closes it. */
-  quitting(): void;
+  /** Marks the app as quitting, so closing its window really closes it; `false` takes that back when the restart didn’t happen. */
+  quitting(on: boolean): void;
 }
 
 /** The release tag recorded in the app at packaging (scripts/package-mac.mjs); none for a dev or ad hoc build. */
@@ -79,29 +79,46 @@ export function startUpdater(host: UpdaterHost) {
   const checks = () => view.shown && !!view.tag && view.reason?.key !== 'dev' && view.reason?.key !== 'untagged';
   const later = (ms: number) => { clearTimeout(timer); timer = setTimeout(() => void check(), ms); };
 
-  /** Asks for the releases and keeps the newest this build would update to. A failure is recorded, and tried again later. */
-  async function check(): Promise<void> {
-    if (!checks() || view.checking || view.step) return;
-    view.checking = true;
-    tell();
-    let failed = false;
-    try {
-      const response = await net.fetch(releasesUrl, { headers, signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) {
-        const limited = response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
-        throw Object.assign(new Error(`releases answered ${response.status}`), { status: response.status, limited });
-      }
-      view.available = newerRelease(await response.json(), view.tag!);
-      view.checked = { at: Date.now() };
-    } catch (error) {
-      failed = true;
-      host.log(`update check: ${error instanceof Error ? error.message : String(error)}`);
-      const { status, limited } = error as { status?: number; limited?: boolean };
-      view.checked = { at: Date.now(), failed: checkFailure({ status, limited }) };
+  /** Reads the releases and answers with the newest this build would update to, if any. */
+  async function newest(): Promise<UpdateRelease | undefined> {
+    const response = await net.fetch(releasesUrl, { headers, signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) {
+      const limited = response.status === 429 || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
+      throw Object.assign(new Error(`releases answered ${response.status}`), { status: response.status, limited });
     }
-    view.checking = false;
-    tell();
-    later(failed ? RETRY_MS : CHECK_EVERY_MS);
+    return newerRelease(await response.json(), view.tag!);
+  }
+
+  /** The check under way, so a click on Update during it waits for it rather than being dropped. */
+  let checkRun: Promise<void> | undefined;
+
+  /** Asks for the releases and keeps the newest this build would update to. A failure is recorded, and tried again later. */
+  function check(): Promise<void> {
+    if (!checks()) return Promise.resolve();
+    if (checkRun) return checkRun;
+    // During an update nothing is read, but the next check stays scheduled: a download that then fails must not end the checks.
+    if (view.step) { later(RETRY_MS); return Promise.resolve(); }
+    checkRun = (async () => {
+      view.checking = true;
+      tell();
+      let failed = false;
+      try {
+        view.available = await newest();
+        view.checked = { at: Date.now() };
+        // An earlier update's failure is old news once a check has gone through.
+        view.failed = undefined;
+      } catch (error) {
+        failed = true;
+        host.log(`update check: ${error instanceof Error ? error.message : String(error)}`);
+        const { status, limited } = error as { status?: number; limited?: boolean };
+        view.checked = { at: Date.now(), failed: checkFailure({ status, limited }) };
+      }
+      view.checking = false;
+      checkRun = undefined;
+      tell();
+      later(failed ? RETRY_MS : CHECK_EVERY_MS);
+    })();
+    return checkRun;
   }
 
   /** Downloads the zip into its own new folder, reporting progress; fails unless every byte the release lists arrived. */
@@ -169,10 +186,19 @@ export function startUpdater(host: UpdaterHost) {
 
   /** Downloads and prepares the newer release, then restarts into it unless the page holds it for something unsaved. */
   async function install(): Promise<void> {
-    const release = view.available;
-    if (!release || view.reason || view.step || view.checking) return;
+    if (!view.available || view.reason || view.step) return;
     Object.assign(view, { step: 'downloading', progress: 0, failed: undefined });
     tell();
+    await checkRun;
+    // The release is read again at the click: its zip may have been replaced, or the release withdrawn, since the last check.
+    // When that read fails (offline), the download itself says so.
+    try { view.available = await newest(); } catch (error) { host.log(`update: reading the release again: ${error instanceof Error ? error.message : String(error)}`); }
+    const release = view.available;
+    if (!release) {
+      Object.assign(view, { step: undefined, progress: undefined, failed: 'That release is no longer offered. Central Knot wasn’t changed.' });
+      tell();
+      return;
+    }
     const folder = await mkdtemp(join(app.getPath('temp') || tmpdir(), 'central-knot-update-'));
     let stage: 'download' | 'install' = 'download';
     try {
@@ -199,10 +225,14 @@ export function startUpdater(host: UpdaterHost) {
   async function restart(): Promise<void> {
     if (view.step !== 'ready') return;
     await host.queued(async () => {
-      host.quitting();
+      host.quitting(true);
       if (stub) app.quit(); else autoUpdater.quitAndInstall();
       await new Promise(done => setTimeout(done, 60_000));
+      // Still here: the restart didn't happen. The app goes back to running as before, and the update stays ready.
+      host.quitting(false);
       host.log('update: the app did not quit for the update within a minute');
+      view.failed = 'Couldn’t restart for the update. Quit Central Knot and open it again to finish it.';
+      tell();
     });
   }
 

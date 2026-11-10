@@ -26,10 +26,10 @@ if (release && !notarize) throw new Error('A release must be notarized; CK_NOTAR
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
 // The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
-// or the version tag on the commit being built (other tags, such as checkpoints, don't count). A build with neither never offers
+// or the highest version tag on the commit being built (other tags, such as checkpoints, don't count). A build with neither never offers
 // updates. A release must have one.
 const versionTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const tagOf = () => { try { return execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' }).split('\n').find(name => versionTag.test(name)) ?? ''; } catch { return ''; } };
+const tagOf = () => { try { return execFileSync('git', ['-c', 'versionsort.suffix=-', 'tag', '--points-at', 'HEAD', '--sort=-version:refname'], { encoding: 'utf8' }).split('\n').find(name => versionTag.test(name)) ?? ''; } catch { return ''; } };
 const tag = process.env.CK_RELEASE_TAG ?? tagOf();
 if (tag && !versionTag.test(tag)) throw new Error(`CK_RELEASE_TAG ${tag} isn’t a version tag like v0.5.0-preview.5.`);
 if (release && !tag) throw new Error('A release is built from its tag: tag the commit (or set CK_RELEASE_TAG), so the app can tell a newer release.');

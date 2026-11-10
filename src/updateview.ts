@@ -1,7 +1,7 @@
 // Updates on the page (updates.ts has the rules and words, updater.ts does the work): the status bar's version, which becomes
 // the Update button when a newer release is ready to install, and what the Settings row needs. Restarting is held, with the
 // reason on the button, while something typed isn't saved.
-import { announce, baseDraftTyped, rerender, toolDraftTyped } from './app.ts';
+import { announce, baseDraftTyped, rerender, showPage, toolDraftTyped } from './app.ts';
 import { h, icon } from './dom.ts';
 import { changesWaiting } from './matrix.ts';
 import { market } from './pluginstate.ts';
@@ -41,7 +41,7 @@ export function takeUpdates(view: UpdateView) {
     saidUpdated = true;
     announce(`Central Knot is now on ${tagWords(view.updated.tag)}.`, false, { label: 'Release notes', run: () => openPage(view.updated!.page) });
   }
-  if (view.failed && view.failed !== before?.failed) announce(view.failed);
+  if (view.failed && view.failed !== before?.failed) { announce(view.failed); updates.restarting = false; }
   if (view.step === 'ready' && before?.step !== 'ready') {
     const held = unsavedWork();
     if (held) announce(`The update is ready. ${held}`);
@@ -93,6 +93,13 @@ export function statusEnd(version: string): Node[] {
   const view = updates.view;
   const button = updateControl('update-button', 'status');
   if (button) return [button];
+  // A newer release this copy can't install itself: said here too, and Settings says why and links the release.
+  if (view?.shown && view.available && view.reason) {
+    const words = tagWords(view.available.tag);
+    return [h('button.status-update', { type: 'button', id: 'update-available', title: `${words} is available. ${view.reason.text} Open Settings for the release page.`,
+      onclick: () => { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); } },
+      icon('circle-arrow-down', 14), h('span.btn-label', {}, 'Update available'))];
+  }
   return [h('span.status-name', {}, 'Central Knot'), document.createTextNode(' '), h('span', { id: 'status-version' }, view ? buildWords(view) : version)];
 }
 

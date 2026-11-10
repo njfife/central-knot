@@ -804,8 +804,10 @@ app.whenReady().then(async () => {
   handleNow('settings:show-log', showLog);
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   updater = smoke ? undefined : startUpdater({
-    log, send: view => send('updates:changed', view), hasPage: () => !!window && !window.isDestroyed(), queued,
-    pending: () => appSettings.update, savePending: update => saveAppSettings({ update }), quitting: () => { quitting = true; },
+    log, send: view => send('updates:changed', view), hasPage: () => !!window && !window.isDestroyed(),
+    // The restart also waits for Central Knot's own settings file, which is written outside the queue.
+    queued: work => queued(async () => { await settingsWrites; return work(); }),
+    pending: () => appSettings.update, savePending: update => saveAppSettings({ update }), quitting: on => { quitting = on; },
   });
   const noUpdates = async (): Promise<UpdateView> => ({ shown: false, version: app.getVersion(), checking: false });
   handleNow('updates:view', () => updater?.view() ?? noUpdates());
