@@ -28,15 +28,6 @@ args = ["repl"]
 
 [profiles.work]
 model = "o3"
-
-# Codex's per-skill switches (Disable): arrays of tables, kept as they are
-[[skills.config]]
-path = "/x/skills/a/SKILL.md"
-enabled = false
-
-[[skills.config]]
-name = "b"
-enabled = false
 `;
 const massive = { type: 'stdio', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' } };
 const copilotOf = async (home: string) => JSON.parse(await readFile(join(home, '.copilot/mcp-config.json'), 'utf8')).mcpServers;
@@ -46,7 +37,9 @@ test('A managed Claude server reaches Copilot and Codex with values as-is; other
   const box = await sandbox();
   try {
     await writeFile(join(box.home, '.claude.json'), claudeJson({ massive }));
-    await writeFile(join(box.home, '.codex/config.toml'), codexToml);
+    // Codex's own skill switches ([[skills.config]] blocks) sit in the same file and never stop its servers being read.
+    const before = `${codexToml}\n[[skills.config]]\nname = "docs:pdf"\nenabled = false\n`;
+    await writeFile(join(box.home, '.codex/config.toml'), before);
     const view = await mcpView(box.context, tools);
     assert.deepEqual(view.servers.map(server => server.key), ['massive', 'node_repl']);
     assert.match(view.servers.find(server => server.key === 'node_repl')!.held ?? '', /ChatGPT desktop/);
@@ -54,7 +47,7 @@ test('A managed Claude server reaches Copilot and Codex with values as-is; other
     assert.equal(result.writes, 2, JSON.stringify(result.results));
     assert.deepEqual((await copilotOf(box.home)).massive, { type: 'local', command: 'npx', args: ['-y', 'massive'], env: { MASSIVE_TOKEN: 'secret-value-123' }, tools: ['*'] });
     const toml = await readFile(join(box.home, '.codex/config.toml'), 'utf8');
-    assert.ok(toml.startsWith(codexToml), 'everything already in config.toml stays byte for byte');
+    assert.ok(toml.startsWith(before), 'everything already in config.toml stays byte for byte');
     assert.ok(toml.includes('[mcp_servers.massive]\ncommand = "npx"\nargs = ["-y", "massive"]') && toml.includes('[mcp_servers.massive.env]\nMASSIVE_TOKEN = "secret-value-123"'));
     assert.equal((await applyMcp(box.context, tools, [])).writes, 0, 'a repeat writes nothing');
   } finally { await box.cleanup(); }

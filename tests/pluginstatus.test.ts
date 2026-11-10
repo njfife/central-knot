@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, limitNote, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
+import { blocked, comparableText, limitNote, offeredVersion, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
-import type { MarketplaceView, PluginsView } from '../src/types.ts';
+import type { MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
   states: { p: { 'claude-cli': { state: 'installed', path: '/x' }, 'codex-cli': { state: 'held', reason: 'other' } } } };
@@ -18,6 +18,22 @@ test('A tool can take a plugin only when its CLI is there, it is not held or ref
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);
   assert.match(unavailable({ ...view, clis: {} }, entry, 'p', 'copilot-cli') ?? '', /wasn’t found/);
+});
+
+test('Only a known version that names another release is a difference', () => {
+  const states = (claude?: string, codex?: string): MarketplaceView => ({ ...entry, states: { p: { 'claude-cli': { state: 'installed', path: '/x', version: claude }, 'codex-cli': { state: 'installed', path: '/y', version: codex } } } });
+  // Codex names its copy with a commit after the version; a "v" or build suffix is the same release.
+  assert.deepEqual(otherVersions(view, states('v1.2.0', '1.2.0-77c10e110b37'), 'p', '1.2.0'), []);
+  assert.deepEqual(otherVersions(view, states('1.1.0', '1.2.0+build.5'), 'p', '1.2.0'), [{ tool: 'claude-cli', version: '1.1.0' }]);
+  // A pre-release is another release; an unknown version on either side is not a difference.
+  assert.deepEqual(otherVersions(view, states('1.2.0-beta', undefined), 'p', '1.2.0'), [{ tool: 'claude-cli', version: '1.2.0-beta' }]);
+  assert.deepEqual(otherVersions(view, states('1.1.0'), 'p', undefined), []);
+  // The list row names tools by version, each version kept with the word before it.
+  assert.equal(otherVersionsLine(otherVersions(view, states('1.1.0', '1.1.0'), 'p', '1.2.0')), 'Claude Code and Codex have\u00a01.1.0');
+  // Once a plugin's own files are read, their version (plugin.json's) is the one offered, not the catalog entry's.
+  assert.equal(offeredVersion({ name: 'p', description: '', version: '1.0.0' }, { version: '1.1.0' } as PluginDetail), '1.1.0');
+  // A copy checked out with Windows line endings is the same text.
+  assert.equal(comparableText('---\r\nname: s\r\n'), comparableText('---\nname: s\n'));
 });
 
 test('A tool’s limits are named in a few words', () => {

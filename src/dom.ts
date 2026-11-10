@@ -1,4 +1,5 @@
 import { icons, type IconName } from './icons.ts';
+import { groupBy } from './model.ts';
 
 type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
@@ -230,3 +231,22 @@ export const runAfterLayout = (): void => { for (const step of layoutSteps) step
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */
 export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dismiss', title = label, look = '' }: { id?: string; label?: string; title?: string; look?: string } = {}) =>
   h(`button.band-dismiss${look}`, { type: 'button', id, 'aria-label': label, title, onclick }, icon('x', 12));
+
+/**
+ * Blocks showing a file's text as written, one per distinct text, for any kind of copy (a skill in each tool, a plugin's
+ * copy in the marketplace and in each tool). Texts are the same when `same` gives the same key (by default, exactly the
+ * same). `name` says who holds a block (given how many distinct texts there are); it shows above each block when the
+ * copies differ, or always with `named`. `warn` marks a block whose holders are the odd ones out. Ids are `${id}-0`, `-1`….
+ */
+export function fileBlocks<Copy extends { text: string }>(id: string, label: string, copies: Copy[], name: (holders: Copy[], distinct: number) => string,
+  { named = false, warn, same = text => text }: { named?: boolean; warn?: (holders: Copy[]) => boolean; same?: (text: string) => string } = {}): HTMLElement[] {
+  const distinct = groupBy(copies, copy => same(copy.text));
+  return [...distinct].map(([, holders], index) => {
+    const text = holders[0]!.text;
+    const who = name(holders, distinct.size);
+    const odd = warn?.(holders) ?? false;
+    return h('div.content-block', {},
+      (named || distinct.size > 1) && h(`p.content-owner${odd ? '.tone-warning' : ''}`, {}, odd ? icon('circle-alert', 12) : null, who),
+      h('pre.content.mono', { tabindex: '0', id: `${id}-${index}`, 'aria-label': `${label}, ${who}` }, text));
+  });
+}

@@ -511,7 +511,7 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
   const was = !!committedOf(skill.key).disabled?.includes(tool);
   // An older build: no new Disable, but a copy disabled there can still be enabled (its effect there isn't verified).
   if (!disabled && !was && skill.disableUnverified?.[tool]) return skill.disableUnverified[tool]!;
-  if (skill.disableUnverified?.[tool] && was) return disabled ? 'Disabled. Enable is offered here, though its effect on this build isn’t verified.' : 'Enabled again on Apply all (its effect on this build isn’t verified).';
+  if (skill.disableUnverified?.[tool] && was) return disabled ? 'Disabled. Turning it back on is still offered; its effect there isn’t verified.' : 'Enabled again on Apply all; its effect there isn’t verified.';
   if (disabled && skill.copies[tool] === undefined) return was ? `Gets a copy on Apply all, still disabled there from before: ${names[tool]} won’t load it.` : `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
   if (disabled && !was) return 'Disabled on Apply all.';
   // "Still synced" only where the skill really syncs to this tool: its box can be off while the copy stays disabled.

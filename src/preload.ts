@@ -43,5 +43,6 @@ const api: DesktopApi = {
   deleteProfile: (id, home) => ipcRenderer.invoke('profiles:delete', id, home),
   switchProfile: (id, home) => ipcRenderer.invoke('profiles:switch', id, home),
   onProfileSwitched: callback => { ipcRenderer.on('profile:switched', (_event, result) => callback(result)); },
+  setPluginSkill: (source, marketName, plugin, skill, tool, on, home) => ipcRenderer.invoke('plugins:skill', source, marketName, plugin, skill, tool, on, home),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

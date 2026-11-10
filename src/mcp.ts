@@ -91,7 +91,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   try { text = await readFile(file, 'utf8'); } catch (error) { return { entries: [], exists: false, problem: errorCode(error) === 'ENOENT' ? undefined : `${file} could not be read.` }; }
   try {
     if (tool === 'codex-cli') {
-      const tables = readTomlTables(text);
+      // `[[…]]` blocks (Codex's `[[skills.config]]`) are never servers.
+      const tables = readTomlTables(text).filter(table => !table.array);
       const entries: McpEntry[] = [];
       // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
       // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.
@@ -104,13 +105,11 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
           if (path.length === 1) { if (entry.value && typeof entry.value === 'object' && !Array.isArray(entry.value)) for (const name of Object.keys(entry.value)) inline.add(name); continue; }
           inline.add(path[1]);
         }
-        // An array of tables under a server (`[[mcp_servers.docs]]`) is a form Central Knot does not edit: the server is held.
-        if (table.array && table.path[0] === 'mcp_servers' && table.path.length >= 2) inline.add(table.path[1]);
         // Other dotted keys inside a server's own table (beyond `env.X` and `http_headers.X`, which are read) are a form Central
         // Knot does not edit: the server is held.
         if (table.path.length === 2 && table.path[0] === 'mcp_servers' && table.entries.some(entry => entry.keys.length > 1 && !(entry.keys.length === 2 && ['env', 'http_headers'].includes(entry.keys[0])))) inline.add(table.path[1]);
       }
-      for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers' && !candidate.array)) {
+      for (const table of tables.filter(candidate => candidate.path.length === 2 && candidate.path[0] === 'mcp_servers')) {
         const name = table.path[1];
         const value = (key: string) => table.entries.find(entry => entry.key === key)?.value;
         const subtables = tables.filter(candidate => candidate.path.length >= 3 && candidate.path[0] === 'mcp_servers' && candidate.path[1] === name);

@@ -13,11 +13,12 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
-import { appendTomlTable, eolOf, readTomlTables, removeTomlTables, setJsonMember, tableEnd, tomlValue, type TomlTable } from './textedit.ts';
+import { editTomlArray, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
+import { SKILL_SWITCH_TESTED_FROM } from './pluginstatus.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
 export type { SwitchTarget };
 import { problemText, toolName } from './words.ts';
-import { record, withoutBom } from './values.ts';
+import { compareVersions, record, withoutBom } from './values.ts';
 
 
 
@@ -29,18 +30,13 @@ export interface SwitchFile { tool: HarnessId; path: string; text: string; exist
  * (ENB-01, DET-03), while a copy already disabled shows as disabled and can be enabled again. An unknown build (no CLI found,
  * say only a desktop app) is not held back: the settings file is the tool's documented one either way.
  */
-const VERIFIED_FROM: Record<HarnessId, string> = { 'claude-cli': '2.1.311', 'copilot-cli': '1.0.107', 'codex-cli': '0.142.3', 'pi-cli': '1.5.0' };
+const VERIFIED_FROM: Record<HarnessId, string> = { 'claude-cli': '2.1.311', 'pi-cli': '1.5.0', ...SKILL_SWITCH_TESTED_FROM } as Record<HarnessId, string>;
 
 /** Why a new Disable isn't offered for this build of a tool, if it isn't. */
 export function unverifiedBuild(tool: HarnessId, version: string | undefined): string | undefined {
   if (!version) return undefined;
-  const numbers = (value: string) => value.split(/[.+-]/).slice(0, 3).map(Number);
-  const [have, floor] = [numbers(version), numbers(VERIFIED_FROM[tool])];
-  for (let index = 0; index < 3; index++) {
-    if (have[index] > floor[index]) return undefined;
-    if (have[index] < floor[index]) return `Disable is verified from version ${VERIFIED_FROM[tool]}; this is ${version}. Update it to use Disable here.`;
-  }
-  return undefined;
+  // Said like a plugin skill's switch (pluginstatus.ts untestedBuild).
+  return compareVersions(version, VERIFIED_FROM[tool]) < 0 ? `Not verified on this build of ${toolName(tool)} (${version}): Disable is verified from ${VERIFIED_FROM[tool]}.` : undefined;
 }
 
 /** The file that holds a tool's skill switches. */
@@ -55,7 +51,7 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const reason = errorCode(error) === 'CK_FORM' ? 'lists skill rules in a form Central Knot doesn’t edit.' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
+    const reason = errorCode(error) === 'CK_FORM' ? 'writes skills.config as a value, a form Central Knot doesn’t edit.' : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
     return { tool, path, text, exists: true, problem: { file: path, reason } };
   }
 }
@@ -122,27 +118,49 @@ function parse(tool: HarnessId, text: string): ParsedSwitches {
 }
 
 /**
- * Codex's `[[skills.config]]` entries in order (the last matching one wins). Throws on skill rules written any other way:
- * `skills = { config = … }`, `[skills]` with `config = …`, a `[skills.config]` table, or `skills.config = …` as a dotted key.
+ * Codex's `[[skills.config]]` entries in order (the last matching one wins), read with codexSkillSwitches like a plugin skill's.
+ * Throws on skill rules written as a value (`skills.config = …`, `[skills]` with `config = …`, `skills = { config = … }`) or
+ * as a `[skills.config]` table: forms a `[[skills.config]]` block can't be added to.
  */
 function codexRules(text: string): CodexRule[] {
   const tables = readTomlTables(text);
-  const isRule = (table: TomlTable) => table.array === true && table.path.length === 2 && table.path[0] === 'skills' && table.path[1] === 'config';
-  for (const table of tables) {
-    if (isRule(table)) continue;
-    if (table.path[0] === 'skills' && table.path[1] === 'config') throw formError();
-    for (const entry of table.entries) {
-      const path = [...table.path, ...entry.keys];
-      const inlineRules = path[0] === 'skills' && (path.length === 1 || path[1] === 'config');
-      if (inlineRules) throw formError();
-    }
-  }
-  return tables.filter(isRule).map(table => {
-    const value = (key: string) => table.entries.find(entry => entry.key === key)?.value;
-    return { table, path: value('path'), name: value('name'), enabled: value('enabled') };
+  const { switches, inline } = codexSkillSwitches(tables);
+  if (inline || tables.some(table => !table.array && table.path[0] === 'skills' && table.path[1] === 'config')) throw formError();
+  return switches.map(entry => {
+    const table = tables.find(candidate => candidate.array && candidate.start === entry.start)!;
+    return { table, path: entry.path, name: entry.name, enabled: table.entries.find(field => field.key === 'enabled')?.value };
   });
 }
 
+/**
+ * One entry of Codex's `skills.config` list in config.toml: a skill picked by `name` (a plugin's as `plugin:skill`) or by
+ * the `path` of its SKILL.md, turned off by `enabled = false`. Where several pick one skill, Codex lets the last decide.
+ */
+export interface CodexSkillSwitch { name?: string; path?: string; enabled: boolean; /** Where its `[[skills.config]]` block starts in the file; undefined for one written inline (`skills.config = [...]`), which Central Knot reads but never edits. */ start?: number }
+/**
+ * Codex's skill switches in a config.toml (its `tables`, from readTomlTables), in file order, and whether the list is
+ * written as a value (`inline`), even an empty one, where a `[[skills.config]]` block can't be added.
+ */
+export function codexSkillSwitches(tables: TomlTable[]): { switches: CodexSkillSwitch[]; inline: boolean } {
+  const switchOf = (fields: Record<string, TomlValue>, start?: number): CodexSkillSwitch =>
+    ({ name: typeof fields.name === 'string' ? fields.name : undefined, path: typeof fields.path === 'string' ? fields.path : undefined, enabled: fields.enabled !== false, start });
+  const found: CodexSkillSwitch[] = [];
+  let inline = false;
+  for (const table of tables) {
+    if (table.array && table.path.join('.') === 'skills.config') { found.push(switchOf(Object.fromEntries(table.entries.map(entry => [entry.key, entry.value])), table.start)); continue; }
+    if (table.array) continue;
+    // The same list written as a value: `skills.config = [{ … }]` at the top, or `config = [{ … }]` under `[skills]`.
+    for (const entry of table.entries) {
+      const path = [...table.path, ...entry.keys].join('.');
+      if (path !== 'skills' && path !== 'skills.config') continue;
+      // `skills = { config = [...] }` is the same list inside an inline table, which no `[[skills.config]]` block may extend.
+      const list = path === 'skills' ? record(entry.value)?.config : entry.value;
+      inline = true;
+      for (const item of Array.isArray(list) ? list : []) { const fields = record(item); if (fields) found.push(switchOf(fields as Record<string, TomlValue>)); }
+    }
+  }
+  return { switches: found, inline };
+}
 /** Pi's exact forms for a copy: relative to its agent folder (how `pi config` writes it) and absolute, for the file and its folder. */
 function piForms(target: SwitchTarget, config: string): { written: string; all: Set<string> } {
   const rel = relative(config, target.skillFile);
@@ -199,17 +217,14 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
  * matching rule wins. A file with Windows line ends gets them in what is added too.
  */
 function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarget, disabled: boolean): string {
-  const eol = eolOf(text);
-  /** The rule Central Knot writes for this copy, saying `enabled`. */
-  const ruleSaying = (enabled: boolean) => ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${enabled}`].join(eol);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const wantEnabled = !disabled;
-  // Ours to take out: our own rule saying the opposite of what is wanted now.
-  const staleRule = ruleSaying(!wantEnabled);
-  const isOurs = (rule: CodexRule) => text.slice(rule.table.start, tableEnd(text, rule.table)).trimEnd() === staleRule;
-  const ours = codexRules(text).filter(rule => isPathOf(rule, target.skillFile) && isOurs(rule));
-  let out = removeTomlTables(text, ours.map(rule => rule.table));
-  // A removed rule at the end of the file takes the blank line before it too; one in the middle took its own after it.
-  if (ours.some(rule => tableEnd(text, rule.table) === text.length)) out = out.replace(/(\r?\n)\r?\n$/, '$1');
+  // Ours to take out: our own rule (as editTomlArray writes it) saying the opposite of what is wanted now. Comment lines
+  // at a table's end sit above the next header and belong to what follows.
+  const staleRule = ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${!wantEnabled}`].join(eol);
+  const ownText = (table: TomlTable) => text.slice(table.start, table.end).replace(/(?:\r?\n[ \t]*(?:#[^\n]*)?)+$/, '').trimEnd();
+  const ours = new Set(codexRules(text).filter(rule => isPathOf(rule, target.skillFile) && ownText(rule.table) === staleRule).map(rule => rule.table.start));
+  let out = ours.size ? editTomlArray(text, ['skills', 'config'], table => ours.has(table.start)) : text;
   // The person's own rules for this path, from the last, so earlier offsets stay right.
   for (const rule of codexRules(out).filter(candidate => isPathOf(candidate, target.skillFile)).reverse()) {
     const entry = rule.table.entries.find(candidate => candidate.key === 'enabled');
@@ -221,5 +236,5 @@ function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarg
       : `${out.slice(0, headerEnd)}${value}${eol}${out.slice(headerEnd)}`;
   }
   if (stateIn(context, 'codex-cli', { rules: codexRules(out) }, target).disabled === disabled) return out;
-  return appendTomlTable(out, `${ruleSaying(wantEnabled)}${eol}`);
+  return editTomlArray(out, ['skills', 'config'], () => false, { path: target.skillFile, enabled: wantEnabled });
 }

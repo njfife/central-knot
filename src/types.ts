@@ -126,6 +126,8 @@ export interface DesktopApi {
   switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
   /** A switch made from the menu bar: what it did, so the page can show it with Undo. */
   onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
+  /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
+  setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -290,6 +292,8 @@ export interface CatalogPlugin {
   version?: string;
   /** The plugin's folder, when it sits inside the marketplace itself. Elsewhere its components are not known before install. */
   folder?: string;
+  /** Its folder is the marketplace's own root ("source": "./"), whose entry may list the plugin's skills. */
+  isMarketplaceRoot?: boolean;
   components?: Components;
   displayName?: string;
   category?: string;
@@ -326,7 +330,19 @@ export interface Catalog {
   copilotRefuses?: string;
 }
 
-export type InstallState = { state: 'installed'; path: string; live?: boolean } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
+/**
+ * One of an installed plugin's skills that a tool has turned off (ENB-06), by its name (SKILL.md's, or its folder's).
+ * `held`: why it can't be turned back on from here: the switch holding it off isn't this plugin's own.
+ */
+export interface SkillOff { skill: string; held?: string }
+
+export type InstallState = { state: 'installed'; path: string; live?: boolean;
+  /** The version the tool records for its copy, or its copy's manifest gives (see plugins.ts copyVersion). */
+  version?: string;
+  /** Where the tool has a switch for one skill of a plugin: the skills the installed copy holds, and those of them turned off. */
+  skills?: string[]; skillsOff?: SkillOff[];
+  /** Why none of its skills can be switched here, whatever the skill: the tool's config is written in a form Central Knot doesn't edit. */
+  switchesHeld?: string } | { state: 'not-installed' } | { state: 'not-known'; reason: string }
   /** The tool has a different marketplace under the same name: Central Knot neither reads nor changes its plugins. */
   | { state: 'held'; reason: string };
 
@@ -335,7 +351,7 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
@@ -363,8 +379,11 @@ export interface MarketplaceView {
   copilotRefuses?: string;
 }
 
-/** One named part of a plugin (a skill, command or agent) with what it says it does. */
-export interface NamedPart { name: string; description: string }
+/**
+ * One named part of a plugin (a skill, command or agent): what it says it does, its whole file (SKILL.md or NAME.md) as
+ * written, and where it sits in the plugin (`path`, the same in every copy of the plugin).
+ */
+export interface NamedPart { name: string; description: string; text: string; path: string }
 /** What a plugin holds, read from its files (catalogdetail.ts); the row counts come from the same read. */
 export interface PluginContents {
   skills: NamedPart[];
@@ -379,9 +398,21 @@ export interface PluginContents {
   lspServers: string[];
   /** A top-level bin/ folder (account routes refuse it). */
   bin: boolean;
+  /** Its version: its plugin.json's, else its marketplace entry's, as Claude Code reads them. */
+  version?: string;
 }
 /** A plugin's contents and README, read when its page opens; for a plugin kept elsewhere, from its own repository. */
-export interface PluginDetail extends PluginContents { readme?: string; problem?: string }
+export interface PluginDetail extends PluginContents {
+  readme?: string;
+  /** Why its files couldn't be read. */
+  problem?: string;
+  /** Whether the marketplace's own copy of its files was read; when not, its parts come only from the tools' copies. */
+  offered: boolean;
+  /** Each tool's installed copy, read from where that tool keeps it: its version and its parts with their files. */
+  installed?: Partial<Record<HarnessId, InstalledCopy>>;
+}
+/** What one tool has installed of a plugin, read from that tool's own copy. */
+export type InstalledCopy = Pick<PluginContents, 'skills' | 'commands' | 'agents' | 'version'>;
 
 export interface PluginsView {
   home: string;
@@ -393,6 +424,8 @@ export interface PluginsView {
   marketplaces: MarketplaceView[];
   /** Tools present only as a desktop app's bundled copy, with no CLI to run plugin commands. */
   desktopOnly?: HarnessId[];
+  /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
+  versions?: Partial<Record<HarnessId, string>>;
 }
 
 // ---------- MCP servers ----------

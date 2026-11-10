@@ -5,7 +5,7 @@ import { h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { queued, toggle } from './pluginplan.ts';
 import { clearNotice, market, openLink } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, stateOf, unavailable } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, stateOf, unavailable, versionDiffers } from './pluginstatus.ts';
 import type { HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
@@ -13,10 +13,11 @@ import { toolNames as names } from './words.ts';
 export const pluginTitle = (plugin: PluginView) => plugin.displayName ?? plugin.name;
 
 /**
- * One tool's box for one plugin: installed, not installed, chosen for Apply all, or not available, each saying why.
- * `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * One tool's box for one plugin: installed (with its version), not installed, chosen for Apply all, or not available,
+ * each saying why. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * `offered` is the version to compare with, when there is one (see versionToCompare).
  */
-export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number) {
+export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pcell-${marketIndex}-${plugin.name}-${tool}`;
   const working = market.working;
   if (working?.source === entry.source && working.plugin === plugin.name && working.tools.includes(tool)) {
@@ -42,7 +43,8 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
-    const text = `${name}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
+    const version = status.version ? ` ${status.version}${versionDiffers(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
+    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
     return box({ look: 'cell-synced.cell-on', state: 'installed', title: stuck ? `${text}. Can’t uninstall here: ${stuck}` : `${text}. Click to uninstall on Apply all.`,
@@ -62,7 +64,7 @@ const rendered = new Map<string, HTMLElement>();
  * A README as page content. Its opening title, a first paragraph that mostly repeats a description already on the page,
  * and what only repeats the parts the page lists (`parts`, see markdown.trimRepeats) are left out.
  */
-export function readme(body: string, name: string, descriptions: string[] = [], parts: NamedPart[] = []): HTMLElement {
+export function readme(body: string, name: string, descriptions: string[] = [], parts: Pick<NamedPart, 'name' | 'description'>[] = []): HTMLElement {
   const cacheKey = JSON.stringify([name, descriptions, parts, body]);
   const cached = rendered.get(cacheKey);
   if (cached) return cached;
@@ -71,6 +73,9 @@ export function readme(body: string, name: string, descriptions: string[] = [], 
   rendered.set(cacheKey, node);
   return node;
 }
+
+/** A note in the warning tone with its icon: a tool on another version, or a copy that differs. */
+export const versionNote = (text: string | Node, extra = '') => h(`span.plugin-version-differs${extra}`, {}, icon('circle-alert', 12), text);
 
 /** Parts joined with a quiet middle dot between them: "Version 1.2 · by Docs crew · productivity". */
 export const dotted = (parts: (string | Element)[]) => parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part]));
