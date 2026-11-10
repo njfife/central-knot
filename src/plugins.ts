@@ -9,7 +9,8 @@ import { pathBeside } from './platform.ts';
 import { configRoot, harnesses } from './harnesses.ts';
 import { MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { editTomlArray, readTomlTables, type TomlTable, type TomlValue } from './textedit.ts';
+import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
+import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
 import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
 import type { PluginTool } from './presence.ts';
 import { errorCode, writeFileChecked } from './share.ts';
@@ -309,35 +310,6 @@ async function readJson(path: string): Promise<Record<string, unknown> | undefin
   try { return parseObject(withoutBom(await readFile(path, 'utf8')).replace(/^\s*\/\/.*$/gm, '')); } catch { return undefined; }
 }
 const recordJson = (context: PluginContext, path: string) => once(context, `json:${path}`, () => readJson(path));
-/**
- * One entry of Codex's `skills.config` list in config.toml: a skill picked by `name` (a plugin's as `plugin:skill`) or by
- * the `path` of its SKILL.md, turned off by `enabled = false`. Where several pick one skill, Codex lets the last decide.
- */
-interface CodexSkillSwitch { name?: string; path?: string; enabled: boolean; /** Where its `[[skills.config]]` block starts in the file; undefined for one written inline (`skills.config = [...]`), which Central Knot reads but never edits. */ start?: number }
-/**
- * Codex's skill switches in a config.toml (its `tables`, from readTomlTables), in file order, and whether the list is
- * written as a value (`inline`), even an empty one, where a `[[skills.config]]` block can't be added.
- */
-function codexSkillSwitches(tables: TomlTable[]): { switches: CodexSkillSwitch[]; inline: boolean } {
-  const switchOf = (fields: Record<string, TomlValue>, start?: number): CodexSkillSwitch =>
-    ({ name: typeof fields.name === 'string' ? fields.name : undefined, path: typeof fields.path === 'string' ? fields.path : undefined, enabled: fields.enabled !== false, start });
-  const found: CodexSkillSwitch[] = [];
-  let inline = false;
-  for (const table of tables) {
-    if (table.array && table.path.join('.') === 'skills.config') { found.push(switchOf(Object.fromEntries(table.entries.map(entry => [entry.key, entry.value])), table.start)); continue; }
-    if (table.array) continue;
-    // The same list written as a value: `skills.config = [{ … }]` at the top, or `config = [{ … }]` under `[skills]`.
-    for (const entry of table.entries) {
-      const path = [...table.path, ...entry.keys].join('.');
-      if (path !== 'skills' && path !== 'skills.config') continue;
-      // `skills = { config = [...] }` is the same list inside an inline table, which no `[[skills.config]]` block may extend.
-      const list = path === 'skills' ? record(entry.value)?.config : entry.value;
-      inline = true;
-      for (const item of Array.isArray(list) ? list : []) { const fields = record(item); if (fields) found.push(switchOf(fields as Record<string, TomlValue>)); }
-    }
-  }
-  return { switches: found, inline };
-}
 type CodexTables = Record<'marketplaces' | 'plugins', Record<string, Record<string, TomlValue>>> & { skills: CodexSkillSwitch[]; skillsInline: boolean };
 /** Codex's `[marketplaces.NAME]` and `[plugins."ID"]` tables from its config.toml, by name, and its skill switches. Empty when it can't be read. */
 const codexTables = (context: PluginContext, root: string) => once(context, `codex:${root}`, async (): Promise<CodexTables> => {
