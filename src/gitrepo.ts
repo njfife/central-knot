@@ -38,6 +38,9 @@ type Unfinished = Record<string, {
   here?: string;
   /** Left because Automatic sync was off (an MCP server's or agent's deletion), so it can go once sync is on. */
   waitedForSync?: true;
+  /** Left because it was held (its copy here unreadable, no tool to take it, a fault in the repo's file): while that lasts, the row
+   * says so in that cause's own words; once it is gone, `reason` is out of date and not shown. */
+  heldFor?: true;
 }>;
 
 interface RepoState {
@@ -245,14 +248,32 @@ async function readSideOnce(dir: string, treeish: string, withBase: boolean): Pr
   return side;
 }
 
+// ---------- Why an item can't move, said once ----------
+
+/** Said when copies here differ and sync hasn't settled which is the item yet (Sync off, say): it waits rather than guess. */
+const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.';
+/** Said of a Managed item none of whose copies here can stand for it: each is turned off for it, unreadable just now, or (an agent) one a tool gets one-way and was edited there. */
+const NO_STANDING_COPY = 'No copy here can stand for it just now: each is turned off for it, can’t be read, or was edited in a tool that gets it one-way.';
+/** Said of an item sync still manages but no tool here shows right now (unreadable, or its folder away). */
+const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is away). If it was deleted, Push sends that once sync has recorded it.';
+/** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
+const CLAUDE_ONLY = 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
+/** Said of an MCP server's deletion only Claude Code's settings could make here. */
+const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
+/**
+ * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
+ * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
+ */
+const DELETION_WAITS = 'Its deletion from the repo waits for Automatic sync: turn it on, then Pull again.';
+/** Said of a row the last Pull left while it was held, once what held it has gone (it reads again, a tool now takes it, the repo's file is fixed). */
+const NOW_FREE = 'What kept it out at the last Pull has gone: Pull brings it in now.';
+
 // ---------- The Managed set here, written into the clone ----------
 
 /** Which tool Pull writes first, and whose copy stands for an item: the tools' own order, Claude Code first (it takes any skill or
  * agent as written). Sync ranks competing edits in an order of its own (mcp.ts, agents.ts); this only picks among equals. */
 const byPreference = (first: HarnessId, second: HarnessId) => mcpTools.indexOf(first) - mcpTools.indexOf(second);
 
-/** Said when copies here differ and sync hasn't settled which is the item yet (Sync off, say): it waits rather than guess. */
-const UNSETTLED = 'Its copies here differ and haven’t synced yet. Turn on Automatic sync, or use Sync once on its page, then click Refresh.';
 
 /**
  * Which tool's copy stands for a Managed item here, among the tools it syncs to, or why none does: an edit waiting to spread when
@@ -384,10 +405,6 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   return written;
 }
 
-/** Said of a Managed item none of whose copies here can stand for it: each is turned off for it, unreadable just now, or (an agent) one a tool gets one-way and was edited there. */
-const NO_STANDING_COPY = 'No copy here can stand for it just now: each is turned off for it, can’t be read, or was edited in a tool that gets it one-way.';
-/** Said of an item sync still manages but no tool here shows right now (unreadable, or its folder away). */
-const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is away). If it was deleted, Push sends that once sync has recorded it.';
 
 /**
  * Items sync still records as Managed that weren't written: not found by discovery (a SKILL.md that won't parse, a folder away) or
@@ -469,7 +486,8 @@ const same = (first?: SideItem, second?: SideItem) => first?.id === second?.id;
 const editedSince = (left: Unfinished[string], atHere?: SideItem) => left.here !== undefined && left.here !== atHere?.id;
 /** Whether the repo has a change to this item that hasn't come in yet: made since the base, or left by the last Pull. */
 const repoChangeWaits = (sides: Pick<Sides, 'base' | 'latest'>, unfinished: Unfinished, key: string) => !same(sides.base.get(key), sides.latest.get(key)) || !!unfinished[key];
-const changeFrom = (from?: SideItem, to?: SideItem): RepoChange['change'] => (!from ? 'added' : !to ? 'removed' : 'changed');
+/** What happened to an item between two sides: gone from the second is a removal (also when neither has it: a deletion kept waiting). */
+const changeFrom = (from?: SideItem, to?: SideItem): RepoChange['change'] => (!to ? 'removed' : !from ? 'added' : 'changed');
 
 /**
  * What Pull does with an incoming row, which Pull itself and the page both read: `waits` (a deletion that needs Automatic sync, which
@@ -490,10 +508,11 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
   const incoming: RepoChange[] = [];
   const outgoing: RepoChange[] = [];
   const { base, latest, here, unsent } = sides;
-  for (const key of new Set([...base.keys(), ...latest.keys(), ...here.keys()])) {
+  // Unsent keys too: one whose deletion in the repo waits is in no side once the base has moved past it.
+  for (const key of new Set([...base.keys(), ...latest.keys(), ...here.keys(), ...unsent.keys()])) {
     const [atBase, inRepo, atHere] = [base.get(key), latest.get(key), here.get(key)];
-    // An item that can't be sent from here is listed among what goes out, below, with why. If the repo changed it too, that change
-    // waits as well, listed coming in: Pull won't take it while this computer's copy can't be read, and keeps it for later.
+    // An item that can't be sent from here goes on exactly one list, held, with why: coming in when the repo has a change to it
+    // waiting (Pull won't take it while this computer's copy can't be read, and keeps it for later), else going out (below).
     if (unsent.has(key)) {
       const { item, reason } = unsent.get(key)!;
       const shown = inRepo ?? atBase ?? item;
@@ -509,7 +528,7 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     else if (unfinished[key]) {
       const editedHere = editedSince(unfinished[key], atHere);
       if (editedHere && atHere && !inRepo) outgoing.push({ ...row, change: 'added', keptHere: true });
-      else incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].reason, retry: true, alsoHere: editedHere ? (atHere ? 'changed' : 'removed') : undefined });
+      else incoming.push({ ...row, change: changeFrom(atHere, inRepo), held: unfinished[key].heldFor ? NOW_FREE : unfinished[key].reason, retry: true, alsoHere: editedHere ? (atHere ? 'changed' : 'removed') : undefined });
     }
     else if (same(atHere, atBase)) incoming.push({ ...row, change: changeFrom(atBase, inRepo), alsoHere: !atHere && sides.unmanaged?.has(key) ? 'unmanaged' : undefined });
     else if (same(inRepo, atBase)) outgoing.push({ ...row, change: changeFrom(atBase, atHere) });
@@ -519,16 +538,25 @@ export function classify(sides: Pick<Sides, 'base' | 'latest' | 'here' | 'unsent
     else incoming.push({ ...row, change: changeFrom(atBase, inRepo), alsoHere: atHere ? 'changed' : 'removed' });
   }
   for (const [key, { item, reason }] of unsent) if (!repoChangeWaits(sides, unfinished, key)) outgoing.push({ key, kind: item.kind, name: item.name, change: latest.has(key) ? 'changed' : 'added', held: reason });
-  for (const row of incoming) {
-    // An MCP server with no tool here to take it can't come in at all, said before Pull rather than found by it.
-    if (row.kind === 'mcp' && sides.noServerTaker && (!row.held || row.retry)) { row.held = row.change === 'removed' ? CLAUDE_ONLY_REMOVAL : CLAUDE_ONLY; row.retry = undefined; }
-    // An MCP server's or agent's deletion Pull could make (not held, or left by the last Pull): it waits while sync is off, and one
-    // that waited says so once sync is on.
-    if (row.change === 'removed' && (row.kind === 'mcp' || row.kind === 'agent') && (!row.held || row.retry)) row.sync = !syncOn ? 'waits' : unfinished[row.key]?.waitedForSync ? 'ready' : undefined;
-    row.pull = pullOf(row);
-  }
   const order = (first: RepoChange, second: RepoChange) => first.kind.localeCompare(second.kind) || first.name.localeCompare(second.name);
-  return { incoming: incoming.sort(order), outgoing: outgoing.sort(order) };
+  return { incoming: incoming.map(row => settleIncoming(row, sides, unfinished, syncOn)).sort(order), outgoing: outgoing.sort(order) };
+}
+
+/**
+ * The finished incoming row, from what classify found and the conditions here: an MCP server no tool here takes can't come in (said
+ * before Pull, not found by it); an MCP server's or agent's deletion waits while Automatic sync is off, and one that waited says so
+ * once it is on; then what Pull does with it (pullOf).
+ */
+function settleIncoming(row: RepoChange, sides: Pick<Sides, 'noServerTaker'>, unfinished: Unfinished, syncOn: boolean): RepoChange {
+  // Pull could act on it: not held, or held only until the last Pull's reason is tried again.
+  const pullCouldAct = !row.held || !!row.retry;
+  if (row.kind === 'mcp' && sides.noServerTaker && pullCouldAct) {
+    return { ...row, held: row.change === 'removed' ? CLAUDE_ONLY_REMOVAL : CLAUDE_ONLY, retry: undefined, pull: 'stuck' };
+  }
+  const deletionNeedingSync = pullCouldAct && row.change === 'removed' && (row.kind === 'mcp' || row.kind === 'agent');
+  const sync = !deletionNeedingSync ? undefined : !syncOn ? 'waits' as const : unfinished[row.key]?.waitedForSync ? 'ready' as const : undefined;
+  const settled: RepoChange = { ...row, sync };
+  return { ...settled, pull: pullOf(settled) };
 }
 
 // ---------- View ----------
@@ -658,14 +686,6 @@ const notIn = (item: string, message: string): DestinationResult => ({ item, out
 /** A write into the first tool that didn't happen: changed just now (left as it is), or any other failure, in plain words. */
 const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: unknown) => notIn(change.name, errorCode(error) === 'CK_CHANGED'
   ? `${harnesses[tool].name}’s ${noun} changed just now, so it was left as it is. Pull again.` : `Could not write ${harnesses[tool].name}’s ${noun}: ${plainError(error)}`);
-/** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
-const CLAUDE_ONLY = 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
-const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
-/**
- * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
- * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
- */
-const DELETION_WAITS = 'Its deletion from the repo waits for Automatic sync: turn it on, then Pull again.';
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
 /**
@@ -949,13 +969,16 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
     const results: DestinationResult[] = [];
     const unfinished: Unfinished = {};
     // What this computer had, to tell an edit made since; when nothing here could be read, the last synced state (the base) stands in.
-    const unfinish = (key: string, reason: string, waitedForSync?: true) => {
-      unfinished[key] = { reason, here: sides.here.get(key)?.id ?? sides.base.get(key)?.id, waitedForSync };
+    // What this computer had: its copy now; else what was recorded when it was first left (an unreadable copy's id isn't known); on
+    // a first Pull with nothing readable here, nothing is known, and the repo's version comes in with History keeping yours.
+    const unfinish = (key: string, reason: string, flags: Pick<Unfinished[string], 'waitedForSync' | 'heldFor'> = {}) => {
+      const earlier = state.unfinished?.[key];
+      unfinished[key] = { reason, here: sides.here.get(key)?.id ?? (earlier ? earlier.here : sides.base.get(key)?.id), ...flags };
     };
-    // A repo change held for a reason here (this computer can't read its copy, no tool takes it) isn't taken, and isn't lost: it is
-    // kept as unfinished, so once the base moves on it still reads as the repo's change (never as one made here, which the next
-    // Push would send), and comes in once the reason goes. A fault in the repo's own file keeps its row by itself.
-    for (const change of incoming) if (change.pull === 'stuck' && !sides.latest.get(change.key)?.problem) unfinish(change.key, change.held!);
+    // A held repo change (this computer can't read its copy, no tool takes it, the repo's file has a fault) isn't taken, and isn't
+    // lost: it is kept as unfinished with what this computer had, so once the base moves on it still reads as the repo's change
+    // (never as one made here, which the next Push would send), and comes in once the cause goes.
+    for (const change of incoming) if (change.pull === 'stuck') unfinish(change.key, change.held!, { heldFor: true });
     const firstWrites: FirstWrite[] = [];
     const waitsForClaude: string[] = [];
     const made = new Set<string>();
@@ -982,7 +1005,7 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
           outcome = outcome.filter(result => !(result.harness === 'claude-cli' && result.outcome === 'held'));
         }
         const stuck = outcome.find(result => result.outcome === 'held' && !result.harness) ?? outcome.find(result => result.outcome === 'failed');
-        if (stuck) unfinish(change.key, stuck.message, change.pull === 'waits' || undefined);
+        if (stuck) unfinish(change.key, stuck.message, { waitedForSync: change.pull === 'waits' || undefined });
         results.push(...outcome);
       }
     } finally { await tellHistory(context, made, firstWrites); }

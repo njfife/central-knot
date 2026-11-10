@@ -487,6 +487,9 @@ test('classify: an edit in the repo brings back an item removed here; an edit he
   assert.equal(classify(removed, {}, true).incoming[0].sync, undefined);
   const leftWaiting = { ...removed, base: new Map() };
   assert.equal(classify(leftWaiting, { 'agent:planner': { reason: 'waits', here: 'a', waitedForSync: true } }, true).incoming[0].sync, 'ready');
+  // A repo deletion of an item this computer can't read, kept by the last Pull: still listed as a removal waiting, never lost.
+  const unread = { base: new Map(), latest: new Map(), here: new Map(), unsent: new Map([['skill:review', { item: item('x'), reason: 'unreadable' }]]) };
+  assert.deepEqual(classify(unread, { 'skill:review': { reason: 'unreadable', heldFor: true } }).incoming.map(row => [row.change, row.pull]), [['removed', 'stuck']]);
 });
 
 test('sourceTool: the copy that stands for an item is a full one before a one-way one, never one edited where it is one-way, and none when the edits disagree', () => {
