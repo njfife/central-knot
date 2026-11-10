@@ -1,15 +1,13 @@
 // Instructions: each tool's own user-wide instruction file, viewed and edited in place (INS-01, INS-02).
 // A save is a checked write of one file: it must still hold what the editor opened, the text it replaces is kept first, and every
 // earlier version can be put back. Nothing here deletes or empties a file, and no project or workspace file is read or written.
-import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
 import { isPresent } from './presence.ts';
-import { storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
+import { sha256, storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
 /** Every file a save can write in a tool's folder. */
 export const instructionFiles: Record<HarnessId, string[]> = {
@@ -69,7 +67,7 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
     if (snapshot.harness === 'claude-cli' && text && /^@\S/m.test(text)) notes.push('Lines starting with @ import other files. Those files are not shown or changed here.');
-    files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: text === undefined ? '' : sha(text), readers, notes, nextStep: 'Start a new session to use the change.', versions: await versions(context.home, snapshot.harness, text ?? '') });
+    files.push({ tool: snapshot.harness, path, exists: text !== undefined, text: text ?? '', hash: text === undefined ? '' : sha256(text), readers, notes, nextStep: 'Start a new session to use the change.', versions: await versions(context.home, snapshot.harness, text ?? '') });
   }
   return files;
 }
@@ -83,12 +81,12 @@ export async function saveInstruction(context: ShareContext, snapshots: Snapshot
   if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
   const { path } = await bind(tool, snapshot.root);
   const current = await readText(path);
-  if ((current === undefined ? '' : sha(current)) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
+  if ((current === undefined ? '' : sha256(current)) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };
   if (current === text) return { saved: false };
   if (current !== undefined) {
     const folder = versionsFolder(context.home, tool);
     await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, `${Date.now()}-${sha(current).slice(0, 12)}.md`), current, { flag: 'wx' });
+    await writeFile(join(folder, `${Date.now()}-${sha256(current).slice(0, 12)}.md`), current, { flag: 'wx' });
   }
   await mkdir(dirname(path), { recursive: true });
   try { await writeFileChecked(path, text, current); }

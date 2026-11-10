@@ -4,11 +4,11 @@
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
 import { withoutBom } from './values.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { configRoot, harnessIds, harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
@@ -55,8 +55,9 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
   }
 }
 
-const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
-export const serverHash = (server: NeutralServer) => createHash('sha256').update(JSON.stringify(canonical(server))).digest('hex');
+/** A value with object keys sorted (and undefined left out), so the same settings hash the same however they were written. */
+export const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
+export const serverHash = (server: NeutralServer) => sha256(JSON.stringify(canonical(server)));
 
 const strings = (value: unknown): Record<string, string> | undefined => (value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) : undefined);
 const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? value.map(String) : undefined);
@@ -69,7 +70,7 @@ function hostBound(name: string, server: NeutralServer): string | undefined {
   return undefined;
 }
 
-function fromJson(name: string, tool: HarnessId, file: string, raw: Record<string, unknown>): McpEntry {
+export function fromJson(name: string, tool: HarnessId, file: string, raw: Record<string, unknown>): McpEntry {
   const type = String(raw.type ?? (raw.url ? 'http' : 'stdio'));
   const server: NeutralServer = {
     transport: type === 'sse' ? 'sse' : type === 'http' || type === 'streamable-http' ? 'http' : 'stdio',
@@ -178,7 +179,7 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
  * Rereads the file, checks the entry is still what was decided on, then edits only that entry (FIL-02). The write itself refuses
  * if the file changed after this read, so a setting saved meanwhile (even an unrelated one) is never lost.
  */
-async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>): Promise<string | undefined> {
+export async function editEntry(context: ShareContext, tool: HarnessId, name: string, expected: string | undefined, server: NeutralServer | undefined, extras?: Record<string, unknown>): Promise<string | undefined> {
   const file = mcpFile(context, tool);
   const now = await readTool(context, tool);
   if (now.problem) return now.problem;
@@ -209,14 +210,14 @@ async function recoverSettings(context: ShareContext, tool: HarnessId) {
  * settings (a Codex `enabled = false`, a timeout), so Restore puts each tool's entry back as it was. Never pruned.
  */
 const keptBase = (context: ShareContext, name: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name));
-async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
+export async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
   const hash = serverHash(server);
   const path = join(keptBase(context, name), `${hash}.json`);
   try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
   if (!entry) return undefined;
   const text = `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`;
   // The latest settings for this version, and an unchanging copy History can name, so a later version never overwrites an older one.
-  const ref = `${entry.tool}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
+  const ref = `${entry.tool}-${sha256(text).slice(0, 16)}`;
   const latest = join(keptBase(context, name), hash, `${entry.tool}.json`);
   if ((await readFile(latest, 'utf8').catch(() => undefined)) !== text) await writeDurably(latest, text);
   try { await stat(join(keptBase(context, name), hash, `${ref}.json`)); } catch { await writeDurably(join(keptBase(context, name), hash, `${ref}.json`), text); }
@@ -225,7 +226,7 @@ async function keep(context: ShareContext, name: string, server: NeutralServer, 
 async function keptExtras(context: ShareContext, name: string, hash: string, ref: string): Promise<Record<string, unknown> | undefined> {
   try { return JSON.parse(await readFile(join(keptBase(context, name), hash, `${ref}.json`), 'utf8')).extras; } catch { return undefined; }
 }
-async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
+export async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
   try {
     const server = JSON.parse(await readFile(join(keptBase(context, name), `${hash}.json`), 'utf8'));
     const extras: Partial<Record<HarnessId, Record<string, unknown>>> = {};
@@ -254,7 +255,7 @@ async function inspectMcpRecord(home: string): Promise<{ record?: McpRecord; pro
     return validMcpItems(record?.items) ? { record: record! } : damaged;
   } catch { return damaged; }
 }
-async function readMcpRecord(home: string): Promise<McpRecord> {
+export async function readMcpRecord(home: string): Promise<McpRecord> {
   return (await inspectMcpRecord(home)).record ?? { formatVersion: MCP_FORMAT_VERSION, items: {} };
 }
 const saveMcpRecord = (home: string, record: McpRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);

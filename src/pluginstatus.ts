@@ -1,9 +1,16 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
+import { takesPlugins } from './presence.ts';
+
+/**
+ * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
+ * Copilot CLI when their plugin route is blocked here. Claude Code always takes the plugin itself.
+ */
+export const partsTools: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -16,6 +23,7 @@ export const heldReason = (tool: HarnessId, marketName: string, other: string) =
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
+  if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
@@ -29,6 +37,7 @@ export const installed = (entry: MarketplaceView, plugin: string, tool: HarnessI
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.
  */
 export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   return state.state === 'installed' ? undefined : blocked(view, entry, tool);
@@ -44,6 +53,77 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
   if (!view.canWrite) return PREVIEW_ONLY;
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
+
+/** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
+export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
+
+/**
+ * Whether a tool is one that would take this plugin's parts, whatever they are: it takes parts, has none of this plugin's
+ * yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
+ * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
+ */
+export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
+  if (!partsTools.includes(tool) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
+}
+
+/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents). Unknown counts as yes. */
+export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+
+/**
+ * Whether this plugin's parts can go into this tool as separate items, or are there already (then they can always be
+ * updated or removed, even once the plugin could go there itself).
+ */
+export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
+  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
+}
+
+/**
+ * Why a tool takes this plugin's parts rather than the plugin, short, for one sentence about several tools: [one tool,
+ * several tools]. "Pi takes no plugins", "Copilot CLI and Codex have no command-line tool here".
+ */
+export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
+  if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
+  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
+  // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
+  return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
+}
+
+/**
+ * The same part, by each kind's own rule: skill folders ignore case (as macOS and Windows do), agents match as the Agents
+ * page keys them (NFC, ignoring case), MCP servers are keys in a settings file and match exactly.
+ */
+export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>): boolean {
+  if (first.kind !== second.kind) return false;
+  if (first.kind === 'mcp') return first.name === second.name;
+  return first.name.normalize('NFC').toLowerCase() === second.name.normalize('NFC').toLowerCase();
+}
+
+/** Which page lists each kind of part, and the kind each page lists. */
+export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
+export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
+
+/** Each kind of part in words: [one, several]. */
+export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
+
+/**
+ * Where a tool stands with this plugin's parts, for the box, the key and the status line alike: they can go in
+ * (`offer`), they are there (`installed`), or they are there and the plugin has changed since (`changed`). Undefined
+ * when parts aren't a matter for this tool.
+ */
+export function partsMark(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): 'offer' | 'installed' | 'changed' | undefined {
+  if (!partsOffer(view, entry, plugin, tool, components)) return undefined;
+  const parts = partsOf(entry, plugin, tool);
+  return parts?.changed ? 'changed' : parts ? 'installed' : 'offer';
+}
+
+/** "2 skills · 1 MCP server", from parts as recorded. */
+export function partsSummary(items: PartsState['items'], separator = ' · '): string {
+  return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
+}
+
+/** "version 1.2", or nothing when the catalog gave none. */
+export const versionWord = (version?: string) => (version ? `version ${version}` : '');
 
 /**
  * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
@@ -121,7 +201,7 @@ export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourc
 
 /** Tools that can still take this plugin: available there and not installed yet. */
 export const toolsWithoutPlugin = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
-  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
+  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool) && !partsOf(entry, plugin, tool));
 
 /**
  * The parts that won't fully work in a tool, short, in the words "In each tool" uses up to its colon: "MCP servers may

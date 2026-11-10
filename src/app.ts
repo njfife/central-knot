@@ -123,7 +123,7 @@ const focusById = (id?: string | null) => (id ? document.getElementById(id) : nu
  * page follows: a page whose kind is no longer here gives way to the Overview, saying why, and a page with its own data
  * reads it again (unless `reload` is false: the caller reads it itself).
  */
-function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
+export function setHome(view: HomeView | null | undefined, { reload = true } = {}): void {
   if (!view) return;
   const before = state.home ? homeTools().join() : undefined;
   state.home = view;

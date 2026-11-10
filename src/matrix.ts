@@ -4,18 +4,60 @@
 import { brandMark } from './brand.ts';
 import { DAY_MS } from './model.ts';
 import { kindNouns } from './presence.ts';
-import { andList, capitalToolsPhrase, orList, problemText, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, capitalToolsPhrase, orList, problemText, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { saidInStatusBar, tell, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
+import type { Change, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
+import { market } from './pluginstate.ts';
+import { pluginKey } from './pluginplan.ts';
+import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { folded, lineDiff } from './diff.ts';
 import { plural } from './model.ts';
 import { planAdd as planAddPure, syncingTools, withBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
+
+/**
+ * The plugins this item came from as a part (parts.ts): each plugin once, with the tools it went into as a separate item
+ * because they can't take the plugin. Empty for an ordinary item.
+ */
+function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; tools: HarnessId[] }[] {
+  const partKind = partOfPage[page];
+  const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
+  const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
+  for (const install of state.home?.parts ?? []) {
+    if (!install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
+    const key = pluginKey(install.source, install.plugin);
+    const entry = found.get(key) ?? { install, tools: [] };
+    entry.tools.push(install.tool);
+    found.set(key, entry);
+  }
+  // Tools in column order, as everywhere else ("Codex and Pi").
+  return [...found.values()].map(entry => ({ ...entry, tools: entry.tools.sort(byToolOrder) }));
+}
+
+/** Opens a plugin's page on Plugins, where its parts are updated or removed together. */
+function openPlugin(install: PartsInstall) {
+  market.nav = { source: install.source, plugin: install.plugin, tab: 'plugins', find: '', category: undefined };
+  showPage('plugins');
+}
+
+/** The note in an item's details: which plugin it is a part of, where, and where its parts are managed together. */
+function partNote(skill: SampleSkill) {
+  // Once read, the Plugins page knows whether the plugin is still listed; a page that can't show it isn't linked to.
+  const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
+  return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
+    h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
+      ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
+        : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
+}
+
+/** A part's tag on its row: "from <plugin>", titled with the version and the tools it went into. */
+const partTags = (skill: SampleSkill) => fromPlugins(skill, kind).map(({ install, tools }) =>
+  h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('blocks', 12, 'tone-faint'), `from ${install.plugin}`));
 const ago = (iso: string) => {
   const days = Math.floor((Date.now() - Date.parse(iso)) / DAY_MS);
   return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
@@ -91,6 +133,16 @@ const newView = () => ({
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
 /** Opens a page already narrowed, for links that point at a problem (the Overview's "has different copies"). */
 export const showFiltered = (which: Kind, filter: Filter) => { views[which].filter = filter; };
+/** Opens an item's details on its own page (Skills, MCP servers or Agents), found by name, and scrolls it into view. */
+export function openItem(which: Kind, name: string) {
+  const facts = which === 'skills' ? state.home?.manage.skills : which === 'mcp' ? state.home?.mcp.servers : state.home?.agents.servers;
+  const partKind = partOfPage[which];
+  const key = facts?.find(item => samePart({ kind: partKind, name: item.key }, { kind: partKind, name }) || samePart({ kind: partKind, name: item.name }, { kind: partKind, name }))?.key;
+  views[which].filter = 'all';
+  views[which].comparing = key;
+  showPage(which);
+  if (key) requestAnimationFrame(() => document.querySelector(`.ov-row[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center' }));
+}
 let view = views.skills;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
@@ -700,14 +752,15 @@ function limitedFields(skill: SampleSkill) {
 }
 
 /** MCP: the server's definition as labelled lines ("Type HTTP", "URL …"), read from its one-line summary. */
-function definition(summary: string) {
+function definition(summary: string, managed: boolean) {
   const [kind, ...rest] = summary.split(' · ');
   const value = rest.join(' · ');
   const isCommand = kind === 'Command';
   return h('dl.details-definition', {},
     h('dt', {}, 'Type'), h('dd', {}, isCommand ? 'Command (stdio)' : kind),
     h('dt', {}, isCommand ? 'Command' : 'URL'), h('dd.mono', {}, value),
-    h('dd.details-definition-hint', {}, toolList().includes('claude-cli') && toolList().length > 1
+    // An unmanaged server's copies are each tool's own: nothing spreads, so the hint says only where to edit.
+    h('dd.details-definition-hint', {}, !managed ? 'To change it, edit a settings file below; each tool keeps its own copy.' : toolList().includes('claude-cli') && toolList().length > 1
       ? `To change it, edit any settings file below. ${andList(toolList().filter(tool => tool !== 'claude-cli').map(tool => names[tool]))} sync on their own; Claude Code updates when you click Write to Claude Code.`
       : 'To change it, edit any settings file below; the change syncs to the others.'));
 }
@@ -780,7 +833,7 @@ function committedStatus(skill: SampleSkill, differs: boolean): string {
   const waiting = view.draft.has(skill.key);
   if (skill.held) return `Can’t be managed: ${skill.held}`;
   if (skill.separate) return 'Unmanaged. Each tool keeps its own copy.';
-  if (!skill.managed) return differs ? 'Not managed yet. Its copies differ.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
+  if (!skill.managed) return differs ? 'Not managed yet. Its copies differ.' : fromPlugins(skill, kind).length ? 'Unmanaged: Central Knot doesn’t sync its copies.' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
   if (kind === 'agents' && skill.oneWay) return `Managed · ${names[skill.oneWay.from]} is the source${oneWayStatus(skill)}`;
   if (kind === 'mcp' && !waiting && skill.waits?.includes('claude-cli')) {
     return `Waits for Write to Claude Code · synced in ${toolsPhrase(toolList().filter(tool => tool !== 'claude-cli' && cellOf(skill, tool) === 'synced'), toolList())}`;
@@ -838,7 +891,8 @@ function details(skill: SampleSkill, placement: Placement = 'row'): HTMLElement 
       (inFiles && allSame) || (differs && !skill.managed && !draft) ? null
         : h('p.details-status', {}, allSame ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : status, pending ? null : disabledNote, draft && !pending && !inFiles ? h('span.details-pending', {}, ' · not applied yet') : null),
       kind !== 'mcp' && skill.description && !(differs && !draft) && !inFiles ? h('p.details-description', {}, skill.description) : null,
-      kind === 'mcp' && skill.description ? definition(skill.description) : null,
+      kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
+      partNote(skill),
       inFiles ? null : itemActions(skill, differs && !draft)),
     differs ? compareChoices(skill) : null,
     // Agents: each tool runs an agent its own way; Central Knot moves the name, description and prompt (AGT-01).
@@ -963,6 +1017,7 @@ function nameCell(skill: SampleSkill, attention: boolean) {
       attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = open ? undefined : skill.key; rerender(); }, '.decide') : null,
       decided ? decidedPill(skill, decided) : null),
     kind === 'agents' && skill.oneWay && !decided ? oneWayTag(skill, skill.oneWay.from) : null,
+    partTags(skill),
     skill.description ? h('span.ov-name-about', { title: skill.description }, skill.description) : null);
 }
 
