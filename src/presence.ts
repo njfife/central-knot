@@ -3,11 +3,14 @@
 import type { HarnessId, Snapshot } from './types.ts';
 
 /**
- * A tool is in this home when it really exists there: its app or CLI was detected, or its own configuration folder was
- * found (discovery marks both by leaving `detection` other than 'Not found'). Skills in a folder several tools share,
- * such as ~/.agents/skills, never count: they would make every tool that reads that folder look installed.
+ * A tool is in this home when it is installed there: its CLI or its desktop app was found. Its configuration folder alone
+ * is not the tool: a folder stays behind after an uninstall, and a tool nobody installed here is offered nowhere. Where
+ * this computer wasn't searched (a chosen folder or the Practice copy, whose probes never ran), the tool's own folder is
+ * all there is to go by. Skills in a folder several tools share, such as ~/.agents/skills, never count: they would make
+ * every tool that reads that folder look installed.
  */
-export const isPresent = (snapshot: Snapshot): boolean => snapshot.detection !== 'Not found';
+export const isPresent = (snapshot: Snapshot): boolean =>
+  (snapshot.detection === 'Config found but app not detected' ? snapshot.probe.state === 'not-run' : snapshot.detection !== 'Not found');
 
 /** The tools in this home, in discovery order: the columns, boxes, menus and sentences every page draws from. */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
