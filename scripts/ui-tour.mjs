@@ -1032,6 +1032,40 @@ if (wanted('updates')) {
   await shot(a, 'settings-cannot', 'A build not made from a release (a development or local build): the row says why it doesn’t update itself and offers the releases page.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-cannot-${width}`, `The same at ${width}×${height}.`); }
   await size(1280, 800);
+  // The narrowest window with the status bar at its fullest: a profile in use, and sync on with nothing managed yet. In a
+  // folder home, which keeps its profile across the restart (the practice copy is made anew at each launch).
+  const again = await serveReleases([{ tag: 'v0.5.0-preview.5', zip, bytesPerSecond: 400_000 }]);
+  const narrowAs = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: again.releasesUrl });
+  const narrowSettings = join(scratch, 'data', 'app-settings.json');
+  const reopen = async (tag, change) => {
+    a.quit(); await wait(500);
+    writeFileSync(narrowSettings, JSON.stringify({ ...JSON.parse(readFileSync(narrowSettings, 'utf8')), ...change }));
+    a = await launch(narrowAs(tag));
+    await size(860, 560);
+  };
+  await fresh({ CK_UPDATE_RELEASES: again.releasesUrl });
+  const folder = join(scratch, 'update-home');
+  cpSync(join(root, 'fixtures/home'), folder, { recursive: true });
+  await reopen('v0.5.0-preview.4', { home: { mode: 'custom', path: folder } });
+  await a.click('#nav-profiles'); await a.click('#profile-new');
+  await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle();
+  await a.click('#pf-skill\\:notes'); await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
+  await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the button says "Update", and the "Central Knot" name makes room.');
+  await a.click('#nav-skills'); await a.click('#manage-all');
+  await a.click('#update-button');
+  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
+  await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked "Update": the button shows the download.');
+  await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
+  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the button says "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the button’s).');
+  await reopen('v0.5.0-preview.5', { update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } });
+  await waitFor(a, `/now on/.test(document.getElementById('announcement').textContent)`, 10000);
+  await shot(a, 'narrow-updated', 'Opened again as 0.5.0 preview 5 at 860×560, the profile still in use: the version alone at the end, and the note that it is on the new version as its mark.');
+  await a.click('#nav-settings');
+  await shot(a, 'narrow-settings-updated', 'Settings at 860×560 on that launch: the Updates row says it was updated, with the release notes.');
+  await size(1280, 800);
+  await shot(a, 'settings-updated', 'The same at 1280×800.');
+  await again.close();
 }
 
 // ---------- Settings ----------

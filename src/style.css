@@ -219,6 +219,9 @@ ul { list-style: none; }
 /* A narrow status bar gives a fact its short form (renderer.ts writeFact), the full sentence in its tooltip. */
 .fact-short { display: none; }
 @container status (width < 1000px) { .fact-long:has(+ .fact-short) { display: none; } .fact-short { display: inline; } }
+/* It also sets its parts closer, so that at the narrowest window a profile in use, sync with nothing managed yet and the Update
+   button at its widest all fit. The bar spans the window, and can't be styled by its own container query: the window's width decides. */
+@media (width < 1000px) { #status, #status-facts { gap: 18px; } }
 /*
  * The message takes the room the facts leave. Its later sentences drop whole when they don't fit (they wrap onto a line
  * out of sight), and only the first sentence shortens, with an ellipsis; the tooltip has it whole. With too little room

@@ -98,6 +98,19 @@ try {
   page.close(); await stopAll();
   check('after the interrupted download the installed app is unchanged', tree(app) === installed);
 
+  // 1b. A download that goes quiet with the connection left open: the app ends it itself after a minute, and offers it again.
+  releases.splice(0, releases.length, { tag: newerTag, zip: newerZip, stall: 0.3 });
+  page = await launch();
+  await page.run(`window.centralKnot.checkForUpdates()`);
+  await until(page, `document.querySelector('#update-button')`, 30_000);
+  await page.run(`document.querySelector('#update-button').click()`);
+  const began = Date.now();
+  const quiet = await failedText(page);
+  check('a download that goes quiet is ended and says so', /download didn’t finish.*wasn’t changed/.test(quiet) && Date.now() - began > 55_000, [quiet, Date.now() - began]);
+  check('and the button offers the update again', await page.run(`(b => !b.disabled && b.textContent)(document.querySelector('#update-button'))`) === `Update to ${words(newerTag)}`);
+  page.close(); await stopAll();
+  check('after the quiet download the installed app is unchanged', tree(app) === installed);
+
   // 2. A newer zip signed by another identity (ad hoc): Squirrel refuses it.
   releases.splice(0, releases.length, { tag: adhocTag, zip: adhocZip });
   page = await launch();
