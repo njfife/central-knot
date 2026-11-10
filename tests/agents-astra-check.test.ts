@@ -36,7 +36,7 @@ test('R3 deletion Restore must recover each destinations own fields', async () =
     await writeFile(b.paths[1], md('Original', 'model: copilot-model\n'));
     await applyAgents(b.context, tools, [{ ...manage[0], use: 'claude-cli' }]);
     await rm(b.paths[0]); await applyAgents(b.context, tools, [], { settleMs: 0 });
-    const event = (await readHistory(b.home)).find(e => e.kind === 'deleted')!;
+    const event = (await readHistory(b.context)).find(e => e.kind === 'deleted')!;
     await restoreAgent(b.context, tools, event.id);
     assert.match(await readFile(b.paths[1], 'utf8'), /model: copilot-model/);
   } finally { await b.clean(); }
@@ -46,7 +46,7 @@ test('R4 undo must respect stopped one-way copies', async () => {
     await writeFile(b.paths[0], md('Original', 'model: opus\n')); await applyAgents(b.context, tools, manage);
     await writeFile(b.paths[1], md('Local only')); await applyAgents(b.context, tools, []);
     await writeFile(b.paths[0], md('Upstream edit', 'model: opus\n')); await applyAgents(b.context, tools, []);
-    const event = (await readHistory(b.home)).find(e => e.kind === 'edit')!;
+    const event = (await readHistory(b.context)).find(e => e.kind === 'edit')!;
     await restoreAgent(b.context, tools, event.id);
     assert.match(await readFile(b.paths[1], 'utf8'), /Local only/);
   } finally { await b.clean(); }
@@ -55,7 +55,7 @@ test('R5 old deletion Restore must not overwrite newly managed same-name agent',
   const b = await box(); try {
     await writeFile(b.paths[0], md()); await applyAgents(b.context, tools, manage);
     await rm(b.paths[1]); await applyAgents(b.context, tools, [], { settleMs: 0 });
-    const event = (await readHistory(b.home)).find(e => e.kind === 'deleted')!;
+    const event = (await readHistory(b.context)).find(e => e.kind === 'deleted')!;
     await writeFile(b.paths[0], md('Unrelated replacement')); await applyAgents(b.context, tools, manage);
     const result = await restoreAgent(b.context, tools, event.id);
     assert.ok(result.stopped, JSON.stringify(result));
@@ -82,7 +82,7 @@ test('R8 Restore must respect ownership gate', async () => {
   const b = await box(); try {
     await writeFile(b.paths[0], md()); await applyAgents(b.context, tools, manage);
     await writeFile(b.paths[0], md('Edited')); await applyAgents(b.context, tools, []);
-    const event = (await readHistory(b.home)).find(e => e.kind === 'edit')!;
+    const event = (await readHistory(b.context)).find(e => e.kind === 'edit')!;
     const { record } = await readRecord(b.home); record!.owner = 'other-build'; await saveRecord(b.home, record!);
     assert.equal((await syncGate(b.context)).state, 'stopped');
     const result = await restoreAgent(b.context, tools, event.id);

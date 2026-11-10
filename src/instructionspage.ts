@@ -3,7 +3,7 @@
 import { loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { plural } from './model.ts';
-import { button, emptyState, h, icon, pathText } from './dom.ts';
+import { button, emptyState, h, icon, onMac, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
 import type { InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
@@ -28,7 +28,7 @@ const ago = (at: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
 
-const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+const keys = `Esc to cancel · ${onMac ? '⌘' : 'Ctrl'}+Enter to review`;
 
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
