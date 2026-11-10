@@ -1758,6 +1758,7 @@ async function updateFlow() {
     await a.click('#manage-all');
     await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
     await press('update-button');
+    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
     for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
     const labels = await a.run('window.ckLabels');
     check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);

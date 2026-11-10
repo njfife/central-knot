@@ -90,12 +90,15 @@ export function whyNoUpdate({ packaged, tag, bundle, home, team, writable }: Upd
   return undefined;
 }
 
+/** Said while an update downloads with something unsaved open: it won't restart by itself, as it otherwise would. */
+export const restartWaits = 'Something here isn’t saved yet, so Central Knot will wait for you to restart.';
+
 /** A build's name where its version shows: "0.5.0 preview 4" for a release, the package version otherwise. */
 export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.tag && tagVersion(view.tag) ? tagWords(view.tag) : view.version);
 
 /**
  * The status bar's update button, or nothing while there is no update this copy can install (the version shows as text).
- * `held`: why the page didn't restart by itself once the update was ready (something typed and not saved); `restarting`: the
+ * `held`: why the page won't restart by itself once the update is ready (something typed and not saved); `restarting`: the
  * page has asked main to restart.
  */
 export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; short?: string; held?: boolean } | undefined {
@@ -104,7 +107,7 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
   const words = tagWords(next.tag);
   if (view.step === 'downloading') {
     const percent = Math.floor((view.progress ?? 0) * 100);
-    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. Central Knot restarts into it when it’s ready.`, busy: true };
+    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. ${held ? restartWaits : 'Central Knot restarts into it when it’s ready.'}`, busy: true };
   }
   if (view.step === 'installing') return { label: 'Preparing update…', title: `Checking and unpacking ${words}.`, busy: true };
   if (view.step === 'ready') {

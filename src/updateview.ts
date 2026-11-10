@@ -5,7 +5,7 @@ import { announce, baseDraftTyped, rerender, showPage, toolDraftTyped } from './
 import { h, icon } from './dom.ts';
 import { changesWaiting } from './matrix.ts';
 import { market } from './pluginstate.ts';
-import { buildWords, tagWords, updateButton, updateStatus } from './updates.ts';
+import { buildWords, restartWaits, tagWords, updateButton, updateStatus } from './updates.ts';
 import { plural } from './model.ts';
 import type { UpdateView } from './types.ts';
 
@@ -101,13 +101,13 @@ export async function checkNow(fromMenu = false) {
 export function startUpdate() {
   keepFocus();
   const next = updates.view?.available;
-  // Said at the click, for anyone who can't see the button's tooltip: the app is going to restart.
-  if (next) announce(`Downloading ${tagWords(next.tag)}. Central Knot restarts when it’s ready.`);
+  // Said at the click, for anyone who can't see the button's tooltip: the app is going to restart, or to wait for something unsaved.
+  if (next) announce(`Downloading ${tagWords(next.tag)}. ${unsavedWork() ? restartWaits : 'Central Knot restarts when it’s ready.'}`);
   void window.centralKnot.installUpdate().then(takeUpdates, () => { announce('Couldn’t start the update. Try again.'); returnFocus(); });
 }
 
 /** What the Update button says now, with the reason restarting is held, if it is. */
-export const buttonNow = (view = updates.view) => (view ? updateButton(view, { held: view.step === 'ready' ? unsavedWork() : undefined, restarting: updates.restarting }) : undefined);
+export const buttonNow = (view = updates.view) => (view ? updateButton(view, { held: view.step ? unsavedWork() : undefined, restarting: updates.restarting }) : undefined);
 
 /** The Update button, in the status bar or the Settings row. A held restart restarts on click: the person has chosen. */
 export function updateControl(id: string, variant: 'status' | 'setting') {
