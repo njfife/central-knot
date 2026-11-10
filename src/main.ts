@@ -34,7 +34,7 @@ let homeWritable = true;
 let lastManagedCount = 0;
 /** The open home's profiles as last read, for the menu bar's Profile menu. */
 let lastProfiles: ProfilesView = { profiles: [], offByProfile: {} };
-/** How many switches no longer match the profile in use, as last read (the menus say so beside its name). */
+/** How many items the tools no longer match the profile in use on, as last read (the menus say so beside its name). */
 let lastDrift = 0;
 /**
  * The switch files' modification times as the page last read them (or the background last looked): a change since then was made
@@ -383,8 +383,8 @@ async function profilesSaved(): Promise<ProfilesView> {
 /**
  * A switch turned in a tool's own settings (outside Central Knot) changes no content, so sync writes nothing: while profiles are
  * in play, the background looks at the switch files on its own. When one changed since the page read them, or something else
- * changed (the pass wrote, or a file event: an item may have come or gone), drift is worked out again: the menus follow it, and the page reads again (its marks
- * show each switch). Codex's config.toml and Pi's mcp.json hold MCP entries too, so an MCP edit there counts.
+ * changed (the pass wrote, or a file event: an item may have come or gone), drift is worked out again: the menus follow it, and
+ * the page reads again (its marks show each switch). Codex's config.toml and Pi's mcp.json hold MCP entries too, so an MCP edit there counts.
  */
 async function lookAtSwitchFiles(somethingChanged: boolean) {
   if (!profilesInUse(lastProfiles)) return;

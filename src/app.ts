@@ -244,7 +244,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   // The new History event is the one that undid this; offering it inline makes the undo itself undoable here.
   const past = state.history?.find(event => event.id === eventId);
   const undoneBy = past?.undoneBy;
-  // A profile switch's band tells what could not change itself; only a stop goes to the Skills page's problems band too.
+  // An Undo of a profile switch lists what it couldn't change in its own band, so the Skills page's problems band gets only a stop.
   state.applied = past?.kind === 'profile' && !result.stopped ? undefined : result;
   if (past?.kind === 'profile') {
     if (!result.stopped) undoOutcome(result, undoneBy);
