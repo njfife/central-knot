@@ -396,7 +396,7 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
  * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
   if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
@@ -424,7 +424,7 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
-  const shared = context();
+  const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);

@@ -30,6 +30,8 @@ export interface ShareContext {
   /** Real-home writes are on only where Nathan accepted them: macOS, and never in a smoke test. */
   allowActualWrites?: boolean;
   overrides?: Partial<Record<HarnessId, string>>;
+  /** Reads shared within one pass or one view (what each tool has through its plugins): set only on a context made for that one use. */
+  reads?: Map<string, Promise<unknown>>;
   /** Test seam: throws at a named step, standing in for a crash. */
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */

@@ -1130,7 +1130,7 @@ async function practiceFlow() {
   // it"), and opens the plugin's page, where the plugin and its parts are updated together.
   const installRecord = join(practice, '.claude/plugins/installed_plugins.json');
   const installsBefore = existsSync(installRecord) ? readFileSync(installRecord, 'utf8') : undefined;
-  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8') });
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }) });
   await a.click('#header-refresh');
   for (let tries = 0; tries < 30 && (await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
   same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'present']);
@@ -1138,6 +1138,9 @@ async function practiceFlow() {
   check('its box says which plugin, and the key names the mark', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\. Click to open the plugin’s page\.$/.test(throughTitle ?? '') && /Through a plugin/.test(await a.text('.legend') ?? ''), [throughTitle, await a.text('.legend')]);
   await fitsAtMinimum(a, 'a skill a tool has through a plugin');
   await a.shot('skill-through-plugin');
+  await a.click('#nav-mcp');
+  same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
+  await a.click('#nav-skills');
   await a.click('#cell-triage-claude-cli');
   for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
   check('and opens the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));

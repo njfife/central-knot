@@ -68,6 +68,6 @@ export const kindNouns: Record<HomeKind, { one: string; many: string; title: str
 /** Each kind as a sentence names it, many of it: "MCP servers". */
 export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.many])) as Record<HomeKind, string>;
 
-/** Why a tool gets no copy of a skill it already has through a plugin: said in its box, its row and wherever a copy is refused. */
-export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }) =>
-  `${toolNames[tool]} has this skill through the plugin ${given.plugin}${given.version ? ` (version ${given.version})` : ''}${given.off ? ', turned off there' : ''}, so no separate copy is placed there.`;
+/** Why a tool gets no copy of an item it already has through a plugin: said in its box, its row and wherever a copy is refused. */
+export const throughPlugin = (tool: HarnessId, given: { plugin: string; version?: string; off?: true }, item = 'skill') =>
+  `${toolNames[tool]} has this ${item} through the plugin ${given.plugin}${given.version ? ` (version ${given.version})` : ''}${given.off ? ', turned off there' : ''}, so no separate copy is placed there.`;

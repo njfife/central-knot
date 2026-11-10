@@ -13,8 +13,7 @@ import {
 import { parseSkill } from './discovery.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
 import { problemText, throughPlugin, toolName } from './words.ts';
-import { pluginSkills } from './plugins.ts';
-import { takesPlugins } from './presence.ts';
+import { throughPlugins } from './plugins.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
@@ -80,16 +79,11 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
   }
   // A tool that has the skill through one of its plugins needs no copy of its own, and gets none: the row says where it
   // comes from instead. Matched by name, as the tools name it: the skill's folder, or the name its SKILL.md gives.
-  const reads = { home: context.home, dataDir: '', binaries: {}, overrides: context.overrides, reads: new Map() };
-  for (const tool of tools.filter(takesPlugins)) {
-    const given = new Map((await pluginSkills(reads, tool).catch(() => [])).reverse().map(item => [itemKey(item.skill), item] as const));
-    if (!given.size) continue;
+  for (const [tool, given] of await throughPlugins(context, tools, 'skill', itemKey)) {
     for (const entry of map.values()) {
       if (entry.facts.copies[tool]) continue;
-      const names = [entry.facts.key, ...Object.values(entry.skills).flat().map(skill => itemKey(skill.name))];
-      const from = names.map(name => given.get(name)).find(Boolean);
-      if (!from) continue;
-      const { skill: _skill, ...plugin } = from;
+      const plugin = [entry.facts.key, ...Object.values(entry.skills).flat().map(skill => itemKey(skill.name))].map(name => given.get(name)).find(Boolean);
+      if (!plugin) continue;
       (entry.facts.plugin ??= {})[tool] = plugin;
       entry.facts.cannot[tool] = throughPlugin(tool, plugin);
     }
