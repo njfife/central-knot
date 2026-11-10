@@ -32,7 +32,7 @@ export interface FeedHost {
 const STALLED_MS = 60_000;
 
 /** A request the feed answered with something other than the file: its status. */
-class Answered extends Error { constructor(readonly status: number) { super(`the feed answered ${status}`); } }
+class Answered extends Error { status: number; constructor(status: number) { super(`the feed answered ${status}`); this.status = status; } }
 /** The archive ran past the size its manifest lists. */
 class TooLong extends Error {}
 /** Why a request failed, in words: what the feed answered, or that it couldn't be reached. */
