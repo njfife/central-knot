@@ -822,6 +822,30 @@ async function practiceFlow() {
   check('and files waits for Write again', await a.exists('#mcp-write-claude'));
   await a.click('#mcp-write-claude');
   check('Write works again after Undo', JSON.parse(readFileSync(join(practice, '.claude.json'), 'utf8')).mcpServers.files?.command === 'npx');
+  // A server turned off in one tool, outside Central Knot (as `copilot mcp disable` writes it), is marked so, and its row has
+  // that tool's switch to turn it on again: Apply all changes only Copilot's own switch, and Undo flips it back.
+  const copilotMcpSwitch = join(practice, '.copilot/settings.json');
+  const offBefore = `${JSON.stringify({ ...JSON.parse(readNow(copilotMcpSwitch) || '{}'), disabledMcpServers: ['docs'] }, null, 2)}\n`;
+  writeFileSync(copilotMcpSwitch, offBefore);
+  await a.click('#header-refresh');
+  check('a server disabled in Copilot CLI is marked there', await a.exists('.ov-row[data-key="docs"] [data-tool="copilot-cli"] .cell-disabled'), await a.text('.ov-row[data-key="docs"]'));
+  await a.click('#open-docs');
+  await a.shot('practice-mcp-disabled');
+  const docsSwitches = Object.fromEntries(await a.all('.details-mcp .tool-switch .switch', '[e.id, e.getAttribute("aria-checked")]'));
+  same('its row offers each tool’s switch, off only for Copilot CLI', [docsSwitches['enable-docs-copilot-cli'], docsSwitches['enable-docs-claude-cli'], docsSwitches['enable-docs-codex-cli']], ['false', 'true', 'true']);
+  await a.click('#enable-docs-copilot-cli');
+  check('Enable waits for Apply all', readFileSync(copilotMcpSwitch, 'utf8') === offBefore && (await a.text('.apply-count') ?? '').includes('1 copy to enable'), await a.text('.apply-count'));
+  await applyAll(a);
+  same('Apply all turns it on in Copilot CLI and keeps the rest of its settings', [JSON.parse(readFileSync(copilotMcpSwitch, 'utf8')).disabledMcpServers, await a.exists('.ov-row[data-key="docs"] .cell-disabled')], [undefined, false]);
+  check('the result says so, with Undo', /docs enabled in Copilot CLI/.test(await a.text('.band-outcome, .bands') ?? ''), await a.text('.bands'));
+  await a.shot('practice-mcp-enabled');
+  await a.click('#outcome-undo-switch');
+  same('Undo turns it off again, byte for byte', readFileSync(copilotMcpSwitch, 'utf8'), offBefore);
+  if (!(await a.exists('#enable-docs-copilot-cli'))) await a.click('#open-docs');
+  await a.click('#enable-docs-copilot-cli');
+  await applyAll(a);
+  check('and it can be enabled once more', !readFileSync(copilotMcpSwitch, 'utf8').includes('disabledMcpServers'), readFileSync(copilotMcpSwitch, 'utf8'));
+  if (await a.exists('#enable-docs-copilot-cli')) await a.click('#open-docs');
   // An MCP edit spreads within seconds: settings files are watched, not left to the 20 s poll.
   const copilotFile = join(practice, '.copilot/mcp-config.json');
   writeFileSync(copilotFile, readFileSync(copilotFile, 'utf8').replace('"command": "npx"', '"command": "npx-edited"'));

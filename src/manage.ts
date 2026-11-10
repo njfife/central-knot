@@ -1225,6 +1225,7 @@ async function undoSwitched(context: ShareContext, history: HistoryEvent[], past
   const back: SwitchRecord[] = [];
   let pending = false;
   for (const { tool, disabled, before, target } of past.switched ?? []) {
+    if (!target) continue;
     let flipped: { changed: boolean; previous?: string };
     try { flipped = await setDisabled(context, tool, target, !disabled, before); }
     catch (error) { pending = true; results.push({ item: past.item, harness: tool, outcome: 'failed', message: `Could not change it in ${toolName(tool)}: ${switchFailure(error)}` }); continue; }
@@ -1307,7 +1308,7 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
 async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
   if (tool !== 'claude-cli' || (await readKeptOverrides(context))[target.folder] !== undefined) return undefined;
   const disables = (await readHistory(context)).filter(event => event.kind === 'switched' && event.key === key)
-    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target.folder === target.folder));
+    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target?.folder === target.folder));
   return disables.at(-1)?.before;
 }
 

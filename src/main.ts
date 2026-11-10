@@ -848,7 +848,12 @@ app.whenReady().then(async () => {
       // A Pull that deleted the base instructions: the base's own Undo puts the base and its tools back.
       if (past?.base) return undoPulledBase(context(), await read(), eventId);
       const tools = await presentNow();
-      if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
+      if (key.startsWith('mcp:')) {
+        const result = await restoreMcp(context(), tools, eventId);
+        // Undo of a server's Disable or Enable is a choice made by hand too.
+        await releaseProfileHolds(context(), switchedByHand([{ key: key.slice('mcp:'.length) }], result.results, 'mcp'));
+        return { stopped: result.stopped, results: result.results, harnessWrites: result.writes };
+      }
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       const restored = await restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
       // Undo of a Disable or Enable is a choice made by hand, like the switch itself: profiles stop holding those switches.
@@ -880,9 +885,14 @@ app.whenReady().then(async () => {
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
-  handle('mcp:apply', async (list, resume, home) => (home === current?.home
-    ? applyMcp(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
-    : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
+  handle('mcp:apply', async (list, resume, home) => {
+    if (home !== current?.home) return { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 };
+    const asked = changes(list);
+    const result = await applyMcp(context(), await presentNow(), asked, { resume: resume === true, ...(syncOn ? {} : { only: new Set(asked.map(change => change.key)) }) });
+    // A Disable or Enable chosen here takes that switch over from profiles, as a skill's does.
+    await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results, 'mcp'));
+    return result;
+  });
   handle('agents:apply', async (list, resume, home) => (home === current?.home
     ? applyAgents(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
