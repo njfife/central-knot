@@ -325,8 +325,9 @@ export function pluginsPage() {
   const view = market.view;
   // From the marketplaces' own read (pagedata.ts): what it found, else that it is reading or could not read.
   if (!view) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, market.read.state === 'failed' ? 'Marketplaces could not be read.' : 'Reading marketplaces…')));
-  // A home with only Pi, or with no tools: nothing here installs plugins, so there are no boxes to draw.
+  // A home with no tools: another home is the way forward.
   if (noTools()) return h('div.page', {}, noToolsState('plugins-choose-home'));
+  // Tools, but none that takes plugins (only Pi): the sidebar hides Plugins then, so this is a marketplace read that saw a plugin tool go before the home's read did.
   if (!view.tools.length) return h('div.page', {}, emptyState('puzzle', 'No tool in this home can install plugins', 'None of the tools found here takes plugins. Once one is installed, Central Knot finds it on its own, or at once with Refresh at the top.',
     button({ variant: 'outline', label: 'See Harnesses', id: 'plugins-no-tools', onclick: () => showPage('harnesses') })));
   const shown = current();

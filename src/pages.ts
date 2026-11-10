@@ -46,6 +46,7 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
  */
 function addHint(holders: HarnessId[], noun: string) {
   if (holders.length) return `Add one in ${orList(holders.map(toolName))}, then Refresh.`;
+  // No tool here holds this kind: a Pi-only home whose Pi Agents tab's Open Agents leads to the Agents page.
   return `${andList(homeToolNames())} can’t hold ${noun}.`;
 }
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
