@@ -154,7 +154,9 @@ const readSummary = (view: HomeView) => {
   const skills = view.manage.skills.length, servers = view.mcp.servers.length, agents = view.agents?.servers.length ?? 0;
   // "Nothing changed" means nothing was written; a copy that stopped updating is still news, so it is said.
   const stopped = (view.agents?.servers ?? []).filter(server => server.managed && server.stopped?.length).map(server => `${server.name}’s ${server.stopped!.length === 1 ? 'copy in one tool' : 'copies in some tools'}`);
-  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${stopped.length ? '' : 'Nothing changed.'}`;
+  // A catch-up that copied managed skills where they were missing is said, not covered by "Nothing changed".
+  const caught = [...new Set(view.manage.caughtUp.filter(result => result.outcome === 'written').map(result => result.item))];
+  return `Read ${plural(skills, 'skill')}, ${plural(servers, 'MCP server')} and ${plural(agents, 'agent')} from ${view.label}. ${caught.length ? `Copied ${andList(caught)} where ${caught.length === 1 ? 'it was' : 'they were'} missing.` : stopped.length ? '' : 'Nothing changed.'}`;
 };
 
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {

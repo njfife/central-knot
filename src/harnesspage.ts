@@ -82,7 +82,9 @@ function countRow(label: string, { value, note, faint = false }: Count) {
   return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
 }
 
-function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
+/** `found`: false for a tool not on this computer, whose counts are a plain dash (its card says it was not found). */
+function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId, found = true): Count {
+  if (!found) return { value: '—', faint: true };
   if (!supported) return { value: '—', note: `${names[tool]} doesn’t use ${kindNoun[kind][1]}`, faint: true };
   if (!total) return { value: '0', note: 'none yet', faint: true };
   return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
@@ -99,7 +101,8 @@ function instructionCount(tool: HarnessId): Count {
   return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
 }
 
-function pluginCount(tool: HarnessId): Count {
+function pluginCount(tool: HarnessId, found = true): Count {
+  if (!found) return { value: '—', faint: true };
   const plugins = pluginsIn(tool);
   if (plugins.state === 'reading') return { value: '…', faint: true };
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
@@ -130,7 +133,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
     h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), found(home, tool) ? icon('arrow-right', 14, 'tone-faint') : null),
     // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
     home.mode === 'actual' ? h(`span.harness-card-status${snapshot.detection === 'Not found' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)) : null,
-    h('span.harness-counts', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool))), countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool))),
+    h('span.harness-counts', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool, found(home, tool)))), countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool, found(home, tool)))),
   ];
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   if (!found(home, tool)) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },

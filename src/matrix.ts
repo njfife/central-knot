@@ -973,7 +973,7 @@ function helpBand(): HTMLElement | null {
     h('span.band-text.band-lines', {},
       h('span', {}, `Turn on Managed to keep ${one} the same in every tool you include. Nothing is written until Apply all.`),
       h('span.tone-muted', {}, ...(kind === 'agents' && list.some(skill => Object.keys(skill.limits ?? {}).length)
-        ? ['Once it’s Managed, click a tool’s box to leave that tool out.']
+        ? [focus ? 'Tick a tool’s box to add an agent there; once it’s Managed, untick a box to leave that tool out.' : 'Once it’s Managed, click a tool’s box to leave that tool out.']
         : ['Click a tool’s box to include it or leave it out. Turning Managed off keeps existing copies.']))),
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }

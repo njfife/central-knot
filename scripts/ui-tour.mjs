@@ -246,8 +246,11 @@ if (wanted('harnesses')) {
   await size(860, 560);
   const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
   if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
-  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi has no agents of its own.');
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
+  await a.click('#harness-tab-skills'); await a.click('#cell-release-notes-pi-cli'); await shot(a, 'pi-pending-860', 'Ticked release-notes’ Pi box at 860×560: the change waits, and the toolbar wraps for it.'); await a.click('#discard');
   await size(1280, 800);
+  // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
+  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
 }
 
 a.quit();

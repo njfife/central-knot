@@ -1413,14 +1413,15 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-page .ov-row:not(.ov-head) { height: auto; min-height: 40px; }
 .ov-desc { display: block; padding: 8px 16px 8px 12px; font-size: 12px; line-height: 16px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
-/* The description shows only when its column has room; otherwise it stays in the row's details and the name column takes the
-   free width instead, so names are not cut short beside empty space. Measured on the table's own width, per number of tool
-   columns n: name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep in step with --ov-columns above). */
-@container (max-width: 768px) { .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] { --ov-columns: minmax(170px, 1fr) 76px repeat(1, minmax(92px, 132px)) 16px; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
-@container (max-width: 900px) { .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] { --ov-columns: minmax(170px, 1fr) 76px repeat(2, minmax(92px, 132px)) 16px; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
-@container (max-width: 1032px) { .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] { --ov-columns: minmax(170px, 1fr) 76px repeat(3, minmax(92px, 132px)) 16px; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
-@container (max-width: 1164px) { .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] { --ov-columns: minmax(170px, 1fr) 76px repeat(4, minmax(92px, 132px)) 16px; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
-@container (max-width: 1296px) { .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] { --ov-columns: minmax(170px, 1fr) 76px repeat(5, minmax(92px, 132px)) 16px; } .harness-page .ov[data-tools="5"] .ov-name-sub { display: block; } }
+/* The description shows only when its column has room; otherwise it goes under the name and the name column takes the free
+   width instead, with the tool columns at their narrow size so the name and description get the room. Measured on the table's
+   own width, per number of tool columns n: name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep
+   in step with --ov-columns above). */
+@container (max-width: 768px) { .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] { --ov-columns: minmax(170px, 1fr) 76px repeat(1, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
+@container (max-width: 900px) { .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] { --ov-columns: minmax(170px, 1fr) 76px repeat(2, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
+@container (max-width: 1032px) { .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] { --ov-columns: minmax(170px, 1fr) 76px repeat(3, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
+@container (max-width: 1164px) { .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] { --ov-columns: minmax(170px, 1fr) 76px repeat(4, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
+@container (max-width: 1296px) { .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] { --ov-columns: minmax(170px, 1fr) 76px repeat(5, minmax(92px, 124px)) 16px; } .harness-page .ov[data-tools="5"] .ov-name-sub { display: block; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
@@ -1496,3 +1497,4 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-tab-none:not(.selected) { color: var(--ink-faint); }
 .harness-tab-none:not(.selected):hover { color: var(--ink); }
 .harness-page .empty-body { text-wrap: balance; }
+.harness-page .tool-head-name { white-space: nowrap; }
