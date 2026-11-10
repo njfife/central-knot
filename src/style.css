@@ -1012,7 +1012,8 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-name { flex-direction: row; align-items: baseline; }
   .plugin-row-line { flex: 0 1 auto; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
-  .plugin-row-update { flex: none; margin-left: 14px; }
+  /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
+  .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
 }
 /* The header's hint keeps to whole lines: a narrow table says only that nothing runs until Apply all. */
 .hint-short { display: none; }
