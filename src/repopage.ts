@@ -67,8 +67,8 @@ export async function loadRepo(check = false): Promise<void> {
   repo.checking = false;
   // What the check found, in the status bar, so it never disagrees with the page.
   if (view?.connected && state.page === 'repo') {
-    const { pull: toPull, push: toPush } = waitingCounts(view);
-    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.`
+    const { pull: toPull, push: toPush, retry } = waitingCounts(view);
+    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush || retry ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : '', retry ? `${retry} to try again` : ''].filter(Boolean).join(', ')}.`
       : view.branchGone ? 'Checked the repo: its branch is gone.' : view.pushBlocked ? 'Checked the repo: a newer commit to pull.' : 'Checked the repo: up to date.');
   }
   rerender();
@@ -105,8 +105,10 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
   const claudeWaits = result.waitsForClaude ?? [];
-  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : 'Pulled. Nothing in your tools needed to change.';
-  const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
+  // Items Pull couldn't finish are listed below with why; the band says so rather than sound finished.
+  const left = result.view.connected ? waitingCounts(result.view).retry : 0;
+  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : left ? 'Pulled.' : 'Pulled. Nothing in your tools needed to change.';
+  const rest = [left ? `${plural(left, 'item')} couldn’t come in yet; ${left === 1 ? 'its row says' : 'their rows say'} why.` : '', missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
     claudeWaits.length ? `To add ${andList(claudeWaits)} to Claude Code, close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
   // One wording for the promise, always with History one click away.
   await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : `any of the ${count}`} in History.` : undefined);
@@ -161,7 +163,9 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
     ? { added: 'New in the repo', changed: 'Changed in the repo', removed: 'Removed in the repo' }[change.change]
     : { added: 'New here', changed: 'Changed here', removed: 'Removed here' }[change.change];
   // Held from the repo: Push never touches it there (unless it was only waiting on the last Pull, which Pull retries).
-  const note = change.held ? (side === 'in' ? `Can’t come in. ${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}` : `Stays out of the repo. ${change.held}`)
+  // Held: what can't happen is said in warning colour; the why, in the note's own soft ink.
+  const heldLead = (lead: string, rest: string) => [h('span.tone-warning', {}, lead), ` ${rest}`];
+  const note = change.held ? (side === 'in' ? heldLead('Can’t come in.', `${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}`) : heldLead('Stays out of the repo.', change.held))
     : change.alsoHere === 'removed' ? 'Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.'
     : change.alsoHere === 'unmanaged' ? `${/^[aeiou]|^MCP/i.test(kind.label) ? 'An' : 'A'} ${kind.label.replace(/^[A-Z][a-z]/, word => word.toLowerCase())} named ${change.name} is already in your tools, not Managed. Pull replaces it; yours stays in History.`
     : change.alsoHere ? `Changed here too. Pull uses the repo’s version; yours stays in History.`
@@ -169,15 +173,14 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
     : side === 'in' && change.change === 'removed' ? 'Pull deletes it from your tools. History can restore it.'
     : side === 'out' && change.change === 'removed' ? 'Deleted here or no longer Managed. Push removes it from the repo.'
     : undefined;
-  // Only what can't come in is said in full warning colour; a both-changed note is safe (History keeps yours), so its icon warns, not its words.
-  const tone = change.held ? 'tone-warning' : 'tone-muted';
-  const noteGlyph: IconName = change.held || change.alsoHere ? 'triangle-alert' : 'info';
+  // The note is in soft ink; a held or both-changed one has a warning icon (a both-changed one is safe: History keeps yours).
+  const warns = !!change.held || !!change.alsoHere;
   return h(`li.repo-row${change.held ? '.repo-row-held' : ''}`, { 'data-key': change.key },
     h('span.repo-row-icon', { title: kind.label }, icon(kind.glyph, 14, 'tone-muted')),
     h('span.repo-row-main', {},
       h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-kind', {}, kind.label),
         h(`span.repo-row-change.repo-change-${change.held ? 'held' : change.change}`, {}, label)),
-      note ? h(`span.repo-row-note.${tone}`, {}, icon(noteGlyph, 12, change.alsoHere && !change.held ? 'tone-warning' : ''), note) : null));
+      note ? h('span.repo-row-note.tone-muted', {}, icon(warns ? 'triangle-alert' : 'info', 12, warns ? 'tone-warning' : ''), note) : null));
 }
 
 /** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
@@ -189,20 +192,22 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
   const stuck = changes.filter(stuckRow).length;
   return h('section.repo-side', { 'aria-labelledby': id },
     // Title, its button, then what can't move: the button stays put whatever is held.
-    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck ? h('span.repo-stuck-count', {}, `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null),
+    // With no button there, the rows just below say it.
+    h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck && action ? h('span.repo-stuck-count', {}, icon('triangle-alert', 12, 'tone-warning'), `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null),
     blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('triangle-alert', 12, 'tone-warning'), blocked) : null,
     // What can't move comes last, so the list reads top-down as what the button does, then what stays.
     changes.length ? h('ul.repo-list', {}, [...changes].sort((first, second) => Number(stuckRow(first)) - Number(stuckRow(second))).map(change => changeRow(change, side)))
       : h('p.repo-empty-side', {}, empty));
 }
 
-/** Changes waiting each way, leaving out items that can't move. */
-export const waitingCounts = (view: ConnectedRepoView) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
+/** Changes waiting each way, leaving out items that can't move; `retry`: items the last Pull couldn't finish, which Pull tries again. */
+export const waitingCounts = (view: ConnectedRepoView) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length,
+  retry: view.incoming.filter(change => change.retry).length });
 
-/** "The same commit", and what of it hasn't come in, so the facts stay true when an item is held. */
+/** "The same commit", and what of it hasn't come in (held, or left by the last Pull), so the facts stay true. */
 function sameCommitText(view: ConnectedRepoView): string {
-  const held = view.incoming.filter(stuckRow).length;
-  return held ? `The same commit. ${plural(held, 'item')} in it can’t come in.` : 'The same commit';
+  const missing = view.incoming.filter(change => change.held).length;
+  return missing ? `The same commit. ${plural(missing, 'item')} in it ${missing === 1 ? 'hasn’t' : 'haven’t'} come in.` : 'The same commit';
 }
 
 /** Push's count as the toolbar and status bar say it: waiting on Pull when Push can't run yet. */
@@ -218,19 +223,23 @@ function stuckText(view: ConnectedRepoView): string {
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
 function summary(view: ConnectedRepoView): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
-  const { pull: incoming, push: outgoing } = waitingCounts(view);
+  const { pull: incoming, push: outgoing, retry } = waitingCounts(view);
   const stuckNote = stuckText(view);
-  const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null,
-    outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', pushCountText(view, outgoing), !!view.pushBlocked) : null,
+  // While the repo can't be reached, the counts are what was last seen: said quietly, as neither button can act on them.
+  const waiting = !!view.problem;
+  const counts = [incoming ? part('arrow-down-to-line', waiting ? 'tone-muted' : 'tone-accent', `${incoming} to pull`, waiting) : null,
+    outgoing ? part('arrow-up-from-line', view.pushBlocked || waiting ? 'tone-muted' : 'tone-accent', pushCountText(view, outgoing), !!view.pushBlocked || waiting) : null,
+    retry ? part('triangle-alert', 'tone-warning', `${retry} to try again`, true) : null,
     stuckNote ? part('triangle-alert', 'tone-warning', stuckNote, true) : null];
   // Up to date only when nothing waits: a newer commit that changes nothing here still has to be pulled before a push.
   const settled = view.branchGone ? part('triangle-alert', 'tone-warning', 'The repo’s branch is gone')
     : view.pushBlocked ? part('arrow-down-to-line', 'tone-accent', 'A newer commit to pull')
+    : stuckNote ? part('circle-check', 'tone-success', 'Nothing else to pull or push')
     : part('circle-check', 'tone-success', 'Up to date with the repo');
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
     // Unreachable: what can't move is said beside each list; the line keeps to the problem and the counts.
-    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts.slice(0, 2)]
-    : !incoming && !outgoing ? [settled, counts[2]]
+    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts.slice(0, 3)]
+    : !incoming && !outgoing && !retry ? [settled, counts[3]]
     : counts;
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
   return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
@@ -247,8 +256,9 @@ function pullButton(view: ConnectedRepoView, pullable: number, moving: boolean) 
   const retryable = view.incoming.filter(change => change.retry).length;
   if (!pullable && !retryable && !view.pushBlocked) return null;
   return button({
-    variant: pullable && !view.problem ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', id: 'repo-pull', disabled: moving || !view.latest,
-    label: pullable ? `Pull ${pullable}` : retryable ? 'Try again' : 'Pull',
+    variant: view.problem ? 'outline' : 'primary', size: 'small', icon: 'arrow-down-to-line', id: 'repo-pull', disabled: moving || !view.latest,
+    // Pull also tries again what the last one couldn't finish, so those count too.
+    label: pullable ? `Pull ${pullable + retryable}` : retryable ? 'Try again' : 'Pull',
     attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' },
     // A keyboard press (no pointer: detail 0) keeps its place on the page when the button goes away.
     onclick: (event: MouseEvent) => pull(event.detail === 0),

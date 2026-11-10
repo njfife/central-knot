@@ -314,6 +314,22 @@ if (wanted('repo')) {
   await shot(a, 'repo-pulled-both', 'The repo is back. Clicked "Pull": incident takes the repo’s version, notes waits to be pushed, and broken stays listed with why.');
   await a.click('#nav-history'); await shot(a, 'repo-history', 'Clicked "History": what Pull brought in, each with Undo.');
   await a.click('#nav-repo'); await waitFor(a, `!/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`, 30000); await a.settle();
+  const idle = `document.body.dataset.busy !== 'true' && !/Checking/.test(document.querySelector('#repo-state')?.textContent ?? '')`;
+  // Only the item that can't come in is left.
+  await a.click('#repo-push'); await waitFor(a, idle, 30000); await a.settle();
+  await shot(a, 'repo-held-only', 'Clicked "Push": notes went to the repo. Only broken is left, and it can’t come in.');
+  // With Sync off, an agent's deletion from the repo can't finish: Pull leaves it to try again.
+  run(author, 'pull', '--quiet', 'origin', 'main');
+  rmSync(join(author, 'agents', 'reviewer.md'));
+  run(author, 'add', '-A'); run(author, 'commit', '--quiet', '-m', 'Retire the reviewer'); run(author, 'push', '--quiet', 'origin', 'HEAD:main');
+  await a.click('#sync-switch'); await a.settle();
+  await a.click('#header-refresh'); await waitFor(a, idle, 30000); await a.settle();
+  await a.click('#repo-pull'); await waitFor(a, idle, 30000); await a.settle();
+  await shot(a, 'repo-try-again', 'With Sync off, the repo deleted the reviewer agent and "Pull 1" was clicked: the deletion waits for Sync, and the page says it is left to try again.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await shot(a, 'repo-try-again-860', 'The same at 860×560.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.click('#sync-switch'); await a.settle();
   await a.click('#repo-disconnect'); await shot(a, 'repo-disconnect-confirm', 'Clicked "Disconnect…": it asks once, saying what stays.');
   await tab(1); await shot(a, 'repo-keyboard-cancel', 'Pressed Tab: focus moves from Disconnect to Cancel.');
   await a.run(`document.querySelector('#repo-disconnect-confirm').focus()`);

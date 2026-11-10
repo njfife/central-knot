@@ -34,7 +34,7 @@ function applyLayout() {
 function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string) {
   const current = state.page === page;
   return h('button.nav-row', {
-    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
+    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
   }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
@@ -66,10 +66,13 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 /** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
 function repoRow() {
   const view = repo.view;
-  const { pull, push } = view?.connected ? waitingCounts(view) : { pull: 0, push: 0 };
-  // Directions, not an item count: ↓ to pull, ↑ to push.
-  const shown = [pull ? `↓${pull}` : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
-  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, [pull ? `${pull} to pull` : '', push ? `${push} to push` : ''].filter(Boolean).join(' · '));
+  const { pull, push, retry } = view?.connected ? waitingCounts(view) : { pull: 0, push: 0, retry: 0 };
+  // A newer commit that changes nothing here still waits to be pulled: a bare arrow.
+  const newer = view?.connected && !pull && !retry && !!view.pushBlocked;
+  // Directions, not an item count: ↓ to pull (or try again), ↑ to push.
+  const shown = [pull + retry ? `↓${pull + retry}` : newer ? '↓' : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
+  const said = [pull ? `${pull} to pull` : '', retry ? `${retry} to try again` : '', newer ? 'A newer commit to pull' : '', push ? `${push} to push` : ''].filter(Boolean).join(' · ');
+  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined);
 }
 
 function renderSidebar() {

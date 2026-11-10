@@ -922,7 +922,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .page-title .title-tag { vertical-align: top; margin-top: 1px; height: 22px; line-height: 16px; }
 /* Round 9: bands end where their page's content ends (later and more specific than the generic cap). */
 .page:not(.ov-page) > .history-bands > .band { padding-right: max(16px, calc(100% - 884px)); }
-.history-what > strong { flex: none; white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.history-what > strong { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .history-row { align-items: start; }
 .history-row > .history-when, .history-row > .history-done { padding-top: 2px; }
 .history-done { padding-right: 6px; }
@@ -1368,7 +1368,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-address-text { min-width: 0; flex: 1 1 auto; line-height: 20px; }
 .repo-url { font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
 /* The branch follows the address's last line, as part of it. */
-.repo-address-text > .repo-branch { display: inline-block; margin-left: 8px; vertical-align: 1px; white-space: nowrap; }
+.repo-address-text > .repo-branch { display: inline-block; margin-left: 8px; vertical-align: 1px; overflow-wrap: anywhere; }
 .repo-page .market-add-input[aria-invalid='true'], .repo-page .market-add-input[aria-invalid='true']:focus { border-color: var(--danger); outline-color: var(--danger); }
 /* Bands on this page pin their icon to the first line, as its notes do. */
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
@@ -1389,7 +1389,8 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
 .repo-row-icon { display: flex; padding-top: 3px; }
 .repo-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.repo-row-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* A long name wraps, and its kind and change follow it rather than stay at the far edge. */
+.repo-row-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
 .repo-row-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
@@ -1400,7 +1401,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-side-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .repo-activity { color: var(--ink); }
 .repo-activity-part { white-space: nowrap; }
-.repo-stuck-count { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--warning); text-transform: none; letter-spacing: 0; }
+.repo-stuck-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); text-transform: none; letter-spacing: 0; }
 .repo-stale { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-stale > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 /* The state line takes focus only so a keyboard user keeps their place; it isn't a control, so it doesn't look like one. */

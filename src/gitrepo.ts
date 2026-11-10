@@ -573,7 +573,7 @@ const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: 
  * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
  * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
  */
-const DELETION_WAITS = 'Its deletion from the repo waits for Sync: turn on Sync or use Sync once, then Pull again.';
+const DELETION_WAITS = 'Its deletion from the repo waits for Sync: turn on Sync or use Sync once, then try again.';
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
 /** What a sync pass started by Pull may touch: with Sync off, this item alone (as Apply all does); with Sync on, undefined, an ordinary pass. */
@@ -639,7 +639,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
   const server = item && parseServer(change.name, await readFile(join(dir, item.paths[0]), 'utf8'));
   if (item && !server) return [notIn(change.name, item.problem ?? 'It could not be read.')];
   const writer = view.tools.filter(tool => tool !== 'claude-cli').sort(byPreference).find(tool => !facts?.off.includes(tool) && (server ? !cannotHold(tool, server) : !!facts?.copies[tool]));
-  if (!writer) return [notIn(change.name, server ? 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write now.' : 'Remove it in Claude Code’s settings, or use Write now on MCP servers.')];
+  if (!writer) return [notIn(change.name, server ? 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.' : 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.')];
   const here = (await readTool(context, writer)).entries.find(entry => entry.name === change.name);
   if (here?.hash !== (server ? serverHash(server) : undefined)) {
     // What this tool had is kept first, so Undo can put it back.
