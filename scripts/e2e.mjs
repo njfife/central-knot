@@ -1898,16 +1898,16 @@ async function draftFlow() {
   await a.click('#base-draft');
   // Claude Code and Codex have a CLI here; Copilot CLI has only its folder in the home, so it is not offered.
   same('each tool with a CLI on this computer is offered, and no other', await a.all('#base-card [id^="base-draft-by-"]', 'e.textContent'), ['Draft with Claude Code', 'Draft with Codex']);
-  check('before a tool is chosen, the card says what it will do and that the draft is seen first', /sorts them/.test(await says('#base-card')) && /before anything is saved/.test(await says('#base-card')), await says('#base-card'));
+  check('before a tool is chosen, the card says what it will do and that the draft is seen first', /splits them/.test(await says('#base-card')) && /before anything is saved/.test(await says('#base-card')), await says('#base-card'));
   await a.click('#base-draft-by-claude-cli');
-  check('a tool that can’t answer says why in its own words, and the other tool can still be tried', (await says('#base-draft-problem')).includes('Claude Code could not write a draft. It said: Not logged in · Please run /login') && await a.exists('#base-draft-by-codex-cli'), await says('#base-card'));
+  check('a tool that can’t answer says why in its own words, and the other tool can still be tried', (await says('#base-draft-problem')).includes('Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.') && await a.exists('#base-draft-by-codex-cli'), await says('#base-card'));
   same('and nothing was written', [readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(join(home, '.central-knot/instructions/base.md'))], [claude0, codex0, false, false]);
   await a.shot('draft-problem');
 
   // A tool that takes its time: the card says it is writing, and Stop ends it.
   writeFileSync(mode, 'slow');
   await a.run(`document.querySelector('#base-draft-by-codex-cli').click()`);
-  check('while a tool writes, the card says so and offers Stop', await untilThere('#base-draft-stop') && /Codex is writing the draft/.test(await says('#base-card')), await says('#base-card'));
+  check('while a tool writes, the card says so and offers Stop', await untilThere('#base-draft-stop') && /Codex is writing a draft of the base instructions/.test(await says('#base-card')), await says('#base-card'));
   await a.shot('draft-writing');
   await a.click('#base-draft-stop');
   check('Stop goes back to choosing a tool, with nothing said to be wrong', await untilThere('#base-draft-by-codex-cli') && !(await a.exists('#base-draft-problem')), await says('#base-card'));
@@ -1915,15 +1915,17 @@ async function draftFlow() {
   // A draft: reviewed first, each file's change said, and what the draft carried nowhere pointed out.
   writeFileSync(mode, 'ok');
   await a.click('#base-draft-by-codex-cli');
-  check('the draft opens as a review that names who wrote it', await untilThere('#base-save') && /Codex’s draft: 2 lines of base instructions/.test(await says('.ins-review-title')), await says('#base-card'));
+  check('the draft opens as a review that names who wrote it', await untilThere('#base-save') && (await says('.ins-review-title')) === 'Codex’s draft. Check it, then save.', await says('#base-card'));
   const prompt = readNow(got);
   check('the tool was sent each file’s own text', prompt.includes(`<<<FILE: claude-cli, Claude Code’s CLAUDE.md>>>\n${claude0}<<<END OF FILE>>>`) && prompt.includes(`<<<FILE: codex-cli, Codex’s AGENTS.md>>>\n${codex0}<<<END OF FILE>>>`), prompt);
   check('and ran in a folder of its own, gone afterwards', readNow(`${got}.cwd`).includes('central-knot-draft-') && !existsSync(readNow(`${got}.cwd`).trim()), readNow(`${got}.cwd`));
   const plan = await says('.base-plan');
-  check('the review says what each file becomes', plan.includes('Its own instructions go from 6 lines to the 2 lines the draft kept only for Claude Code') && plan.includes('Its own instructions go from 2 lines to the 1 line the draft kept only for Codex') && plan.includes('copilot-instructions.md is created, holding only the base instructions.'), plan);
-  check('a line the draft carried nowhere is pointed out under its file', plan.includes('1 line of CLAUDE.md is in the draft nowhere word for word'), plan);
+  same('the review shows the base as it will be', await a.all('#base-card .ins-editor > pre.ins-preview', 'e.textContent'), ['# Style\nBe brief.']);
+  check('and says what each file becomes', plan.includes('Keeps 2 lines of its own, then the base:') && plan.includes('Keeps 1 line of its own, then the base:') && plan.includes('copilot-instructions.md is created, holding only the base instructions.'), plan);
+  same('with the lines each file keeps in view', await a.all('.base-plan pre.ins-preview', 'e.textContent'), ['# Claude\nUse the Task tool.', 'Run codex review before pushing.']);
+  check('a line the draft carried nowhere is pointed out under its file', plan.includes('1 line of CLAUDE.md isn’t in the draft as written. It may be reworded or left out.'), plan);
   await a.click('#base-lost-claude-cli');
-  same('and shown on request', await a.all('.base-plan pre.ins-preview', 'e.textContent'), ['Dropped by the draft.']);
+  same('and shown on request', (await a.all('.base-plan pre.ins-preview', 'e.textContent'))[1], 'Dropped by the draft.');
   same('nothing is written by reviewing', [readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd)], [claude0, codex0, false]);
   await a.shot('draft-review');
   for (const width of [860, 1180, 1320, 1728]) { await sizeTo(a, width, 800); same(`nothing cut off in a draft’s review at ${width}×800`, await a.run(CUT_OFF), []); }
@@ -1937,7 +1939,7 @@ async function draftFlow() {
   await fullSize(a);
   await a.shot('draft-edit');
   await a.click('#base-review');
-  check('a line put back by hand is no longer pointed out', !(await says('.base-plan')).includes('nowhere word for word'), await says('.base-plan'));
+  check('a line put back by hand is no longer pointed out', !(await says('.base-plan')).includes('in the draft as written'), await says('.base-plan'));
   await a.click('#base-save');
   const block = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->\n# Style\nBe brief.\n<!-- Central Knot base instructions: end -->\n';
   same('one Save sets the base and each file: its own part, then the base', [readNow(claudeMd), readNow(agentsMd), readNow(copilotMd), readNow(join(home, '.central-knot/instructions/base.md'))],

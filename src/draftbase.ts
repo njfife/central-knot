@@ -172,7 +172,7 @@ export async function writeDraft(sources: DraftSources, by: HarnessId, binary: s
     if (ran.code === 'timeout') return { stopped: `${name} did not finish a draft in time, so it was stopped. Nothing was changed.` };
     if (ran.code !== 0) {
       const why = lastWords(ran.said) || lastWords(ran.output);
-      return { stopped: `${name} could not write a draft${why ? `. It said: ${why}` : '.'} Nothing was changed.` };
+      return { stopped: `${name} could not write a draft${why ? `: “${why}”.` : '.'} Nothing was changed.` };
     }
     const answer = command.answer === 'file' ? await readFile(answerFile, 'utf8').catch(() => '') : ran.output;
     const tools = sources.files.map(file => file.tool);

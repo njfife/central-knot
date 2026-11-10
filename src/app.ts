@@ -929,7 +929,8 @@ export const draftBaseWith = (tool: HarnessId) => {
     try {
       const result = await api().draftBase(tool, state.home!.home);
       await rereadInstructions();
-      const none = (why: string, problem = true) => { if (problem) state.draftPick = { problem: why }; focusAfterBusy = `base-draft-by-${tool}`; announce(why); };
+      // A failure is read where it is said, so no tool's button looks chosen; after Stop, focus is back on the tool that was stopped.
+      const none = (why: string, problem = true) => { if (problem) state.draftPick = { problem: why }; focusAfterBusy = problem ? 'base-draft-problem' : `base-draft-by-${tool}`; announce(why); };
       const draft = result.draft;
       if (!draft) { none(result.cancelled ? 'Stopped. No draft was written, and nothing was changed.' : result.stopped ?? 'No draft was written.', !result.cancelled); return; }
       // Written from the files as they were when it started: saving it over one that changed since would lose what is new there.

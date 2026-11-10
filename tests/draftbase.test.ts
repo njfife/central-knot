@@ -143,7 +143,7 @@ test('A tool that fails, answers out of form, takes too long or is stopped gives
     const sources = await draftSources(box.context, await box.snapshots());
     // Not signed in: it exits before reading the prompt, and what it said is passed on.
     const signedOut = await writeDraft(sources, 'claude-cli', await box.cli('signed-out', 'echo "Not logged in · Please run /login" >&2\nexit 1'));
-    assert.equal(signedOut.stopped, 'Claude Code could not write a draft. It said: Not logged in · Please run /login Nothing was changed.');
+    assert.equal(signedOut.stopped, 'Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.');
     const chatty = await writeDraft(sources, 'codex-cli', await box.cli('chatty', 'cat > /dev/null\necho "Sure! Here are some thoughts."'));
     assert.equal(chatty.stopped, 'Codex answered, but its answer stopped before the end, so there is no draft. Nothing was changed. Try again, or have another tool write it.');
     // Codex's answer is the file it is told to write, not what it prints while working.
