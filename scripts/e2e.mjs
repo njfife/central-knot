@@ -2082,8 +2082,11 @@ async function openCodeFlow() {
   mkdirSync(join(oc, 'agents'));
   writeFileSync(join(oc, 'agents/helper.md'), '---\ndescription: Helps.\nmode: subagent\n---\n\nYou help.\n');
   const a = await launch(join(scratch, 'opencode-data'), flag('--electron') ? ['--as-released'] : [], home);
+  // With --shots, a page's picture at each window size the app must fit.
+  const pictures = async (page, name) => { if (!shots) return; for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await sizeTo(page, width, height); await page.shot(`${name}-${width}`); } await fullSize(page); };
   await a.click('#nav-harnesses');
   const card = await a.text('#harness-opencode-cli');
+  await pictures(a, 'opencode-harnesses');
   check('OpenCode’s card names its CLI and its desktop app, each with its version, once', card.includes('Installed · 1.19.5; OpenCode desktop 2.2.5') && !card.includes('(OpenCode'), card);
   const pages = await a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
   check('with OpenCode beside Claude Code, Agents and Plugins are pages', pages.includes('agents') && pages.includes('plugins'), pages);
@@ -2095,22 +2098,26 @@ async function openCodeFlow() {
   await a.click('#open-notes');
   check('a skill OpenCode reads in Claude Code’s folder has its Disable there, and no Remove: the copy is Claude Code’s', await a.exists('#enable-notes-opencode-cli') && !(await a.exists('#remove-notes-opencode-cli')) && await a.exists('#remove-notes-claude-cli'));
   await fitsAtMinimum(a, 'Skills with OpenCode, a skill open');
-  await a.shot('opencode-skills');
+  await pictures(a, 'opencode-skill-open');
   const view = await a.run('window.centralKnot.refresh()');
   same('its MCP server is read from its settings, off as its settings say', view.mcp.servers.map(server => [server.key, server.disabled]), [['oc-docs', ['opencode-cli']]]);
   same('its agent is read from its agents folder', view.agents.servers.map(server => [server.key, Object.keys(server.copies)]), [['helper', ['opencode-cli']]]);
-  await a.click('#nav-instructions');
+  await a.click('#nav-mcp'); await a.click('#open-oc-docs'); await pictures(a, 'opencode-mcp-open');
+  await a.click('#nav-agents'); await pictures(a, 'opencode-agents');
+  await a.click('#nav-instructions'); await pictures(a, 'opencode-instructions');
   check('its instruction file is AGENTS.md in its own folder', (await a.text('.page') ?? '').includes('~/.config/opencode/AGENTS.md') && (await a.text('.page') ?? '').includes('Be brief.'), await a.text('.page'));
   await a.click('#nav-plugins');
   check('marketplaces are said to come from the tools that have them, not OpenCode', /Marketplaces you added in Claude Code show up here/.test(await a.text('.page') ?? ''), await a.text('.page'));
   await a.click('#nav-harnesses'); await a.click('#harness-opencode-cli');
+  await pictures(a, 'opencode-page-skills');
   await a.click('#harness-tab-plugins');
+  await pictures(a, 'opencode-page-plugins');
   check('its Plugins tab says where plugins install and that its parts can go in', /installs marketplace plugins into Claude Code\. A plugin’s page on Plugins can put its parts in OpenCode as separate items\./.test(await a.text('#harness-body') ?? ''), await a.text('#harness-body'));
   await a.click('#harness-tab-about');
   const about = await a.text('#harness-body');
   check('About names its folders and its settings file', ['~/.config/opencode/skills', '~/.claude/skills', '~/.config/opencode/opencode.json', '~/.config/opencode/agents', '~/.config/opencode/AGENTS.md'].every(path => about.includes(path)), about);
   await fitsAtMinimum(a, 'OpenCode’s page, About');
-  await a.shot('opencode-about');
+  await pictures(a, 'opencode-page-about');
   same('no page errors, OpenCode', a.pageErrors, []);
   await a.quit();
 
@@ -2160,21 +2167,23 @@ async function openCodeFlow() {
   check('the plugin’s skill and MCP server are in OpenCode, the server in OpenCode’s form', existsSync(join(mine, 'skills/triage/SKILL.md')) && /"issues": \{\s*"type": "local",\s*"command": \[\s*"npx",\s*"-y",\s*"@example\/issues-mcp"\s*\]\s*\}/.test(withParts) && withParts.includes('// mine'), withParts || await p.text('.bands'));
   const partAgent = readNow(join(mine, 'agents/release-reviewer.md'));
   check('and a plugin’s agent is an OpenCode agent', partAgent.includes('description: Reviews a release branch before it ships.') && partAgent.includes('mode: all') && partAgent.includes('Review it.'), partAgent || await p.text('.bands'));
-  await p.shot('opencode-parts');
+  await pictures(p, 'opencode-parts-four-tools');
   // Five tools is the widest table: nothing is cut off at the smallest window.
   mkdirSync(join(practice, '.pi/agent'), { recursive: true });
   await p.click('#header-refresh');
   await p.click('#nav-skills');
   check('with Pi too, the table has five tool columns', (await p.all('.ov-tool-head')).length === 5, await p.all('.ov-tool-head'));
-  await p.shot('opencode-five-tools');
+  await pictures(p, 'opencode-five-skills');
   for (const page of ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles']) {
     await p.click(`#nav-${page}`);
     await fitsAtMinimum(p, `${page} with five tools`);
+    if (['mcp', 'plugins', 'profiles', 'harnesses', 'overview'].includes(page)) await pictures(p, `opencode-five-${page}`);
   }
   await p.click('#nav-plugins');
   await p.click('[id^="popen-"][id$="-issue-tracker"]');
   for (let tries = 0; tries < 40 && !/Can go in|Its parts/.test(await p.text('.plugin-page') ?? ''); tries++) await wait(100);
   await fitsAtMinimum(p, 'a plugin’s page with five tools');
+  await pictures(p, 'opencode-five-plugin-page');
   same('no page errors, OpenCode in the Practice copy', p.pageErrors, []);
   await p.quit();
 }

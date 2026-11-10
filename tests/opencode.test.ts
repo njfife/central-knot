@@ -97,6 +97,10 @@ test('OpenCode’s skill switch is a deny rule by name, written last so it decid
     const denied = '{ "permission": { "skill": { "al*": "deny" } } }';
     assert.equal(state(denied), true);
     assert.deepEqual((readJsonc(flip(denied, false)) as { permission: { skill: unknown } }).permission.skill, { 'al*': 'deny', alpha: 'allow' });
+    // Asked for what already holds, nothing changes: the person's other permission rules are not touched.
+    const other = '{ "permission": { "bash": "ask" } }';
+    assert.equal(flip(other, false), other);
+    assert.equal(flip(off, true), off);
     // One word for every skill becomes a map that says the same.
     assert.deepEqual((readJsonc(flip('{ "permission": { "skill": "ask" } }', true)) as { permission: { skill: unknown } }).permission.skill, { '*': 'ask', alpha: 'deny' });
     // `permission` as one word has no place for a skill's rule: reported, never written.
@@ -155,6 +159,8 @@ test('OpenCode’s servers are read from both places in its settings, written in
     // An entry under mcp.servers is edited where it is, never made again under mcp.
     const edited = (await readTool(box.context, 'opencode-cli')).entries.find(entry => entry.name === 'newer')!;
     assert.equal(edited.file, settings(box.home));
+    await writeFile(settings(box.home), '');
+    assert.deepEqual([(await readTool(box.context, 'opencode-cli')).problem, (await readTool(box.context, 'opencode-cli')).entries], [undefined, []], 'an empty file has no servers');
     // A file that isn't JSON is reported and never written.
     await writeFile(settings(box.home), '{ "mcp": ');
     assert.match((await readTool(box.context, 'opencode-cli')).problem ?? '', /could not be read as JSON/);

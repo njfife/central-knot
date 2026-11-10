@@ -171,7 +171,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
     }
     const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
     if (tool === 'opencode-cli') {
-      const settings = record(readJsonc(text));
+      // An empty settings file holds no servers yet, as an empty object would.
+      const settings = record(text.trim() ? readJsonc(text) : {});
       if (!settings || ('mcp' in settings && !record(settings.mcp))) throw new Error('mcp is not an object');
       const mcp = record(settings.mcp) ?? {};
       const holder = openCodeHolder(mcp);

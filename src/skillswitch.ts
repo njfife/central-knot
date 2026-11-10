@@ -243,6 +243,8 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
   if (file.tool === 'opencode-cli') {
     const path = ['permission', 'skill'];
     const rules = openCodeRules(json);
+    // Already as asked: not a byte changes.
+    if ((openCodeAction(rules, target.name) === 'deny') === disabled) return file.text;
     const own = rules.find(([pattern]) => pattern === target.name);
     // One word for every skill becomes a map that says the same, so one skill's rule has a place.
     let out = typeof record(json.permission)?.skill === 'string' ? setJsonMember(text, path, Object.fromEntries(rules)) : text;
@@ -253,8 +255,8 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     if (disabled) return bom + setJsonMember(out, [...path, target.name], 'deny');
     // Still off by a wider rule ("*": "deny"): the skill gets its own rule after it.
     if (decides === 'deny') return bom + setJsonMember(out, [...path, target.name], 'allow');
-    // A map the Enable left empty goes with its last entry, and so does a `permission` it leaves empty.
-    if (!rest.length) out = setJsonMember(out, Object.keys(record(json.permission) ?? {}).length > 1 ? path : ['permission'], undefined);
+    // A map the Enable left empty goes with its last entry, and so does a `permission` that held nothing else.
+    if (!rest.length) out = setJsonMember(out, Object.keys(record(json.permission) ?? {}).some(key => key !== 'skill') ? path : ['permission'], undefined);
     return bom + out;
   }
   const { written, all } = piForms(target, toolConfigRoot(context, file.tool));
