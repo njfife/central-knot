@@ -211,7 +211,7 @@ type PullState = NonNullable<RepoChange['pull']>;
 const pullState = (change: RepoChange): PullState => change.pull ?? 'moves';
 
 /** A row's note: what Pull or Push will do with it, or why it can't; `warns` when the reader should look twice. */
-function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLElement; warns: boolean } | undefined {
+function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLElement; warns: boolean; act?: HTMLElement } | undefined {
   // What can't happen leads in warning colour; the why follows in the note's soft ink, as one wrapping sentence.
   const lead = (first: string, rest: string) => ({ text: h('span', {}, h('span.tone-warning', {}, first), ` ${rest}`), warns: true });
   const plain = (text: string, warns = false) => ({ text, warns });
@@ -223,8 +223,9 @@ function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLE
   const state = pullState(change);
   // Left by the last Pull: a deletion isn't "coming in", so it says what didn't happen.
   const notYet = change.change === 'removed' ? 'Not deleted here yet.' : 'Didn’t come in yet.';
-  if (state === 'waits') return change.retry ? lead(notYet, 'It waits for Automatic sync: turn it on (at the bottom), then Pull again.')
-    : lead('Waits for Automatic sync.', 'Pull deletes it once sync is on; History can restore it.');
+  // Before Pull, the note under the list says what turning sync on does (with its button); after, the row carries the button.
+  if (state === 'waits') return change.retry ? { ...lead(notYet, 'It waits for Automatic sync: turn it on, then Pull again.'), act: syncOnButton(`repo-sync-on-${change.key}`) }
+    : lead('Waits for Automatic sync.', 'History can restore it once it is deleted.');
   // Waited for sync at the last Pull, and sync is on now: only the click is left.
   if (change.sync === 'ready') return plain('Automatic sync is on now: Pull again deletes it from your tools. History can restore it.');
   if (state === 'again') return lead(notYet, change.held!);
@@ -250,7 +251,7 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
       // Kind and change stay together, so a long name that wraps carries them as one.
       h('span.repo-row-line', {}, h('strong.repo-row-name', { title: change.name }, change.name), h('span.repo-row-meta', {}, h('span.repo-row-kind', {}, kind.label),
         h(`span.repo-row-change.repo-change-${quiet ? 'held' : change.change}`, {}, label))),
-      note ? h('span.repo-row-note.tone-muted', {}, icon(note.warns ? 'triangle-alert' : 'info', 12, note.warns ? 'tone-warning' : ''), note.text) : null));
+      note ? h('span.repo-row-note.tone-muted', {}, icon(note.warns ? 'triangle-alert' : 'info', 12, note.warns ? 'tone-warning' : ''), h('span', {}, note.text, note.act ? [' ', note.act] : null)) : null));
 }
 
 /** An item its button won't move: held for good, or (coming in) waiting for Automatic sync. */
@@ -394,10 +395,9 @@ function connectedPage(view: ConnectedRepoView) {
   const pullMovesNone = !!pullControl && !counts.pull && !counts.retry && view.incoming.length > 0;
   // With sync on first, one Pull would also make the deletions waiting for it: said, to save the second Pull.
   const waitingNames = view.incoming.filter(change => pullState(change) === 'waits').map(change => change.name);
-  const movesNoneText = waitingNames.length ? `${PULL_MOVES_NONE} With Automatic sync on first, Pull deletes ${andList(waitingNames)} too.` : PULL_MOVES_NONE;
+  const movesNoneText = waitingNames.length ? `${PULL_MOVES_NONE} Turn on Automatic sync first, and Pull deletes ${andList(waitingNames)} too.` : PULL_MOVES_NONE;
   // The step it names, where the eye already is.
-  const turnSyncOn = waitingNames.length && state.home && !state.home.syncOn
-    ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id: 'repo-sync-on', disabled: locked, onclick: () => void setSync(true) }) : undefined;
+  const turnSyncOn = waitingNames.length ? syncOnButton('repo-sync-on') : undefined;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
@@ -438,6 +438,10 @@ function connectedPage(view: ConnectedRepoView) {
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 
+/** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */
+const syncOnButton = (id: string) => (state.home && !state.home.syncOn
+  ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id, disabled: !!state.busy || !state.home.manage.access.allowed, onclick: () => void setSync(true) }) : undefined);
+
 /** Disconnect…: asks first, in place (disconnectQuestion), with focus on Cancel. */
 const disconnectButton = (disabled: boolean) => button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled,
   onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-cancel')?.focus(); } });
@@ -452,8 +456,10 @@ const disconnectQuestion = () => (repo.confirmDisconnect ? h('div.band.repo-conf
 function problemBand(unreachable: string | undefined) {
   const shown = repo.problem ?? unreachable;
   if (!shown) return null;
+  // An action's refusal can be dismissed; a reason to read again (the repo out of reach, or reading failed) offers Try again.
+  const refusal = !!repo.problem && repo.problem !== lastReadFailure;
   return h('div.band.band-danger', { role: 'alert' }, icon('circle-alert', 14), h('span.band-text', {}, shown),
-    repo.problem ? closeButton(() => { repo.problem = undefined; rerender(); }, { id: 'repo-problem-dismiss' })
+    refusal ? closeButton(() => { repo.problem = undefined; rerender(); }, { id: 'repo-problem-dismiss' })
       : button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Try again', id: 'repo-try-again', disabled: !!state.busy, onclick: () => void loadRepo(true) }));
 }
 
@@ -492,8 +498,8 @@ export function repoPage(): HTMLElement {
   const view = repo.view;
   // Not read yet: said so. Never read because reading failed: the reason, and Disconnect (which needs no reading) as a way out.
   if (!view && !lastReadFailure) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, 'Reading…')));
-  if (!view) return h('div.page.repo-page', {}, h('div.bands', {}, disconnectQuestion(), problemBand(undefined)),
-    h('div.scroll', {}, h('p.empty', {}, 'The repo could not be read.'), repo.confirmDisconnect ? null : disconnectButton(!!state.busy)));
+  if (!view) return h('div.page.repo-page', {}, h('div.toolbar.repo-toolbar', {}, h('span.toolbar-spacer'), repo.confirmDisconnect ? null : disconnectButton(!!state.busy)),
+    h('div.bands', {}, disconnectQuestion(), problemBand(lastReadFailure)));
   if (view.connected) return connectedPage(view);
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
