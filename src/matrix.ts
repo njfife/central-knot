@@ -30,7 +30,8 @@ function fromPlugins(skill: SampleSkill, page: Kind): { install: PartsInstall; t
   const named = [skill.key, skill.name].filter((name): name is string => !!name).map(name => ({ kind: partKind, name }) as const);
   const found = new Map<string, { install: PartsInstall; tools: HarnessId[] }>();
   for (const install of state.home?.parts ?? []) {
-    if (!install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
+    // A copy removed from that tool by hand is no longer a part installed there.
+    if ((toolList().includes(install.tool) && skill.copies[install.tool] === undefined) || !install.items.some(item => !item.removed && named.some(name => samePart(item, name)))) continue;
     const key = pluginKey(install.source, install.plugin);
     const entry = found.get(key) ?? { install, tools: [] };
     entry.tools.push(install.tool);
