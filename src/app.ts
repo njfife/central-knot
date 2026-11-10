@@ -133,7 +133,7 @@ export function announce(text: string, quiet = false) {
 export function tell(outcome: Outcome | undefined, otherwise = ''): void {
   state.outcome = outcome;
   if (!outcome) announce(otherwise);
-  else announce(outcome.text, !saidInStatusBar(outcome));
+  else { announce(outcome.text, !saidInStatusBar(outcome)); outcome.said = state.said.seq; }
 }
 
 /** Paints the status bar's message from state.said, keeping its whole text as its tooltip. */
@@ -569,6 +569,8 @@ export interface Outcome {
   history?: boolean;
   undo?: { id: string; label: string };
   act?: { label: string; id: string; run: () => void; title?: string };
+  /** When it was said (state.said.seq): a result newer than a table's pending changes still shows there. */
+  said?: number;
 }
 
 /**

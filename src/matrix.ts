@@ -142,6 +142,8 @@ interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: b
 const newView = () => ({
   committed: sample.map(skill => ({ ...skill })),
   draft: new Map<string, Draft>(),
+  /** When the draft last changed (state.said.seq): a result said before that steps aside for the pending changes. */
+  draftSaid: 0,
   filter: 'all' as Filter,
   find: '',
   /** The skill whose details are open under its row. */
@@ -224,6 +226,7 @@ function edit(key: string, change: (skill: SampleSkill, draft?: Draft) => Draft)
   const same = !next.resolve && next.managed === base.managed && sameSet(next.off, base.off) && !next.remove?.length && !Object.keys(next.switches ?? {}).length;
   if (same) view.draft.delete(key); else view.draft.set(key, next);
   announce(view.draft.size ? `${view.draft.size} ${view.draft.size === 1 ? 'change' : 'changes'} not applied yet.` : 'No changes.', true);
+  view.draftSaid = state.said.seq;
 }
 
 // Turning a skill on undoes "keep both"; turning it off drops a chosen copy. The page then shows what Apply all will do.
@@ -1418,7 +1421,7 @@ export { brandMark };
 function outcomeShown(outcome: Outcome, matrixPage: boolean): boolean {
   if (outcome.page !== state.page) return false;
   const named = [outcome.item, ...(outcome.items ?? [])].filter((name): name is string => !!name);
-  if (matrixPage && view.draft.size) return false;
+  if (matrixPage && view.draft.size && (outcome.said ?? 0) < view.draftSaid) return false;
   const choosing = matrixPage && view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && named.some(name => name === skill.name || name.toLowerCase() === skill.key));
   if (choosing) return false;
   return !(state.skillsView === 'files' && state.item && !named.some(name => name.toLowerCase() === state.item));
