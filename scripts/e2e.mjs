@@ -693,6 +693,20 @@ async function practiceFlow() {
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
   check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 1, mobile: false });
+  // Scrolled just past the header's own place, it stays flush with the scroller's top while the first row passes under it.
+  // The scroller is held short for the measurement, so the five-plugin fixture scrolls far enough at any layout.
+  const pinned = await a.run(`(() => {
+    const box = document.querySelector('#plugins-scroll'), head = document.querySelector('.plugin-table .ov-head'), top = () => box.getBoundingClientRect().top;
+    const style = box.style.cssText;
+    box.style.flex = 'none'; box.style.height = '160px';
+    box.scrollTop = head.getBoundingClientRect().top - top() + 20;
+    const gap = Math.round(head.getBoundingClientRect().top - top()), rowUnder = document.querySelector('.plugin-row').getBoundingClientRect().top < head.getBoundingClientRect().bottom;
+    box.scrollTop = 0; box.style.cssText = style;
+    return { gap, rowUnder };
+  })()`);
+  same('scrolled at 860×560, the plugin column header pins flush to the top, with no rows showing above it', pinned, { gap: 0, rowUnder: true });
+  await a.send('Emulation.clearDeviceMetricsOverride');
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));

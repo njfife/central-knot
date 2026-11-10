@@ -917,7 +917,12 @@ span.ins-confirm { margin-top: 0; }
 .market-hint { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 8px; font-size: 12px; color: var(--ink-soft); }
 .market-hint > svg { flex: none; margin-top: 2px; }
 .market-hint .btn { height: auto; padding-top: 0; padding-bottom: 0; line-height: inherit; }
-.market-main { padding: 18px max(0px, calc(var(--market-gutter) - var(--scrollbar))) 32px var(--market-gutter); }
+/*
+ * Never a top padding here: sticky offsets count from a scroller's padding edge, so the plugin table's pinned column
+ * header would stop below the toolbar with rows showing through the gap. The pages in this scroller carry that space.
+ */
+.market-main { padding-right: max(0px, calc(var(--market-gutter) - var(--scrollbar))); padding-bottom: 32px; padding-left: var(--market-gutter); }
+.market-page, .plugin-page { padding-top: 18px; }
 /*
  * The toolbar's left on a marketplace's page: its name, then its facts, on one line. What doesn't fit wraps onto a line
  * below, out of sight, so facts drop whole, the last first; the name, first, only shortens (with its tooltip) once alone.
@@ -969,6 +974,8 @@ span.ins-confirm { margin-top: 0; }
   .plugin-table > .plugin-row:nth-child(even of .plugin-row):not(:hover):not(:has(:focus-visible)) { background: var(--row-stripe); }
 }
 .plugin-table .ov-row { grid-template-columns: minmax(0, 1fr) repeat(var(--tool-count, 3), 120px) 28px; height: auto; min-height: 40px; }
+/* Room above the tool icons, so the pinned header doesn't touch the toolbar's rule */
+.plugin-table .ov-head { min-height: 48px; }
 .plugin-table .ov-head .ov-name { padding: 6px 0; font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .plugin-row { cursor: pointer; }
 .plugin-row-name { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; padding: 8px 12px 8px 0; text-align: left; }
@@ -1089,7 +1096,7 @@ span.ins-confirm { margin-top: 0; }
   .market-add-input { width: 240px; }
   .plugins-page { --market-gutter: 16px; }
   /* Less height around the table, and two-line rows (the name, then what it holds and what it does), so several show. */
-  .market-main { padding-top: 12px; }
+  .market-page, .plugin-page { padding-top: 12px; }
   .market-tabs { margin: 8px 0 6px; }
   .market-tab { padding: 5px 10px; }
   .plugin-table .ov-head .ov-tool-head { flex-direction: row; gap: 6px; }
