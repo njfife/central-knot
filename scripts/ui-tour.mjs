@@ -299,7 +299,10 @@ if (wanted('profiles')) {
   await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
   await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: release-notes and review are off where a profile turned them off (the profile mark).');
   await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
-  await a.click('#nav-skills'); await a.click('#open-notes'); await a.click('#enable-notes-claude-cli'); await a.click('#apply');
+  await a.click('#nav-skills');
+  // Rows stay open across pages, so notes may already be open from earlier.
+  if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
+  await a.click('#enable-notes-claude-cli'); await a.click('#apply');
   await a.click('#nav-profiles');
   await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
   await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
@@ -624,7 +627,7 @@ async function everyPage(tag) {
   const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
   await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
-  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
 
@@ -651,8 +654,8 @@ if (wanted('sizes')) {
     if (width === 860) {
       // An edit made outside the app while the Overview is open: the rail marks Skills with a dot until it is seen.
       await a.click('#nav-overview');
-      edit(join(practice, '.codex/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex for the rail.\n'));
-      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Codex) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
+      edit(join(practice, '.claude/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Claude Code for the rail.\n'));
+      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Claude Code) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
     }
     await everyPage(`${width}`);
     // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
@@ -669,7 +672,8 @@ if (wanted('sizes')) {
       await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
       // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
       await a.click('#nav-skills');
-      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+      // A box whose copies differ opens the comparison instead of choosing a change, so it is skipped.
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled]):not([data-state$="differs"])')?.id ?? ''`);
       if (box) {
         await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
         await a.click('#sidebar-toggle');
@@ -729,7 +733,7 @@ async function toolViews(tag, home) {
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
   await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
-  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
 }
 
 if (wanted('missing')) {
@@ -738,7 +742,7 @@ if (wanted('missing')) {
   await toolViews('before', 'The practice copy, with every tool');
   // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
-  await a.click('#home-actual'); await a.click('#nav-tools');
+  await a.click('#home-actual'); await a.click('#nav-harnesses');
   await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
   await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
   const folder = join(scratch, 'two-tools');
@@ -751,7 +755,7 @@ if (wanted('missing')) {
   await toolViews('after', 'A folder with only Claude Code and Codex');
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
-  await a.click('#nav-tools'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-harnesses'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
   await a.size(1280, 800);
   await a.size(860, 560);
@@ -765,7 +769,7 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
-  await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-harnesses'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
   await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
@@ -775,10 +779,10 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
-  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
   await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
-  await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
   await a.size(1280, 800);
 }
 
