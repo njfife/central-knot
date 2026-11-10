@@ -147,6 +147,8 @@ export interface DesktopApi {
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
+  /** Adds the marketplace this build carries to one tool's own list of marketplaces, with that tool's own command. Installs nothing. */
+  addCarriedTo(tool: HarnessId, home: string): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
@@ -459,6 +461,9 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
+
+/** What adding a marketplace to one tool's own list came to: already `there`, `added`, `held` (left alone, with why) or `failed`. */
+export interface ListedReport { tool: HarnessId; outcome: 'there' | 'added' | 'held' | 'failed'; message: string }
 
 /**
  * The marketplace a bundled build carries, as the page shows it: the app's name, the name and picture the build gave the

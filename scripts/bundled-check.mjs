@@ -86,11 +86,20 @@ check('report: the plugin kept on GitHub is packed or named', sparkPacked || /- 
 rmSync(market, { recursive: true, force: true });
 
 // ---------- The app ----------
+// Stand-ins for the tools' CLIs: each answers --version and "plugin marketplace add <folder>", which it records where the real
+// tool does (the real commands are exercised by tests/harness). Anything else fails.
 mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+const marketNameOf = `name=$(sed -n 's/.*"name": *"\\([^"]*\\)".*/\\1/p' "$4/.claude-plugin/marketplace.json" | head -1)`;
+const adds = {
+  claude: `mkdir -p "$HOME/.claude/plugins"; printf '{"%s":{"source":{"source":"directory","path":"%s"},"installLocation":"%s"}}\\n' "$name" "$4" "$4" > "$HOME/.claude/plugins/known_marketplaces.json"`,
+  copilot: `mkdir -p "$HOME/.copilot"; printf '{"extraKnownMarketplaces":{"%s":{"source":{"source":"directory","path":"%s"}}}}\\n' "$name" "$4" > "$HOME/.copilot/settings.json"`,
+  codex: `mkdir -p "$HOME/.codex"; printf '[marketplaces.%s]\\nsource = "%s"\\n' "$name" "$4" >> "$HOME/.codex/config.toml"`,
+};
 for (const [name, output] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
-  writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nexit 9\n`);
+  writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${output}" && exit 0\nif [ "$1 $2 $3" = "plugin marketplace add" ]; then ${marketNameOf}; ${adds[name]}; echo "$4" >> "$HOME/added-by-${name}.txt"; exit 0; fi\nexit 9\n`);
   chmodSync(join(HOME, '.local/bin', name), 0o755);
 }
+const addedBy = name => { try { return readFileSync(join(HOME, `added-by-${name}.txt`), 'utf8').trim().split('\n'); } catch { return []; } };
 async function launch() {
   const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
@@ -126,6 +135,20 @@ check('its settings are in a folder of its own', existsSync(join(dataDir, 'bundl
 if (process.platform !== 'darwin') check('the standard app’s settings folder was not made', !existsSync(join(appData, 'central-knot')));
 check('the unpacked marketplace has no fetch folder', !existsSync(join(marketFolder, '.git')));
 
+// At the first open the build adds its marketplace to each tool's own list: Claude Code and Codex here. Copilot CLI
+// refuses a marketplace that lists an npm plugin, so it is left alone. Nothing is installed.
+// (Only where the home can be written: on a Mac. Elsewhere it is preview only, and nothing is added.)
+const writes = process.platform === 'darwin';
+const waitFor = async (test, ms = 20000) => { for (const end = Date.now() + ms; Date.now() < end; await wait(200)) if (test()) return true; return false; };
+if (writes) {
+  check('the marketplace was added to Claude Code’s and Codex’s own lists, by their own commands', await waitFor(() => addedBy('claude').length === 1 && addedBy('codex').length === 1), { claude: addedBy('claude'), codex: addedBy('codex') });
+  check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
+  check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
+  check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
+} else {
+  await wait(1500);
+  check('in a home that is preview only, it is added to no tool', ['claude', 'copilot', 'codex'].every(name => addedBy(name).length === 0));
+}
 await a.click('#nav-plugins');
 check('Plugins lists the carried marketplace', await a.until(`!!document.querySelector('.market-item')`));
 await a.settle();
@@ -147,6 +170,8 @@ await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
 check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*As of .+ \(Folder: market\)\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
+if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('Claude Code and Codex have it in their own list of marketplaces')`), await a.run(`document.querySelector('.market-in-tools')?.textContent`));
+check('and offers no Add button where it is already there or can’t go', await a.run(`document.querySelectorAll('[id^="add-carried-"]').length`) === 0);
 check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes('npm-thing') && text.includes('npm: @example/npm-thing')));
 check('About shows the marketplace’s README', await a.until(`document.querySelector('.plugin-readme-body')?.textContent.includes('What is inside')`));
 await a.shot('about-1280');
@@ -173,10 +198,22 @@ const before = statSync(marketFolder).ino;
 a.quit();
 await wait(500);
 
-// A second open keeps what is there: the same folder, not unpacked again.
+// Between the two opens the person takes the marketplace out of Claude Code, in Claude Code.
+if (writes) rmSync(join(HOME, '.claude/plugins/known_marketplaces.json'));
+
+// A second open keeps what is there: the same folder, not unpacked again, and what was taken out of a tool stays out.
 const b = await launch();
 await b.click('#nav-plugins');
 check('a second open lists it again', await b.until(`document.querySelectorAll('.plugin-row').length === 6`));
+if (writes) {
+  await b.click('#market-tab-about');
+  check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('it was not added again by itself', addedBy('claude').length === 1 && addedBy('codex').length === 1, { claude: addedBy('claude'), codex: addedBy('codex') });
+  await b.shot('about-add-1280');
+  await b.click('[id^="add-carried-"][id$="claude-cli"]');
+  check('Add to Claude Code adds it, and the page says so', await b.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('Claude Code and Codex have it')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('the status bar says what happened', await b.run(`document.querySelector('#announcement').textContent`).then(text => text.includes('is now in Claude Code’s own list of marketplaces')), await b.run(`document.querySelector('#announcement').textContent`));
+}
 check('a second open keeps the unpacked marketplace as it is', statSync(marketFolder).ino === before);
 check('no page error at the second open', b.errors.length === 0, b.errors);
 b.quit();

@@ -521,10 +521,26 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
   handoff = { id: readId, home: current!.home, snapshots };
   toolsChangedHere(snapshots);
+  addCarriedSoon(presentTools(snapshots));
   if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...made.agents.servers].filter(fact => fact.managed).length;
   return made;
+}
+
+/** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
+let carriedMarket: ReturnType<typeof registerMarketplaces> | undefined;
+/**
+ * A bundled build adds its marketplace to the own list of each tool found in this computer's home (ORG-03), after the home
+ * was read and outside that read: each tool's own command takes its turn in the queue. The page hears when one was added,
+ * and the log keeps what each came to.
+ */
+function addCarriedSoon(present: HarnessId[]) {
+  if (!bundle || !carriedMarket) return;
+  void carriedMarket.addCarried(present, queued).then(reports => {
+    for (const report of reports) log(`bundle: ${bundle?.release.marketplace} in ${report.tool}: ${report.outcome}: ${report.message}`);
+    if (reports.some(report => report.outcome === 'added')) send('sync:changed');
+  }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 
 /** Background passes run through the same queue as the page's requests, one at a time, and tell the page when something changed. */
@@ -943,8 +959,8 @@ app.whenReady().then(async () => {
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
-  registerMarketplaces({ handle, handleNow }, {
-    home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
+  carriedMarket = registerMarketplaces({ handle, handleNow }, {
+    home: () => (current ? { home: current.home, overrides: context().overrides, actual: current.mode === 'actual' } : undefined),
     read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),

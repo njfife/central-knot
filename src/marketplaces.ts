@@ -11,7 +11,7 @@ import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, BundledView, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, BundledView, Catalog, ListedReport, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, notCarried, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
@@ -21,8 +21,8 @@ export const viaLabel = (app: DesktopApp, answered = app.carriedVersion) => `${a
 
 /** What the marketplace feature needs from the app around it. */
 export interface MarketplaceHost {
-  /** The home on screen, or undefined before one is open. */
-  home(): { home: string; overrides?: Partial<Record<HarnessId, string>> } | undefined;
+  /** The home on screen, or undefined before one is open. `actual`: it is this computer's own home, not a folder opened as one. */
+  home(): { home: string; overrides?: Partial<Record<HarnessId, string>>; actual?: boolean } | undefined;
   /**
    * This home's tools, in the order the page shows them, and the snapshots they were found in: one read (or the read a
    * Refresh or home switch just made, named by `readId`), so the columns and what each tool's install says always agree.
@@ -43,6 +43,7 @@ export interface MarketplaceHost {
 export interface MarketplaceEngine {
   findClis(): Promise<Routes>;
   checkAccess: typeof engine.checkAccess;
+  addMarketplace: typeof engine.addMarketplace;
   readCatalog: typeof engine.readCatalog;
   readRemotePlugin: typeof engine.readRemotePlugin;
   install: typeof engine.install;
@@ -72,7 +73,7 @@ async function findClis(): Promise<Routes> {
   }
   return routes;
 }
-const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
+const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, addMarketplace: engine.addMarketplace, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
 
 /** Tools named by the page: only those that install plugins. */
 const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools);
@@ -454,7 +455,76 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
-  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts };
+  // ---------- The build's own marketplace in each tool's own list (ORG-03) ----------
+
+  /**
+   * The tools this build has added its marketplace to, by home, kept with the build's other data. A tool is added to once:
+   * if the person then takes the marketplace out in the tool, it stays out until they add it again from here. Another
+   * marketplace (a build that carries a different one) starts the record again.
+   */
+  const addedPath = join(host.dataDir, 'bundled', 'added-to-tools.json');
+  const readAdded = async (marketName: string): Promise<Record<string, HarnessId[]>> => {
+    try {
+      const read = JSON.parse(await readFile(addedPath, 'utf8'));
+      const homes = read?.marketplace === marketName && read.homes && typeof read.homes === 'object' ? read.homes as Record<string, unknown> : {};
+      return Object.fromEntries(Object.entries(homes).map(([home, tools]) => [home, toolIds(tools)]));
+    } catch { return {}; }
+  };
+  const noteAdded = async (marketName: string, home: string, tool: HarnessId) => {
+    const homes = await readAdded(marketName);
+    if (homes[home]?.includes(tool)) return;
+    await writeDurably(addedPath, `${JSON.stringify({ marketplace: marketName, homes: { ...homes, [home]: [...(homes[home] ?? []), tool] } }, null, 2)}\n`);
+  };
+  /** Tools an automatic add was tried for this session, so one that failed is tried again at the next open, not at every read. */
+  const tried = new Set<string>();
+
+  /** Adds the carried marketplace to one tool's own list and notes it when it is there afterwards. */
+  async function addCarriedToTool(tool: PluginTool): Promise<ListedReport | undefined> {
+    const carried = host.bundled?.();
+    if (!carried) return undefined;
+    const ctx = await context({ clis: true });
+    const { catalog } = await catalogFor(ctx, carried.source, { counts: false });
+    if (!catalog?.name) return { tool, outcome: 'failed', message: 'The marketplace this build carries can’t be read now.' };
+    const { outcome, message } = await use.addMarketplace(ctx, catalog, tool).catch(error => ({ outcome: 'failed' as const, message: `It stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}` }));
+    if (outcome === 'there' || outcome === 'added') await noteAdded(catalog.name, ctx.home, tool);
+    return { tool, outcome, message };
+  }
+
+  /**
+   * At open, and whenever the home is read: the build's marketplace is added to the own list of every tool found here that
+   * takes plugins and has not been given it yet, through that tool's own command, so it shows in the tool's own plugin
+   * browser. Nothing is installed. Only in this computer's own home, where writing is allowed, and only for a tool whose
+   * commands can run (its CLI, or its desktop app's copy). `turn` runs each tool's add in the app's queue, one at a time,
+   * so the page's own requests go between them.
+   */
+  async function addCarried(present: HarnessId[], turn: <T>(work: () => Promise<T>) => Promise<T>): Promise<ListedReport[]> {
+    const carried = host.bundled?.(), open = host.home();
+    if (!carried || !open?.actual || !(await host.writeAccess()).allowed) return [];
+    const marketName = (await catalogFor(await context(), carried.source, { counts: false })).catalog?.name;
+    if (!marketName) return [];
+    const done = (await readAdded(marketName))[open.home] ?? [];
+    const todo = toolIds(present).filter(tool => !done.includes(tool) && !tried.has(`${open.home}\u0000${tool}`));
+    if (!todo.length) return [];
+    const { binaries } = await use.findClis();
+    const reports: ListedReport[] = [];
+    for (const tool of todo.filter(candidate => binaries[candidate])) {
+      tried.add(`${open.home}\u0000${tool}`);
+      // The home may have been switched while this waited its turn: then nothing more is added.
+      const report = await turn(async () => (host.home()?.home === open.home ? addCarriedToTool(tool) : undefined));
+      if (report) reports.push(report);
+    }
+    return reports;
+  }
+
+  /** The same for one tool, asked for on the marketplace's About tab: also the way back after taking it out in the tool. */
+  async function addCarriedTo(tool: PluginTool, home: unknown): Promise<{ stopped?: string; report?: ListedReport; view?: PluginsView }> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped };
+    const report = await addCarriedToTool(tool);
+    return { report, view: await view() };
+  }
+
+  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts, addCarried, addCarriedTo };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -471,7 +541,7 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
  * The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. `handle`
  * queues a request behind the app's other work; `handleNow` answers at once, for requests that change nothing a tool uses.
  */
-export function registerMarketplaces({ handle, handleNow }: { handle: Handle; handleNow: Handle }, host: MarketplaceHost): void {
+export function registerMarketplaces({ handle, handleNow }: { handle: Handle; handleNow: Handle }, host: MarketplaceHost): Pick<ReturnType<typeof createMarketplaces>, 'addCarried'> {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
   handle('plugins:view', async (fresh, readId) => (open() ? markets.view(fresh === true, typeof readId === 'number' ? readId : undefined) : null));
@@ -482,6 +552,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });
   handle('plugins:forget', async source => (open() && isText(source) ? markets.forget(source) : null));
   handle('plugins:pick-folder', async () => (await host.pickFolder()) ?? null);
+  handle('plugins:add-carried', async (tool, home) => { const ids = toolIds([tool]); return open() && ids.length ? markets.addCarriedTo(ids[0]!, home) : { stopped: 'That request was malformed, so nothing ran.' }; });
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
   handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
@@ -503,4 +574,5 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
+  return markets;
 }
