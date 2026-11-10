@@ -309,7 +309,7 @@ test('A bundled build’s own marketplace is listed first, stays listed, and off
     assert.deepEqual(installed.reports.map(report => report.outcome), ['installed']);
     const refused = await box.markets.install(carried, 'team', 'xlsx', ['claude-cli', 'codex-cli'], box.home);
     assert.deepEqual(refused.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
-    assert.match(refused.reports[0]!.message, /This build doesn’t carry its files.*It is an npm package\./);
+    assert.match(refused.reports[0]!.message, /^Acme Knot doesn’t include this plugin’s files, so it can’t be installed from here\. It is an npm package\.$/);
     assert.deepEqual(box.calls.filter(call => call.startsWith('install')), ['install pdf claude-cli']);
   } finally { await box.cleanup(); }
 });

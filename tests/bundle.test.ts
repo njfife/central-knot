@@ -53,8 +53,6 @@ test('build inputs: none is the standard build, any one is a custom build with i
   assert.deepEqual(describeBuild({ appName: 'Staging Knot' }), { id: 'staging-knot', name: 'Staging Knot', bundleId: 'com.centralknot.custom.staging-knot' });
   assert.deepEqual(describeBuild({ marketplace: '/m', appName: 'Acme', appId: 'acme.tools', marketplaceName: ' Acme plugins ', marketplaceLogo: '/x/Logo.PNG' }),
     { id: 'acme.tools', name: 'Acme', bundleId: 'com.centralknot.custom.acme.tools', marketplace: { displayName: 'Acme plugins', logo: 'marketplace-logo.png' } });
-  // The standard app's name can be asked for outright, with an identity of the build's own.
-  assert.equal(describeBuild({ appName: 'Central Knot', appId: 'ck-test' }).name, 'Central Knot');
 });
 
 test('build inputs that describe no build are refused in plain words', () => {
@@ -65,7 +63,7 @@ test('build inputs that describe no build are refused in plain words', () => {
   // Left with the standard app's name, the build's file would take the standard app's place.
   assert.throws(() => describeBuild({ marketplace: '/m' }), /needs its own name: add --app-name/);
   assert.throws(() => describeBuild({ appId: 'acme' }), /needs its own name: add --app-name/);
-  assert.throws(() => describeBuild({ appName: 'Central Knot' }), /--app-id/);
+  for (const name of ['Central Knot', 'central knot']) assert.throws(() => describeBuild({ appName: name, appId: 'acme' }), /--app-name can’t be “Central Knot”/, name);
   assert.throws(() => describeBuild({ marketplaceName: 'Acme plugins' }), /add --marketplace/);
   assert.throws(() => describeBuild({ marketplaceLogo: '/x/logo.png' }), /add --marketplace/);
   assert.throws(() => describeBuild({ appName: 'Acme', appId: 'central-knot' }), /--app-id/);
@@ -97,15 +95,18 @@ test('packing: every plugin’s files go in as they are, a plugin kept elsewhere
     assert.equal(release.from, 'Folder: source');
     assert.deepEqual(release.plugins, [{ name: 'docs', version: '1.0.0' }, { name: 'elsewhere', version: '2.0.0' }, { name: 'release', version: '0.4.1' }]);
     assert.deepEqual(release.unpackaged.map(item => item.name), ['packaged']);
-    assert.equal(release.unpackaged[0]!.reason, 'Its files are an npm package (@acme/packaged), which a build can’t carry.');
+    assert.equal(release.unpackaged[0]!.reason, 'Its files are an npm package (@acme/packaged), which can’t be packed into the app.');
+    // Whoever makes the release hears what that one entry does to Copilot CLI.
+    assert.deepEqual(packed.notes.map(note => note.split('.')[0]), ['Copilot CLI refuses a marketplace with an npm plugin source (“packaged”)']);
     assert.deepEqual(await readRelease(join(base, 'out/release.json')), release);
     assert.equal(releaseLabel(release), 'November 10, 2026 (Folder: source)');
     assert.equal(releaseDate(release), 'November 10, 2026');
     // What Settings says of the build: the date only, since where it was made from means nothing to whoever was handed the app.
     assert.deepEqual(aboutBuild({ id: 'acme-knot', name: 'Acme Knot', bundleId: 'x' }, '0.5.0', { name: 'Acme plugins', date: releaseDate(release) }), [
-      'Acme Knot is a custom build of Central Knot 0.5.0, with its own settings apart from the standard app’s.',
-      'It doesn’t update itself.',
-      'It comes with the Acme plugins marketplace as of November 10, 2026, which changes only with a new build of Acme Knot.']);
+      'Acme Knot is a custom build of Central Knot 0.5.0.',
+      'It keeps its own settings, separate from Central Knot’s.',
+      'It doesn’t update itself: for a newer one, ask whoever gave you Acme Knot.',
+      'Its Acme plugins marketplace is as of November 10, 2026 and changes only with a new Acme Knot.']);
 
     // Opened as the app opens it: the folder the tools are given holds the marketplace, without the fetch's .git folders.
     const data = join(base, 'data');
@@ -198,6 +199,7 @@ test('opening: a newer carried release replaces the content, an older one never 
     // An app that carries the older release (an app update after newer content arrived) leaves the newer content in use.
     const kept = await openBundle(data, join(base, 'one'));
     assert.equal(kept.problem, undefined);
+    assert.match(kept.kept ?? '', /sequence 2\) is newer than the release this app carries \(sequence 1\)/);
     assert.equal(kept.active?.release.sequence, 2);
     assert.match(await readFile(skill, 'utf8'), /1\.1\.0/);
   } finally { await cleanup(); }
@@ -270,7 +272,7 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.match(report, /Identity: acme-knot \(com\.centralknot\.custom\.acme-knot\)/);
     assert.match(report, /Marketplace: team-tools, shown as “Acme plugins”, with the logo logo\.svg/);
     assert.match(report, /Plugins packed \(2\): docs 1\.0\.0, release 0\.4\.1/);
-    assert.match(report, /NOT PACKED \(1\)[^\n]*\n {2}- packaged: /);
+    assert.match(report, /NOT PACKED \(1\)[^\n]*\n {2}- packaged: [^\n]+\nNote: Copilot CLI refuses a marketplace with an npm plugin source/);
     assert.match(report, /App updates: not met\./);
     assert.match(report, /Content feed: not met\./);
     // An unbundled custom build carries nothing and says so.

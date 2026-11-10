@@ -22,10 +22,10 @@ export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.'
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
 /** Why a plugin a bundled build's marketplace lists can't be installed from it: the build carries no files for it (`reason`: why it couldn't be packed). */
-export const notCarried = (reason: string) => `This build doesn’t carry its files, so it can’t be installed from here. ${reason}`;
+export const notCarried = (app: string, reason: string) => `${app} doesn’t include this plugin’s files, so it can’t be installed from here. ${reason}`;
 
 /** Why this plugin can't be installed from its marketplace at all, if the marketplace is a bundled build's and the build has no files for it. */
-export const whyNotCarried = (entry: MarketplaceView, plugin: string) => { const left = entry.bundled?.unpackaged.find(item => item.name === plugin); return left && notCarried(left.reason); };
+export const whyNotCarried = (entry: MarketplaceView, plugin: string) => { const left = entry.bundled?.unpackaged.find(item => item.name === plugin); return left && notCarried(entry.bundled!.app, left.reason); };
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {

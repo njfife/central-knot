@@ -27,8 +27,8 @@ export async function stage(inputs, out = 'build/custom') {
 
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
   const { inputs, rest } = buildInputs(process.argv.slice(2));
-  const at = rest.indexOf('--out');
-  const out = at >= 0 ? rest.splice(at, 2)[1] : undefined;
+  const at = rest.findIndex(arg => arg === '--out' || arg.startsWith('--out='));
+  const out = at < 0 ? undefined : rest[at].startsWith('--out=') ? rest.splice(at, 1)[0].slice('--out='.length) : rest.splice(at, 2)[1];
   if (rest.length || (at >= 0 && !out)) { console.error(`Not a build input: ${rest.join(' ') || '--out needs a folder'}. The inputs are listed at the top of scripts/custom-build.mjs.`); process.exit(2); }
   if (!isCustom(inputs)) { console.error('No build input was given, so there is nothing to stage: that is the standard app.'); process.exit(2); }
   try {

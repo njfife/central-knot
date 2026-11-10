@@ -378,8 +378,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
     // A plugin the build's marketplace lists but carries no files for is not installed from it.
-    const left = carriedAs(source)?.unpackaged.find(item => item.name === plugin);
-    if (left) return { reports: failedFor(tools, notCarried(left.reason)) };
+    const carried = carriedAs(source), left = carried?.unpackaged.find(item => item.name === plugin);
+    if (carried && left) return { reports: failedFor(tools, notCarried(carried.app, left.reason)) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {
