@@ -411,7 +411,7 @@ export interface PartItem { kind: PartKind; name: string; hash: string; /** What
 /** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
 export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
 /** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. `out`: the person turned it off or removed it there, so it stays out until chosen. */
-export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string; out?: true; /** It is in and can stay, but can't be taken out or rewritten there now, and why. */ fixed?: string }
+export interface PartPlan { kind: PartKind; name: string; why?: string; /** `why` holds for every part of this kind in this tool (Pi has no agents). */ wholeKind?: true; limit?: string; out?: true; /** It is in and can stay, but can't be taken out or rewritten there now, and why. */ fixed?: string }
 /** A part by kind and name. */
 export type PartRef = Pick<PartItem, 'kind' | 'name'>;
 /**

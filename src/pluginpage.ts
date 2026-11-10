@@ -344,12 +344,12 @@ function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: Plugin
   const plans = plansFor(entry, plugin);
   const partRows = rows.filter((row): row is SwitchRow & { part: PartRef } => !!row.part);
   const stand = (tool: HarnessId, part: PartRef) => partStand(view, entry, plugin, tool, part, plans?.[tool]);
-  // Tools that take single parts, once their plan is read. One where no row's part can go in, each for the same reason
-  // (Pi has no agents), gets that reason said once above the list and no column of locks.
+  // Tools that take single parts, once their plan is read. One that takes no part of this kind at all (Pi has no agents)
+  // gets that reason said once above the list and no column of locks.
   const pickable = view.tools.filter(tool => !tools.includes(tool) && partsPickable(view, entry, plugin.name, tool) && !!plans?.[tool] && partRows.length > 0);
   const noneGoIn = (tool: HarnessId) => {
-    const reasons = partRows.map(row => plans![tool]!.find(planned => samePart(planned, row.part))?.why);
-    return reasons[0] && reasons.every(reason => reason === reasons[0]) && !partRows.some(row => stand(tool, row.part).there) ? reasons[0] : undefined;
+    const planned = partRows.map(row => plans![tool]!.find(part => samePart(part, row.part)));
+    return planned.every(part => part?.wholeKind) && !partRows.some(row => stand(tool, row.part).there) ? planned[0]!.why : undefined;
   };
   const picking = pickable.filter(tool => !noneGoIn(tool));
   const columns = view.tools.filter(tool => switchable.includes(tool) || picking.includes(tool));

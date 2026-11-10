@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
 import type { Stats } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, sep } from 'node:path';
 import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, readAgentRecord, safeName } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
@@ -113,7 +113,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
   }
   for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) {
     // Claude Code rewrites its MCP file while running, so its servers are written only with Write to Claude Code (MCP-02).
-    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are added with “Write to Claude Code” on the MCP servers page, so parts leave them out.' }); continue; }
+    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are added with “Write to Claude Code” on the MCP servers page, so parts leave them out.', wholeKind: true }); continue; }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { unread.add(unreadKey('mcp', server)); plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
     const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
     if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
@@ -126,7 +126,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     ready.push({ kind: 'mcp', name: server, hash: serverHash(neutral), store: async () => { await keepServer(context, server, neutral); } });
   }
   for (const agent of files.agents) {
-    if (tool === 'pi-cli') { plan.push({ kind: 'agent', name: agent.name, why: 'Pi has no agents.' }); continue; }
+    if (tool === 'pi-cli') { plan.push({ kind: 'agent', name: agent.name, why: 'Pi has no agents.', wholeKind: true }); continue; }
     if (!agent.whole) { unread.add(unreadKey('agent', agent.name)); plan.push({ kind: 'agent', name: agent.name, why: 'Its file is too large to read.' }); continue; }
     if (!safeName(agent.name)) { plan.push({ kind: 'agent', name: agent.name, why: 'Its name can’t be a file name.' }); continue; }
     const parsed = fromMarkdown(agent.name, agent.text);
@@ -229,8 +229,8 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
     if (!at) return { state: 'absent' };
     try { return { state: 'there', seen: (await readTree(dir)).hash }; }
     catch (error) {
-      if (at.isSymbolicLink() && await leadsNowhere(dir)) return { state: 'absent', brokenLink: await readlink(dir).catch(() => '') };
-      return { state: 'unreadable', why: whyUnread(name, dir, at, error) };
+      if (at.isSymbolicLink() && await leadsNowhere(dir)) return { state: 'absent', brokenLink: shown(context, await readlink(dir).catch(() => '')) };
+      return { state: 'unreadable', why: whyUnread(name, shown(context, dir), at, error) };
     }
   }
   if (item.kind === 'mcp') {
@@ -244,8 +244,10 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
   }
   const file = agentFile(context, tool, item.name);
   try { return { state: 'there', seen: sha256(await readFile(file, 'utf8')) }; }
-  catch (error) { return errorCode(error) === 'ENOENT' ? { state: 'absent' } : { state: 'unreadable', why: `its file in ${name} couldn’t be read (${file}: ${errorCode(error) ?? 'unknown error'})` }; }
+  catch (error) { return errorCode(error) === 'ENOENT' ? { state: 'absent' } : { state: 'unreadable', why: `its file in ${name} couldn’t be read (${shown(context, file)}: ${errorCode(error) ?? 'unknown error'})` }; }
 }
+/** A path as a person reads it: one in their own home folder starts with `~`. */
+const shown = (context: ShareContext, path: string) => (context.realHome && path.startsWith(`${context.realHome}${sep}`) ? `~${path.slice(context.realHome.length)}` : path);
 /** Whether a link's target is gone (and not merely out of reach: a target that can't be checked counts as there). */
 const leadsNowhere = async (link: string) => stat(link).then(() => false, error => errorCode(error) === 'ENOENT');
 /** Why a skill's place in a tool couldn't be read, naming what is there, where, the system's own error code, and what to do about it. */
