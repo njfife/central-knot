@@ -479,6 +479,10 @@ async function practiceFlow() {
   await switchFromBar('Incident');
   check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));
   check('the switch’s result shows over pending changes, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  // Display order: what every tool has disabled goes last, under Disabled everywhere; notes, still on, stays above it.
+  const sections = await a.run(`[...document.querySelectorAll('.ov-section[data-section]')].map(head => [head.dataset.section, [...head.parentElement.querySelectorAll('.ov-row[data-key]')].map(row => row.dataset.key)])`);
+  const unusedRows = sections.find(([role]) => role === 'unused')?.[1] ?? [];
+  check('skills disabled in every tool come last, under Disabled everywhere', sections.at(-1)?.[0] === 'unused' && (await a.all('.ov-section[data-section="unused"] strong'))[0] === 'Disabled everywhere' && unusedRows.includes('standup') && !unusedRows.includes('notes') && sections.some(([role, keys]) => role !== 'unused' && keys.includes('notes')), sections);
   await a.click('#outcome-undo');
   await a.click('#discard');
   // On History (no result band) the switch is listed at once and its result is said in the status bar, as is its Undo from there.
@@ -705,7 +709,7 @@ async function practiceFlow() {
   await a.click('#nav-skills');
   await a.click('#open-standup');
   await a.click('#files-standup');
-  same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
+  same('the Skills list has every skill, the managed ones first', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-release-notes', 'list-review', 'list-notes', 'list-standup']);
   await a.click('#list-standup');
   check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
   check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
@@ -1172,6 +1176,27 @@ async function practiceFlow() {
   await a.shot('practice-plugin-parts');
   await a.click('#nav-skills');
   check('the skill says which plugin it came from', /from issue-tracker/.test(await a.text('[data-key="triage"]') ?? ''), await a.text('[data-key="triage"]'));
+  // Claude Code has the plugin itself: on Skills its box says the skill comes through it (never "No copy" or "Can't load
+  // it"), and opens the plugin's page, where the plugin and its parts are updated together.
+  const installRecord = join(practice, '.claude/plugins/installed_plugins.json');
+  const installsBefore = existsSync(installRecord) ? readFileSync(installRecord, 'utf8') : undefined;
+  writeClaudeInstall(practice, 'ck-test-market', 'issue-tracker', '9.9.9', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8'), '.mcp.json': JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }) });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.run(`document.querySelector('#cell-triage-claude-cli')?.dataset.state`)) !== 'plugin'; tries++) await wait(100);
+  same('a tool with the plugin itself has the skill through it', await a.run(`[document.querySelector('#cell-triage-claude-cli')?.dataset.state, document.querySelector('#cell-triage-pi-cli')?.dataset.state]`), ['plugin', 'present']);
+  const throughTitle = await a.run(`document.querySelector('#cell-triage-claude-cli')?.title`);
+  check('its box says which plugin, and the key names the mark', /^Claude Code has this skill through the plugin issue-tracker \(version 9\.9\.9\), so no separate copy is placed there\. Click to open the plugin’s page\.$/.test(throughTitle ?? '') && /Through a plugin/.test(await a.text('.legend') ?? ''), [throughTitle, await a.text('.legend')]);
+  await fitsAtMinimum(a, 'a skill a tool has through a plugin');
+  await a.shot('skill-through-plugin');
+  await a.click('#nav-mcp');
+  same('so does its MCP server, on MCP servers', await a.run(`[document.querySelector('#cell-issues-claude-cli')?.dataset.state, /through the plugin issue-tracker/.test(document.querySelector('#cell-issues-claude-cli')?.title ?? '')]`), ['plugin', true]);
+  await a.click('#nav-skills');
+  await a.click('#cell-triage-claude-cli');
+  for (let tries = 0; tries < 30 && !(await a.exists('#plugin-back')); tries++) await wait(100);
+  check('and opens the plugin’s page', await a.exists('#plugin-back') && /issue[- ]tracker/i.test(await a.text('.plugin-page h2') ?? ''), await a.text('.plugin-page h2'));
+  if (installsBefore === undefined) rmSync(installRecord); else writeFileSync(installRecord, installsBefore);
+  rmSync(join(practice, '.claude/plugins/cache/ck-test-market/issue-tracker/9.9.9'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   check('Undo takes the parts out of Pi', !existsSync(join(practice, '.pi/agent/skills/triage')) && !readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
@@ -1710,17 +1735,37 @@ async function fewToolsFlow() {
   for (let tries = 0; tries < 30 && !(await a.exists('#history-choose-home')); tries++) await wait(100);
   check('History says the same, in the same place, rather than offering Skills', await a.exists('#history-choose-home') && !(await a.exists('#history-go-skills')), await a.text('.page'));
   await a.click('#nav-overview');
+  // On this computer a tool is here when its CLI (or desktop app) is: each stand-in answers --version only.
+  const cli = (path, version) => { mkdirSync(join(home, path, '..'), { recursive: true }); writeFileSync(join(home, path), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`); chmodSync(join(home, path), 0o755); };
+  // A folder a tool left behind, with no CLI or app beside it, is not the tool: the home still has no tools.
+  mkdirSync(join(home, '.codex/skills/notes'), { recursive: true });
+  writeFileSync(join(home, '.codex/skills/notes/SKILL.md'), text('notes'));
+  await a.click('#header-refresh');
+  same('a tool’s folder alone, with no CLI or app, makes no tool', await pages(), ['overview', 'harnesses', 'history', 'repo', 'settings']);
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
+  cli('.pi/agent/bin/pi', 'pi 1.5.0');
   await a.click('#header-refresh');
+  // Codex, whose folder is still here, holds agents and plugins: were it counted, both pages would be back.
   same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']);
   check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  await a.click('#nav-skills');
+  check('the tool with only a folder is no column', await a.exists('#tool-pi-cli') && !(await a.exists('[data-tool="codex-cli"], #tool-codex-cli')));
+  await a.click('#nav-harnesses');
+  const folderOnly = await a.text('#harness-codex-cli');
+  check('Harnesses says its folder is all that is here, and its card opens nothing', folderOnly.includes('Not found · only its folder is here') && folderOnly.includes('Install Codex, then Refresh.') && !(await a.exists('button#harness-codex-cli')), folderOnly);
+  await fitsAtMinimum(a, 'Harnesses with a tool that left only its folder');
+  await a.shot('folder-only-harness');
+  rmSync(join(home, '.codex'), { recursive: true, force: true });
+  await a.click('#nav-overview');
   mkdirSync(join(home, '.claude'), { recursive: true });
+  cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
   same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']);
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
   await a.click('#nav-agents');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
+  rmSync(join(home, '.local/bin/claude'));
   await a.click('#header-refresh');
   same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);

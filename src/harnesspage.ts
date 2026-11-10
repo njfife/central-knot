@@ -72,6 +72,8 @@ const detectionLine = (snapshot: Snapshot, home: HomeView) => {
   const app = snapshot.app ? appLine(snapshot.app) : '';
   if (snapshot.detection === 'Installed') return [`Installed${snapshot.probe.version ? ` · ${snapshot.probe.version}` : ''}`, app].filter(Boolean).join('; ');
   if (snapshot.detection === 'App only') return `${app} · no CLI found`;
+  // A folder with no tool beside it: the tool is not installed, and its folder (shown under this line) is all that is here.
+  if (snapshot.detection === 'Config found but app not detected') return 'Not found · only its folder is here';
   return snapshot.detection;
 };
 /**
@@ -145,7 +147,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   const here = found(home, tool);
   const head = h('span.harness-card-head', {}, brandMark(tool, 18), h('strong.harness-card-name', {}, names[tool]), here ? icon('arrow-right', 14, 'tone-faint') : null);
   // On this computer each card says how its tool was found; a sample or chosen folder is said once, in the note above.
-  const status = home.mode === 'actual' ? h(`span.harness-card-status${snapshot.detection === 'Not found' ? '.tone-faint' : ''}`, {}, detectionLine(snapshot, home)) : null;
+  const status = home.mode === 'actual' ? h(`span.harness-card-status${here ? '' : '.tone-faint'}`, {}, detectionLine(snapshot, home)) : null;
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   if (!here) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
     // When no tool at all was found, the note above already says to install one; each card need not repeat it.

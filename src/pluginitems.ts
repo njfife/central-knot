@@ -1,8 +1,7 @@
 // What each plugin installed whole in a tool brings: its skills, MCP servers and agents, read with the home (main process)
 // from the tool's own records and its own copy of the plugin, as that tool reads it. Files only: nothing is run, and a copy
 // that can't be read is said, never a reason the personal items go missing.
-import { installedContents } from './catalogdetail.ts';
-import { installedPlugins, registeredMarketplaces, type PluginContext } from './plugins.ts';
+import { installedCopies, registeredMarketplaces, type PluginContext } from './plugins.ts';
 import { takesPlugins } from './presence.ts';
 import type { HarnessId, InstalledPlugin, PluginItem } from './types.ts';
 
@@ -18,23 +17,21 @@ export const UNREADABLE = 'Its files couldn’t be read.';
 export async function readPluginItems(context: PluginContext, tools: HarnessId[], { texts = false } = {}): Promise<InstalledPlugin[]> {
   const read = { ...context, reads: context.reads ?? new Map() };
   const perTool = await Promise.all(tools.filter(takesPlugins).map(async tool => {
-    const [plugins, markets] = await Promise.all([installedPlugins(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
-    return Promise.all(plugins.map(async ({ plugin, marketplace, state, off, entry, atMarketplaceRoot }): Promise<InstalledPlugin> => {
+    const [plugins, markets] = await Promise.all([installedCopies(read, tool).catch(() => []), registeredMarketplaces(read, tool).catch(() => [])]);
+    return plugins.map(({ plugin, marketplace, state, off, contents }): InstalledPlugin => {
       const source = markets.find(market => market.name === marketplace)?.source;
       const base: InstalledPlugin = { tool, plugin, marketName: marketplace, ...(off ? { off } : {}), items: [], listed: !!source, ...(source ? { source } : {}) };
       if (state.state !== 'installed') return { ...base, problem: state.state === 'not-known' ? state.reason : UNREADABLE };
-      try {
-        const contents = await installedContents(tool, state.path, entry, atMarketplaceRoot);
-        const file = (kind: 'skill' | 'agent') => (part: { name: string; description: string; text: string }): PluginItem => ({ kind, name: part.name, description: part.description, ...(texts ? { text: part.text } : {}) });
-        const items: PluginItem[] = [
-          ...contents.skills.map(file('skill')),
-          ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),
-          ...(tool === 'codex-cli' ? [] : contents.agents.map(file('agent'))),
-        ];
-        const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
-        return { ...base, version: state.version, items, ...(skillsOff.length ? { skillsOff } : {}) };
-      } catch { return { ...base, problem: UNREADABLE }; }
-    }));
+      if (!contents) return { ...base, problem: UNREADABLE };
+      const file = (kind: 'skill' | 'agent') => (part: { name: string; description: string; text: string }): PluginItem => ({ kind, name: part.name, description: part.description, ...(texts ? { text: part.text } : {}) });
+      const items: PluginItem[] = [
+        ...contents.skills.map(file('skill')),
+        ...contents.mcpServers.map(server => ({ kind: 'mcp' as const, name: server.name, description: '', runs: server.runs })),
+        ...(tool === 'codex-cli' ? [] : contents.agents.map(file('agent'))),
+      ];
+      const skillsOff = (state.skillsOff ?? []).map(entry => entry.skill);
+      return { ...base, version: state.version, items, ...(skillsOff.length ? { skillsOff } : {}) };
+    });
   }));
   return perTool.flat();
 }

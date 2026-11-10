@@ -1,6 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
-import type { SwitchProblem } from './types.ts';
+import type { SwitchProblem, ThroughPlugin } from './types.ts';
 export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
@@ -24,6 +24,8 @@ export interface SampleSkill {
   managed: boolean;
   off: Tool[];
   cannot?: Partial<Record<Tool, string>>;
+  /** Tools with no copy of their own that have it through a plugin installed there (each is in `cannot` too). */
+  plugin?: Partial<Record<Tool, ThroughPlugin>>;
   /** Copies that differ, left as separate skills on purpose. */
   separate?: boolean;
   /** Why this skill cannot be managed at all. */
@@ -73,6 +75,7 @@ export const sample: SampleSkill[] = [
     versions: { 'claude-cli': { lines: '12 lines', changed: 'edited 2 weeks ago', text: 'Summarize what changed and what to check.' }, 'copilot-cli': { lines: '19 lines', changed: 'edited 4 days ago', text: 'List defects first, then missing tests.' } } },
   { key: '.scratch', description: 'Private notes skill.', copies: { 'claude-cli': 'k' }, managed: false, off: [], cannot: { 'copilot-cli': 'Copilot CLI does not load folders starting with a dot.' } },
   { key: 'writing-shape', description: 'Shape a draft before polishing it.', copies: { 'claude-cli': 'l', 'copilot-cli': 'l' }, managed: true, off: [] },
+  { key: 'old-deploy', description: 'Deploy steps from the last project.', copies: { 'claude-cli': 'm' }, managed: false, off: [], disabled: ['claude-cli'] },
 ];
 
 export const designMode = new URLSearchParams(location.search).has('design');

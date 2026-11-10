@@ -181,6 +181,9 @@ export interface ToolCopy {
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */
+/** The plugin a tool has an item through: its name, the marketplace as that tool added it, and the installed copy's version. `off`: turned off there. */
+export interface ThroughPlugin { plugin: string; marketplace: string; source?: string; version?: string; off?: true }
+
 export interface SkillFacts {
   /** Made by Convert to skill from an agent (AGT-02): which agent, from which tool, and what an agent had that a skill does not. */
   converted?: { agent: string; origin: HarnessId; losses: string[] };
@@ -194,6 +197,11 @@ export interface SkillFacts {
   off: HarnessId[];
   /** Why a tool that lacks the skill could not load a copy. */
   cannot: Partial<Record<HarnessId, string>>;
+  /**
+   * Tools with no copy of their own that have the skill through a plugin installed there. Each is in `cannot` too, in
+   * words: no separate copy is placed beside a plugin's.
+   */
+  plugin?: Partial<Record<HarnessId, ThroughPlugin>>;
   /** Why the skill cannot be managed at all, such as a link inside it. */
   held?: string;
   /** The person chose to keep differing copies as they are. */

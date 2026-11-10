@@ -18,7 +18,7 @@ import { removeChecked, replaceCopy, rootProblem } from './manage.ts';
 import { canonical, cannotHold, editEntry, fromJson, keep as keepServer, kept as keptServer, readMcpRecord, readTool, serverHash, type NeutralServer } from './mcp.ts';
 import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts';
 import {
-  changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, placeCopy, readRecord, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
+  changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, partsRecordPath, placeCopy, readParts, readRecord, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
 } from './share.ts';
 import type { ActionReport, HarnessId, PartItem, PartKind, PartPlan, PartRef, PartsInstall, PartsPick } from './types.ts';
 import { sameSource } from './plugins.ts';
@@ -26,7 +26,7 @@ import { toolNames } from './words.ts';
 
 // ---------- Record ----------
 
-const recordPath = (home: string) => join(storeDirectory(home), 'plugin-parts.json');
+const recordPath = partsRecordPath;
 const runPath = (home: string, run: string) => join(storeDirectory(home), 'plugin-parts-runs', `${run}.json`);
 /** Agent files as written, by their bytes' hash (skills and MCP servers are kept in their own pages' stores). */
 const agentTextPath = (home: string, hash: string) => join(storeDirectory(home), 'items', 'plugin-parts', 'agent', `${hash}.txt`);
@@ -35,12 +35,7 @@ const agentTextPath = (home: string, hash: string) => join(storeDirectory(home),
 type PartsOf = Pick<PartsInstall, 'source' | 'plugin' | 'tool'>;
 const isFor = (install: PartsOf, target: PartsOf) => install.plugin === target.plugin && install.tool === target.tool && sameSource(install.source, target.source);
 
-export async function readParts(home: string): Promise<PartsInstall[]> {
-  try {
-    const parsed = JSON.parse(await readFile(recordPath(home), 'utf8'));
-    return Array.isArray(parsed?.installs) ? parsed.installs : [];
-  } catch { return []; }
-}
+export { readParts };
 /** The record's entry for one plugin's parts in one tool, if it has one. */
 const entryFor = async (home: string, target: PartsOf) => (await readParts(home)).find(install => isFor(install, target)) ?? null;
 /** Saves the record with `entry` in place of the one for `target` (null: none). */

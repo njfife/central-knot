@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
-import { appCandidates, executableCandidates } from './platform.ts';
+import { appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import { findApp, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
@@ -62,8 +62,9 @@ export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Pa
  */
 async function findClis(): Promise<Routes> {
   const routes: Routes = { binaries: {}, apps: {} };
+  const path = await searchPath();
   for (const tool of pluginTools) {
-    for (const candidate of executableCandidates(homedir(), process.env.PATH ?? '', harnesses[tool].binary)) {
+    for (const candidate of executableCandidates(homedir(), path, harnesses[tool].binary)) {
       try { await access(candidate, constants.X_OK); routes.binaries[tool] = candidate; break; } catch { /* next */ }
     }
     if (routes.binaries[tool]) continue;

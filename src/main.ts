@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, wri
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
@@ -41,6 +41,8 @@ function trimLog() {
   } catch { /* no log yet, or it can't be read: nothing to trim */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
+// Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
+void searchPath();
 const BUILD = 'com.centralknot.firstlook';
 let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
@@ -82,9 +84,10 @@ const overrideFor = (id: HarnessId) => (current?.mode === 'actual' ? process.env
 
 async function read(): Promise<Snapshot[]> {
   const { mode, home } = current!;
+  const path = mode === 'actual' ? await searchPath() : '';
   return Promise.all(harnessIds.map(id => discover({
     home, mode, harness: id, configOverride: overrideFor(id),
-    binaries: mode === 'actual' ? executableCandidates(home, process.env.PATH ?? '', harnesses[id].binary) : [],
+    binaries: mode === 'actual' ? executableCandidates(home, path, harnesses[id].binary) : [],
     apps: mode === 'actual' ? appCandidates(home, harnesses[id].binary) : [],
     runProbes: mode === 'actual',
   })));
@@ -402,7 +405,7 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
  * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
   if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
@@ -430,7 +433,7 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
-  const shared = context();
+  const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);
@@ -452,7 +455,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
-  made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides), presentTools(snapshots));
+  // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
+  made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), presentTools(snapshots));
   lastItems = switchItems(made.manage, made.mcp);
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
@@ -675,7 +679,7 @@ const elsewhere = 'The home on screen is not the one open. Nothing was written. 
 const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 
 /** What the plugin items reader needs of the open home: files only, so no tool's CLI. */
-const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | undefined) => ({ home: current!.home, dataDir: app.getPath('userData'), binaries: {}, overrides });
+const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | undefined, reads?: Map<string, Promise<unknown>>) => ({ home: current!.home, dataDir: app.getPath('userData'), binaries: {}, overrides, reads });
 
 /**
  * Keeps what a change came to, for a problem report: a refusal for the whole home, each plugin step as its tool reported

@@ -14,9 +14,10 @@ import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
-import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
+import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ThroughPlugin, ToolCopy } from './types.ts';
 import { agentTools, type AgentTool } from './presence.ts';
-import { toolNames as shown } from './words.ts';
+import { throughPlugin, toolNames as shown } from './words.ts';
+import { throughPlugins } from './plugins.ts';
 
 export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
@@ -248,12 +249,22 @@ function fieldText(value: unknown): string {
   return line.length > 80 ? `${line.slice(0, 79)}…` : line || '(empty)';
 }
 
+/**
+ * The agents each tool has through its installed plugins, by key: such a tool gets no file of its own beside the
+ * plugin's. Only an agent Central Knot installed elsewhere as that plugin's part counts: a name alone could be another agent.
+ */
+async function agentsThroughPlugins(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, Map<string, ThroughPlugin>>> {
+  const all = await throughPlugins(context, tools, 'agent', keyOf);
+  return new Map([...all].map(([tool, given]) => [tool, new Map([...given].flatMap(([key, { asParts, text: _text, ...plugin }]) => (asParts ? [[key, plugin] as const] : [])))]));
+}
+
 export async function agentsView(context: ShareContext, tools: HarnessId[], notices: SyncNotice[] = []): Promise<McpView> {
   const present = tools.filter(isAgentTool);
   const { byKey, problems, unreadable, duplicates } = await gatherAgents(context, present);
   const { record = { formatVersion: AGENTS_FORMAT_VERSION, items: {} }, problem } = await inspectAgentRecord(context.home);
   if (problem) problems.unshift(problem);
   const agents: SkillFacts[] = [];
+  const through = await agentsThroughPlugins(context, present);
   for (const [key, slot] of [...byKey].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[key];
     const entries = Object.values(slot) as AgentEntry[];
@@ -268,6 +279,9 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     }
     const cannot: Partial<Record<HarnessId, string>> = {};
     if (!safeName(shownCopy.name)) for (const tool of present) if (!slot[tool]) cannot[tool] = 'This name can’t be a file name in another tool.';
+    // A tool that has the agent through one of its plugins is shown as that, and gets no file of its own.
+    const plugin: Partial<Record<HarnessId, ThroughPlugin>> = {};
+    for (const tool of present) { const given = slot[tool] ? undefined : through.get(tool)?.get(key); if (given) { plugin[tool] = given; cannot[tool] = throughPlugin(tool, given, 'agent'); } }
     const limits: Partial<Record<HarnessId, string>> = {};
     if (origin) for (const tool of present) {
       const lost = losses(tool, origin);
@@ -276,7 +290,7 @@ export async function agentsView(context: ShareContext, tools: HarnessId[], noti
     const edited = managed ? item.copies.filter(copy => !copy.oneWay && !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     const stopped = item?.copies.filter(copy => copy.stopped).map(copy => copy.tool) ?? [];
     const kept = origin && Object.keys(limits).length ? Object.entries(origin.agent.fields).map(([field, value]) => `${field} (${fieldText(value)})`) : undefined;
-    agents.push({ key, name: shownCopy.name, description: shownCopy.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: origin && Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept });
+    agents.push({ key, name: shownCopy.name, description: shownCopy.agent.description, copies, extra: [], managed, off: item?.off ?? [], cannot, ...(Object.keys(plugin).length ? { plugin } : {}), held: blocked(key, unreadable, duplicates, present), separate: item?.separate, edited, choiceBlocks: {}, limits, oneWay: origin && Object.keys(limits).length ? { from: origin.tool, lost: Object.keys(origin.agent.fields) } : undefined, stopped, kept });
   }
   return { tools: present, servers: agents, claudePending: [], access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
@@ -298,7 +312,7 @@ function originOnApply(item: AgentRecordItem | undefined, slot: AgentSlot, prese
 /** Observed missing times per file, kept while the app runs (DEL-01's settle). A restart forgets them, which only delays a deletion. */
 const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
-interface AgentPass { context: ShareContext; present: AgentTool[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
+interface AgentPass { context: ShareContext; present: AgentTool[]; through: Awaited<ReturnType<typeof agentsThroughPlugins>>; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
   resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number; decideNow?: Set<string> }
 interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number } type Loser = { tool: HarnessId; hash: string };
 type Situation = 'rootMoved' | 'removalOwed' | 'folderRemade' | 'stopped' | 'away' | 'off' | 'oneWay' | 'oneWayChanged' | 'deleted' | 'unchanged' | 'edited';
@@ -318,7 +332,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const displacedByEarlierPass = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
   const { folderIds, resetTools } = await readFolderIds(context, present, record.roots);
   const { chosen, newlyManaged } = recordChoices(record, onDisk.byKey, changes, log);
-  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, deletedNow: new Set(), limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000, decideNow: options.decideNow };
+  const pass: AgentPass = { context, present, through: await agentsThroughPlugins(context, present), record, onDisk, folderIds, resetTools, chosen, newlyManaged, deletedNow: new Set(), limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000, decideNow: options.decideNow };
   const outcomes: AgentOutcome[] = [];
   for (const [key, item] of Object.entries(record.items)) if (item.state === 'shared' && (!options.only || options.only.has(key))) outcomes.push(await syncAgent(pass, log, key, item));
   await finishPendingRemovals(pass, log);
@@ -481,6 +495,8 @@ async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, {
   const oneWay = lost.length > 0 || undefined;
   if (here?.hash === source.hash) return { copy: { tool, file: here.file, hash: here.hash, bytes: here.bytes, oneWay }, wrote: false };
   if (!here && !safeName(source.name)) { log.results.push({ item: item.name, harness: tool, outcome: 'held', message: 'This name can’t be a file name here.' }); return { wrote: false }; }
+  const given = here ? undefined : pass.through.get(tool)?.get(source.key);
+  if (given) { log.results.push({ item: item.name, harness: tool, outcome: 'held', message: throughPlugin(tool, given, 'agent') }); return { wrote: false }; }
   const path = here?.file ?? fileFor(pass.context, tool, source.name);
   let text: string;
   try { text = agentText(tool, source.agent, here?.text); } catch { log.results.push({ item: item.name, harness: tool, outcome: 'held', message: 'This file could not be updated without changing other parts of it.' }); return { wrote: false }; }
@@ -671,8 +687,11 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const replaced: { tool: HarnessId; hash: string }[] = [];
   const copies: AgentCopy[] = item.copies.filter(copy => copy.stopped);
   const origin = { tool: version.tool, agent: version.agent };
+  const through = await agentsThroughPlugins(context, present);
   for (const tool of present.filter(candidate => !item.off.includes(candidate) && !stopped.has(candidate))) {
     const here = slot[tool];
+    const given = here ? undefined : through.get(tool)?.get(key);
+    if (given) { results.push({ item: item.name, harness: tool, outcome: 'held', message: throughPlugin(tool, given, 'agent') }); continue; }
     const oneWay = losses(tool, origin).length > 0;
     // This tool's own kept file when there is one, whole; otherwise name, description and prompt written into what is there.
     const text = version.texts[tool] ?? agentText(tool, version.agent, here?.text);

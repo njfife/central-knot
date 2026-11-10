@@ -101,18 +101,15 @@ const install = (tool: HarnessId, extra: Partial<InstalledPlugin> = {}): Install
 const piPart: PartsInstall = { source: '/m', marketName: 'm', plugin: 'issue-tracker', tool: 'pi-cli', at: '', digest: '', items: [{ kind: 'skill', name: 'triage', hash: '' }] };
 const homeOf = (skills: SkillFacts[], pluginItems: InstalledPlugin[], parts: PartsInstall[] = []) => ({ manage: { skills }, mcp: { servers: [] }, agents: { servers: [] }, parts, pluginItems }) as unknown as HomeView;
 
-test('a plugin’s skill installed whole and put into Pi as a part is one row: the part’s, with the plugin’s copies laid onto it', () => {
-  const home = homeOf([fact('triage', { 'pi-cli': true })], [install('claude-cli'), install('copilot-cli')], [piPart]);
-  const { rows, merged } = pageRows(home, 'skills');
-  assert.deepEqual([rows.length, Object.keys(merged.get('triage')![0]!.copies)], [0, ['claude-cli', 'copilot-cli']]);
-  assert.deepEqual([pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli'), pluginItemCount(home, 'skills', 'pi-cli')], [0, 1, 0]);
+test('a plugin’s skill the person also has (its part in Pi, shown there as through the plugin elsewhere) is that one row, not a second', () => {
+  const through = { plugin: 'issue-tracker', marketplace: 'm' };
+  const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')], [piPart]);
+  assert.deepEqual([pageRows(home, 'skills').rows.length, pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli')], [0, 0, 0]);
 });
 
-test('a personal skill that only shares the name stays its own row; so does a part whose row has its own copy where the plugin is', () => {
-  for (const home of [homeOf([fact('triage', { 'claude-cli': true })], [install('claude-cli')]), homeOf([fact('triage', { 'pi-cli': true, 'claude-cli': true })], [install('claude-cli')], [piPart])]) {
-    const { rows, merged } = pageRows(home, 'skills');
-    assert.deepEqual([rows.map(row => row.key), merged.size, pluginItemCount(home, 'skills')], [['issue-tracker@m/triage'], 0, 1]);
-  }
+test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
+  const home = homeOf([fact('triage', { 'claude-cli': true })], [install('claude-cli')]);
+  assert.deepEqual([pageRows(home, 'skills').rows.map(row => row.key), pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli'), pluginItemCount(home, 'skills', 'pi-cli')], [['issue-tracker@m/triage'], 1, 1, 0]);
 });
 
 test('each tool’s cell says whether it is on: the skill’s own switch, the whole plugin, or not there and why', () => {

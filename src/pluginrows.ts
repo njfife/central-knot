@@ -1,7 +1,8 @@
 // What plugins installed whole bring, as rows of the Skills, MCP servers and Agents pages (no DOM): one row per item of a
-// plugin across every tool that has the plugin, or, where that plugin also put the item into another tool as a separate
-// part, laid onto that part's own row. A personal item that only shares a name stays a row of its own. These rows are
-// never managed: no switch, no sync, no profile, no repo; the plugin's page is where they are handled.
+// plugin across every tool that has the plugin. An item the person also has as their own (the same skill, or the plugin's
+// part in another tool) stays on that row, whose box says "Through a plugin" (SkillFacts.plugin); one that only shares a
+// name is a row of its own here. These rows are never managed: no switch, no sync, no profile, no repo; the plugin's
+// page is where they are handled.
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartKind, PluginItem, SkillFacts } from './types.ts';
@@ -23,8 +24,8 @@ export interface PluginRow {
   installs: Partial<Record<HarnessId, InstalledPlugin>>;
 }
 
-/** A page's plugin rows: those shown apart, those laid onto a part's row (by that row's key), and copies that couldn't be read. */
-export interface PageRows { rows: PluginRow[]; merged: Map<string, PluginRow[]>; unread: InstalledPlugin[] }
+/** A page's plugin rows (those no row of the person's own already shows), and copies that couldn't be read. */
+export interface PageRows { rows: PluginRow[]; unread: InstalledPlugin[] }
 
 /** Whether this tool's copy of the plugin has this item turned off, and how: the whole plugin, or the skill's own switch. */
 export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'skill' | undefined {
@@ -34,15 +35,15 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'skill' | und
   return row.kind === 'skill' && install.skillsOff?.some(name => samePart({ kind: 'skill', name }, row)) ? 'skill' : undefined;
 }
 
-/** Whether a fact is, in some tool, this plugin's item put in as a separate part (parts.ts), and still there. */
-const isPartOf = (home: HomeView, fact: SkillFacts, row: PluginRow) => (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName
-  && fact.copies[install.tool] !== undefined && install.items.some(item => !item.removed && [fact.key, fact.name].some(name => samePart(item, { kind: row.kind, name }))));
+/** Whether a person's own row already shows this plugin's item: some tool has that row's item through this plugin (its box says so). */
+const onOwnRow = (fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
+  && Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName);
 
 const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
 
 /**
- * The page's plugin rows for a home, worked out once per read. A row joins a part's row only where that row has no copy of
- * its own, and doesn't sync, in every tool the plugin is in, so a cell never stands for two things.
+ * The page's plugin rows for a home, worked out once per read: one per item of a plugin, across the tools that have it
+ * installed, left out where a row of the person's own already shows that item as there through the plugin.
  */
 export function pageRows(home: HomeView, page: Page): PageRows {
   const known = memo.get(home) ?? {};
@@ -60,25 +61,16 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   }
   // Every tool with the plugin, so a copy without this item (Codex and an agent, another version) says so in its cell.
   for (const row of byKey.values()) for (const install of home.pluginItems ?? []) if (install.plugin === row.plugin && install.marketName === row.marketName) row.installs[install.tool] = install;
-  const rows: PluginRow[] = [], merged = new Map<string, PluginRow[]>();
-  for (const row of [...byKey.values()].sort((first, second) => first.name.localeCompare(second.name))) {
-    const tools = Object.keys(row.copies) as HarnessId[];
-    const part = facts.find(fact => [fact.key, fact.name].some(name => samePart(row, { kind, name })) && isPartOf(home, fact, row)
-      && tools.every(tool => fact.copies[tool] === undefined && (!fact.managed || fact.off.includes(tool))));
-    if (part) merged.set(part.key, [...(merged.get(part.key) ?? []), row]); else rows.push(row);
-  }
+  // One row, not two: an item a person's own row shows as "Through a plugin" in some tool stays that row's.
+  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(fact, row))).sort((first, second) => first.name.localeCompare(second.name));
   const unread = (home.pluginItems ?? []).filter(install => install.problem);
-  const made = { rows, merged, unread };
+  const made = { rows, unread };
   memo.set(home, { ...known, [page]: made });
   return made;
 }
 
-/** How many items the page lists that come with plugins installed whole and aren't a part's row; in `tool`, every one it has there. */
-export function pluginItemCount(home: HomeView, page: Page, tool?: HarnessId): number {
-  const { rows, merged } = pageRows(home, page);
-  if (!tool) return rows.length;
-  return rows.filter(row => row.copies[tool]).length + [...merged.values()].filter(list => list.some(row => row.copies[tool])).length;
-}
+/** How many plugin rows the page lists; in `tool`, those it has there. */
+export const pluginItemCount = (home: HomeView, page: Page, tool?: HarnessId): number => pageRows(home, page).rows.filter(row => !tool || row.copies[tool]).length;
 
 /** The tools that have this item through the plugin, in column order. */
 export const pluginTools = (row: PluginRow) => (Object.keys(row.copies) as HarnessId[]).sort(byToolOrder);
