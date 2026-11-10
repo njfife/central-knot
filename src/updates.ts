@@ -145,3 +145,9 @@ export function updateFailure(stage: 'download' | 'install', error: string): str
   if (/code ?sign|signature|requirement/i.test(error)) return `The download isn’t signed by Central Knot’s developer, so it wasn’t installed. ${kept}`;
   return `The update couldn’t be prepared. ${kept} Try again, or download it from the release page.`;
 }
+
+/**
+ * The wait for the update to be prepared ran out. Nothing has changed, but the preparing can't be called off: if it still
+ * finishes, the update is offered as ready then, and whichever way it went, the next launch says.
+ */
+export const prepareUnfinished = 'Preparing the update is taking too long. Central Knot hasn’t changed. If it still finishes, Central Knot offers the restart then; otherwise try again later.';
