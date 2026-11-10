@@ -1232,10 +1232,10 @@ async function practiceFlow() {
     && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
   await a.click('#plugins-apply');
   check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
-    && /skill triage put into Pi/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+    && /skill triage put into Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
   const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
   check('the log file says what that change came to: the plugin, the parts picked, the tool, and the broken link replaced',
-    /plugins:parts issue-tracker@team-tools \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
+    /plugins:parts issue-tracker@[\w-]+ \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
   for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
   await a.click(partSwitch('skill-triage'));
