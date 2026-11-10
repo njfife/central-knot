@@ -169,7 +169,7 @@ export async function packRelease({ source, out, work, sequence, minApp, now = n
     await cp(copy.folder, join(stage, held, plugin.name), { recursive: true, verbatimSymlinks: true, filter: path => resolve(path) !== resolve(copy.root, '.git') });
     moved.set(plugin.name, `./${held}/${plugin.name}`);
   }
-  if (moved.size) await pointEntries(stage, new Map([...moved].map(([name, path]) => [name, { path }])));
+  if (moved.size) await pointEntries(stage, moved);
   // What the archive holds is read once more, as the app will read it: a plugin counts as packed only if it is found there.
   const packed = await parseCatalog(stage, stage, 'folder', { counts: false });
   if (packed.problem) return { problem: `The packed marketplace could not be read back: ${packed.problem}` };
@@ -265,13 +265,16 @@ export function buildReport(build: CustomBuild, release: BundleRelease | undefin
 export async function publishRelease(input: { source: string; out: string; work: string; sequence?: number; minApp?: string; now?: Date; fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease; report: string } | { problem: string }> {
   if (input.minApp !== undefined && !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(input.minApp)) return { problem: '--min-app takes an app version, such as 0.6.0.' };
   const before = await readRelease(join(input.out, RELEASE_FILE));
+  const notHigher = (sequence: number) => `Nothing was published. Its sequence (${sequence}) must be higher than the one already published there (${before!.sequence}): installed copies take only a higher one.`;
+  // A number given by hand is checked before anything is fetched; the time-based default, once the release is made.
+  if (before && input.sequence !== undefined && input.sequence <= before.sequence) return { problem: notHigher(input.sequence) };
   const packed = await packRelease({ ...input, out: join(input.work, 'publish') });
   if ('problem' in packed) return packed;
   const { release, notes, failedNow } = packed;
   const nothing = 'Nothing was published.';
   if (failedNow.length) return { problem: `${nothing} The files of ${failedNow.length === 1 ? 'one plugin' : `${failedNow.length} plugins`} couldn’t be fetched this time, and a release doesn’t go out without ${failedNow.length === 1 ? 'it' : 'them'}:\n${release.unpackaged.filter(item => failedNow.includes(item.name)).map(item => `  - ${item.name}: ${item.reason}`).join('\n')}\nTry again, or take ${failedNow.length === 1 ? 'that entry' : 'those entries'} out of the marketplace.` };
   if (before && before.marketplace !== release.marketplace) return { problem: `${nothing} ${input.out} holds releases of the marketplace “${before.marketplace}”, and this one is “${release.marketplace}”.` };
-  if (before && release.sequence <= before.sequence) return { problem: `${nothing} Its sequence (${release.sequence}) must be higher than the one already published there (${before.sequence}): installed copies take only a higher one.` };
+  if (before && release.sequence <= before.sequence) return { problem: notHigher(release.sequence) };
   await mkdir(input.out, { recursive: true });
   await copyFile(join(input.work, 'publish', release.archive), join(input.out, release.archive));
   // The manifest goes last and all at once: it is what says there is a release.

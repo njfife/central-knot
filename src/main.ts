@@ -534,7 +534,9 @@ async function syncThenView(explicit = false): Promise<HomeView> {
 
 /**
  * The plugins of a marketplace that a tool in this computer's own home has installed. A release of the carried
- * marketplace that no longer packs one of them carries it over, so it keeps working there until it is uninstalled.
+ * marketplace that no longer packs one of them carries it over, so it keeps working there until it is uninstalled. (By
+ * the marketplace's name: a tool with another marketplace under that name keeps a same-named plugin here too, which
+ * costs a folder and nothing else.)
  */
 async function carriedInstalled(marketplace: string): Promise<string[]> {
   const context = { home: homedir(), dataDir: join(app.getPath('userData'), 'plugins'), binaries: {}, overrides: Object.fromEntries(harnessIds.map(id => [id, process.env[harnesses[id].configEnv]])) };
@@ -559,7 +561,8 @@ function lookAtFeed(): Promise<void> {
   if (!feed || smoke) return Promise.resolve();
   feedLook ??= (async () => {
     clearTimeout(feedTimer);
-    const result = await checkFeed({ feed, dataDir: app.getPath('userData'), appVersion: app.getVersion(), fetch: (url, init) => net.fetch(url, init), keep: carriedInstalled, turn: queued })
+    // Read past the app's web cache: a static server gives no cache rules, and a cached manifest would hide a new release for days.
+    const result = await checkFeed({ feed, dataDir: app.getPath('userData'), appVersion: app.getVersion(), fetch: (url, init) => net.fetch(url, { ...init, cache: 'no-store' }), keep: carriedInstalled, turn: queued })
       .catch((error): FeedCheck => ({ outcome: 'failed', message: `Couldn’t check for newer plugins: ${error instanceof Error ? error.message : String(error)}` }));
     feedSeen = { checked: Date.now(), outcome: result.outcome, message: result.message };
     log(`feed: ${result.outcome}: ${result.message}`);

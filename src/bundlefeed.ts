@@ -4,7 +4,7 @@
 // against the manifest, unpacked aside, swapped in. Anything short of that leaves the plugins in use as they are and says
 // why. Plain files over http or https, with no sign-in of the app's own: who can reach the address is the publisher's affair.
 import { createWriteStream } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -74,13 +74,16 @@ export async function checkFeed(host: FeedHost): Promise<FeedCheck> {
     release = bundleRelease(await response.json().catch(() => undefined));
   } catch (error) { return failed(`Couldn’t check for newer plugins: ${whyNot(error)}.`); }
   if (!release) return failed('Couldn’t check for newer plugins: what is published there isn’t a release this app can read.');
+  // (With nothing in use, because the build's own release never unpacked, whatever its feed publishes is taken.)
   if (active && release.marketplace !== active.release.marketplace) return failed(`What is published there is another marketplace (“${release.marketplace}”), so it was not used.`);
   if (active && release.sequence <= active.release.sequence) return { outcome: 'current', message: 'No newer plugins are published.', active };
   const date = releaseDate(release);
   if (release.minApp && compareVersions(host.appVersion, release.minApp) < 0) return { outcome: 'held', message: `Newer plugins${date ? ` (${date})` : ''} are published, but they need this app at ${release.minApp} or newer. They arrive once the app is updated.`, active };
-  const file = join(host.dataDir, 'bundled', `download-${randomUUID()}.tgz`);
+  const folder = join(host.dataDir, 'bundled'), file = join(folder, `download-${randomUUID()}.tgz`);
   try {
-    await mkdir(join(host.dataDir, 'bundled'), { recursive: true });
+    await mkdir(folder, { recursive: true });
+    // A download the app was quit in the middle of goes first (one look runs at a time, so it is nobody's).
+    for (const name of await readdir(folder)) if (name.startsWith('download-')) await rm(join(folder, name), { force: true });
     try { await download(host, release, file); } catch (error) { return failed(`Newer plugins${date ? ` (${date})` : ''} are published, but they couldn’t be downloaded: ${whyNot(error)}. The ones here stay in use.`); }
     const use = release;
     const { problem } = await host.turn(async () => activateRelease(host.dataDir, use, file, await host.keep(use.marketplace)));

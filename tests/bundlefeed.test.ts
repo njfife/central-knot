@@ -61,6 +61,8 @@ test('a newer release published to the feed is taken; the same one again is not'
     const published = await box.publish(2);
     assert.ok('release' in published, JSON.stringify(published));
     assert.match(published.report, /^Published team-tools: November 11, 2026 \(Folder: source\), sequence 2\n/);
+    // A download the app was quit in the middle of, some time ago, is cleared on the way.
+    await writeFile(join(box.data, 'bundled/download-left-behind.tgz'), 'half');
     const taken = await checkFeed(box.host);
     assert.deepEqual([taken.outcome, taken.message, taken.active?.release.sequence], ['updated', 'Now has the plugins published on November 11, 2026.', 2]);
     assert.match(await box.skill(), /docs 1\.1\.0/);
@@ -190,5 +192,30 @@ test('publishing: a plugin that can never be packed is left out and named; one w
     assert.ok('problem' in other);
     assert.match(other.problem, /holds releases of the marketplace “team-tools”, and this one is “other-tools”/);
     assert.equal((await readRelease(join(box.feed, 'release.json')))?.sequence, 3);
+  } finally { await box.cleanup(); }
+});
+
+test('a kept plugin keeps its own entry in each manifest that listed it, and enters no manifest that didn’t', async () => {
+  const box = await setup();
+  try {
+    // A marketplace with both manifests: "claude-only" is in Claude's alone; "both" is in both, with Codex's own fields.
+    const write = async (plugins: string[]) => {
+      await market(box.source, Object.fromEntries(plugins.map(name => [name, '1.0.0'])));
+      await put(join(box.source, '.agents/plugins/marketplace.json'), JSON.stringify({ name: 'team-tools', plugins: plugins.filter(name => name !== 'claude-only').map(name => ({ name, source: { source: 'local', path: `./plugins/${name}` }, policy: { installation: 'AVAILABLE' } })) }));
+    };
+    await write(['docs', 'claude-only', 'both']);
+    assert.ok('release' in await box.publish(2));
+    assert.equal((await checkFeed(box.host)).outcome, 'updated');
+    // Release 3 offers neither any more; a tool here has both installed.
+    await write(['docs']);
+    assert.ok('release' in await box.publish(3));
+    assert.equal((await checkFeed({ ...box.host, keep: async () => ['claude-only', 'both'] })).outcome, 'updated');
+    const folder = bundledMarketplace(box.data);
+    const entries = async (file: string) => JSON.parse(await readFile(join(folder, file), 'utf8')).plugins as { name: string; source: unknown; policy?: unknown }[];
+    assert.deepEqual((await entries('.claude-plugin/marketplace.json')).map(entry => [entry.name, entry.source]), [['docs', './plugins/docs'], ['both', './_kept/both'], ['claude-only', './_kept/claude-only']]);
+    assert.deepEqual(await entries('.agents/plugins/marketplace.json'), [
+      { name: 'docs', source: { source: 'local', path: './plugins/docs' }, policy: { installation: 'AVAILABLE' } },
+      { name: 'both', source: { source: 'local', path: './_kept/both' }, policy: { installation: 'AVAILABLE' } }]);
+    assert.deepEqual((await activeBundle(box.data))?.release.kept?.sort(), ['both', 'claude-only']);
   } finally { await box.cleanup(); }
 });
