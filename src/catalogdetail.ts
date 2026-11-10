@@ -142,7 +142,8 @@ async function markdownIn(root: string, folder: string, paths: string[], unread?
       const body = await partFile(root, file);
       if (body === undefined) { if (unread && await present(file)) unread.push(basename(file, '.md')); continue; }
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body, path: relative(folder, file) });
+      // Copilot's naming, used in plugins too: x.agent.md is the agent x.
+      found.push({ name: meta.name || basename(file).replace(/(\.agent)?\.md$/, ''), description: meta.description ?? '', text: body, path: relative(folder, file) });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));

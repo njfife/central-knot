@@ -7,13 +7,14 @@ import { caughtUpNames, DAY_MS } from './model.ts';
 import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
+import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
 import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
+import { cellWords, handledWhere, inWhere, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 import { plural } from './model.ts';
 import { planAdd as planAddPure, syncingTools, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
@@ -50,15 +51,111 @@ function openPlugin(install: PartsInstall) {
 function partNote(skill: SampleSkill) {
   // Once read, the Plugins page knows whether the plugin is still listed; a page that can't show it isn't linked to.
   const unlisted = (install: PartsInstall) => !!market.view && !market.view.marketplaces.some(entry => entry.source === install.source && entry.plugins.some(plugin => plugin.name === install.plugin));
-  return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('blocks', 12, 'tone-muted'),
+  return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'),
     h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
         : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
 }
 
-/** A part's tag on its row: "from <plugin>", titled with the version and the tools it went into. */
-const partTags = (skill: SampleSkill) => fromPlugins(skill, kind).map(({ install, tools }) =>
-  h('span.row-tag.row-part', { title: `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item` }, icon('blocks', 12, 'tone-faint'), `from ${install.plugin}`));
+/** The one mark of a plugin's item on its row, a part's or one inside the installed plugin: the plugin's glyph and "from <plugin>"; its title says which. */
+const pluginTag = (plugin: string, title: string) => h('span.row-tag.row-part', { title }, icon('puzzle', 12, 'tone-faint'), `from ${plugin}`);
+/** A part's tag on its row, titled with the version and the tools it went into, and where the same plugin is installed whole. */
+const partTags = (skill: SampleSkill) => fromPlugins(skill, kind).map(({ install, tools }) => {
+  const whole = wholeOf(skill).find(row => row.plugin === install.plugin && row.marketName === install.marketName);
+  return pluginTag(install.plugin, `Part of the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item${whole ? `. Also inside the plugin ${inWhere(whole)}` : ''}`);
+});
+
+// ---------- What a plugin installed whole brings (pluginrows.ts) ----------
+/** This page's plugin rows for the home on screen; none in the design preview. */
+const plugged = () => (designMode || !state.home ? { rows: [] as PluginRow[], merged: new Map<string, PluginRow[]>(), unread: [] } : pageRows(state.home, kind));
+/** Rows of the installed plugin laid onto a part's row: where the plugin that put the part in one tool is installed whole in others. */
+const wholeOf = (skill: SampleSkill) => plugged().merged.get(skill.key) ?? [];
+/** The installed plugin's copy shown in a part row's cell, where that row has nothing of its own there. */
+const wholeIn = (skill: SampleSkill, tool: Tool) => (cellOf(skill, tool) === 'absent' ? wholeOf(skill).find(row => row.copies[tool as HarnessId]) : undefined);
+/** A row of a plugin's: a part's, or with the installed plugin laid onto it. */
+const fromAPlugin = (skill: SampleSkill) => fromPlugins(skill, kind).length > 0 || wholeOf(skill).length > 0;
+
+/** One tool's box for a plugin's item: filled with the plugin's glyph where its copy brings it (marked when off there), else empty. Never a button: sync never copies or changes a plugin's own files. */
+function pluginCell(row: PluginRow, tool: Tool, id: string) {
+  const has = !!row.copies[tool as HarnessId];
+  const off = offIn(row, tool as HarnessId);
+  const words = cellWords(row, tool as HarnessId);
+  return h(`span.cell-button.cell-static${has ? '.cell-plugin.cell-on' : '.cell-absent'}${off ? '.cell-disabled' : ''}`, { id, role: 'img', title: words, 'aria-label': words, 'data-state': has ? (off ? 'plugin-off' : 'plugin') : 'plugin-none' },
+    has ? icon('puzzle', 14) : null, off ? h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null);
+}
+
+/** Opens the plugin's page on Plugins, found by its marketplace's name where the source each tool recorded is spelled otherwise. */
+function openWhole(row: PluginRow) {
+  const source = Object.values(row.installs).find(install => install?.listed)?.source;
+  market.nav = { source, plugin: row.plugin, tab: 'plugins', find: '', category: undefined, marketName: row.marketName };
+  showPage('plugins');
+}
+
+/** Where a plugin's item is handled, as a sentence: a link to the plugin's page, or how the tool itself does it. */
+function handledNote(row: PluginRow, lead: string, id: string) {
+  const where = handledWhere(row);
+  return h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'), h('span', {}, lead, where.text,
+    ...(where.listed ? [h('button.inline-link', { type: 'button', id, onclick: (event: Event) => { event.stopPropagation(); openWhole(row); } }, `${row.plugin}’s page on Plugins`), '. '] : [' ']),
+    'Central Knot doesn’t sync it or change its files.'));
+}
+
+/** On a part's row: the same plugin installed whole, and where it is handled. */
+const wholeNote = (skill: SampleSkill) => wholeOf(skill).map(row => handledNote(row, `Also inside the plugin ${inWhere(row)}. `, `open-whole-${skill.key}-${row.plugin}`));
+
+/** Plugin items whose file is shown, by row key, so a redraw keeps it open. */
+const filesShown = new Set<string>();
+
+/** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
+function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
+  const [type, ...rest] = row.description.split(' · ');
+  const copies = pluginTools(row).flatMap(tool => (row.copies[tool]?.text !== undefined ? [{ tool, text: row.copies[tool]!.text! }] : []));
+  const shown = filesShown.has(row.key);
+  const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
+  return h(`div.compare.details.details-plugin${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
+    h('div.details-head', {},
+      h('p.details-status', {}, `From the plugin ${row.plugin} · not managed by Central Knot`),
+      kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
+        : row.description ? h('p.details-description', {}, row.description) : null,
+      handledNote(row, '', `open-whole-${row.key}`),
+      copies.length ? h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => { if (shown) filesShown.delete(row.key); else filesShown.add(row.key); rerender(); })) : null),
+    h('div.details-tools', {}, toolList().map(tool => h('div.details-tool', {}, h('div.details-tool-head', {},
+      h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])), h('span.details-tool-line', {}, toolWords(row, tool as HarnessId)))))),
+    shown ? h('div.plugin-file', {}, fileBlocks(`pfile-${row.key}-text`, file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 })) : null);
+}
+
+/** A plugin item's row: its name with the plugin's mark, no Managed switch, and a box per tool. */
+function pluginRowEl(row: PluginRow) {
+  const open = view.comparing === row.key;
+  return [
+    h(`div.ov-row.unmanaged.ov-plugin-row${open ? '.open' : ''}`, { role: 'row', 'data-key': row.key, 'aria-expanded': String(open), onclick: () => openRow(row.key) },
+      h('div.ov-name.ov-name-fit', { role: 'cell', title: row.description ? `${row.name}: ${row.description}` : row.name },
+        h('button.row-open', { type: 'button', id: `open-${row.key}`, 'aria-label': `${open ? 'Hide' : 'Show'} details for ${row.name}`, onclick: (event: Event) => { event.stopPropagation(); openRow(row.key); } },
+          icon(open ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
+        h('span.ov-name-main', {}, h('span.ov-name-text', {}, row.name)),
+        pluginTag(row.plugin, insideTitle(row)),
+        row.description ? h('span.ov-name-about', { title: row.description }, row.description) : null),
+      h('div.ov-managed', { role: 'cell', title: 'Not managed: it comes with the plugin' }),
+      toolList().map(tool => h('div.ov-cell', { role: 'cell', 'data-tool': tool }, pluginCell(row, tool, `cell-${row.key}-${tool}`)))),
+    open && !docked() ? pluginDetails(row) : null,
+  ];
+}
+
+/** The plugin items' own section, after the person's own items: counted apart, since nothing here manages them. */
+function pluginSection(list: PluginRow[]) {
+  if (!list.length) return null;
+  return h('div', { role: 'rowgroup' },
+    h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
+      sectionNote('not managed here; each plugin’s page handles them'))),
+    list.flatMap(pluginRowEl));
+}
+
+/** Installed plugins whose copy couldn't be read in the tools this table is about: what they bring is missing, and why. */
+function unreadBand() {
+  const list = plugged().unread.filter(install => !focus || install.tool === focus);
+  if (!list.length) return null;
+  return h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, list.slice(0, 3).map(install => `What ${install.plugin} brings in ${names[install.tool]} isn’t listed: ${install.problem}`).join(' · ') + (list.length > 3 ? ` · and ${list.length - 3} more` : '')));
+}
 const ago = (iso: string) => {
   const days = Math.floor((Date.now() - Date.parse(iso)) / DAY_MS);
   return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
@@ -132,7 +229,7 @@ export function differingIn({ facts, tools, waiting }: ReturnType<typeof kindSou
 }
 const other = (tool: Tool) => toolList().find(entry => entry !== tool)!;
 const others = (tool: Tool) => toolList().filter(entry => entry !== tool);
-type Filter = 'all' | 'managed' | 'unmanaged' | 'attention';
+type Filter = 'all' | 'managed' | 'unmanaged' | 'attention' | 'plugins';
 type Resolution = Tool | 'separate';
 /** `prior` is the Managed state before a copy choice, so undoing the choice puts it back. */
 interface Draft { managed: boolean; off: Tool[]; resolve?: Resolution; prior?: boolean; /** The chosen copy's content ID when it was chosen. */ seen?: string; /** Whether the skill was managed when this change was first made: a change made against an older state is dropped, never applied. */ seenManaged?: boolean;
@@ -362,7 +459,8 @@ function filterBar() {
     icon(glyph, 13, 'chip-icon'), h('span.chip-label', {}, label), warn !== undefined ? h('span.chip-count', {}, String(warn)) : null);
   return h('div.chips', { role: 'group', 'aria-label': 'Show' },
     chip('all', 'All', 'list'), chip('managed', 'Managed', 'circle-check'), chip('unmanaged', 'Unmanaged', 'circle-dashed'),
-    copiesDifferChipShown() ? chip('attention', 'Copies differ', cellLook.differs.glyph!, attention) : null);
+    copiesDifferChipShown() ? chip('attention', 'Copies differ', cellLook.differs.glyph!, attention) : null,
+    pluginChipShown() ? chip('plugins', 'From plugins', 'puzzle') : null);
 }
 
 // Edits waiting for Sync are not Apply all's to write: the Sync-off banner offers Sync now for them.
@@ -493,6 +591,8 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
       h('button.cell-button.cell-removing.cell-pending-edit', { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: text, 'aria-label': text, 'data-state': 'removing',
         onclick: (event: Event) => { event.stopPropagation(); setRemoved(skill.key, [tool], false); } }, icon('minus', 16)));
   }
+  const whole = wholeIn(skill, tool);
+  if (whole) return h('div.ov-cell', { role: 'cell', 'data-tool': tool }, pluginCell(whole, tool, `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`));
   const { cell: drawn, on, pending, look, disabled, switching } = cellNow(skill, tool);
   const differs = drawn === 'differs' || drawn === 'present-differs';
   // A pending cell with no copy yet gets one written: a plus, where a plain tick only starts syncing what is there.
@@ -631,6 +731,8 @@ function rowLine(skill: SampleSkill, tool: Tool, quiet: boolean): string {
 
 /** rowLine without the note on an unverified build. */
 function rowSentence(skill: SampleSkill, tool: Tool, quiet: boolean): string {
+  const whole = wholeIn(skill, tool);
+  if (whole) return toolWords(whole, tool as HarnessId);
   const switching = switchLine(skill, tool);
   // While a draft is pending, a row with no change of its own stays as quiet as it is once applied.
   const base = committedOf(skill.key);
@@ -955,6 +1057,7 @@ function details(skill: SampleSkill, placement: Placement = 'row'): HTMLElement 
       kind !== 'mcp' && skill.description && !(differs && !draft) && !inFiles ? h('p.details-description', {}, skill.description) : null,
       kind === 'mcp' && skill.description ? definition(skill.description, skill.managed) : null,
       partNote(skill),
+      wholeNote(skill),
       inFiles ? null : itemActions(skill, differs && !draft)),
     differs ? compareChoices(skill) : null,
     // Agents: each tool runs an agent its own way; Central Knot moves the name, description and prompt (AGT-01).
@@ -1022,6 +1125,15 @@ function itemDock(skill: SampleSkill) {
       h('div.dock-title', {}, h('h2', {}, middle(name)), h('p', {}, nouns[kind][0])),
       closeButton(() => { view.comparing = undefined; rerender(); }, { id: 'dock-close', label: `Close details for ${name}`, title: 'Close' })),
     h('div.scroll.dock-scroll', { id: 'dock-scroll' }, details(skill, 'dock')));
+}
+
+/** A plugin item's details docked beside the table, as an item's are. */
+function pluginDock(row: PluginRow) {
+  return h('aside.dock', { 'aria-label': `Details for ${row.name}` },
+    h('header.dock-head', {},
+      h('div.dock-title', {}, h('h2', {}, middle(row.name)), h('p', {}, `${nouns[kind][0]} · from ${row.plugin}`)),
+      closeButton(() => { view.comparing = undefined; rerender(); }, { id: 'dock-close', label: `Close details for ${row.name}`, title: 'Close' })),
+    h('div.scroll.dock-scroll', { id: 'dock-scroll' }, pluginDetails(row, 'dock')));
 }
 
 /** Opening a row's details brings them into view, so a choice below the fold is not missed. */
@@ -1107,6 +1219,13 @@ const swatch = (cell: Cell, on: boolean) => {
 /** A key swatch: a box with its own copy, dashed blue because what happens to it waits for Apply all. */
 const pendingOwnCopy = () => { const mark = swatch('present', false); mark.classList.add('cell-pending-edit'); return mark; };
 
+/** The key's entries for a plugin's boxes, when the table draws any: in the plugin, and turned off in that tool. */
+function pluginLegend(list: SampleSkill[], entry: (label: string, node: HTMLElement) => HTMLElement) {
+  const offs = [...plugged().rows, ...list.flatMap(wholeOf)].flatMap(row => (toolList() as HarnessId[]).filter(tool => row.copies[tool]).map(tool => !!offIn(row, tool)));
+  const mark = (off: boolean) => h(`span.legend-cell.cell-plugin.cell-on${off ? '.cell-disabled' : ''}`, { 'aria-hidden': 'true' }, icon('puzzle', 11), off ? h('span.cell-disabled-mark', {}, icon('circle-off', 8)) : null);
+  return offs.length ? [entry('In the plugin (its page handles it)', mark(false)), offs.some(Boolean) ? entry('Plugin’s, turned off there', mark(true)) : null] : [];
+}
+
 function legend(list: SampleSkill[]) {
   const entry = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   // What is drawn: a pending synced cell is drawn as Starts syncing, a replaced one with its own mark.
@@ -1170,6 +1289,7 @@ function legend(list: SampleSkill[]) {
     seen.has('differs') || seen.has('present-differs') ? entry('Copies differ', swatch('differs', true)) : null,
     seen.has('present') || seen.has('off') ? entry('Has its own copy', swatch('present', false)) : null,
     seen.has('absent') ? entry('No copy', swatch('absent', false)) : null,
+    ...pluginLegend(list, entry),
     seen.has('cannot') ? entry('Can’t load it', swatch('cannot', false)) : null,
     // The dashed blue Managed switch is a pending mark too.
     list.some(skill => view.draft.has(skill.key) && skill.managed && !committedOf(skill.key).managed) ? entry('Becomes Managed on Apply all', h('span.legend-switch', { 'aria-hidden': 'true' }, h('span.switch-knob'))) : null);
@@ -1549,6 +1669,8 @@ function mcpNotices() {
   for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
+  const unread = unreadBand();
+  if (unread) bands.push(unread);
   const result = kind === 'agents' ? state.agentsResult : state.mcpResult;
   const told = toldNotices();
   const shownNotices = told.filter(notice => !state.dismissed.has(notice.history || notice.item));
@@ -1606,6 +1728,8 @@ function notices() {
   if (!manage.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, manage.access.reason)));
   if (manage.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
   if (manage.gate.state === 'needs-resume') bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
+  const unread = unreadBand();
+  if (unread) bands.push(unread);
   const applied = state.applied;
   // Skills that cannot go somewhere, or whose copies differ, already show that in their row; the band is for failures.
   const problems = applied ? applied.results.filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/^Copies differ\./.test(result.message))) : [];
@@ -1815,7 +1939,11 @@ function useTable(which: Kind, harness?: Tool) {
   forgetOtherHomes();
   if (view.shownFor !== harness) startFresh(view, harness);
   if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
+  if (view.filter === 'plugins' && !pluginChipShown()) view.filter = 'all';
 }
+
+/** Whether the From plugins chip is drawn: some row here is a plugin's. */
+const pluginChipShown = () => plugged().rows.some(row => !focus || row.copies[focus as HarnessId]) || committedList().some(skill => inFocus(skill) && fromAPlugin(skill));
 
 /**
  * Whether the Copies differ chip is drawn: something differs once pending changes apply, or differed before them while the
@@ -1845,10 +1973,14 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   useTable(which, harness);
   const all = rows();
   const needle = view.find.trim().toLowerCase();
-  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : needsChoice(skill)))
+  const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : view.filter === 'plugins' ? fromAPlugin(skill) : needsChoice(skill)))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
+  // A plugin's items follow Find and the chips: shown with All and From plugins, on a harness's page where it has them.
+  const plugins = plugged().rows.filter(row => (view.filter === 'all' || view.filter === 'plugins') && (!focus || row.copies[focus as HarnessId])
+    && (!needle || row.name.toLowerCase().includes(needle) || row.description.toLowerCase().includes(needle)));
   const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => { view.find = text; rerender(); } });
   const open = docked() ? all.find(skill => skill.key === view.comparing) : undefined;
+  const openPlugin = docked() && !open ? plugins.find(row => row.key === view.comparing) : undefined;
   // Rows a harness's page is about (it has a copy) split into Managed and Unmanaged; the rest, only other tools have.
   const here = shown.filter(inFocus), away = shown.filter(skill => !inFocus(skill));
   managedDrawn = here.some(skill => committedOf(skill.key).managed);
@@ -1866,10 +1998,12 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
           toolList().map(tool => toolHead(tool, shown))),
         section('managed', here.filter(skill => committedOf(skill.key).managed), here.filter(skill => skill.managed).length),
         section('unmanaged', here.filter(skill => !committedOf(skill.key).managed), here.filter(skill => !skill.managed).length),
+        pluginSection(plugins),
         // Items only other tools have: their box in this tool's column adds them here (see setTool).
         focus ? section('away', away, away.length) : null,
         ghostRows()), toolList().length),
       legend(all))];
+  if (openPlugin) return h('div.page.ov-page.docked', { 'data-variant': variant }, h('div.dock-main', {}, table), pluginDock(openPlugin));
   return open ? h('div.page.ov-page.docked', { 'data-variant': variant }, h('div.dock-main', {}, table), itemDock(open))
     : h('div.page.ov-page', { 'data-variant': variant }, table);
 }

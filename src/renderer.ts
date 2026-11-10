@@ -6,6 +6,7 @@ import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns } from './words.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
@@ -94,9 +95,10 @@ function renderSidebar() {
   region('nav').replaceChildren(...[
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
-    row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
-    row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
-    row('agents', 'bot', designMode ? undefined : home?.agents.servers.length),
+    // Each page's rows, a plugin's items included.
+    row('skills', 'wand-sparkles', designMode ? sample.length : home && home.manage.skills.length + pluginItemCount(home, 'skills')),
+    row('mcp', 'plug', designMode ? undefined : home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
+    row('agents', 'bot', designMode ? undefined : home && home.agents.servers.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.

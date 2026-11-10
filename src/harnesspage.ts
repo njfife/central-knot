@@ -3,6 +3,7 @@
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
 import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
@@ -40,7 +41,8 @@ const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t u
 function tally(home: HomeView, kind: Kind, tool: HarnessId) {
   const source = kindSource(home, kind);
   const here = source.facts.filter(item => item.copies[tool] !== undefined);
-  return { kind, supported: source.tools.includes(tool), total: here.length, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
+  const plugins = pluginItemCount(home, kind, tool);
+  return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
 }
 
 const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions.data?.find(file => file.tool === tool);
@@ -86,11 +88,14 @@ function countRow(label: string, { value, note, faint = false }: Count) {
   return h('div.harness-count', {}, h('span.harness-count-label', {}, label), h(`span.harness-count-value${faint ? '.tone-faint' : ''}`, {}, value), h('span.harness-count-note', {}, note ?? ''));
 }
 
-function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
+function kindCount({ kind, supported, total, plugins, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
   // None: the words say it, without a 0 beside them.
   if (!total) return { value: '', note: 'none yet', faint: true };
-  return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
+  // A plugin's items are counted and said apart: they are never managed.
+  const own = total - plugins;
+  const mine = !own ? '' : managed === own ? (plugins ? `${own} managed` : 'all managed') : !managed ? (plugins ? `${own} unmanaged` : 'none managed') : `${managed} managed · ${own - managed} unmanaged`;
+  return { value: String(total), note: [mine, plugins ? `${plugins} from plugins` : ''].filter(Boolean).join(' · ') };
 }
 
 function instructionCount(tool: HarnessId): Count {
@@ -205,7 +210,7 @@ function tabs(home: HomeView, tool: HarnessId) {
     if (!supports(home, tab, tool)) return { shown: '—', elsewhere: 0 };
     const facts = kindSource(home, tab).facts;
     const here = facts.filter(item => item.copies[tool] !== undefined).length;
-    return { shown: here, elsewhere: facts.length - here };
+    return { shown: here + pluginItemCount(home, tab, tool), elsewhere: facts.length - here };
   };
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },
     TABS.map(tab => {
@@ -239,7 +244,7 @@ function unsupported(kind: Kind, tool: HarnessId) {
 
 function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
-  if (kindSource(home, kind).facts.length) return designOverview(kind, tool);
+  if (kindSource(home, kind).facts.length || pluginItemCount(home, kind)) return designOverview(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   const empty = kindEmpty(kind);
   return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));

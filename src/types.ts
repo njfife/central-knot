@@ -410,6 +410,20 @@ export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: 
 /** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
 export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
 
+// ---------- What a plugin installed whole brings (pluginitems.ts) ----------
+/** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
+export interface PluginItem { kind: PartKind; name: string; description: string; /** Skills and agents: the file as written. */ text?: string; /** MCP servers: what it runs or connects to. */ runs?: string }
+/** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
+export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
+  /** The whole plugin is turned off in that tool. */ off?: boolean;
+  /** Its skills that tool has turned off one by one (Copilot CLI's and Codex's switch). */ skillsOff?: string[];
+  items: PluginItem[];
+  /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
+  /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
+  /** Where that tool has its marketplace from, as it records it. */ source?: string }
+/** Declared apart from HomeView's own line, so changes beside it merge cleanly: the plugins installed whole in this home's tools. */
+export interface HomeView { pluginItems?: InstalledPlugin[] }
+
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
 

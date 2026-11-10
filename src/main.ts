@@ -17,6 +17,7 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
+import { readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
@@ -442,6 +443,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
+  // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
+  made.pluginItems = await readPluginItems({ home: current!.home, dataDir: app.getPath('userData'), binaries: {}, overrides: shared.overrides }, presentTools(snapshots));
   lastItems = switchItems(made.manage, made.mcp);
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
