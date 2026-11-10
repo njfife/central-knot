@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
-import {
+import { newRecord,
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
@@ -484,7 +484,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const tools = presentTools(snapshots);
   const gathered = await gather(context, snapshots, record);
   // A crash between these steps leaves an intact record this build can resume.
-  if (!record) { record = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, record); }
+  if (!record) { record = newRecord(context); await saveRecord(context.home, record); }
   if (gate.state !== 'ready') await remember(context, record.generation);
   // The record is saved only when it changed: catch-up runs on every read, and a read that finds nothing to do writes nothing.
   let saved = JSON.stringify(record);

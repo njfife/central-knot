@@ -13,8 +13,7 @@ import { parseCatalog } from './plugins.ts';
 import { writeDurably } from './share.ts';
 import { PRODUCT, SAFE_NAME, record, text } from './values.ts';
 
-/** The standard app's identity: the system's name for it, and the name a sync record gives its owner. */
-export const STANDARD_BUILD = 'com.centralknot.firstlook';
+export { STANDARD_BUILD } from './values.ts';
 
 export const CUSTOM_FILE = 'custom-build.json';
 export const RELEASE_FILE = 'release.json';

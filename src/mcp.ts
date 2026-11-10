@@ -9,7 +9,7 @@ import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { configRoot, harnesses } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { newRecord, FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
@@ -362,7 +362,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   // The sync record is the one place ownership lives: make it now if this is the first thing Central Knot manages.
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
-  if (!owner) { owner = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, owner); }
+  if (!owner) { owner = newRecord(context); await saveRecord(context.home, owner); }
   if (gate.state !== 'ready') await remember(context, owner.generation);
 
   const present = tools.filter(tool => mcpTools.includes(tool));

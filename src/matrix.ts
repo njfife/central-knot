@@ -6,7 +6,7 @@ import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS } from './model.ts';
 import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { whyReadOnly, saidInStatusBar, takeOverSync, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, fileBlocks, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { byKey, standing } from './roworder.ts';
@@ -1715,11 +1715,29 @@ function secondStepNote() {
     h('span.band-why', {}, practice ? ' On your real tools, quit Claude Code first.' : ' Claude Code rewrites its settings file while running, so it is written only when you click Write.')));
 }
 
+/**
+ * Another build syncs this home (ORG-08): who, whether it is open now, and Take over syncing. Only one build syncs a home
+ * at a time; this one changes no skill, MCP server or agent here until it is told to take over.
+ */
+function otherOwnerBand(): HTMLElement | null {
+  const gate = state.home?.manage.gate;
+  if (gate?.state !== 'stopped' || !gate.owner) return null;
+  const { name, running } = gate.owner;
+  const said = running === true ? `${name} is open and syncs this home, so nothing is changed from here.`
+    : running === false ? `${name} synced this home last and isn’t open, so nothing is syncing here now.`
+      : `${name} syncs this home, so nothing is changed from here.`;
+  const take = button({ variant: 'outline', size: 'small', label: 'Take over syncing', id: 'take-over-sync', disabled: !!state.busy || !state.home!.manage.access.allowed, onclick: () => void takeOverSync() });
+  take.title = `This app syncs this home from then on, from where ${name} left it: every managed item and choice stays. ${name} stops syncing here.`;
+  return h('div.band', { role: 'status', id: 'other-owner' }, icon('circle-alert', 14, 'tone-warning'), h('span.band-text', {}, said), take);
+}
+
 function mcpNotices() {
   const mcp = listView()!;
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
   if (!mcp.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, mcp.access.reason)));
+  const owned = otherOwnerBand();
+  if (owned) bands.push(owned);
   for (const problem of mcp.problems) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'), h('span.band-text', {}, problem)));
   const unread = unreadBand();
   if (unread) bands.push(unread);
@@ -1778,7 +1796,9 @@ function notices() {
   const bands: HTMLElement[] = [];
   for (const band of [syncOffBand(), outcomeBand()]) if (band) bands.push(band);
   if (!manage.access.allowed) bands.push(h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, manage.access.reason)));
-  if (manage.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
+  const owned = otherOwnerBand();
+  if (owned) bands.push(owned);
+  else if (manage.gate.state === 'stopped') bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
   if (manage.gate.state === 'needs-resume') bands.push(h('div.band', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, manage.gate.reason)));
   const unread = unreadBand();
   if (unread) bands.push(unread);

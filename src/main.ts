@@ -1,4 +1,4 @@
-import { onlyAllowed, record, strings } from './values.ts';
+import { PRODUCT, onlyAllowed, record, strings } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, net, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
@@ -8,7 +8,7 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
-import { syncsHere, writeAccess, type ShareContext } from './share.ts';
+import { syncsHere, takeOverSync, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
 import { installedPlugins } from './plugins.ts';
@@ -127,7 +127,7 @@ let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
 
 function context(): ShareContext {
   return {
-    home: current!.home, mode: current!.mode, read, build: BUILD,
+    home: current!.home, mode: current!.mode, read, build: BUILD, buildName: custom?.name ?? PRODUCT,
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
@@ -520,6 +520,8 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
   // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
   made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), presentTools(snapshots));
+  // Another build syncs this home: whether it is open now decides what the page says about it.
+  if (made.manage.gate.state === 'stopped' && made.manage.gate.owner) made.manage.gate.owner.running = await buildRunning(made.manage.gate.owner.build);
   lastItems = switchItems(made.manage, made.mcp);
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
@@ -571,6 +573,15 @@ function lookAtFeed(): Promise<void> {
     feedTimer = setTimeout(() => void lookAtFeed(), result.outcome === 'failed' ? FEED_RETRY_MS : FEED_EVERY_MS);
   })().finally(() => { feedLook = undefined; });
   return feedLook;
+}
+
+/**
+ * Whether the build with this identity is open now, as macOS has it (an installed app, by its bundle id); undefined
+ * where that can't be told (other systems, or a build run from its source).
+ */
+function buildRunning(build: string): Promise<boolean | undefined> {
+  if (process.platform !== 'darwin' || !app.isPackaged) return Promise.resolve(undefined);
+  return new Promise(done => execFile('/usr/bin/lsappinfo', ['info', '-only', 'pid', '-app', build], { timeout: 5_000 }, (error, out) => done(error ? undefined : /"pid"\s*=\s*\d+/.test(String(out)))));
 }
 
 /** The marketplace feature's own work at open (marketplaces.ts); set once its requests are registered. */
@@ -1115,6 +1126,13 @@ app.whenReady().then(async () => {
   });
   handle('sync:set', async on => { await saveSyncSetting(on === true); return current ? syncThenView() : null; });
   handle('sync:now', async home => (home === current?.home ? syncThenView(true) : null));
+  // Take over syncing (ORG-08): this build becomes the home's sync owner, then reads and syncs it as its owner.
+  handle('sync:take-over', async home => {
+    if (home !== current?.home) return { stopped: elsewhere, view: null };
+    const taken = await takeOverSync(context());
+    if (taken.from) log(`sync: took over syncing ${home} from ${taken.from}`);
+    return { ...taken, view: await syncThenView() };
+  });
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, resume, home) => {

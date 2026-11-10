@@ -27,6 +27,7 @@ const api: DesktopApi = {
   applyAgents: (changes, resume, home) => ipcRenderer.invoke('agents:apply', changes, resume, home),
   setSync: on => ipcRenderer.invoke('sync:set', on),
   syncNow: home => ipcRenderer.invoke('sync:now', home),
+  takeOverSync: home => ipcRenderer.invoke('sync:take-over', home),
   onSyncChanged: callback => { ipcRenderer.on('sync:changed', () => callback()); },
   onSaid: callback => { ipcRenderer.on('said', (_event, text) => callback(String(text))); },
   getSettings: () => ipcRenderer.invoke('settings:get'),

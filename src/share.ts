@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { PRODUCT } from './values.ts';
+import { STANDARD_BUILD, PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
@@ -25,6 +25,8 @@ export interface ShareContext {
   /** Always reads disk, so every plan and result reflects what is there now. */
   read: () => Promise<Snapshot[]>;
   build: string;
+  /** What this build calls itself, written into a record it owns so another build can say whose it is. */
+  buildName?: string;
   settingsPath: string;
   /** The person's real home, written only when reached by explicitly choosing it. */
   realHome: string;
@@ -47,7 +49,7 @@ export interface RecordCopy { harness: HarnessId; directory: string; hash: strin
 export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
   /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
   displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
-export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
+export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** The owner's own name, as people know it (a record made before there were custom builds has none). */ ownerName?: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
 /** Where the plugins' parts are recorded (parts.ts writes it): which plugin's parts went into which tool as separate items. */
@@ -330,6 +332,9 @@ export async function removeFileChecked(path: string, expected: string) {
   await unlink(parked);
 }
 
+/** A home's first sync record, owned by this build. */
+export const newRecord = (context: ShareContext): SyncRecord => ({ formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, ...(context.buildName ? { ownerName: context.buildName } : {}), items: Object.create(null) });
+
 export const saveRecord = (home: string, record: SyncRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
 
 type Settings = { homes?: Record<string, { generation: string }> };
@@ -353,10 +358,36 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
-  if (record.owner !== context.build) return { state: 'stopped', reason: `Sharing here belongs to another ${PRODUCT} build (${record.owner}). Nothing was written or deleted.` };
+  // One build syncs a home at a time (ORG-08). Another build's home is left alone until this one is told to take over.
+  if (record.owner !== context.build) {
+    const name = ownerName(record);
+    return { state: 'stopped', reason: `${name} syncs this home, so nothing was written or deleted. Take over syncing to have ${context.buildName ?? 'this app'} sync it instead.`, owner: { build: record.owner, name } };
+  }
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
+}
+
+/** The build that owns a record, by the name people know it by: the one it recorded, the standard app's, or failing both, its identity. */
+const ownerName = (record: SyncRecord) => record.ownerName || (record.owner === STANDARD_BUILD ? PRODUCT : `Another ${PRODUCT} build (${record.owner})`);
+
+/**
+ * Takes over syncing a home from the build that owns its record (ORG-08): this build becomes the owner and carries on
+ * from the record as it is, every managed item, choice and baseline with it, since the record and what it keeps live in
+ * the home, not in either build. The build that owned it finds another owner at its next pass and stops; it changes
+ * nothing more there until it is told to take over in turn. Ownership never moves any other way. A record that can't be
+ * read stays as it is, with the reason.
+ */
+export async function takeOverSync(context: ShareContext): Promise<{ stopped?: string; from?: string }> {
+  const { record, problem } = await readRecord(context.home);
+  if (problem) return { stopped: `${problem} ${NOTHING_CHANGED}` };
+  if (!record) return { stopped: 'Nothing is synced in this home yet, so there is nothing to take over.' };
+  if (record.owner === context.build) return {};
+  const from = ownerName(record);
+  const { ownerName: _before, ...rest } = record;
+  await saveRecord(context.home, { ...rest, owner: context.build, ...(context.buildName ? { ownerName: context.buildName } : {}) });
+  await remember(context, record.generation);
+  return { from };
 }
 
 /** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */

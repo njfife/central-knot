@@ -1047,6 +1047,13 @@ export const syncNow = () => busy('Syncing…', async () => {
   announce('Synced once. Automatic sync stays off.', true);
 });
 
+/** Take over syncing: this app syncs the home from now on, in place of the build that did; nothing is reset. */
+export const takeOverSync = () => busy('Taking over syncing…', async () => {
+  const taken = await api().takeOverSync(state.home!.home);
+  if (taken.view) setHome(taken.view);
+  announce(taken.stopped ? `Syncing was not taken over. ${taken.stopped}` : taken.from ? `This app now syncs this home, from where ${taken.from} left it. ${taken.from} no longer syncs here.` : 'This app already syncs this home.');
+});
+
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
 let refreshing = false;
 let refreshOwed = false;
