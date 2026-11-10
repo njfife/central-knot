@@ -1,19 +1,18 @@
-// How the app names this computer and its home, and what it offers on this platform. Decided here once, for the main
-// process (from process.platform) and the page (from its user agent) alike.
+// How the app names this computer, its home, where its icon sits and the shortcut key: words only, decided here once, for
+// the main process (from process.platform) and the page (from its user agent) alike. What Start at sign-in can do here is
+// signin.ts's.
 
-/** This computer's names and what its platform offers. */
+/** This computer's names, as sentences use them. */
 export interface MachineNames {
   /** Its home: "This Mac’s home". */
   home: string;
   /** The machine inside a sentence: "not found on this Mac". */
   machine: string;
-  /** Where Central Knot's icon keeps running: "the menu bar" on a Mac, "the tray" elsewhere; `Tray` starts a sentence. */
+  /** Where Central Knot's icon keeps running: "the menu bar" on a Mac, "the system tray" elsewhere; `Tray` starts a sentence. */
   tray: string;
   Tray: string;
-  /** The icon itself: "menu bar icon" on a Mac, "tray icon" elsewhere. */
+  /** The icon itself: "menu bar icon" on a Mac, "system tray icon" elsewhere. */
   trayIcon: string;
-  /** Whether Central Knot can start at sign-in here (not on Linux). */
-  signIn: boolean;
   /** The key a shortcut is held with: ⌘ on a Mac, Ctrl elsewhere. */
   modifierKey: string;
 }
@@ -24,10 +23,9 @@ export function machineNames(platform: string): MachineNames {
   return {
     home: mac ? 'This Mac’s home' : 'This computer’s home',
     machine: mac ? 'this Mac' : 'this computer',
-    tray: mac ? 'the menu bar' : 'the tray',
-    Tray: mac ? 'The menu bar' : 'The tray',
-    trayIcon: mac ? 'menu bar icon' : 'tray icon',
-    signIn: platform !== 'linux',
+    tray: mac ? 'the menu bar' : 'the system tray',
+    Tray: mac ? 'The menu bar' : 'The system tray',
+    trayIcon: mac ? 'menu bar icon' : 'system tray icon',
     modifierKey: mac ? '⌘' : 'Ctrl',
   };
 }

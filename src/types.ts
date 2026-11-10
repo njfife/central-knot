@@ -64,7 +64,7 @@ export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
   refresh(): Promise<HomeView | null>;
   apply(changes: Change[], resume: boolean, home: string): Promise<ApplyResult>;
-  history(): Promise<HistoryEvent[]>;
+  history(): Promise<HistoryList>;
   applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
@@ -79,10 +79,16 @@ export interface DesktopApi {
   getSettings(): Promise<AppPreferences>;
   /** Sets the appearance; the window follows at once. Returns the settings as saved. */
   setAppearance(appearance: Appearance): Promise<AppPreferences>;
-  /** Turns Start at sign-in on or off, as the menus do. */
+  /** Turns starting at sign-in on or off. Returns the settings as saved, with the system's answer. */
   setStartAtSignIn(on: boolean): Promise<AppPreferences>;
-  /** A preference changed, from a menu or the page: Settings reads them again. */
+  /** How long History keeps things. A shorter window also removes what is now older from the open home's History. Returns the settings as saved, and what became of that older History. */
+  setHistoryDays(days: HistoryDays): Promise<HistoryWindowSaved>;
+  /** Opens the system's own sign-in settings: Login Items on macOS, Startup apps on Windows. */
+  openSignInSettings(): Promise<void>;
+  /** The settings may have changed: main saved a change (this page, a menu, a dialog), or the window came back (the system's own settings may have changed meanwhile). */
   onSettingsChanged(callback: () => void): void;
+  /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
+  showLog(): Promise<ShownLog>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
@@ -382,10 +388,30 @@ export interface InstructionSave { stopped?: string; saved?: boolean }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';
+/** Why starting at sign-in can't be changed here, or why the system has it off (see signin.ts for each one's words). */
+export type SignInReason = 'testing' | 'dev' | 'linux' | 'applications' | 'approval' | 'startupApps';
+/** The system's own place for start at sign-in, in its words: the action that opens it, and what the page says around it. */
+export interface SignInPlace { open: string; unopened: string; unchanged: string }
+/**
+ * Whether Central Knot starts at sign-in, as the system has it. `reason`: why it can't be changed here (`available` false) or,
+ * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
+ */
+export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences {
-  appearance: Appearance;
-  /** Start at sign-in, as the menus show it: offered on this system, changeable in this build (an installed app), and on. */
-  signIn: { offered: boolean; available: boolean; on: boolean };
-}
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+/** How many days History keeps changes and deleted items (Settings); the choices are in model.ts. */
+export type HistoryDays = 7 | 30 | 90;
+/**
+ * What a shorter History window did to the History already recorded. The window is saved in every case. `done`: removed from
+ * the open home at once. `later`: this build doesn't sync the open home yet, and applies the window there with its next History
+ * write. `elsewhere`: the open home is preview-only here, or another Central Knot build syncs it; whichever copy next records a
+ * change there removes its older History, by its own window. `no-home`: no home is open. `failed`: tried and couldn't (the log says why).
+ */
+export type HistoryPrune = 'done' | 'later' | 'elsewhere' | 'no-home' | 'failed';
+/** History as main reads it: the events the window covers, and the window, read together so they always agree. */
+export interface HistoryList { events: HistoryEvent[]; days: HistoryDays }
+/** A saved History window: the settings as saved, and `pruned` when it was shorter; none when nothing was shorter or a newer request overtook it. */
+export interface HistoryWindowSaved { settings: AppPreferences; pruned?: HistoryPrune }
+/** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
+export interface ShownLog { selected: boolean; logged: boolean }
 

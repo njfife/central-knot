@@ -1,5 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
-import { clockTime } from './model.ts';
+import { clockTime, DAY_MS } from './model.ts';
 import { noTools, restoreEvent, showPage, state, touchedToolsPhrase } from './app.ts';
 import { noToolsState } from './pages.ts';
 import { andList, toolName } from './words.ts';
@@ -49,7 +49,7 @@ const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'just now
 const day = (iso: string) => {
   const date = new Date(iso);
   if (date.toDateString() === new Date().toDateString()) return 'Today';
-  if (date.toDateString() === new Date(Date.now() - 86_400_000).toDateString()) return 'Yesterday';
+  if (date.toDateString() === new Date(Date.now() - DAY_MS).toDateString()) return 'Yesterday';
   return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
@@ -76,6 +76,11 @@ function actions(event: HistoryEvent, action?: string) {
   return control;
 }
 
+/** How long History keeps things, with the way to change it. */
+const keptFor = () => state.historyDays
+  ? [` Kept for ${state.historyDays} days. `, h('span.keep-together', {}, 'Change in ', h('button.inline-link', { type: 'button', id: 'history-intro-settings', onclick: () => showPage('settings') }, 'Settings'), '.')]
+  : [];
+
 export function historyPage() {
   // From History's own read (pagedata.ts): what it found, else that it is reading or could not read.
   const events = state.history.data;
@@ -84,7 +89,7 @@ export function historyPage() {
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   const reread = rereadBand(state.history);
-  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.'), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back.', ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.

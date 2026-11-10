@@ -2,6 +2,7 @@
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
 import { brandMark } from './brand.ts';
+import { DAY_MS } from './model.ts';
 import { kindNouns } from './presence.ts';
 import { andList, capitalToolsPhrase, orList, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
@@ -16,7 +17,7 @@ import { planAdd as planAddPure, syncingTools, withBoth } from './addplan.ts';
 
 const names = toolNames as Record<Tool, string>;
 const ago = (iso: string) => {
-  const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
+  const days = Math.floor((Date.now() - Date.parse(iso)) / DAY_MS);
   return days <= 0 ? 'edited today' : days === 1 ? 'edited yesterday' : days < 14 ? `edited ${days} days ago` : days < 60 ? `edited ${Math.floor(days / 7)} weeks ago` : `edited ${Math.floor(days / 30)} months ago`;
 };
 
@@ -791,7 +792,7 @@ function row(skill: SampleSkill) {
   return [
     h(`div.ov-row${takeFlash(skill.key) ? '.row-flash' : ''}${draft ? '.changed' : ''}${skill.managed ? '' : '.unmanaged'}${open ? '.open' : ''}`, { role: 'row', 'data-key': skill.key, 'aria-expanded': String(open), onclick: () => openRow(skill.key) },
       nameCell(skill, attention),
-      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, manage, !!skill.held, `switch-${skill.key}`)),
+      h(`div.ov-managed${draft && skill.managed !== committedOf(skill.key).managed ? '.managed-pending' : ''}`, { role: 'cell' }, toggle({ on: skill.managed, label: `Manage ${skill.name ?? skill.key}`, onchange: manage, disabled: !!skill.held, id: `switch-${skill.key}` })),
       toolList().map(tool => cell(skill, tool))),
     open && !docked() ? details(skill) : null,
   ];
@@ -908,7 +909,7 @@ function differingGroup(differ: AddPlan['differ'], from: Tool, to: Tool, include
   const only = differ.length === 1 ? differ[0] : undefined;
   const says = only ? (only.here ? `${name(only)}: ${names[from]}’s copy would replace this one` : `${name(only)}: added from ${names[from]}’s copy`)
     : `with different copies; ${differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`;
-  const include = toggle(included, `Also add the ${differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`);
+  const include = toggle({ on: included, label: `Also add the ${differ.length} with different copies, using ${names[from]}’s copy`, onchange: on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, id: `menu-conflicts-${from}-${to}` });
   return h('div.add-conflict', {},
     h('span.add-group', { 'data-group': 'different', title }, swatch('differs', true), only ? null : h('strong', {}, String(differ.length)), h('span', {}, says)),
     h('span.add-conflict-label', {}, 'Include'), include);
@@ -1543,7 +1544,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         // The skill's own controls sit beside its name; the changes waiting for Apply all keep the bar's far end.
         h('div.detail-actions', {},
           h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
-          toggle(skill.managed, `Manage ${skill.name ?? skill.key}`, on => setManaged([skill.key], on), !!skill.held, `detail-switch-${skill.key}`)),
+          toggle({ on: skill.managed, label: `Manage ${skill.name ?? skill.key}`, onchange: on => setManaged([skill.key], on), disabled: !!skill.held, id: `detail-switch-${skill.key}` })),
         h('div.detail-pending', {}, changeBar(false))),
       notices(),
       // A wide pane puts the skill's details beside its files, as a plugin's page puts its README beside what it holds.

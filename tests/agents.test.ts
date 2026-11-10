@@ -107,7 +107,7 @@ test('A different agent with the same name (even in another case) needs a choice
     const chosen = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(chosen.writes, 2, JSON.stringify(chosen.results));
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Reviews code/);
-    const chosenEvent = (await readHistory(box.home)).find(entry => entry.kind === 'chosen' && entry.key === 'agent:reviewer')!;
+    const chosenEvent = (await readHistory(box.context)).find(entry => entry.kind === 'chosen' && entry.key === 'agent:reviewer')!;
     assert.equal((await restoreAgent(box.context, tools, chosenEvent.id)).stopped, undefined);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Other prompt\./, 'the replaced copy comes back from History');
   } finally { await box.cleanup(); }
@@ -133,7 +133,7 @@ test('Deleting a two-way copy deletes everywhere after it settles; Restore bring
     assert.equal(gone.writes, 2, JSON.stringify(gone.results));
     assert.deepEqual(await readdir(join(box.home, '.claude/agents')), []);
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0, 'no revival');
-    const event = (await readHistory(box.home)).find(entry => entry.kind === 'deleted' && entry.key === 'agent:reviewer');
+    const event = (await readHistory(box.context)).find(entry => entry.kind === 'deleted' && entry.key === 'agent:reviewer');
     assert.ok(event);
     const restored = await restoreAgent(box.context, tools, event.id);
     assert.equal(restored.writes, 3, JSON.stringify(restored));
@@ -186,7 +186,7 @@ test('An agent edit whose spread failed at first is still History, so the versio
     await applyAgents(box.context, tools, []);
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Edited\./);
-    const edits = (await readHistory(box.home)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
+    const edits = (await readHistory(box.context)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
     assert.equal(edits.length, 1, JSON.stringify(edits));
     assert.notEqual(edits[0].previous, undefined);
   } finally { await box.cleanup(); }
@@ -197,7 +197,7 @@ test('Apply all records the agent files it adds; Undo removes them while unchang
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'agent:reviewer')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added' && event.key === 'agent:reviewer')!;
     assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
     // An edit in Codex since: that file stays, and Codex keeps syncing; Copilot's untouched file goes.
     const codex = join(box.home, '.codex/agents/reviewer.toml');
@@ -216,7 +216,7 @@ test('Undo of an agent Apply all with nothing edited unmanages it', async () => 
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added')!;
     await restoreAgent(box.context, tools, added.id);
     assert.equal((await agentsView(box.context, tools)).servers.find(server => server.key === 'reviewer')?.managed, false);
     assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
@@ -261,7 +261,7 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     const resumed = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(resumed.writes, 1, JSON.stringify(resumed.results));
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), codex);
-    const chosen = (await readHistory(box.home)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
+    const chosen = (await readHistory(box.context)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
     const copilotBefore = await read(box.home, '.copilot/agents/reviewer.agent.md');
     const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
@@ -291,7 +291,7 @@ test('A damaged, unreadable or newer agents record stops every write and is neve
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\nBe thorough.\n'));
     const files = ['.claude/agents/reviewer.md', '.copilot/agents/reviewer.agent.md', '.codex/agents/reviewer.toml'];
     const before = await Promise.all(files.map(file => read(box.home, file)));
-    const added = (await readHistory(box.home)).at(-1)!;
+    const added = (await readHistory(box.context)).at(-1)!;
     const bad: [string, RegExp][] = [
       ['{"formatVersion": 2, "items": {', /The agents record is damaged\. Nothing was written or deleted/],
       [JSON.stringify({ formatVersion: 2, items: 'none' }), /The agents record is damaged\./],

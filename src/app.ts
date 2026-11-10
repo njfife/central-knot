@@ -1,5 +1,5 @@
-import { loadSettings } from './settingspage.ts';
-import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
+import { loadSettings, openSettings } from './settingspage.ts';
+import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { plural } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
@@ -35,6 +35,8 @@ export const state = {
   agentsResult: undefined as McpResult | undefined,
   /** What sync and actions did, newest last: read when the History page opens or the home changes (pagedata.ts). */
   history: pageData<HistoryEvent[]>(),
+  /** How long History keeps things, for History's intro; read with History's events. */
+  historyDays: undefined as HistoryDays | undefined,
   /** What the last Apply all did, shown until the next action or read. */
   applied: undefined as ApplyResult | undefined,
   /** The Skills page: the table, or one skill's files and contents beside the list. */
@@ -210,7 +212,7 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
   const what = [managed ? (singleName ? `${singleName} managed` : `${plural(managed, 'skill')} managed`) : '', newCopies.length ? `${plural(newCopies.length, 'new copy', 'new copies')} written${!singleName && newItems.length <= 3 ? ` (${newItems.join(', ')})` : ` to ${andList(added)}`}` : '', replacedIn.length ? `replaced ${andList(replacedIn.map(name => `${name}’s copy`))} (kept in History)` : '', !added.length && !replacedIn.length ? 'nothing needed copying' : ''].filter(Boolean).join(' · ');
   // New copies are in History as 'added': one Undo here removes them again (while unchanged) and unmanages those skills.
   // Only when nothing was replaced: undoing a replacement is its own History entry, and a half-undone choice would mislead.
-  const recent = result.stopped ? [] : (await api().history()).filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+  const recent = result.stopped ? [] : (await api().history()).events.filter(event => !event.undoneBy && changes.some(change => change.key === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
   const addedNow = replacedSome ? [] : recent.filter(event => event.kind === 'added');
   // A copy choice gets its own inline Undo: each replaced copy back in its own tool, new copies removed, the skill unmanaged.
   const chosenNow = replacedSome ? recent.filter(event => event.kind === 'chosen') : [];
@@ -295,7 +297,7 @@ export async function readAgain() {
  */
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   if (page === 'history') return loadHistory();
-  if (page === 'settings') return loadSettings();
+  if (page === 'settings') return loadSettings().then(() => undefined);
   if (page === 'instructions') return loadInstructions();
   if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
@@ -336,7 +338,9 @@ export function showPage(page: Page) {
     state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table';
     tell(carried);
   }
-  if (!stays) void loadPageData(page);
+  // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
+  if (page === 'settings') openSettings();
+  else if (!stays) void loadPageData(page);
   state.page = page;
   state.find = '';
   state.item = undefined;
@@ -371,12 +375,23 @@ export const shownPath = (path: string) => {
 
 // ---------- History ----------
 
-/** Reads History into its slot; the page redraws once the answer is the newest. */
+/** Reads History (its events, and the window they cover, read together) into its slot; the page redraws once the answer is the newest. */
 export const loadHistory = async (): Promise<void> => {
-  const reading = readPageData(state.history, () => api().history());
+  let days: HistoryDays | undefined;
+  const reading = readPageData(state.history, async () => { const list = await api().history(); days = list.days; return list.events; });
   rerender();
-  if (await reading !== 'dropped') rerender();
+  const result = await reading;
+  if (result === 'dropped') return;
+  if (result === 'ready') state.historyDays = days;
+  rerender();
 };
+
+/** History as an action read it, after what it changed: its events and window, the newest. */
+async function putHistory() {
+  const { events, days } = await api().history();
+  putPageData(state.history, events);
+  state.historyDays = days;
+}
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
@@ -386,7 +401,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   setHome(view);
-  putPageData(state.history, await api().history());
+  await putHistory();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => entry.harness ?? ''))].filter(Boolean);
@@ -574,7 +589,7 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   }
   const view = await api().refresh();
   setHome(view);
-  putPageData(state.history, await api().history());
+  await putHistory();
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
   const items = [...new Set(results.map(entry => entry.item))];
@@ -612,6 +627,9 @@ let refreshOwed = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => { if (isPage(page)) showPage(page); });
+// Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
+// open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
+api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
 
 api().onSyncChanged(() => void backgroundRefresh());
 
@@ -675,7 +693,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
     const copied = [...new Set(result.results.filter(entry => entry.outcome === 'written').map(entry => entry.item))];
     const matched = changes.filter(change => change.managed && !copied.includes(change.key)).map(change => change.key);
     // New entries are in History as 'added': one Undo removes them again (while unchanged) and unmanages those servers.
-    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const addedNow = (await api().history()).events.filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `mcp:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.replaced);
     const undoable = addedNow.length > 0 && !replacedAny;
     const done = managed ? `${plural(managed, 'server')} now managed` : 'Applied';
@@ -702,7 +720,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
-    const addedNow = (await api().history()).filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+    const addedNow = (await api().history()).events.filter(event => event.kind === 'added' && !event.undoneBy && changes.some(change => `agent:${change.key}` === event.key) && Date.now() - Date.parse(event.at) < 5 * 60_000);
     const replacedAny = result.results.some(entry => entry.replaced);
     const undo = addedNow.length && !replacedAny;
     let outcome: Outcome = { page: state.page, items: managed.map(nameOf), text: `${plural(managed.length, 'agent')} managed · ${result.writes ? `${plural(result.writes, 'file')} written` : 'nothing needed writing'}. Edits now sync on their own${oneWay.length ? `; ${oneWay.map(server => `${nameOf(server)} only from ${server.oneWay ? toolName(server.oneWay.from) : 'its source'}`).join('; ')}` : ''}.${result.writes && !undo ? ' To take a new copy back out of a tool, turn off that tool’s box and Apply all, then delete it there.' : ''}`,
@@ -712,7 +730,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
     for (const { change, was } of resumed) for (const tool of was!.stopped!) writeFlag(keptEditFlag(state.home?.home ?? '', change.key, tool), false);
     if (resumed.length && resumed.length === changes.length && result.writes) {
       // The edit the resume replaced is one click back: its 'chosen' event restores it, and the copy stops again.
-      const chosen = (await api().history()).filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
+      const chosen = (await api().history()).events.filter(event => event.kind === 'chosen' && !event.undoneBy && resumed.some(({ change }) => event.key === `agent:${change.key}`) && Date.now() - Date.parse(event.at) < 5 * 60_000);
       const back = [...new Set(chosen.flatMap(event => event.losers.map(loser => toolName(loser.tool) ?? loser.tool)))];
       outcome = { page: state.page, items: resumed.map(({ was }) => nameOf(was!)),
         text: resumed.map(({ change, was }) => `${andList(was!.stopped!.map(tool => toolName(tool) ?? tool))} ${was!.stopped!.length === 1 ? 'has' : 'have'} ${toolName(change.use!) ?? change.use}’s copy of ${nameOf(was!)} again and receives its updates`).join('; ') + '. The edited copy is in History.',

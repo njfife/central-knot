@@ -3,6 +3,7 @@ import { icons, type IconName } from './icons.ts';
 type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
 
+
 /** `h('button.btn.ghost', { id: 'x', onclick }, 'Label')`. Keys starting with "on", and value and checked, are set as properties. */
 export function h(spec: string, props: Props = {}, ...children: (Child | Child[])[]): HTMLElement {
   const [tag, ...classes] = spec.split('.');
@@ -26,7 +27,7 @@ export function icon(name: IconName, size = 16, extraClass = ''): SVGElement {
 export const hiddenText = (text: string) => h('span.hidden-text', {}, text);
 
 interface ButtonOptions {
-  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'link';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'link' | 'danger';
   size?: 'micro' | 'small' | 'default';
   icon?: IconName;
   label?: string;
@@ -54,11 +55,6 @@ export function button(options: ButtonOptions): HTMLElement {
   }, options.icon && icon(options.icon, iconSize), label && h('span.btn-label', {}, label));
 }
 
-/** An on/off switch named `label`; a click reports the new state and goes no further (a table row behind it stays closed). */
-export function toggle(on: boolean, label: string, onchange: (on: boolean) => void, disabled = false, id?: string): HTMLElement {
-  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
-    h('span.switch-knob'));
-}
 
 /** Keeps the start and the distinguishing tail: the start ellipsizes, the tail stays. */
 export function middle(text: string, tailLength = 12, extraClass = ''): HTMLElement {
@@ -78,6 +74,12 @@ export const pathText = (text: string, full = text): HTMLElement => {
   return h('span.middle.mono.path-text', { title: full },
     h('span.middle-head', {}, cut > 0 ? text.slice(0, cut) : text), cut > 0 ? h('span.middle-tail', {}, text.slice(cut)) : null);
 };
+
+/** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
+export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
+  return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
+    h('span.switch-knob'));
+}
 
 export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
   return h('label.tick', {},

@@ -649,7 +649,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
   const recordProblem = (await inspectMcpRecord(context.home)).problem;
   if (recordProblem) return { stopped: recordProblem, results: [], writes: 0 };
-  const history = await readHistory(context.home);
+  const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
   const name = past?.key.replace(/^mcp:/, '');

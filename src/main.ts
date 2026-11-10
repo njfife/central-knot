@@ -1,6 +1,6 @@
-import { onlyAllowed } from './values.ts';
+import { onlyAllowed, record } from './values.ts';
 import { execFile } from 'node:child_process';
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
@@ -8,21 +8,24 @@ import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
-import { syncGate, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, eventChange, manageView, readHistory, restoreFromHistory } from './manage.ts';
+import { syncsHere, writeAccess, type ShareContext } from './share.ts';
+import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HomeMode, HomeView, Snapshot, SyncNotice } from './types.ts';
+import { defaultHistoryDays, historyDayChoices } from './model.ts';
+import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
+import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 
 const smoke = process.argv.includes('--smoke-test');
+const logPath = () => join(app.getPath('userData'), 'central-knot.log');
 /** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
 function log(line: string) {
-  try { appendFileSync(join(app.getPath('userData'), 'central-knot.log'), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
+  try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 const BUILD = 'com.centralknot.firstlook';
@@ -73,6 +76,7 @@ function context(): ShareContext {
     settingsPath: join(app.getPath('userData'), 'sharing-settings.json'), realHome: homedir(),
     allowActualWrites: process.platform === 'darwin' && !smoke,
     overrides: Object.fromEntries(harnessIds.map(id => [id, overrideFor(id)])),
+    historyDays: historyDays(),
   };
 }
 
@@ -89,76 +93,134 @@ async function saveSyncSetting(on: boolean) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
   refreshTray();
-  preferencesChanged();
-}
-
-/**
- * Tells the page that a preference changed, wherever it was changed (the app menu, the menu bar menu or the page), so an
- * open Settings page reads them again instead of showing, and then resending, an old value.
- */
-function preferencesChanged() {
-  tell('settings:changed');
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function tell(channel: 'sync:changed' | 'settings:changed' | 'navigate', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
-async function loadAppSettings() { try { appSettings = JSON.parse(await readFile(appSettingsPath(), 'utf8')) ?? {}; } catch { appSettings = {}; } }
-async function saveAppSettings(change: Partial<AppSettings>) {
-  appSettings = { ...appSettings, ...change };
-  if (smoke) return;
-  await mkdir(app.getPath('userData'), { recursive: true });
-  await writeFile(appSettingsPath(), `${JSON.stringify(appSettings, null, 2)}\n`);
+/** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
+async function loadAppSettings() {
+  try {
+    appSettings = record(JSON.parse(await readFile(appSettingsPath(), 'utf8'))) ?? {};
+  } catch { appSettings = {}; }
+}
+/**
+ * Every writer (the Settings page, the menu bar menu, the app menu, the first-close dialog, a home switch) saves through this
+ * one chain, so writes never interleave. Each merges only its own fields into the settings as last saved, and keeps fields
+ * this version doesn't know. It is not the sync queue: a settings change never waits behind sync. The memory copy changes
+ * only once the file is written, so a failed save leaves the last saved value in force; the page hears of every saved change.
+ */
+let settingsWrites: Promise<unknown> = Promise.resolve();
+function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
+  const write = settingsWrites.then(async () => {
+    const next = { ...appSettings, ...change };
+    if (!smoke) {
+      await mkdir(app.getPath('userData'), { recursive: true });
+      await writeFile(appSettingsPath(), `${JSON.stringify(next, null, 2)}\n`);
+    }
+    appSettings = next;
+    // The login item follows the saved choice before anyone hears of it, so what they read back is the system's answer to it.
+    if ('startAtSignIn' in change) applySignIn();
+    refreshTray();
+    send('settings:changed');
+  });
+  settingsWrites = write.catch(() => undefined);
+  return write;
 }
 const appearances: Appearance[] = ['system', 'light', 'dark'];
-/** The settings the Settings page shows: the appearance, and Start at sign-in as the menus show it. */
-const preferences = (): AppPreferences => ({
-  appearance: appSettings.appearance ?? 'system',
-  signIn: { offered: machineNames(process.platform).signIn, available: canStartAtSignIn(), on: startsAtSignIn() },
-});
+/** The settings as the page shows them; a stored value this version doesn't offer counts as the default. */
+const appearance = (): Appearance => appSettings.appearance && appearances.includes(appSettings.appearance) ? appSettings.appearance : 'system';
+const isHistoryDays = (value: unknown): value is HistoryDays => historyDayChoices.includes(value as HistoryDays);
+const historyDays = (): HistoryDays => isHistoryDays(appSettings.historyDays) ? appSettings.historyDays : defaultHistoryDays;
+/**
+ * Counts History window changes asked for: a queued one whose number is no longer the latest was overtaken and does nothing.
+ * The page can't overtake itself (its row takes no other change until main answers); this is the backstop for a second caller.
+ */
+let historyRequests = 0;
+/**
+ * Every window change takes its turn in the queue, in the order asked, so none runs beside a sync pass or another change.
+ * Whether it is shorter (and so prunes) is decided against the saved window when its turn comes, and one a newer request
+ * overtook while it waited does nothing: the newest choice wins and an outdated shorter one never prunes. History reads the
+ * saved window either way, so a prune that fails is logged and reported, never undoes the saved window.
+ */
+async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSaved> {
+  const asked = ++historyRequests;
+  const pruned = await queued(async (): Promise<HistoryPrune | undefined> => {
+    if (asked !== historyRequests) return undefined;
+    const shorter = days < historyDays();
+    await saveAppSettings({ historyDays: days });
+    if (!shorter) return undefined;
+    if (!current) return 'no-home';
+    return pruneHistory(context()).catch(error => { logFailure('history prune', error); return 'failed' as const; });
+  });
+  return { settings: preferences(), pruned };
+}
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
+/**
+ * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
+ * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
+ * back, while opening the folder says why it couldn't. So a selection can only be taken as done; the page says which it got.
+ */
+async function showLog(): Promise<ShownLog> {
+  const logged = await access(logPath()).then(() => true, () => false);
+  if (logged && process.platform !== 'linux') { shell.showItemInFolder(logPath()); return { selected: true, logged }; }
+  const failed = await shell.openPath(app.getPath('userData'));
+  if (failed) throw new Error(failed);
+  return { selected: false, logged };
+}
 /**
  * Applies the appearance setting. Electron's theme source decides `prefers-color-scheme` for the page, so every page's
  * light and dark styles follow it; the window's own background (seen while it draws) follows too.
  */
 function applyAppearance() {
-  nativeTheme.themeSource = preferences().appearance;
+  nativeTheme.themeSource = appearance();
   if (window && !window.isDestroyed()) window.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#000000' : '#fbfbfc');
 }
 /** Shows the window on one of its pages (the Settings… menu item). */
 function showPage(page: string) {
   showWindow();
-  tell('navigate', page);
+  send('navigate', page);
 }
 
-/** A login item is registered only for an installed app, so a test or dev build never adds itself to sign-in. */
-const canStartAtSignIn = () => app.isPackaged && !smoke && (process.platform !== 'darwin' || app.getPath('exe').startsWith('/Applications/'));
-function applySignIn() {
-  if (canStartAtSignIn()) app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: ['--hidden'] });
-}
+const signInFacts = () => ({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke });
+/** Whether Central Knot starts at sign-in, as the system has it now, and why not where it can't (see signin.ts). */
+const signIn = () => signInState(signInFacts(), () => app.getLoginItemSettings({ args: signInArgs }));
 /**
- * On by default (PLT-03): registered at the first launch of an installed app, then left alone. Turning it off in System Settings'
- * Login Items is respected; the menu shows the system's current answer.
+ * Registers or removes the login item as last chosen. Only a save calls it (the first launch's too), never a start: one the
+ * person turned off in the system stays off. A system that refuses (a Windows policy, say) is logged; whoever asked then reads
+ * the system's answer, which says it didn't change.
  */
-async function firstSignIn() {
-  if (!canStartAtSignIn() || appSettings.startAtSignIn !== undefined) return;
-  await saveAppSettings({ startAtSignIn: true });
-  applySignIn();
+function applySignIn() {
+  if (whyNoSignIn(signInFacts())) return;
+  try { app.setLoginItemSettings({ openAtLogin: appSettings.startAtSignIn !== false, args: signInArgs }); } catch (error) { logFailure('start at sign-in', error); }
 }
-const startsAtSignIn = () => canStartAtSignIn() && app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin;
-/** Turns Start at sign-in on or off: the one way the menus, the first-close note and the Settings page change it. */
-async function setStartAtSignIn(on: boolean) {
-  await saveAppSettings({ startAtSignIn: on });
-  applySignIn();
-  refreshTray();
-  preferencesChanged();
+/** On by default (PLT-03): registered at the first launch of an installed app, then left alone. */
+async function firstSignIn() {
+  if (whyNoSignIn(signInFacts()) || appSettings.startAtSignIn !== undefined) return;
+  await saveAppSettings({ startAtSignIn: true });
+}
+/** Every place that turns it on or off (Settings, both menus, the first-close dialog) saves through the settings chain. */
+const setStartAtSignIn = (on: boolean) => saveAppSettings({ startAtSignIn: on });
+/** A menu or the dialog has nowhere to say a save failed: it is logged, and the menus go back to the system's answer. */
+const saveSignInQuietly = (on: boolean) => void setStartAtSignIn(on).catch(error => { logFailure('start at sign-in', error); refreshTray(); });
+/** The checkbox both menus show: the system's answer, the reason beside it, and changeable only where it can be. */
+function signInItem(): MenuItemConstructorOptions {
+  const state = signIn();
+  return { label: signInLabel(state), type: 'checkbox', checked: state.on, enabled: state.available, click: item => saveSignInQuietly(item.checked) };
+}
+/** Where the person finishes or undoes it in the system's own settings: fixed places, never one the page names. */
+function openSignInSettings(): Promise<void> {
+  if (process.platform === 'darwin') return shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension');
+  if (process.platform === 'win32') return shell.openExternal('ms-settings:startupapps');
+  return Promise.reject(new Error('No sign-in settings to open on this system.'));
 }
 const startedHidden = () => process.argv.includes('--hidden') || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
 
@@ -189,8 +251,8 @@ function trayMenu() {
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
-    { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(), visible: machineNames(process.platform).signIn,
-      click: item => void setStartAtSignIn(item.checked) },
+    // Linux has no start at sign-in yet, so its tray never offers one.
+    { ...signInItem(), visible: process.platform !== 'linux' },
     { type: 'separator' },
     { label: syncOn && homeWritable && lastManagedCount > 0 ? 'Quit Central Knot (stops syncing)' : 'Quit Central Knot', click: () => { quitting = true; app.quit(); } },
   ]);
@@ -206,11 +268,9 @@ function refreshTray() {
 const syncOnce = () => fromTray(async () => { keepMcpAndAgents((await pass(await read(), true)).mcpAndAgents); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
-  const next = queue.then(work);
-  queue = next.catch(() => undefined);
-  await next.catch(() => undefined);
+  await queued(work).catch(() => undefined);
   refreshTray();
-  tell('sync:changed');
+  send('sync:changed');
 }
 /**
  * The app menu carries the menu bar's controls too, so they are always reachable: a crowded menu bar (or the notch) can hide the
@@ -228,8 +288,7 @@ function appMenu() {
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
-      { label: canStartAtSignIn() ? 'Start at sign-in' : 'Start at sign-in (move Central Knot to Applications first)', type: 'checkbox', checked: startsAtSignIn(), enabled: canStartAtSignIn(),
-        click: item => void setStartAtSignIn(item.checked) },
+      signInItem(),
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
       { type: 'separator' },
@@ -246,6 +305,8 @@ function makeTray() {
   image.setTemplateImage(true);
   tray = new Tray(image);
   tray.on('click', () => { if (process.platform !== 'darwin') showWindow(); });
+  // Its menu is rebuilt as the pointer reaches the icon, so it shows a change made in System Settings while no window was open.
+  tray.on('mouse-enter', () => tray?.setContextMenu(trayMenu()));
   refreshTray();
 }
 
@@ -263,7 +324,7 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
   const shared: ShareContext = { ...context(), read: async () => snapshots };
-  if (!(await writeAccess(shared)).allowed || (await syncGate(shared)).state !== 'ready') return {};
+  if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
@@ -338,7 +399,7 @@ const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
 async function readFor(readId?: number): Promise<Snapshot[]> {
   if (current && readId === handoff.id && handoff.home === current.home) return handoff.snapshots;
   const snapshots = await read();
-  if (toolsChangedHere(snapshots)) tell('sync:changed');
+  if (toolsChangedHere(snapshots)) send('sync:changed');
   return snapshots;
 }
 
@@ -359,9 +420,7 @@ function toolsChangedHere(snapshots: Snapshot[]): boolean {
   return sameHome;
 }
 
-/** One thing at a time: planning and writing never interleave. */
-let queue: Promise<unknown> = Promise.resolve();
-function queueBackgroundPass() { if (current && !smoke) queue = queue.then(backgroundPass).catch(() => undefined); }
+function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }
 
 async function backgroundPass() {
   if (!current) return;
@@ -390,7 +449,7 @@ async function backgroundPass() {
     // Nobody saw it: the window is closed, gone or behind other windows (D-36).
     if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
   }
-  if (changed || wrote) tell('sync:changed');
+  if (changed || wrote) send('sync:changed');
 }
 
 const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
@@ -461,8 +520,8 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
     stopWatching();
     void startWatching();
+    // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
-    refreshTray();
     return shown;
   } catch (error) { current = previous; throw error; }
 }
@@ -489,23 +548,28 @@ async function startHome(): Promise<HomeView | null> {
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
-function handle(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
-  ipcMain.handle(channel, (event, ...args) => {
-    if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    const next = queue.then(() => work(...args));
-    queue = next.catch(error => { log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`); });
-    return next;
-  });
+/** Keeps a failed request's error for a problem report; the page says what happened in plain words. */
+const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+
+/** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
+let queue: Promise<unknown> = Promise.resolve();
+/** Runs `work` after everything queued before it; its failure reaches the caller but never stalls the queue. */
+function queued<T>(work: () => Promise<T>): Promise<T> {
+  const next = queue.then(work);
+  queue = next.catch(() => undefined);
+  return next;
 }
+/** A page request that takes its turn in the queue. */
+const handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => handleNow(channel, (...args) => queued(() => work(...args)));
 
 /**
- * A request that only reads Central Knot's own copies and writes nothing a tool reads (a README, a plugin's contents):
- * answered at once, outside the queue, so background reads never hold up a change the person asked for.
+ * A request that touches nothing a tool reads (a README, a plugin's contents, Central Knot's own settings, even saving them):
+ * answered at once, outside the queue, so it never waits behind sync and background reads never hold up a change the person asked for.
  */
-function handleRead(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
+function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    return work(...args);
+    return work(...args).catch(error => { logFailure(channel, error); throw error; });
   });
 }
 
@@ -534,13 +598,15 @@ function createWindow(show: boolean) {
       void saveAppSettings({ closeExplained: true });
       const icon = machineNames(process.platform).trayIcon;
       const syncing = syncOn && homeWritable && lastManagedCount > 0;
+      // The checkbox shows the system's answer as the dialog opens; only a change the person makes to it is saved.
+      const signedIn = signIn();
       void dialog.showMessageBox({
         type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
         message: syncing ? 'Central Knot keeps syncing in the background' : 'Central Knot is still running',
         detail: syncing ? `Open it again from its ${icon}, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
-        ...(canStartAtSignIn() ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: startsAtSignIn() } : {}),
+        ...(signedIn.available ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: signedIn.on } : {}),
       }).then(({ response, checkboxChecked }) => {
-        if (canStartAtSignIn() && checkboxChecked !== startsAtSignIn()) void setStartAtSignIn(checkboxChecked);
+        if (signedIn.available && checkboxChecked !== signedIn.on) saveSignInQuietly(checkboxChecked);
         if (response === 1) { quitting = true; app.quit(); }
       });
     }
@@ -548,7 +614,9 @@ function createWindow(show: boolean) {
   window.on('closed', () => log('window closed'));
   window.webContents.on('render-process-gone', (_event, details) => log(`page process gone: ${details.reason}`));
   window.webContents.on('did-finish-load', () => log('page loaded'));
-  window.on('focus', () => { if (unseen) { unseen = false; refreshTray(); } });
+  // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
+  // are rebuilt and the page re-reads, both from this one event.
+  window.on('focus', () => { unseen = false; refreshTray(); send('settings:changed'); });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
 }
@@ -571,18 +639,28 @@ app.whenReady().then(async () => {
   await firstSignIn();
   makeTray();
   createWindow(!smoke && !startedHidden());
-  handle('settings:get', async () => preferences());
-  handle('settings:appearance', async appearance => {
+  // A read waits for settings writes already under way, so the page never sees a value older than one it just saved.
+  handleNow('settings:get', async () => settingsWrites.then(preferences));
+  handleNow('settings:appearance', async appearance => {
     if (!appearances.includes(appearance as Appearance)) throw new Error('Invalid appearance.');
     await saveAppSettings({ appearance: appearance as Appearance });
     applyAppearance();
     return preferences();
   });
-  handle('settings:sign-in', async on => {
-    if (typeof on !== 'boolean' || !canStartAtSignIn()) throw new Error('Start at sign-in can’t be changed here.');
+  handleNow('settings:sign-in', async on => {
+    if (typeof on !== 'boolean') throw new Error('Invalid start at sign-in.');
+    const why = whyNoSignIn(signInFacts());
+    if (why) throw new Error(why.text);
     await setStartAtSignIn(on);
     return preferences();
   });
+  handleNow('settings:open-sign-in', openSignInSettings);
+  // handleNow, not handle: changeHistoryWindow counts the request on arrival, then takes its own turn in the queue.
+  handleNow('settings:history-days', async (days): Promise<HistoryWindowSaved> => {
+    if (!isHistoryDays(days)) throw new Error('Invalid history days.');
+    return changeHistoryWindow(days);
+  });
+  handleNow('settings:show-log', showLog);
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
@@ -596,7 +674,7 @@ app.whenReady().then(async () => {
     typeof change?.key === 'string' && typeof change.managed === 'boolean' && Array.isArray(change.off)
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
-  registerMarketplaces({ handle, handleRead }, {
+  registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
     read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
@@ -604,7 +682,8 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
   });
-  handle('history:list', async () => (current ? readHistory(current.home) : []));
+  // The window is read in the same turn as the events, so History's caption always describes the events it shows.
+  handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.
   // Reveal only: the file manager selects it; nothing is opened, run or written.
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
@@ -619,7 +698,7 @@ app.whenReady().then(async () => {
   handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
-      const key = (await readHistory(current!.home)).find(entry => entry.id === eventId)?.key ?? '';
+      const key = (await readHistory(context())).find(entry => entry.id === eventId)?.key ?? '';
       const tools = await presentNow();
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));

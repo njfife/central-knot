@@ -5,11 +5,12 @@
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeMarket } from './fixture-market.mjs';
+import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -20,24 +21,23 @@ const command = flag('--electron') ? join(root, 'node_modules/electron/dist', re
 const scratch = mkdtempSync(join(tmpdir(), 'ck-tour-'));
 const HOME = join(scratch, 'home');
 mkdirSync(HOME, { recursive: true });
+// On Linux the file manager is a stand-in that opens nothing.
+mkdirSync(join(scratch, 'bin'));
+writeFileSync(join(scratch, 'bin/xdg-open'), '#!/bin/sh\nexit 0\n');
+chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 
 async function launch() {
   const port = 9300 + Math.floor(Math.random() * 400);
-  // A development run also opens the main process's debugger, so a step can slow or fail one request (mainProcess).
-  const inspect = port + 400;
-  const env = { HOME, PATH: '/usr/bin:/bin', TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
+  // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
+  const inspect = flag('--electron') ? port + 1000 : undefined;
   const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
   let target;
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise(done => { socket.onopen = done; });
-  const pending = new Map();
-  let id = 0;
-  socket.onmessage = message => { const data = JSON.parse(message.data); if (pending.has(data.id)) { pending.get(data.id)(data); pending.delete(data.id); } };
-  const send = (method, params = {}) => new Promise(done => { const key = ++id; pending.set(key, done); socket.send(JSON.stringify({ id: key, method, params })); });
-  const run = async expression => { const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (reply.result.exceptionDetails) throw new Error(reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text); return reply.result.result.value; };
+  const page = await connect(target.webSocketDebuggerUrl);
+  const { send, run } = page;
   const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
   const viewport = { width: 1280, height: 800 };
   /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
@@ -52,34 +52,27 @@ async function launch() {
   await settle();
   return {
     run, send, settle, size, viewport, inspect,
+    main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
-    quit: () => { socket.close(); child.kill('SIGKILL'); },
+    quit: () => { page.close(); child.kill('SIGKILL'); },
   };
 }
 
 /**
- * The main process, through its debugger (development runs only): one request from the page can be slowed or made to
- * fail until `restore`, so the tour can show a page reading again, or a read that failed. Null in a packaged run.
+ * One request from the page slowed or made to fail until `restore`, through the main process's debugger (development
+ * runs only, cdp.mjs), so the tour can show a page reading again, or a read that failed. Null in a packaged run.
  */
-async function mainProcess(a) {
-  if (!flag('--electron')) return null;
-  let target;
-  for (let attempt = 0; attempt < 50 && !target; attempt++) { try { [target] = await (await fetch(`http://127.0.0.1:${a.inspect}/json/list`)).json(); } catch { await wait(100); } }
-  if (!target) return null;
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise(done => { socket.onopen = done; });
-  const pending = new Map();
-  let id = 0;
-  socket.onmessage = message => { const data = JSON.parse(message.data); pending.get(data.id)?.(data); pending.delete(data.id); };
-  const run = expression => new Promise(done => { const key = ++id; pending.set(key, reply => done(reply.result?.result?.value)); socket.send(JSON.stringify({ id: key, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } })); });
-  const handlers = `process.mainModule.require('electron').ipcMain._invokeHandlers`;
+async function requestHandles(a) {
+  if (!a.main) return null;
+  const main = await a.main();
+  const handlers = 'electron.ipcMain._invokeHandlers';
   return {
-    slow: (channel, ms) => run(`(() => { const real = ${handlers}.get(${JSON.stringify(channel)}); globalThis.ckAside = real; ${handlers}.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${ms})).then(() => real(...args))); return true; })()`),
-    fail: channel => run(`(() => { globalThis.ckAside = ${handlers}.get(${JSON.stringify(channel)}); ${handlers}.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the tour.'); }); return true; })()`),
-    restore: channel => run(`(() => { ${handlers}.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
-    close: () => socket.close(),
+    slow: (channel, ms) => main.run(`(() => { const real = ${handlers}.get(${JSON.stringify(channel)}); globalThis.ckAside = real; ${handlers}.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${ms})).then(() => real(...args))); return true; })()`),
+    fail: channel => main.run(`(() => { globalThis.ckAside = ${handlers}.get(${JSON.stringify(channel)}); ${handlers}.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the tour.'); }); return true; })()`),
+    restore: channel => main.run(`(() => { ${handlers}.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close: main.close,
   };
 }
 
@@ -87,11 +80,11 @@ let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
 const wanted = name => !only || only.includes(name);
-/** Takes a screenshot. The pointer moves to the corner first, so no hover shows, unless `hover` keeps it where it is. */
-async function shot(a, name, caption, { hover = false } = {}) {
+/** Takes a screenshot. `pointer`: where the mouse rests for it (to show a hover); by default out of the way, in the corner. */
+async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2 }) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
-  if (!hover) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: a.viewport.height - 2 });
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
   await wait(120);
   const reply = await a.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(out, feature, `${base}.png`), Buffer.from(reply.result.data, 'base64'));
@@ -329,9 +322,10 @@ async function everyPage(tag) {
   await a.click('#nav-history');
   // The pointer over the second row, so its full-width hover shows.
   const hovered = await a.run(`(() => { const row = document.querySelectorAll('.history-row')[1]?.getBoundingClientRect(); return row ? [row.left + row.width / 2, row.top + row.height / 2] : null; })()`);
-  if (hovered) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hovered[0], y: hovered[1] });
+  const pointer = hovered ? { x: hovered[0], y: hovered[1] } : undefined;
+  if (pointer) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
   const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
-  await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, { hover: true });
+  await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
   await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
@@ -391,7 +385,7 @@ if (wanted('sizes')) {
   for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
   await a.theme('dark');
   // Reading again, and a read again that failed: a page keeps what it showed, and says so in a quiet band.
-  const main = await mainProcess(a);
+  const main = await requestHandles(a);
   if (main) {
     await a.size(1728, 1117);
     await ensureMarket();
@@ -489,6 +483,150 @@ if (wanted('missing')) {
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
   await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
   await a.size(1280, 800);
+}
+
+// ---------- Settings ----------
+if (wanted('settings')) {
+  begin('settings');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await a.click('#nav-settings');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.theme('dark'); await shot(a, `settings-${width}-dark`, `Settings at ${width}×${height}, dark. Start at sign-in is off and disabled in this dev build, its reason in the hint’s place.`);
+    await a.theme('light'); await shot(a, `settings-${width}-light`, `Settings at ${width}×${height}, light.`);
+  }
+  await size(860, 560); await a.theme('dark');
+  // Keyboard: the chosen card is the group's one Tab stop; the right arrow moves to Light and chooses it, with the focus ring.
+  await a.run(`document.querySelector('#appearance-system').focus()`);
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle(); await shot(a, 'settings-keyboard', 'Focused the System card (the group\'s Tab stop) and pressed the right arrow: Light is chosen, and the focus ring moved with it.');
+  for (const type of ['keyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 });
+  await a.settle();
+  // A save that fails: the settings file is made read-only, then Light is clicked.
+  const file = join(scratch, 'data/app-settings.json');
+  chmodSync(file, 0o444);
+  await a.click('#appearance-light'); await shot(a, 'settings-save-failed-dark', 'Pressed the right arrow again (Dark), then made the settings file read-only and clicked Light: the row says in plain words what happened and what to do, and Dark stays chosen.');
+  await a.theme('light'); await shot(a, 'settings-save-failed-light', 'The same, light (the system appearance is light; the app is still set to Dark).');
+  chmodSync(file, 0o644);
+  // The tour's clicks don't move focus as a real click would: let the keyboard focus go so no card keeps its ring.
+  await a.run(`document.activeElement?.blur()`);
+  await a.click('#appearance-system');
+  await a.theme('dark'); await a.click('#show-log');
+  await shot(a, 'settings-show-log', 'Clicked "Show log file". On Linux the app opens the log\'s folder (here a stand-in file manager) and the row says which file to look for. macOS and Windows select the file instead and add no line.');
+  await a.theme('light'); await shot(a, 'settings-show-log-light', 'The same, light.'); await a.theme('dark');
+  // Keep history for. History is given changes 3, 12 and 25 days old; shortening to 7 days asks first, then History keeps only the newest.
+  // Nothing is managed yet, so this home has no sync record: a shorter window is saved, and its History is cut the next time it records a change.
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-saved-for-later', 'Shortened to 7 days in a home that doesn’t sync yet (nothing managed): the window is saved, and the row says (with the neutral info glyph) that older History goes the next time this home records a change, not that it was removed. The Show log file note from the step before is gone: one finished note at a time.');
+  await keepFor(a, 30);
+  // From here the home syncs (everything managed, as in the sync tour), so shortening removes older History at once.
+  await a.click('#nav-skills');
+  if (!(await a.run(`!!document.querySelector('.ov-row[data-key="standup"] .switch[aria-checked="true"]')`))) { await a.click('#manage-all'); await a.click('#apply'); }
+  await a.click('#nav-settings');
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/history.json'), JSON.stringify({ events: [
+    { id: 'tour-25', at: new Date(Date.now() - 25 * DAY).toISOString(), key: 'standup', item: 'standup', kind: 'deleted', winner: { tool: 'copilot-cli', hash: 'a'.repeat(64) }, losers: [], orderProved: true, previous: 'a'.repeat(64) },
+    { id: 'tour-12', at: new Date(Date.now() - 12 * DAY).toISOString(), key: 'review', item: 'review', kind: 'chosen', winner: { tool: 'copilot-cli', hash: 'b'.repeat(64) }, losers: [{ tool: 'claude-cli', hash: 'c'.repeat(64) }], orderProved: true },
+    { id: 'tour-3', at: new Date(Date.now() - 3 * DAY).toISOString(), key: 'release-notes', item: 'release-notes', kind: 'edit', winner: { tool: 'claude-cli', hash: 'd'.repeat(64) }, losers: [{ tool: 'copilot-cli', hash: 'e'.repeat(64) }], orderProved: true, previous: 'e'.repeat(64) },
+  ] }));
+  await a.click('#nav-history'); await shot(a, 'history-before-shorten', 'History before the window changes: kept for 30 days (the default), it lists changes from 3, 12 and 25 days ago.');
+  await a.click('#nav-settings');
+  await a.run(`document.querySelector('#history-days').focus()`);
+  await shot(a, 'settings-history-select', 'The Keep history for select, focused (7, 30 or 90 days; 30 by default). Its menu is the system’s own, which a screenshot can’t catch.');
+  await keepFor(a, 7);
+  await shot(a, 'settings-history-confirm-dark', 'Chose 7 days: a shorter window removes History, so the row asks first, naming the local date and time it will cut from. The select still shows the saved 30 days.');
+  await a.theme('light'); await shot(a, 'settings-history-confirm-light', 'The same, light.'); await a.theme('dark');
+  // Keyboard focus on each of the question's buttons, both themes: the danger button's ring sits outside its red fill.
+  for (const [id, name] of [['history-shorten', 'shorten'], ['history-shorten-cancel', 'keep']]) {
+    await a.run(`document.querySelector('#${id}').focus()`);
+    await shot(a, `settings-history-focus-${name}-dark`, `Keyboard focus on "${name === 'shorten' ? 'Shorten to 7 days' : 'Keep 30 days'}", dark.`);
+    await a.theme('light'); await shot(a, `settings-history-focus-${name}-light`, 'The same, light, on the pale danger notice.'); await a.theme('dark');
+  }
+  await a.run(`document.activeElement?.blur()`);
+  await size(1728, 1117); await shot(a, 'settings-history-confirm-1728', 'The same at 1728×1117: the question is as wide as its words and buttons, not a band across the row.');
+  await size(2560, 1440); await shot(a, 'settings-history-confirm-2560', 'The same at 2560×1440: still only as wide as its content.'); await size(860, 560);
+  await a.click('#history-shorten-cancel'); await shot(a, 'settings-history-cancelled', 'Clicked "Keep 30 days" (Cancel): the question goes, nothing is saved (still 30 days), and the focus is back on the select.');
+  await keepFor(a, 7);
+  // Main carries out the change in its turn, after any sync pass: held here so the row's waiting state can be seen.
+  const main = a.main && await a.main();
+  const held = main && await holdQueue(main, a);
+  await a.click('#history-shorten');
+  if (held) {
+    await shot(a, 'settings-history-updating', 'Clicked "Shorten to 7 days" while main is busy (held, as a long sync pass would): the row says History is updating, and its select takes no other change until main is done.');
+    await held.release(); main.close();
+  }
+  await wait(300); await a.settle();
+  await shot(a, 'settings-history-shortened', 'Shortened to 7 days: saved, the select shows it, and the row says (with a check) from when History was removed.');
+  await a.theme('light'); await shot(a, 'settings-history-shortened-light', 'The same, light.'); await a.theme('dark');
+  await a.click('#nav-history'); await shot(a, 'history-after-shorten', 'History after shortening to 7 days: only the change from 3 days ago is left, and the intro says how long History keeps changes.');
+  await a.click('#nav-settings'); await keepFor(a, 30);
+  // A shorten whose removal fails (the home's History folder made read-only): the window is saved anyway, and the row says what didn't happen.
+  const store = join(practice, '.central-knot');
+  chmodSync(store, 0o555);
+  await keepFor(a, 7); await a.click('#history-shorten'); await wait(300); await a.settle();
+  await shot(a, 'settings-history-prune-failed', 'Shortened to 7 days with the home’s History folder read-only: the window is saved (the select shows 7). The row says in red that the older History couldn’t be removed; what happens next and where to look follow in the hint colour.');
+  await a.theme('light'); await shot(a, 'settings-history-prune-failed-light', 'The same, light.'); await a.theme('dark');
+  chmodSync(store, 0o755);
+  await keepFor(a, 30); await a.run(`document.activeElement?.blur()`);
+  // A wide row's hover: pointing at the hint lights the whole row, out to its button.
+  await size(1728, 1117);
+  const hint = await a.run(`(() => { const box = document.querySelector('#setting-log-hint').getBoundingClientRect(); return { x: Math.round(box.left + 20), y: Math.round(box.top + box.height / 2) }; })()`);
+  await shot(a, 'settings-row-hover-1728', 'At 1728×1117, the pointer on the Log file hint: the whole row lights up, tying the text to its button far to the right.', hint);
+  await size(860, 560);
+  // The narrowest row: no real window reaches it (the window is at least 860 wide and has no zoom), so this emulates a
+  // 573-px-wide page (860 at 150% zoom) with the sidebar open, to show the control moving under its text.
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 573, height: 373, deviceScaleFactor: 3, mobile: false }); await a.settle();
+  const railed = await a.has('.rail');
+  if (railed) await a.click('#sidebar-toggle');
+  await shot(a, 'settings-narrow-stacked', 'Emulated: a 573×373 page (860×560 at 150% zoom, which the app does not offer) with the sidebar open, so each row is under 512px: the controls sit under their text, left-aligned.');
+  await keepFor(a, 7); await a.run(`document.querySelector('#setting-history').scrollIntoView({ block: 'start' })`);
+  await shot(a, 'settings-narrow-question', 'The same stacked layout with the shorten question open: its buttons wrap under the words and start at the left, like the select above them.');
+  await a.click('#history-shorten-cancel'); await a.run(`document.activeElement?.blur()`);
+  if (railed) await a.click('#sidebar-toggle');
+  await size(860, 560);
+  // Start at sign-in as an installed app on macOS or Windows would show it. This Linux dev run can't register a login item,
+  // so main stands in as an installed app with the system's login-item answer (see standIn), and the window is refocused so the
+  // page reads it again, as it does when someone comes back from System Settings.
+  if (a.main && process.platform === 'linux') {
+    // Opened afresh, so the earlier rows' notes are gone.
+    await a.click('#nav-skills'); await a.click('#nav-settings');
+    const main = await a.main();
+    await standIn(main, 'win32');
+    const system = async (platform, login) => { await main.run(`(ck.as(${JSON.stringify(platform)}), ck.login = ${JSON.stringify(login)})`); await refocus(main); await a.settle(); };
+    const both = async (name, caption) => { await shot(a, `${name}-dark`, caption); await a.theme('light'); await shot(a, `${name}-light`, 'The same, light.'); await a.theme('dark'); };
+    const press = async (key, code, keyCode, modifiers = 0) => { for (const type of ['rawKeyDown', 'keyUp']) await a.send('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode: keyCode, modifiers }); await a.settle(); };
+    await system('win32', { on: true, enabled: true });
+    await shot(a, 'settings-sign-in-on', 'Stand-in system: an installed app on Windows, starting at sign-in. The switch is on and the hint says what it does.');
+    // Keyboard focus: from the Appearance cards, Shift+Tab goes back to the switch.
+    await a.run(`document.querySelector('#appearance-system').focus()`);
+    await press('Tab', 'Tab', 9, 8);
+    await both('settings-sign-in-focused', `Focused the Appearance cards and pressed Shift+Tab: the switch has the focus ring, outside its track (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.run(`document.activeElement?.blur()`);
+    await system('win32', { on: true, enabled: false });
+    await both('settings-sign-in-turned-off', 'Stand-in system: Windows, turned off in Startup apps (perhaps on purpose). Off; the hint still says what it does, and beneath it a calm grey line says where it was turned off, with Open Startup apps right after the text.');
+    // Keyboard focus on the line's action: Tab from the switch goes to it.
+    await a.run(`document.querySelector('#start-at-sign-in').focus()`);
+    await press('Tab', 'Tab', 9);
+    await a.theme('light');
+    await shot(a, 'settings-sign-in-action-focused-light', `Light. Focused the switch and pressed Tab: Open Startup apps has the focus ring (${await a.run(`document.activeElement.id + (document.activeElement.matches(':focus-visible') ? ', focus-visible' : '')`)}).`);
+    await a.theme('dark');
+    await a.run(`document.activeElement?.blur()`);
+    await system('win32', { on: false, enabled: true, ignore: true });
+    await a.click('#start-at-sign-in');
+    await both('settings-sign-in-unchanged', 'Stand-in system: Windows, which ignores the change. Clicked the switch: it stays Off, and the row says in amber that the system didn’t change it, with Open Startup apps.');
+    // macOS: the hint names the menu bar once the page knows it runs on a Mac, so it is reloaded as one (main names the Login Items).
+    const agent = await a.run('navigator.userAgent');
+    const reloadAs = async userAgent => { await a.send('Emulation.setUserAgentOverride', { userAgent }); await a.send('Page.reload'); await wait(1500); await a.settle(); await a.click('#nav-settings'); };
+    await system('darwin', { on: true, status: 'requires-approval' });
+    await reloadAs(agent.replace(/\(X11;[^)]*\)/, '(Macintosh; Intel Mac OS X 10_15_7)'));
+    await both('settings-sign-in-approval', 'Stand-in system: an installed app on macOS whose login item is off in Login Items (waiting for approval, or turned off there on purpose: macOS reports both alike). The switch shows Off, the system’s answer; the hint stays, and beneath it a calm grey line, true either way, with Open Login Items. (With main standing in as an installed app, the sidebar leaves out the Practice copy, as a released app does.)');
+    // Back to this Linux dev run: the row is off and disabled again, with its reason.
+    await main.run(`ck.restore()`);
+    await reloadAs(agent);
+    main.close();
+  }
+  await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
+  await size(1280, 800);
 }
 
 a.quit();
