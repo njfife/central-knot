@@ -1045,7 +1045,7 @@ export const applyMcpChanges = (changes: Change[], onDone: () => void) => busy('
 
 export const applyAgentsChanges = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   // Read before applying: a copy that had stopped and is now replaced is said as resumed, not as newly managed.
-  const before = state.home?.agents?.servers ?? [];
+  const before = state.home?.agents.servers ?? [];
   const result = await api().applyAgents(changes, state.home!.manage.gate.state === 'needs-resume', state.home!.home);
   const view = await api().refresh();
   setHome(view);
@@ -1053,7 +1053,7 @@ export const applyAgentsChanges = (changes: Change[], onDone: () => void) => bus
   if (!result.stopped) { onDone(); retireTip('agents'); }
   if (!result.stopped) {
     // One-way agents are said apart: an edit spreads from their source only.
-    const managed = changes.filter(change => change.managed).map(change => state.home?.agents?.servers.find(server => server.key === change.key)).filter(server => !!server);
+    const managed = changes.filter(change => change.managed).map(change => state.home?.agents.servers.find(server => server.key === change.key)).filter(server => !!server);
     const oneWay = managed.filter(server => Object.keys(server.limits ?? {}).length);
     const nameOf = (server: { name?: string; key: string }) => server.name ?? server.key;
     // New agent files are in History as 'added': one Undo removes them again (while unchanged) and unmanages those agents.
