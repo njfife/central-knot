@@ -519,7 +519,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'switched' || past?.kind === 'removed') {
     // Every tool's result is said, including one that was already as wanted ("has it back already") or still waits.
     const text = past.kind === 'removed'
-      ? [where.length ? `${past.item} is back in ${andList(where)}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message), stillDisabled(past.key, restored)].filter(Boolean).join(' ')
+      ? [where.length ? `${past.item} is back in ${andList(where.map(tool => toolName(tool)))}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message), stillDisabled(past.key, restored)].filter(Boolean).join(' ')
       : result.results.map(entry => `${past.item}: ${entry.message}`).join(' ');
     // "Undo again" only for a switch Undo that recorded what it flipped.
     const again = past.kind === 'switched' && undoneBy && state.history.data?.some(event => event.id === undoneBy) ? { id: undoneBy, label: 'Undo again' } : undefined;

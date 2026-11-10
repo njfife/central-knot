@@ -424,6 +424,7 @@ async function practiceFlow() {
   await a.run(`document.querySelector('.history-row[data-kind="removed"] button').click()`);
   await a.settle();
   same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
+  check('and names the tool as people know it', (await a.run(`document.querySelector('#announcement').dataset.text`) ?? '').startsWith('notes is back in Codex.'), await a.run(`document.querySelector('#announcement').dataset.text`));
   await a.click('#nav-skills');
 
   // Profiles: a profile with only notes in it turns every other skill and MCP server off with each tool's own switch, in one
