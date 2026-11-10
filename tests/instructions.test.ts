@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { discover } from '../src/discovery.ts';
@@ -61,5 +61,15 @@ test('Saving a missing file creates it; saving the same text writes nothing', as
     const [file] = (await instructionsView(box.context, await box.snapshots())).filter(entry => entry.tool === 'copilot-cli');
     assert.equal((await saveInstruction(box.context, await box.snapshots(), 'copilot-cli', 'Hello.\n', file.hash)).saved, false);
     assert.equal(file.versions.length, 0, 'creating a file keeps no empty version');
+  } finally { await box.cleanup(); }
+});
+
+test('A save for a tool that left the home writes nothing and never recreates its folder', async () => {
+  const box = await sandbox();
+  try {
+    const [file] = (await instructionsView(box.context, await box.snapshots())).filter(entry => entry.tool === 'copilot-cli');
+    await rm(join(box.home, '.copilot'), { recursive: true, force: true });
+    assert.equal((await saveInstruction(box.context, await box.snapshots(), 'copilot-cli', 'Hello.\n', file.hash)).stopped, 'That tool is not in this home.');
+    assert.equal(await lstat(join(box.home, '.copilot')).then(() => true, () => false), false);
   } finally { await box.cleanup(); }
 });

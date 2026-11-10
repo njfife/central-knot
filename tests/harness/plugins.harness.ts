@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promis
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { install, installState, parseCatalog, readCatalog, uninstall, type PluginContext } from '../../src/plugins.ts';
+import type { PluginTool } from '../../src/presence.ts';
 import type { HarnessId } from '../../src/types.ts';
 
 const which = (name: string) => { try { return execFileSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim() || undefined; } catch { return undefined; } };
@@ -20,7 +21,7 @@ async function marker(root: string) {
   for (const args of [['init', '-q'], ['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'v1']]) execFileSync('git', args, { cwd: root, stdio: 'ignore' });
 }
 
-for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[]) {
+for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
   test(`${tool}: install from a Git marketplace, confirmed by its record, then uninstall`, { skip: binaries[tool] ? false : `${tool} not on PATH` }, async () => {
     const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-harness-')));
     const server = spawn(process.execPath, [join(import.meta.dirname, '../../scripts/git-http-fixture.mjs'), join(base, 'served'), '0']);

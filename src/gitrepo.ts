@@ -21,9 +21,10 @@ import { dirname, join } from 'node:path';
 import { agentHash, agentText, agentTools, agentsView, applyAgents, fileFor, fromMarkdown, keepAgentVersion, keyOf, readAgentRecord, readAgents, safeName, type AgentEntry, type NeutralAgent } from './agents.ts';
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
-import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, presentTools, readHistory, replaceCopy, replaceHistory } from './manage.ts';
+import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
 import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpTools, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
-import { NO_REPO_THERE, gitEnv, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
+import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
+import { presentTools } from './presence.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
 
@@ -393,7 +394,7 @@ async function writeAgents(context: ShareContext, dir: string, tools: HarnessId[
   await clearLayout(dir, 'agents', entry => entry.isFile() && entry.name.endsWith('.md'));
   const view = await agentsView(context, tools);
   const entries: AgentEntry[] = [];
-  for (const tool of view.tools) entries.push(...(await readAgents(context, tool)).entries);
+  for (const tool of agentTools.filter(tool => view.tools.includes(tool))) entries.push(...(await readAgents(context, tool)).entries);
   const { sources, ...written } = standingEntries('agent', view.servers, entries, entry => entry.key, agentKey);
   const pathOf = (entry: AgentEntry) => `agents/${toFile(entry.name)}.md`;
   const translated = sources.filter(entry => entry.tool !== 'claude-cli');
@@ -609,9 +610,9 @@ async function check(context: ShareContext, timeoutMs?: number): Promise<string 
   const found = await openClone(context);
   if (!found || !(await writeAccess(context)).allowed) return undefined;
   const fetched = await git(found.dir, ['fetch', '--quiet', '--prune', 'origin'], timeoutMs);
-  const why = fetched.code === 0 ? undefined : whyGitFailed(fetched.code, fetched.output, 'repo');
-  // The address is only changed by connecting again, so that step is said where the address is the cause.
-  const problem = why === NO_REPO_THERE ? `${why} To use another address, Disconnect and connect again.` : why;
+  const failure = fetched.code === 0 ? undefined : gitFailure(fetched.code, fetched.output, 'repo');
+  // The address is only changed by connecting again, so that step is said where the address may be the cause.
+  const problem = failure && (failure.state === 'no-access' || failure.state === 'sign-in') ? `${failure.message} To use another address, Disconnect and connect again.` : failure?.message;
   await saveState(context.home, { ...found.state, checkedAt: new Date().toISOString(), problem });
   return problem;
 }
@@ -845,7 +846,7 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
   const gate = await syncGate(context);
   const gated = gateRefusal(gate);
   if (gated) return stop(gated);
-  const history = await readHistory(context.home);
+  const history = await readHistory(context);
   const past = history.find(event => event.id === eventId);
   if (!past?.settingsFile) return stop('That change can’t be restored.');
   if (past.undoneBy) return stop('That change was already undone.');
@@ -881,7 +882,7 @@ async function pullBase(dir: string, change: RepoChange, item: SideItem | undefi
  * caller placed this first copy" would let sync record it itself.)
  */
 async function tellHistory(context: ShareContext, made: Set<string>, firstWrites: FirstWrite[]) {
-  const history = (await readHistory(context.home)).map(event => (made.has(event.id) ? { ...event, via: 'repo' as const } : event));
+  const history = (await readHistory(context)).map(event => (made.has(event.id) ? { ...event, via: 'repo' as const } : event));
   for (const write of firstWrites) {
     const mine = history.filter(event => made.has(event.id) && event.key === write.change.key);
     if (write.before === undefined) await accountForNewItem(context, history, mine, write);
@@ -987,7 +988,7 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
       for (const change of todo) {
         const item = sides.latest.get(change.key);
         const wrote: Wrote = write => firstWrites.push({ change, ...write });
-        const before = new Set((await readHistory(context.home)).map(event => event.id));
+        const before = new Set((await readHistory(context)).map(event => event.id));
         let outcome: DestinationResult[];
         try {
           // A deletion that waits for Automatic sync (classify says which) leaves every copy, and the row says why.
@@ -998,7 +999,7 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
             : await pullBase(dir, change, item, options.base);
         } catch (error) { outcome = [notIn(change.name, `It could not finish. ${plainError(error)}`)]; }
         // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
-        for (const event of await readHistory(context.home)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
+        for (const event of await readHistory(context)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
         // Claude Code's MCP settings are written only by Write to Claude Code (MCP-02): that wait is said apart, not as a failure.
         if (change.kind === 'mcp' && outcome.some(result => result.harness === 'claude-cli' && result.outcome === 'held')) {
           waitsForClaude.push(change.name);

@@ -92,7 +92,7 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
     view = live(pulled.view);
     assert.deepEqual([view.incoming, view.outgoing, view.base?.id], [[], [], view.latest?.id]);
     // Undo add after a Pull takes back every copy Pull made, whatever the kind.
-    const addedBy = (key: string) => readHistory(second.home).then(events => events.find(event => event.key === key && event.kind === 'added')!);
+    const addedBy = (key: string) => readHistory(second).then(events => events.find(event => event.key === key && event.kind === 'added')!);
     const review = await addedBy('review');
     assert.deepEqual([review.via, review.losers.map(loser => loser.tool).sort()], ['repo', tools]);
     assert.equal((await restoreFromHistory(second, review.id)).stopped, undefined);
@@ -127,15 +127,15 @@ test('An MCP server’s edit and an agent setting only Claude Code has arrive th
     await pullRepo(second);
     assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);
     assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
-    const settings = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
+    const settings = (await readHistory(second)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
     await applyAgents(second, tools, []);
     assert.equal((await undoSettingsChange(second, settings.id)).stopped, undefined, 'Undo still works after a sync pass');
     assert.match(await readFile(secondPlanner, 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
-    const redo = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
+    const redo = (await readHistory(second)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
     assert.equal((await undoSettingsChange(second, redo.id)).stopped, undefined, 'and Redo puts the pulled one back');
     assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
     // An edit made since is never undone away.
-    const redone = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
+    const redone = (await readHistory(second)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
     await writeFile(secondPlanner, `${await readFile(secondPlanner, 'utf8')}Also check the tests.\n`);
     assert.match((await undoSettingsChange(second, redone.id)).stopped ?? '', /edited since/);
   } finally { await box.cleanup(); }
@@ -190,7 +190,7 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
     const view = live((await pullRepo(second, { syncOn: true })).view);
     assert.deepEqual([view.incoming, view.outgoing], [[], []]);
     assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).servers.length], [0, 0]);
-    const deleted = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
+    const deleted = (await readHistory(second)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
     assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
     assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
   } finally { await box.cleanup(); }
@@ -234,7 +234,7 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
     commit('edit');
     await pullRepo(first);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /After/);
-    const pulled = (await readHistory(first.home)).find(event => event.key === 'solo' && event.via === 'repo')!;
+    const pulled = (await readHistory(first)).find(event => event.key === 'solo' && event.via === 'repo')!;
     assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /Before/);
     // A SKILL.md that stops parsing hides the skill from every tool's listing: that is never offered as a removal.
@@ -297,7 +297,7 @@ test('A skill of the repo’s name that this computer never Managed: the row say
     assert.deepEqual(view.incoming.map(row => [row.name, row.change, row.alsoHere]), [['review', 'added', 'unmanaged']]);
     await pullRepo(second);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(second.home, root, 'review/SKILL.md'), 'utf8'), /Shared/);
-    const replaced = (await readHistory(second.home)).find(event => event.key === 'review' && event.kind === 'edit' && event.via === 'repo')!;
+    const replaced = (await readHistory(second)).find(event => event.key === 'review' && event.kind === 'edit' && event.via === 'repo')!;
     assert.equal((await restoreFromHistory(second, replaced.id)).stopped, undefined, 'the replaced copy is still in the store');
     assert.match(await readFile(join(second.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Mine/);
   } finally { await box.cleanup(); }
@@ -329,7 +329,7 @@ test('Edits cross both ways; when both sides changed, the repo’s edit wins on 
 
     assert.equal((await pullRepo(first, { syncOn: false })).stopped, undefined);
     for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(first.home, root, 'review/SKILL.md'), 'utf8'), /From the second computer/);
-    const pulls = (await readHistory(first.home)).filter(event => event.via === 'repo' && event.key === 'review' && Date.parse(event.at) > Date.now() - 60_000);
+    const pulls = (await readHistory(first)).filter(event => event.via === 'repo' && event.key === 'review' && Date.parse(event.at) > Date.now() - 60_000);
     assert.equal(pulls.length, 1, 'one pull, one History row');
     const pulled = pulls[0];
     assert.equal((await restoreFromHistory(first, pulled.id)).stopped, undefined);
@@ -366,7 +366,7 @@ test('A deletion in the repo deletes the skill here, with Restore; an edit here 
     await pullRepo(first);
     const skills = (await manageView(first)).skills;
     assert.deepEqual(skills.map(item => item.key), ['edited']);
-    const deleted = (await readHistory(first.home)).find(event => event.key === 'gone' && event.kind === 'deleted')!;
+    const deleted = (await readHistory(first)).find(event => event.key === 'gone' && event.kind === 'deleted')!;
     assert.equal(deleted.via, 'repo');
     assert.equal((await restoreFromHistory(first, deleted.id)).stopped, undefined);
     assert.ok((await manageView(first)).skills.some(item => item.key === 'gone'));

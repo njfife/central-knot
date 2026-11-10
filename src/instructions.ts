@@ -5,39 +5,47 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
+import { isPresent } from './presence.ts';
 import { storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 const readText = (path: string) => readFile(path, 'utf8').then(text => text, () => undefined);
+/** Every file a save can write in a tool's folder. */
+export const instructionFiles: Record<HarnessId, string[]> = {
+  'claude-cli': ['CLAUDE.md'], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md'],
+};
 const versionsFolder = (home: string, tool: HarnessId) => join(storeDirectory(home), 'instructions', tool);
 
 /** The file a tool actually reads, with what the editor must say about it (capability data §6). */
 async function bind(tool: HarnessId, root: string): Promise<{ path: string; readers: string; notes: string[] }> {
-  if (tool === 'claude-cli') {
-    return { path: join(root, 'CLAUDE.md'), readers: 'Claude Code reads this in every session, in the CLI and the Code tab.', notes: [] };
+  switch (tool) {
+    case 'claude-cli':
+      return { path: join(root, 'CLAUDE.md'), readers: 'Claude Code reads this in every session, in the CLI and the Code tab.', notes: [] };
+    case 'codex-cli': {
+      // A non-empty AGENTS.override.md wins over AGENTS.md: the editor binds the file Codex really reads.
+      const override = join(root, 'AGENTS.override.md');
+      const text = await readText(override);
+      if (text && text.trim()) return { path: override, readers: 'Codex reads this in every session, in the CLI and in ChatGPT desktop’s Codex, which share this folder.', notes: ['AGENTS.override.md is not empty, so Codex reads it instead of AGENTS.md. This edits the override.'] };
+      return { path: join(root, 'AGENTS.md'), readers: 'Codex reads this in every session, in the CLI and in ChatGPT desktop’s Codex, which share this folder.', notes: [] };
+    }
+    case 'pi-cli': {
+      // Pi documents AGENTS.override.md (untested): bound when present. A new AGENTS.md beside CLAUDE.md shadows it (tested).
+      const override = join(root, 'AGENTS.override.md');
+      const text = await readText(override);
+      const notes: string[] = [];
+      if (text && text.trim()) notes.push('AGENTS.override.md is not empty, so it is the file bound here (documented for Pi, not yet tested).');
+      if (await readText(join(root, 'CLAUDE.md')) !== undefined && await readText(join(root, 'AGENTS.md')) === undefined) notes.push('This folder has a CLAUDE.md. Creating AGENTS.md here makes Pi read AGENTS.md instead of it.');
+      notes.push('SYSTEM.md and APPEND_SYSTEM.md, if present, replace or extend Pi’s built-in prompt; they are not shown or changed here.');
+      return { path: text && text.trim() ? override : join(root, 'AGENTS.md'), readers: 'Pi reads this in every session.', notes };
+    }
+    case 'copilot-cli': {
+      const notes: string[] = [];
+      try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
+      notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
+      return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
+    }
   }
-  if (tool === 'codex-cli') {
-    // A non-empty AGENTS.override.md wins over AGENTS.md: the editor binds the file Codex really reads.
-    const override = join(root, 'AGENTS.override.md');
-    const text = await readText(override);
-    if (text && text.trim()) return { path: override, readers: 'Codex reads this in every session, in the CLI and in ChatGPT desktop’s Codex, which share this folder.', notes: ['AGENTS.override.md is not empty, so Codex reads it instead of AGENTS.md. This edits the override.'] };
-    return { path: join(root, 'AGENTS.md'), readers: 'Codex reads this in every session, in the CLI and in ChatGPT desktop’s Codex, which share this folder.', notes: [] };
-  }
-  if (tool === 'pi-cli') {
-    // Pi documents AGENTS.override.md (untested): bound when present. A new AGENTS.md beside CLAUDE.md shadows it (tested).
-    const override = join(root, 'AGENTS.override.md');
-    const text = await readText(override);
-    const notes: string[] = [];
-    if (text && text.trim()) notes.push('AGENTS.override.md is not empty, so it is the file bound here (documented for Pi, not yet tested).');
-    if (await readText(join(root, 'CLAUDE.md')) !== undefined && await readText(join(root, 'AGENTS.md')) === undefined) notes.push('This folder has a CLAUDE.md. Creating AGENTS.md here makes Pi read AGENTS.md instead of it.');
-    notes.push('SYSTEM.md and APPEND_SYSTEM.md, if present, replace or extend Pi’s built-in prompt; they are not shown or changed here.');
-    return { path: text && text.trim() ? override : join(root, 'AGENTS.md'), readers: 'Pi reads this in every session.', notes };
-  }
-  const notes: string[] = [];
-  try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }
-  notes.push('The Copilot app may not read it; that isn’t confirmed yet.');
-  return { path: join(root, 'copilot-instructions.md'), readers: 'Copilot CLI reads this in every session.', notes };
 }
 
 async function versions(home: string, tool: HarnessId, now = '') {
@@ -55,8 +63,8 @@ async function versions(home: string, tool: HarnessId, now = '') {
 /** Every detected tool's instruction file, read as it is now. */
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
-  // Only tools found in this home: an absent tool has no file to edit, and a folder is never created for it here.
-  for (const snapshot of snapshots.filter(entry => entry.detection !== 'Not found' || entry.skills.length > 0)) {
+  // Only tools in this home (presence.ts): an absent tool has no file to edit, and a folder is never created for it here.
+  for (const snapshot of snapshots.filter(isPresent)) {
     const { path, readers, notes } = await bind(snapshot.harness, snapshot.root);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
@@ -70,8 +78,9 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
 export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string): Promise<InstructionSave> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
+  // Only a tool in this home (presence.ts): a save never recreates the folder of a tool that has gone.
   const snapshot = snapshots.find(entry => entry.harness === tool);
-  if (!snapshot) return { stopped: 'That tool is not in this home.' };
+  if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
   const { path } = await bind(tool, snapshot.root);
   const current = await readText(path);
   if ((current === undefined ? '' : sha(current)) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };

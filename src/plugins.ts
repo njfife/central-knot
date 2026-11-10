@@ -10,6 +10,7 @@ import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, 
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
+import type { PluginTool } from './presence.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
@@ -26,6 +27,8 @@ export interface PluginContext {
   timeoutMs?: number;
   /** Reads shared within one read-only view (each tool's records and a live folder's catalog read once). Never set for an install or uninstall, which read again after their command. */
   reads?: Map<string, Promise<unknown>>;
+  /** Access checks made in one request, by URL, so tools installing from one Git marketplace check it once (MKT-05). */
+  checked?: Map<string, Promise<AccessResult>>;
 }
 
 /** A read done once per context when the context carries a cache. */
@@ -35,7 +38,6 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
   return context.reads.get(key) as Promise<T>;
 }
 
-export const pluginTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 
 // ---------- Sources and access ----------
 
@@ -83,22 +85,43 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
   });
 }
 
-/** Git as Central Knot runs it: hooks off, prompts off, and the sign-in this computer already has. */
-export const runGit = (args: string[], timeoutMs = 60_000) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
+/** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
+const git = (args: string[], timeoutMs: number) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
+/** The same Git, for other features (the git repo of the Managed set): hooks and prompts off, this computer's own sign-in. */
+export const runGit = (args: string[], timeoutMs = 60_000) => git(args, timeoutMs);
 
-/** Said when the address reaches no repository this account can read: the one failure only a different address fixes. */
-export const NO_REPO_THERE = 'No access, or no repository there. Check the address and that your account can read it.';
+/** What a Git source said when asked for access: ok, or one MKT-05 class with words a person can act on. */
+export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
+
+/** Why a Git command failed, in classes a person can act on (MKT-05). Where the server's answer fits more than one cause, the message names each. */
+export function gitFailure(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): Exclude<AccessResult, { state: 'ok' }> {
+  const text = output.toLowerCase();
+  if (code === 'missing') return { state: 'git-missing', message: `Git is not installed, so this ${place} cannot be read. Install Git, then try again.` };
+  if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.` };
+  if (/host key verification failed/.test(text)) return { state: 'unknown-host', message: 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.' };
+  if (/passphrase/.test(text)) return { state: 'passphrase', message: 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.' };
+  if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
+  if (/repository not found|not found|404|does not appear to be a git repository|access denied/.test(text)) return { state: 'no-access', message: 'No access, or no repository there: the server doesn’t say which. Check the address and that your account can read it.' };
+  return { state: 'unclassified', message: output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.' };
+}
 
 /** Why a Git command failed, in words a person can act on (MKT-05). */
-export function whyGitFailed(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): string {
-  const text = output.toLowerCase();
-  if (code === 'missing') return `Git is not installed, so this ${place} cannot be read.`;
-  if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.`;
-  if (/host key verification failed/.test(text)) return 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.';
-  if (/passphrase/.test(text)) return 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.';
-  if (/authentication failed|could not read username|terminal prompts disabled|\b40[13]\b|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';
-  if (/repository not found|repository '[^']*' not found|\b404\b|does not appear to be a git repository|repository '[^']*' does not exist|access denied/.test(text)) return NO_REPO_THERE;
-  return output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.';
+export const whyGitFailed = (code: number | 'timeout' | 'missing', output: string, place?: string): string => gitFailure(code, output, place).message;
+
+/**
+ * Whether this computer can read a Git source, asked with `git ls-remote` before Add reads it and before a tool is told
+ * to fetch it, because a tool's own fetch fails silently (MKT-05). Ok proves access from Central Knot only; a tool's own
+ * result still decides an install. Checks made with one context's `checked` are made once per source.
+ */
+export function checkAccess(context: PluginContext, source: string): Promise<AccessResult> {
+  const url = fetchUrl(source);
+  const ask = async (): Promise<AccessResult> => {
+    const listed = await git(['ls-remote', '--quiet', '--', url, 'HEAD'], context.timeoutMs ?? 20_000);
+    return listed.code === 0 ? { state: 'ok' } : gitFailure(listed.code, listed.output);
+  };
+  if (!context.checked) return ask();
+  if (!context.checked.has(url)) context.checked.set(url, ask());
+  return context.checked.get(url)!;
 }
 
 /** Why a push failed: the repo moved on, or this account can't write there; anything else as whyGitFailed says. */
@@ -146,16 +169,16 @@ async function cloneInto(context: PluginContext, url: string, target: string, { 
   const stage = `${target}.${randomUUID()}`;
   await mkdir(dirname(target), { recursive: true });
   await dropStages(target);
-  const git = (args: string[]) => runGit(args, context.timeoutMs ?? 60_000);
-  const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage]);
+  const timeoutMs = context.timeoutMs ?? 60_000;
+  const cloned = await git(['clone', '--depth', '1', '--no-recurse-submodules', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, stage], timeoutMs);
   if (cloned.code !== 0) {
     await rm(stage, { recursive: true, force: true });
     return whyGitFailed(cloned.code, cloned.output);
   }
   // A pinned commit is checked out in the stage too: the copy takes its place only when it is exactly what was asked for.
   if (sha) {
-    const fetched = await git(['-C', stage, 'fetch', '--depth', '1', '--quiet', 'origin', sha]);
-    const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']) : fetched;
+    const fetched = await git(['-C', stage, 'fetch', '--depth', '1', '--quiet', 'origin', sha], timeoutMs);
+    const checked = fetched.code === 0 ? await git(['-C', stage, 'checkout', '--quiet', '--detach', 'FETCH_HEAD'], timeoutMs) : fetched;
     if (checked.code !== 0) { await rm(stage, { recursive: true, force: true }); return `The commit it names (${sha.slice(0, 12)}) could not be read.`; }
   }
   const refused = check ? await check(stage) : undefined;
@@ -310,24 +333,28 @@ const codexTables = (context: PluginContext, root: string) => once(context, `cod
  * own command added in plugins/known_marketplaces.json; Claude Code and Copilot CLI also read extraKnownMarketplaces in
  * settings.json; Codex keeps `[marketplaces.NAME]` tables in config.toml.
  */
-export async function registeredMarketplaces(context: PluginContext, tool: HarnessId): Promise<{ name: string; source: string }[]> {
+export async function registeredMarketplaces(context: PluginContext, tool: PluginTool): Promise<{ name: string; source: string }[]> {
   const root = configRootOf(context, tool);
-  if (tool === 'codex-cli') return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
-  const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
-  if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
-  const found = new Map<string, string>();
-  for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
-    const source = record(record(entry)?.source);
-    const where = text(source?.url) || text(source?.path) || text(source?.repo);
-    if (where && !found.has(name)) found.set(name, where);
+  switch (tool) {
+    case 'codex-cli': return Object.entries((await codexTables(context, root)).marketplaces).map(([name, entry]) => ({ name, source: text(entry.source) })).filter(entry => entry.source);
+    case 'claude-cli': case 'copilot-cli': {
+      const lists = [record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
+      if (tool === 'claude-cli') lists.unshift(await recordJson(context, join(root, 'plugins/known_marketplaces.json')));
+      const found = new Map<string, string>();
+      for (const [name, entry] of lists.flatMap(list => Object.entries(list ?? {}))) {
+        const source = record(record(entry)?.source);
+        const where = text(source?.url) || text(source?.path) || text(source?.repo);
+        if (where && !found.has(name)) found.set(name, where);
+      }
+      return [...found].map(([name, source]) => ({ name, source }));
+    }
   }
-  return [...found].map(([name, source]) => ({ name, source }));
 }
 
 const hasFiles = async (path: string) => { try { return (await readdir(path)).length > 0; } catch { return false; } };
 
 /** The marketplace a tool has under a name, as the source it was added from. */
-async function registeredSource(context: PluginContext, tool: HarnessId, marketplace: string): Promise<string | undefined> {
+async function registeredSource(context: PluginContext, tool: PluginTool, marketplace: string): Promise<string | undefined> {
   return (await registeredMarketplaces(context, tool)).find(entry => entry.name === marketplace)?.source;
 }
 
@@ -335,56 +362,62 @@ async function registeredSource(context: PluginContext, tool: HarnessId, marketp
  * The source of a different marketplace the tool already has under this name, if it has one. Central Knot never installs
  * from, uninstalls from or replaces such a marketplace: it is "held".
  */
-export async function heldBy(context: PluginContext, tool: HarnessId, marketplace: string, source: string): Promise<string | undefined> {
+export async function heldBy(context: PluginContext, tool: PluginTool, marketplace: string, source: string): Promise<string | undefined> {
   const registered = await registeredSource(context, tool, marketplace);
   return registered && !sameSource(registered, source) ? registered : undefined;
 }
 
 /** Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans. */
-export async function installState(context: PluginContext, tool: HarnessId, marketplace: string, plugin: string): Promise<InstallState> {
+export async function installState(context: PluginContext, tool: PluginTool, marketplace: string, plugin: string): Promise<InstallState> {
   const root = configRootOf(context, tool);
   const id = `${plugin}@${marketplace}`;
-  if (tool === 'claude-cli') {
-    // Only the user scope counts: it is the one Central Knot installs to (--scope user) and the one `uninstall` removes.
-    // A plugin installed for one project only is not installed for this person everywhere.
-    const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins)?.[id];
-    const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
-    const path = text(user?.installPath);
-    if (!path) return { state: 'not-installed' };
-    return (await hasFiles(path)) ? { state: 'installed', path } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
-  }
-  if (tool === 'copilot-cli') {
-    const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
-    const entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
-    const cache = text(entry?.cache_path);
-    if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
-    // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
-    const settings = await recordJson(context, join(root, 'settings.json'));
-    const enabled = record(settings?.enabledPlugins)?.[id] === true;
-    const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
-    const folderPath = text(source?.path);
-    if (enabled && source?.source === 'directory' && folderPath) {
-      const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
-      const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
-      return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+  switch (tool) {
+    case 'claude-cli': {
+      // Only the user scope counts: it is the one Central Knot installs to (--scope user) and the one `uninstall` removes.
+      // A plugin installed for one project only is not installed for this person everywhere.
+      const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins)?.[id];
+      const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
+      const path = text(user?.installPath);
+      if (!path) return { state: 'not-installed' };
+      return (await hasFiles(path)) ? { state: 'installed', path } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
     }
-    return { state: 'not-installed' };
+    case 'copilot-cli': {
+      const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
+      const entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
+      const cache = text(entry?.cache_path);
+      if (cache) return (await hasFiles(cache)) ? { state: 'installed', path: cache } : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+      // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
+      const settings = await recordJson(context, join(root, 'settings.json'));
+      const enabled = record(settings?.enabledPlugins)?.[id] === true;
+      const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
+      const folderPath = text(source?.path);
+      if (enabled && source?.source === 'directory' && folderPath) {
+        const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
+        const folder = catalog.plugins.find(item => item.name === plugin)?.folder;
+        return folder && (await hasFiles(folder)) ? { state: 'installed', path: folder, live: true } : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+      }
+      return { state: 'not-installed' };
+    }
+    case 'codex-cli': {
+      if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
+      const cache = join(root, 'plugins/cache', marketplace, plugin);
+      const versions = await readdir(cache).catch(() => [] as string[]);
+      for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version) };
+      return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
+    }
   }
-  if (!(await codexTables(context, root)).plugins[id]) return { state: 'not-installed' };
-  const cache = join(root, 'plugins/cache', marketplace, plugin);
-  const versions = await readdir(cache).catch(() => [] as string[]);
-  for (const version of versions) if (await hasFiles(join(cache, version))) return { state: 'installed', path: join(cache, version) };
-  return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
 }
 
 // ---------- Install and uninstall ----------
 
 /** Files a tool's plugin commands may change; their bytes are kept before and after each run (FIL-03). */
-const touched = (context: PluginContext, tool: HarnessId) => {
+const touched = (context: PluginContext, tool: PluginTool): string[] => {
   const root = configRootOf(context, tool);
-  if (tool === 'claude-cli') return [join(root, 'settings.json'), join(root, 'plugins/installed_plugins.json'), join(root, 'plugins/known_marketplaces.json')];
-  if (tool === 'copilot-cli') return [join(root, 'settings.json'), join(root, 'config.json')];
-  return [join(root, 'config.toml')];
+  switch (tool) {
+    case 'claude-cli': return [join(root, 'settings.json'), join(root, 'plugins/installed_plugins.json'), join(root, 'plugins/known_marketplaces.json')];
+    case 'copilot-cli': return [join(root, 'settings.json'), join(root, 'config.json')];
+    case 'codex-cli': return [join(root, 'config.toml')];
+  }
 };
 
 const readOrNull = (path: string) => readFile(path, 'utf8').catch(() => null);
@@ -401,7 +434,7 @@ async function keepRecord(context: PluginContext, tool: HarnessId, command: stri
 }
 
 /** Runs one native command for a tool against the chosen home, keeping the prior bytes of every file it may change. */
-async function native(context: PluginContext, tool: HarnessId, args: string[]): Promise<NativeRun> {
+async function native(context: PluginContext, tool: PluginTool, args: string[]): Promise<NativeRun> {
   const binary = context.binaries[tool];
   const command = `${harnesses[tool].binary} ${args.join(' ')}`;
   if (!binary) return { tool, command, ok: false, output: noCli(tool), changed: [] };
@@ -424,7 +457,7 @@ async function native(context: PluginContext, tool: HarnessId, args: string[]): 
 }
 
 /** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
-export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: HarnessId): Promise<ActionReport> {
+export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
   const runs: NativeRun[] = [];
   const name = toolNames[tool];
   if (tool === 'copilot-cli') {
@@ -440,16 +473,19 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
   const registered = await registeredSource(context, tool, catalog.name);
   if (!registered) {
+    // The tool's own add fetches a Git marketplace and fails silently, so this computer's access is checked first.
+    const access = catalog.kind === 'git' && context.binaries[tool] ? await checkAccess(context, catalog.source) : undefined;
+    if (access && access.state !== 'ok') return { tool, outcome: 'failed', message: `${access.message} Nothing was added to ${name}.`, runs };
     const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
     runs.push(add);
     if (!add.ok) return { tool, outcome: 'failed', message: `Could not add the marketplace. ${lastLines(add.output)}`.trim(), runs };
   }
   const id = `${plugin}@${catalog.name}`;
-  const args = tool === 'claude-cli' ? ['plugin', 'install', id, '--scope', 'user'] : tool === 'copilot-cli' ? ['plugin', 'install', id] : ['plugin', 'add', id, '--json'];
+  const args = { 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] }[tool];
   const installed = await native(context, tool, args);
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder (nothing copied)' : ''}. ${nextStepFor(tool)}`.trim(), runs };
+  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder (nothing copied)' : ''}. ${nextStepFor[tool]}`.trim(), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
   const older = registered ? ` ${name} uses its own copy of this marketplace, which may be older than the one shown here: update it in ${name}, then try again.` : '';
@@ -457,14 +493,14 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
 }
 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
-export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: HarnessId, source: string): Promise<ActionReport> {
+export async function uninstall(context: PluginContext, marketplace: string, plugin: string, tool: PluginTool, source: string): Promise<ActionReport> {
   const name = toolNames[tool];
   const held = await heldBy(context, tool, marketplace, source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, marketplace, held), runs: [] };
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`;
-  const args = tool === 'codex-cli' ? ['plugin', 'remove', id, '--json'] : tool === 'claude-cli' ? ['plugin', 'uninstall', id, '--scope', 'user'] : ['plugin', 'uninstall', id];
+  const args = { 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] }[tool];
   const removed = await native(context, tool, args);
   const state = await installState(context, tool, marketplace, plugin);
   if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed] };
@@ -475,9 +511,9 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
 /** The end of a tool's own message, shown as it is. */
 const lastLines = (output: string) => output.split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 400);
 
-const nextStepFor = (tool: HarnessId) => ({
+const nextStepFor: Record<PluginTool, string> = {
   'claude-cli': 'Start a new Claude Code session, or run /reload-plugins, to use it.',
   'copilot-cli': 'Start a new Copilot CLI session to use it.',
   'codex-cli': 'Start a new Codex session to use it; restart the ChatGPT desktop app if it is open.',
-} as Partial<Record<HarnessId, string>>)[tool] ?? '';
+};
 

@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentText, agentsView, applyAgents, readAgents, restoreAgent } from '../src/agents.ts';
 import { readHistory } from '../src/manage.ts';
-import type { ShareContext } from '../src/share.ts';
+import { readRecord, syncGate, type ShareContext } from '../src/share.ts';
 import type { HarnessId } from '../src/types.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
@@ -107,7 +107,7 @@ test('A different agent with the same name (even in another case) needs a choice
     const chosen = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(chosen.writes, 2, JSON.stringify(chosen.results));
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Reviews code/);
-    const chosenEvent = (await readHistory(box.home)).find(entry => entry.kind === 'chosen' && entry.key === 'agent:reviewer')!;
+    const chosenEvent = (await readHistory(box.context)).find(entry => entry.kind === 'chosen' && entry.key === 'agent:reviewer')!;
     assert.equal((await restoreAgent(box.context, tools, chosenEvent.id)).stopped, undefined);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Other prompt\./, 'the replaced copy comes back from History');
   } finally { await box.cleanup(); }
@@ -133,7 +133,7 @@ test('Deleting a two-way copy deletes everywhere after it settles; Restore bring
     assert.equal(gone.writes, 2, JSON.stringify(gone.results));
     assert.deepEqual(await readdir(join(box.home, '.claude/agents')), []);
     assert.equal((await applyAgents(box.context, tools, [], { settleMs: 0 })).writes, 0, 'no revival');
-    const event = (await readHistory(box.home)).find(entry => entry.kind === 'deleted' && entry.key === 'agent:reviewer');
+    const event = (await readHistory(box.context)).find(entry => entry.kind === 'deleted' && entry.key === 'agent:reviewer');
     assert.ok(event);
     const restored = await restoreAgent(box.context, tools, event.id);
     assert.equal(restored.writes, 3, JSON.stringify(restored));
@@ -186,7 +186,7 @@ test('An agent edit whose spread failed at first is still History, so the versio
     await applyAgents(box.context, tools, []);
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Edited\./);
-    const edits = (await readHistory(box.home)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
+    const edits = (await readHistory(box.context)).filter(entry => entry.key === 'agent:reviewer' && entry.kind === 'edit');
     assert.equal(edits.length, 1, JSON.stringify(edits));
     assert.notEqual(edits[0].previous, undefined);
   } finally { await box.cleanup(); }
@@ -197,7 +197,7 @@ test('Apply all records the agent files it adds; Undo removes them while unchang
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added' && event.key === 'agent:reviewer')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added' && event.key === 'agent:reviewer')!;
     assert.deepEqual(added.losers.map(loser => loser.tool).sort(), ['codex-cli', 'copilot-cli']);
     // An edit in Codex since: that file stays, and Codex keeps syncing; Copilot's untouched file goes.
     const codex = join(box.home, '.codex/agents/reviewer.toml');
@@ -216,7 +216,7 @@ test('Undo of an agent Apply all with nothing edited unmanages it', async () => 
   try {
     await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
     await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
-    const added = (await readHistory(box.home)).find(event => event.kind === 'added')!;
+    const added = (await readHistory(box.context)).find(event => event.kind === 'added')!;
     await restoreAgent(box.context, tools, added.id);
     assert.equal((await agentsView(box.context, tools)).servers.find(server => server.key === 'reviewer')?.managed, false);
     assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
@@ -261,7 +261,7 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     const resumed = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [], use: 'claude-cli' }]);
     assert.equal(resumed.writes, 1, JSON.stringify(resumed.results));
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), codex);
-    const chosen = (await readHistory(box.home)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
+    const chosen = (await readHistory(box.context)).filter(event => event.kind === 'chosen' && event.key === 'agent:reviewer').at(-1)!;
     const copilotBefore = await read(box.home, '.copilot/agents/reviewer.agent.md');
     const undone = await restoreAgent(box.context, tools, chosen.id, 'narrow');
     assert.equal(undone.stopped, undefined, JSON.stringify(undone));
@@ -276,5 +276,217 @@ test('Undo of using the source’s copy over a stopped one-way copy puts back on
     await applyAgents(box.context, tools, []);
     assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Newer\./);
     assert.equal(await read(box.home, '.codex/agents/reviewer.toml'), edited);
+  } finally { await box.cleanup(); }
+});
+
+test('A damaged, unreadable or newer agents record stops every write and is never rewritten; a missing one is a first run', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    const first = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(first.writes, 2, 'a missing record is a first run');
+    const recordFile = join(box.home, '.central-knot/agents.json');
+    const good = await read(box.home, '.central-knot/agents.json');
+    // An edit in Claude that a pass would spread to Copilot and Codex.
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent('You review code.\nBe thorough.\n'));
+    const files = ['.claude/agents/reviewer.md', '.copilot/agents/reviewer.agent.md', '.codex/agents/reviewer.toml'];
+    const before = await Promise.all(files.map(file => read(box.home, file)));
+    const added = (await readHistory(box.context)).at(-1)!;
+    const bad: [string, RegExp][] = [
+      ['{"formatVersion": 2, "items": {', /The agents record is damaged\. Nothing was written or deleted/],
+      [JSON.stringify({ formatVersion: 2, items: 'none' }), /The agents record is damaged\./],
+      [JSON.stringify({ formatVersion: 2, items: { reviewer: { name: 'reviewer', state: 'shared', off: [] } } }), /The agents record is damaged\./],
+      [JSON.stringify({ items: {} }), /The agents record is damaged\./],
+      [JSON.stringify({ ...JSON.parse(good), formatVersion: 3 }), /The agents record was written by a newer Central Knot\. Nothing was written or deleted/],
+    ];
+    for (const [text, reason] of bad) {
+      await writeFile(recordFile, text);
+      assert.match((await applyAgents(box.context, tools, [])).stopped ?? '', reason);
+      assert.match((await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }])).stopped ?? '', reason);
+      assert.match((await restoreAgent(box.context, tools, added.id)).stopped ?? '', reason);
+      const view = await agentsView(box.context, tools);
+      assert.deepEqual(view.servers.map(server => server.key), ['reviewer'], 'the page still reads');
+      assert.ok(view.gate.state === 'stopped' && reason.test(view.gate.reason));
+      assert.ok(view.problems.some(problem => reason.test(problem)));
+      assert.equal(await read(box.home, '.central-knot/agents.json'), text, 'the record is left as it is');
+      assert.deepEqual(await Promise.all(files.map(file => read(box.home, file))), before, 'no agent file changed');
+    }
+    await rm(recordFile);
+    await mkdir(recordFile);
+    assert.match((await applyAgents(box.context, tools, [])).stopped ?? '', /The agents record could not be read\. Nothing was written or deleted/);
+    assert.deepEqual(await Promise.all(files.map(file => read(box.home, file))), before);
+    await rm(recordFile, { recursive: true });
+    await writeFile(recordFile, good);
+    const resumed = await applyAgents(box.context, tools, []);
+    assert.equal(resumed.stopped, undefined);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be thorough\./, 'with the record back, the edit spreads');
+  } finally { await box.cleanup(); }
+});
+
+test('With an intact record this app has no memory of, Apply stops until an explicit Resume, which keeps the record and remembers it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    const generation = (await readRecord(box.home)).record!.generation;
+    await rm(join(box.base, 'settings.json'));
+    await writeFile(join(box.home, '.claude/agents/writer.md'), claudeAgent('You write docs.\n').replace('name: reviewer', 'name: writer'));
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const blocked = await applyAgents(box.context, tools, [{ key: 'writer', managed: true, off: [] }]);
+    assert.match(blocked.stopped ?? '', /no memory/);
+    assert.equal(blocked.writes, 0);
+    assert.equal((await syncGate(box.context)).state, 'needs-resume');
+    const resumed = await applyAgents(box.context, tools, [{ key: 'writer', managed: true, off: [] }], { resume: true });
+    assert.equal(resumed.stopped, undefined);
+    assert.equal(resumed.writes, 2, JSON.stringify(resumed.results));
+    assert.match(await read(box.home, '.copilot/agents/writer.agent.md'), /You write docs\./);
+    assert.equal((await readRecord(box.home)).record!.generation, generation);
+    assert.equal((await syncGate(box.context)).state, 'ready');
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion owed to a tool that was away finishes when it returns, though a stopped one-way copy stays elsewhere', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent(undefined, 'model: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await writeFile(copilot, claudeAgent('Copilot only.\n'));
+    await applyAgents(box.context, tools, []);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent('Copilot only.\n'));
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion leaves the copy in a tool switched off for the agent, and still finishes in a tool that was away', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md'), copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    assert.equal((await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 })).settling, true);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'] }], { now: 1500, settleMs: 2000 });
+    await applyAgents(box.context, tools, [], { now: 4000, settleMs: 2000 });
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { now: 5000, settleMs: 2000 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+    assert.equal(await readFile(copilot, 'utf8'), claudeAgent());
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion first seen before an agent was unmanaged still waits the settle window once it is managed again', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }], { now: 1100, settleMs: 2000 });
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { now: 10000, settleMs: 2000 });
+    await rm(claude);
+    const pass = await applyAgents(box.context, tools, [], { now: 10001, settleMs: 2000 });
+    assert.equal(pass.writes, 0, JSON.stringify(pass.results));
+    assert.equal(pass.settling, true);
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion removed from one tool still finishes later in a tool that was away', async () => {
+  const box = await sandbox();
+  try {
+    const claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await rm(claude);
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.copilot/agents')), []);
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, tools, [], { settleMs: 0 });
+    assert.deepEqual(await readdir(join(box.home, '.codex/agents')), []);
+  } finally { await box.cleanup(); }
+});
+
+test('A deletion leaves the copy in a tool switched off for the agent while its folder was away', async () => {
+  const box = await sandbox();
+  try {
+    const two: HarnessId[] = ['claude-cli', 'codex-cli'], claude = join(box.home, '.claude/agents/reviewer.md');
+    await writeFile(claude, claudeAgent());
+    await applyAgents(box.context, two, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rename(join(box.home, '.codex/agents'), join(box.base, 'codex-away'));
+    await applyAgents(box.context, two, [{ key: 'reviewer', managed: true, off: ['codex-cli'] }]);
+    await rm(claude);
+    await applyAgents(box.context, two, [], { settleMs: 0 });
+    await rename(join(box.base, 'codex-away'), join(box.home, '.codex/agents'));
+    await applyAgents(box.context, two, [], { settleMs: 0 });
+    assert.match(await read(box.home, '.codex/agents/reviewer.toml'), /Be brief/);
+  } finally { await box.cleanup(); }
+});
+
+test('A copy put back after its tool was switched off and on waits the full settle window when deleted again', async () => {
+  const box = await sandbox();
+  try {
+    const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await rm(copilot);
+    await applyAgents(box.context, tools, [], { now: 1000, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: ['copilot-cli'] }], { now: 1500, settleMs: 2000 });
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }], { now: 1600, settleMs: 2000 });
+    await rm(copilot);
+    const pass = await applyAgents(box.context, tools, [], { now: 3500, settleMs: 2000 });
+    assert.equal(pass.writes, 0, JSON.stringify(pass.results));
+    assert.equal(pass.settling, true);
+  } finally { await box.cleanup(); }
+});
+
+test('A tool with no agents folder yet gets the agent, as skills and MCP servers do', async () => {
+  const box = await sandbox();
+  try {
+    await rm(join(box.home, '.copilot/agents'), { recursive: true });
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent());
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.match(await read(box.home, '.copilot/agents/reviewer.agent.md'), /Be brief/);
+  } finally { await box.cleanup(); }
+});
+
+const originShown = async (context: ShareContext) => { const [agent] = (await agentsView(context, tools)).servers; return { oneWay: agent.oneWay, limits: agent.limits, kept: agent.kept }; };
+
+test('An unmanaged agent whose Claude copy differs from Copilot’s shows no origin, as Apply holds for a choice', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
+    await writeFile(join(box.home, '.copilot/agents/reviewer.agent.md'), '---\nname: reviewer\ndescription: Copilot reviewer\n---\n\nOther prompt.\n');
+    assert.deepEqual(await originShown(box.context), { oneWay: undefined, limits: {}, kept: undefined });
+    const held = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(held.writes, 0);
+    assert.match(held.results[0].message, /Copies differ/);
+    assert.deepEqual(await originShown(box.context), { oneWay: undefined, limits: {}, kept: undefined });
+  } finally { await box.cleanup(); }
+});
+
+test('A richer copy in Copilot doesn’t take over as origin on the page when Apply keeps the recorded Claude origin', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(join(box.home, '.claude/agents/reviewer.md'), claudeAgent(undefined, 'model: opus\n'));
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    await applyAgents(box.context, tools, [{ key: 'reviewer', managed: false, off: [] }]);
+    const copilot = join(box.home, '.copilot/agents/reviewer.agent.md');
+    await writeFile(copilot, (await readFile(copilot, 'utf8')).replace('description: Reviews code\n', 'description: Reviews code\nmodel: gpt-6\ntools: [read]\n'));
+    const before = await originShown(box.context);
+    assert.deepEqual(before.oneWay, { from: 'claude-cli', lost: ['model'] });
+    assert.match(before.limits?.['copilot-cli'] ?? '', /^One-way from Claude Code\./);
+    const result = await applyAgents(box.context, tools, [{ key: 'reviewer', managed: true, off: [] }]);
+    assert.equal(result.writes, 0, JSON.stringify(result.results));
+    assert.deepEqual(await originShown(box.context), before);
   } finally { await box.cleanup(); }
 });
