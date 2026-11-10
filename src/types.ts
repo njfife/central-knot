@@ -154,8 +154,8 @@ export interface DesktopApi {
   setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
   partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
-  /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses. */
-  pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string): Promise<PluginActionResult>;
+  /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses; `pick` installs or takes out only the parts it names. */
+  pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -402,11 +402,18 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
 export type PartKind = 'skill' | 'mcp' | 'agent';
 /** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
 export interface PartItem { kind: PartKind; name: string; hash: string; /** What it was on disk once written (for an MCP entry, with the tool's own settings), to tell a later edit. */ seen?: string;
-  /** The person removed it from the tool: updates leave it out while the plugin still has it. */ removed?: true }
+  /** Out by the person's choice (turned off, or removed from the tool by hand): updates leave it out while the plugin still has it. */ removed?: true }
 /** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
 export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
-/** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. */
-export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string }
+/** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. `out`: the person turned it off or removed it there, so it stays out until chosen. */
+export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string; out?: true }
+/** A part by kind and name. */
+export type PartRef = Pick<PartItem, 'kind' | 'name'>;
+/**
+ * Single parts chosen for one tool: those to put in and those to take out and leave out. `rest`: the tool's other parts
+ * are installed or brought up to date in the same run (an install or update of all its parts, with these exceptions).
+ */
+export interface PartsPick { on: PartRef[]; off: PartRef[]; rest?: boolean }
 /** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
 export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
 

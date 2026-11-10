@@ -1146,6 +1146,27 @@ async function practiceFlow() {
   check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
   await a.click('#punparts-issue-tracker');
   await a.click('#plugins-apply');
+  // Single parts: a switch under Pi puts in that one skill alone, over a link there that leads nowhere; the rest stays out.
+  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !/replaces a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: It replaces a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
+  const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
+  same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
+  await a.click(partSwitch('skill-triage'));
+  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('skill-triage') === 'part-on true' && /Will add 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to add/.test(await a.text('.toolbar') ?? '')
+    && /Goes into Pi as a separate item on Apply all/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
+  await a.click('#plugins-apply');
+  check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
+    && /Replaced a broken link named “triage”/.test(await a.text('.bands') ?? ''), await a.text('.bands'));
+  for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
+  await a.click(partSwitch('skill-triage'));
+  await a.click('#plugins-apply');
+  check('turning its switch off takes it out again', !existsSync(join(practice, '.pi/agent/skills/triage')), await a.text('.bands'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
@@ -1160,7 +1181,7 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.run(`(document.querySelector('[data-plugin="document-tools"]')?.textContent ?? '').includes('Installed') || !!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`)); tries++) await wait(100);
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
-  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
+  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch[id^="pskill-"]', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
   await a.click('#plugins-apply');

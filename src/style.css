@@ -1066,15 +1066,17 @@ span.ins-confirm { margin-top: 0; }
 .part-more:hover { text-decoration: underline; }
 .part-more:focus-visible { outline: 2px solid var(--focus); border-radius: 3px; }
 .plugin-parts li.clamped .part-more { display: inline; }
-/* A plugin's skills with a switch per tool where it is installed: the switches line up under each tool's name. */
+/* A plugin's skills with a switch per tool where it is installed, and its parts with one per tool that takes single parts: the switches line up under each tool's name. */
+/* A row with no switch under one tool keeps that column's width. */
+.skill-switch-none { visibility: hidden; }
 .plugin-skills-note { margin: 0 0 6px; font-size: 12px; color: var(--ink-soft); max-width: 76ch; }
 .skill-switch-cols { display: flex; justify-content: flex-end; margin: 0 0 2px; padding-right: 4px; }
 /* With switches, each skill is a table row: a hairline and a hover tint carry the eye from the name to its switches on a wide window. */
-.plugin-skills .plugin-parts { gap: 0; border-top: 1px solid var(--control-line); }
-.plugin-skills .plugin-parts li.with-end { padding: 5px 4px; border-bottom: 1px solid var(--control-line); }
+:is(.plugin-skills, .plugin-switched) .plugin-parts { gap: 0; border-top: 1px solid var(--control-line); }
+:is(.plugin-skills, .plugin-switched) .plugin-parts li.with-end { padding: 5px 4px; border-bottom: 1px solid var(--control-line); }
 .plugin-parts li > .plugin-part-note { grid-column: 2 / -1; max-width: 76ch; margin-top: 2px; }
 .plugin-part-note code { white-space: nowrap; }
-.plugin-skills .plugin-parts li.with-end:hover { background: var(--hover); }
+:is(.plugin-skills, .plugin-switched) .plugin-parts li.with-end:hover { background: var(--hover); }
 .plugin-parts li.with-end { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto; min-height: 28px; align-items: start; }
 .skill-switches { display: inline-flex; align-self: start; }
 .skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }

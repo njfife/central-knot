@@ -22,12 +22,12 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, AppPreferences, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
-/** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
+/** A short main-process log (window life, failed requests, and what each change came to: see logOutcome) in the app's data folder, for finding out what happened on a tester's Mac. */
 function log(line: string) {
   try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
@@ -663,6 +663,26 @@ const elsewhere = 'The home on screen is not the one open. Nothing was written. 
 /** Keeps a failed request's error for a problem report; the page says what happened in plain words. */
 const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 
+/**
+ * Keeps what a change came to, for a problem report: a refusal for the whole home, each plugin step as its tool reported
+ * it (with the tool's own output when its command failed), and each item an Apply all couldn't change. The words the page
+ * showed, and where they name one, the path and the system's error code; never an item's content.
+ */
+function logOutcome(channel: string, args: unknown[], result: unknown) {
+  if (!result || typeof result !== 'object') return;
+  const { stopped, reports, results } = result as { stopped?: unknown; reports?: unknown; results?: unknown };
+  if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
+  // A plugin step's request names the marketplace and the plugin second and third.
+  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}` : '';
+  for (const report of Array.isArray(reports) ? reports as ActionReport[] : []) {
+    log(`${channel}${plugin} in ${report.tool}: ${report.outcome}${report.changed ? '' : ', nothing changed'}: ${[report.message, ...(report.notes ?? [])].join(' ')}`);
+    for (const run of report.runs.filter(run => !run.ok)) log(`${channel}${plugin} in ${report.tool}: \`${run.command}\` failed: ${run.output.trim().slice(0, 2000)}`);
+  }
+  for (const item of Array.isArray(results) ? results as DestinationResult[] : []) {
+    if (item.outcome === 'failed' || item.outcome === 'held') log(`${channel} ${item.item}${item.harness ? ` in ${item.harness}` : ''}: ${item.outcome}: ${item.message}`);
+  }
+}
+
 /** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
 const notOpenHome = 'The home on screen is not the one open. Nothing was saved. Read it again.';
@@ -699,7 +719,7 @@ const handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>)
 function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    return work(...args).catch(error => { logFailure(channel, error); throw error; });
+    return work(...args).then(result => { logOutcome(channel, args, result); return result; }, error => { logFailure(channel, error); throw error; });
   });
 }
 

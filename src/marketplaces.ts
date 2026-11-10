@@ -12,7 +12,7 @@ import { findApp, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
@@ -408,8 +408,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return files ? planParts(share, files, partsTools, installs) : null;
   }
 
-  /** Installs, updates, removes or undoes one plugin's parts in one tool (parts.ts). `run`: the parts run an Undo reverses. */
-  async function parts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: unknown): Promise<PluginActionResult> {
+  /** Installs, updates, removes or undoes one plugin's parts in one tool (parts.ts). `run`: the parts run an Undo reverses; `pick`: only these parts change. */
+  async function parts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: unknown, pick?: PartsPick): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const share = host.share?.();
@@ -426,7 +426,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const read = await filesOf(ctx, catalog, plugin);
     if (!read.files) return { reports: failedFor([tool], read.problem ?? 'Its files can’t be read.') };
     const version = catalog.plugins.find(entry => entry.name === plugin)?.version;
-    return { reports: [await installParts(share, { source, marketName, plugin, version, tool }, read.files)] };
+    return { reports: [await installParts(share, { source, marketName, plugin, version, tool }, read.files, pick)] };
   }
 
 
@@ -445,6 +445,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
 const isText = (value: unknown, max = 2000): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
+/** Single parts picked for a tool, each a kind and a name (a name is only ever matched against the plugin's own parts). */
+const isPick = (value: unknown): value is PartsPick => {
+  const refs = (list: unknown) => Array.isArray(list) && list.length <= 500 && list.every(ref => ['skill', 'mcp', 'agent'].includes(ref?.kind) && isText(ref?.name, 300));
+  return !!value && typeof value === 'object' && refs((value as PartsPick).on) && refs((value as PartsPick).off) && ['undefined', 'boolean'].includes(typeof (value as PartsPick).rest);
+};
 /** A marketplace or plugin name as the tools accept it; anything else never reaches a command line. */
 const isName = (value: unknown): value is string => typeof value === 'string' && engine.SAFE_NAME.test(value);
 
@@ -468,11 +473,11 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handle('plugins:update', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.update(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handleNow('plugins:parts-plan', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.partsPlan(source, plugin) : null));
-  handle('plugins:parts', async (source, marketName, plugin, tool, mode, run, home) => {
+  handle('plugins:parts', async (source, marketName, plugin, tool, mode, run, home, pick) => {
     const ids = onlyAllowed([tool], partsTools);
     const okMode = mode === 'install' || mode === 'remove' || mode === 'undo';
-    return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length && okMode && (run === undefined || run === null || isText(run, 64))
-      ? markets.parts(source, marketName, plugin, ids[0]!, mode, (run ?? undefined) as string | undefined, home)
+    return open() && isText(source) && isName(marketName) && isName(plugin) && ids.length && okMode && (run === undefined || run === null || isText(run, 64)) && (pick === undefined || pick === null || isPick(pick))
+      ? markets.parts(source, marketName, plugin, ids[0]!, mode, (run ?? undefined) as string | undefined, home, (pick ?? undefined) as PartsPick | undefined)
       : { reports: failedFor(ids, 'That request was malformed, so nothing ran.') };
   });
   handle('plugins:uninstall', async (source, marketplace, plugin, tool, home) => {

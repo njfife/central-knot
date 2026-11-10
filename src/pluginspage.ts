@@ -8,7 +8,7 @@ import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
 import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
-import { allQueued, resultLines, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
+import { allQueued, resultLines, pickOf, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
 import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
@@ -199,7 +199,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     return unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state;
   };
   const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(plugin, tool))));
-  const chosen = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => queued(market.draft, entry.source, plugin.name, tool))).filter(Boolean));
+  const chosen = new Set(entry.plugins.flatMap(plugin => view.tools.flatMap(tool => [queued(market.draft, entry.source, plugin.name, tool), pickOf(market.draft, entry.source, plugin.name, tool) ? 'pick-parts' as const : undefined])).filter(Boolean));
   const unknown = marks.has('not-known');
   const cannot = marks.has('cannot');
   const parts = (['parts-offer', 'parts', 'parts-changed'] as const).filter(mark => marks.has(mark));
@@ -216,6 +216,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
     chosen.size ? h('span.legend-group', {}, h('span.legend-lead', {}, 'On Apply all:'),
       chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
       chosen.has('install-parts') ? item('parts installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
+      chosen.has('pick-parts') && !chosen.has('install-parts') ? item('single parts changed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
       chosen.has('update') ? item('updated', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('refresh-cw', 10))) : null,
       chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null,
       chosen.has('remove-parts') ? item('parts removed', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null) : null);
@@ -244,6 +245,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
     const switches = ({ skills, tools }: { skills: number; tools: number }, verb: string) => (skills ? `${plural(skills, 'skill')} to turn ${verb}${tools > 1 ? ` in ${tools} tools` : ''}` : '');
     const pending = [counts.plugins ? plural(counts.plugins, 'change') : '', counts.installs ? plural(counts.installs, 'install') : '', counts.updates ? plural(counts.updates, 'update') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
       counts.partsInstalls ? `install parts in ${plural(counts.partsInstalls, 'tool')}` : '', counts.partsUpdates ? `update parts in ${plural(counts.partsUpdates, 'tool')}` : '', counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : '',
+      counts.partsOn ? `${plural(counts.partsOn, 'part')} to add` : '', counts.partsOff ? `${plural(counts.partsOff, 'part')} to take out` : '',
       switches(counts.skillsOff, 'off'), switches(counts.skillsOn, 'on')].filter(Boolean).join(' · ');
     return h('div.apply', {},
       // Narrow, the toolbar has nothing else at its left: the hint the table's header gives up sits there (style.css).

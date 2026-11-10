@@ -123,6 +123,9 @@ async function skillsIn(root: string, folder: string, paths: string[], subfolder
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
+/** A command's or agent's name from its file: without `.md`, and without Copilot's `.agent.md` (`reviewer.agent.md` is the agent `reviewer`). */
+const agentName = (file: string) => basename(file, '.md').replace(/\.agent$/, '');
+
 /**
  * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders, NESTED_LEVELS down.
  * Each part's `path` is its file relative to the plugin's `folder`. A file listed there that can't be read, or a folder
@@ -140,9 +143,9 @@ async function markdownIn(root: string, folder: string, paths: string[], unread?
     for (const file of files) {
       if (found.some(part => part.path === relative(folder, file))) continue;
       const body = await partFile(root, file);
-      if (body === undefined) { if (unread && await present(file)) unread.push(basename(file, '.md')); continue; }
+      if (body === undefined) { if (unread && await present(file)) unread.push(agentName(file)); continue; }
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body, path: relative(folder, file) });
+      found.push({ name: meta.name || agentName(file), description: meta.description ?? '', text: body, path: relative(folder, file) });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));
@@ -291,8 +294,8 @@ export async function pluginFiles(folder: string, entry: Record<string, unknown>
     // Read again with its size known: a part copied as an item is never a cut copy.
     const file = join(folder, part.path);
     const read = await readInside(root, file, PART_FILE_LIMIT);
-    if (read) agents.push({ name: basename(file, '.md'), text: read.text, whole: read.whole });
-    else unread.agents.push(basename(file, '.md'));
+    if (read) agents.push({ name: agentName(file), text: read.text, whole: read.whole });
+    else unread.agents.push(agentName(file));
   }
   return { folder, skills: skills.map(dir => ({ name: basename(dir), dir })), agents, servers: servers.values, unread };
 }
