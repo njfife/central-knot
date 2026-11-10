@@ -1,8 +1,10 @@
 // Base instructions (INS-03, INS-04): one text, written once, that Central Knot keeps in each chosen tool's own instruction file,
 // in a marked block after that tool's own instructions. A tool's own text is never rewritten. A copy edited in a tool's file is
 // shown, never overwritten by itself: the person uses it as the base or puts the base back. Every save shows each file's change first.
-import { applyBaseChange, savingOff, startTakeOut, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
-import { baseAction, fileWithBase, readersOfFile, sameBase, splitBase } from './basetext.ts';
+// One of the person's own tools can write the first draft (INS-06): it sorts every tool's instructions into the base and what
+// stays only in each tool's file, and the draft is reviewed and saved like any other base change, each file's own text included.
+import { applyBaseChange, closeDraftPick, draftBaseWith, draftStale, draftable, openDraftPick, savingOff, startTakeOut, stopDraft, baseDraftTyped, baseSaveDoesSomething, loadBaseVersion, ownText, rerender, showPage, toolDraftTyped, shownPath, startBaseEdit, state, type BaseEdit } from './app.ts';
+import { baseAction, draftedOwn, fileWithBase, linesNotCarried, readersOfFile, sameBase, splitBase } from './basetext.ts';
 import { lineDiff } from './diff.ts';
 import { button, checkbox, h, icon, lockAttrs as lockAttrsFor, pathText } from './dom.ts';
 import { changeCounts, diffView, discardConfirm, escapeTo, keepCaret, keys, legend, previewBlock, versionsList } from './editparts.ts';
@@ -24,8 +26,11 @@ document.addEventListener('keydown', event => {
 
 /** The base card's own button, where focus rests once its editor closes. */
 const restingFocus = () => (state.base?.text.trim() ? 'base-edit' : 'base-write');
-/** The draft started as a review on the card (an edited copy, putting the base back, an update, an earlier version). */
-const startedInReview = (edit: BaseEdit) => !!edit.source && edit.source.kind !== 'own';
+/** The draft started as a review on the card (an edited copy, putting the base back, an update, an earlier version). One a tool
+ *  wrote opens as a review too, but it is the person's to change: going back from it opens the editor. */
+const startedInReview = (edit: BaseEdit) => !!edit.source && edit.source.kind !== 'own' && edit.source.kind !== 'draft';
+/** The tool that wrote the draft under review, by name; undefined for any other draft. */
+const draftedBy = (edit: BaseEdit) => (edit.source?.kind === 'draft' && edit.source.tool ? toolNames[edit.source.tool] : undefined);
 
 /** Leaves the review: back to the editor, or closed when the review started on the card (an edited copy, an earlier version). */
 function closeOrBack(edit: BaseEdit) {
@@ -48,7 +53,7 @@ const readers = (file: InstructionFile) => readersOfFile(file.tool, file.sameFil
 const readerNames = (file: InstructionFile) => toolList(readers(file));
 
 /** What saving the draft does to one destination's file: the new text, and a sentence saying so. Undefined: not involved. */
-function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string } | undefined {
+function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: string; /** In a tool's draft: the own text the file keeps, shown under its row. */ keeps?: string } | undefined {
   const chosen = readers(file).some(tool => edit.tools.includes(tool)) && !!edit.text.trim();
   // Involved when it gets the base now, or (not chosen) when it got it before or still holds a block it can lose; a missing file
   // is never created to take a block out.
@@ -57,7 +62,9 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   const name = fileName(file.path);
   const { own, copy } = splitBase(file.text);
   const action = baseAction(readers(file), requestOf(edit));
-  const planned = fileWithBase(file.text, edit.text, { chosen, held: file.base, action });
+  // A draft a tool wrote also says what stays only in this file: that becomes its own text.
+  const drafted = chosen ? draftedOwn(readers(file), edit.own) : undefined;
+  const planned = fileWithBase(file.text, edit.text, { chosen, held: file.base, action, own: drafted });
   if ('left' in planned) return { next: file.text, says: chosen ? `Left as it is: its copy of the base was edited in ${name}. Choose what to do with it on this card after saving.` : `Left as it is, block included: its copy of the base was edited in ${name}, so Central Knot doesn’t take it out.` };
   const { next } = planned;
   const says = (text: string) => ({ next, says: text });
@@ -66,6 +73,8 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
     : `Stops getting base updates. The text stays in ${name} as ${readerNames(file)}’s own instructions, since the file would otherwise be empty; delete it on its card if you don’t want it.`);
   if (action === 'putBack') return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${toolNames[file.tool]}’s Earlier versions.`);
   if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
+  // A draft's row shows the lines the file keeps, so the sentence only counts them.
+  if (drafted !== undefined) return { next, keeps: drafted, says: drafted.trim() ? `Its own instructions become ${plural(lineCount(drafted), 'line')}, then the base:` : `No instructions of its own: ${name} will hold only the base.` };
   if (copy === undefined && file.base?.leftPlain) return says('Its plain copy of the base goes back into the base block, so it isn’t there twice.');
   if (action === 'adopt') return says(sameBase(own, edit.text) ? `Its ${plural(lineCount(own), 'line')} move into the base block, so ${toolNames[file.tool]} reads the same as now. The file as it was stays under Earlier versions.`
     : lineDiff(own, edit.text).some(line => line.kind === 'removed')
@@ -106,8 +115,12 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
   // Esc anywhere in the editor (the text, a tool box, a button) is Cancel.
   return h('div.ins-editor', { onkeydown: escapeTo('base-cancel', 'base-keep') },
     from && edit.source?.kind === 'own' ? h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, `${fileName(from.path)}’s instructions move into the base: ${toolNames[from.tool]} still reads them, now from the base block, and the tools you choose get them too. A line meant only for ${toolNames[from.tool]} can go back into its own instructions after saving.`)) : null,
+    draftedBy(edit) ? h('p.ins-note', {}, icon('wand-sparkles', 13, 'tone-muted'), h('span', {}, `${draftedBy(edit)}’s draft. Change anything, then Review changes.`)) : null,
+    staleNote(edit),
+    draftedBy(edit) ? h('h3.base-subhead', {}, 'The base, for every tool') : null,
     area,
-    h('fieldset.base-tools', {}, h('legend', {}, 'Tools that get them, after each tool’s own instructions. Review changes shows what unticking one does to its file.'),
+    draftedOwnEditors(files, edit),
+    h('fieldset.base-tools', {}, h('legend', {}, 'Tools that get the base, after their own instructions'),
       files.filter(file => isFirstReader(file, files)).map(file => checkbox({ id: `base-tool-${file.tool}`, checked: edit.tools.includes(file.tool), onchange: checked => {
         // One file read by several tools is ticked or unticked for all of them.
         const group = readers(file);
@@ -117,19 +130,47 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
         edit.confirmDiscard = false; rerender();
       } }, ...readers(file).map(tool => brandMark(tool, 14)), h('span', {}, readerNames(file)), h('span.base-file', {}, fileName(file.path), file.sameFile.length ? ' (one file)' : '', file.exists ? '' : ' (new file)')))),
     edit.confirmDiscard
-      ? h('div.ins-actions', {}, discardConfirm('the base instructions', { discard: 'base-discard', keep: 'base-keep' }, 'Keep editing',
-        { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-text' }))
+      ? h('div.ins-actions', {}, discardConfirm(draftedBy(edit) ? `${draftedBy(edit)}’s draft` : 'the base instructions', { discard: 'base-discard', keep: 'base-keep' }, 'Keep editing',
+        { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-text' }, !!draftedBy(edit)))
       : h('div.ins-actions', {},
         button({ variant: 'primary', size: 'small', label: 'Review changes', id: 'base-review', disabled: !reviewable(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById('base-save')?.focus(); } }),
-        button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-cancel', onclick: () => {
+        button({ variant: 'ghost', size: 'small', label: draftedBy(edit) ? 'Discard the draft' : 'Cancel', id: 'base-cancel', onclick: () => {
           const ask = baseDraftTyped();
           if (ask) edit.confirmDiscard = true; else state.baseEdit = undefined;
           rerender();
           document.getElementById(ask ? 'base-keep' : restingFocus())?.focus();
         } }),
         h('span.ins-locked', { id: 'base-hint' }, hint()),
-        state.base?.tools.length ? button({ variant: 'link', size: 'micro', label: 'Stop sharing with every tool…', id: 'base-stop', attrs: { title: 'Review what stopping does to each tool’s file; each tool’s own instructions stay' },
+        state.base?.tools.length && !draftedBy(edit) ? button({ variant: 'link', size: 'micro', label: 'Stop sharing with every tool…', id: 'base-stop', attrs: { title: 'Review what stopping does to each tool’s file; each tool’s own instructions stay' },
           onclick: () => { Object.assign(edit, { ticksBeforeStop: edit.tools, tools: [], stage: 'review', confirmDiscard: false }); rerender(); document.getElementById('base-save')?.focus(); } }) : null));
+}
+
+/** Said where a draft a tool wrote is shown, once a file it was written from holds something else: the draft can't be saved. */
+function staleNote(edit: BaseEdit) {
+  const stale = draftStale(edit);
+  if (!stale.files.length && !stale.base) return null;
+  const what = [...(stale.base ? ['the base instructions'] : []), ...(stale.files.length ? [`${toolList(stale.files.map(file => file.tool))}’s ${stale.files.length === 1 ? 'file' : 'files'}`] : [])].join(' and ');
+  return h('p.ins-note.ins-warn', { id: 'base-draft-stale' }, icon('triangle-alert', 13, 'tone-warning'),
+    h('span', {}, `${what.charAt(0).toUpperCase()}${what.slice(1)} changed after this draft was written, so the draft knows nothing of what is new there and can’t be saved. Discard it and have it written again.`));
+}
+
+/** In a draft a tool wrote: what stays only in each tool's file, to change like the base above it. An unticked tool's file
+ *  stays as it is, so it has nothing to edit here. */
+function draftedOwnEditors(files: InstructionFile[], edit: BaseEdit) {
+  const sorted = files.filter(file => isFirstReader(file, files) && draftedOwn(readers(file), edit.own) !== undefined);
+  if (!draftedBy(edit) || !sorted.length) return null;
+  return h('div.base-own-list', {}, h('h3.base-subhead', {}, 'Each tool’s own instructions'),
+    sorted.map(file => {
+      const ticked = readers(file).some(tool => edit.tools.includes(tool));
+      const key = readers(file).find(tool => edit.own?.[tool] !== undefined)!;
+      const label = h('label.base-own-label', { for: `base-own-${file.tool}` }, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, fileName(file.path)));
+      if (!ticked) return h('div.base-own', {}, label, h('p.base-explain', {}, `Not ticked below, so its own instructions stay as they are.`));
+      const area = h('textarea.ins-text.base-own-text', { id: `base-own-${file.tool}`, spellcheck: 'false', placeholder: `Nothing only for ${readerNames(file)}: its file will hold only the base.`,
+        oninput: (event: Event) => { edit.own = { ...edit.own, [key]: (event.target as HTMLTextAreaElement).value }; } }) as HTMLTextAreaElement;
+      area.value = edit.own![key]!;
+      area.rows = Math.min(16, Math.max(3, lineCount(area.value) + 1));
+      return h('div.base-own', {}, label, area);
+    }));
 }
 
 /** A review's headline, its Save label, and the result sentence once saved (given the files written), for where the draft came from. */
@@ -147,6 +188,7 @@ function reviewWords(edit: BaseEdit, writes: InstructionFile[], putBackFile: str
   const save = writes.length ? `Save and update ${writesText}` : 'Save';
   if (kind === 'version') return { title: `Going back to earlier base instructions: ${counts || 'the same text'}.`, save, done: saved('The earlier base instructions are back') };
   if (kind === 'copy') return { title: `Using ${from}’s edited copy as the base instructions: ${counts}.`, save, done: saved('Base instructions saved') };
+  if (draftedBy(edit)) return { title: `${draftedBy(edit)}’s draft. Check it, then save.`, save, done: saved('Base instructions saved') };
   if (!edit.tools.length && state.base?.tools.length) return { title: 'Stop sharing the base with every tool. Each file below says what stays in it; the base is kept here for later.',
     save, done: (written: string) => `Stopped sharing the base instructions${written ? `; ${written} no longer ${written.includes(' and ') ? 'get' : 'gets'} them` : ''}. The base is kept here for later.` };
   const title = !before.trim() ? `Review the base instructions: ${plural(lineCount(edit.text), 'line')}.`
@@ -167,31 +209,71 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const plans = kind === 'update' ? writes : all;
   const putBackFile = kind === 'putBack' ? fileName(plans[0]?.file.path ?? '') : '';
   const { title, save, done } = reviewWords(edit, writes.map(entry => entry.file), putBackFile);
+  const stale = draftStale(edit).files.length > 0 || draftStale(edit).base;
   return h('div.ins-editor', {},
     h('p.ins-review-title', {}, title),
     edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${edit.conflict} This review now shows things as they are.`)) : null,
-    edit.text === before ? null : [legend(before.trim() ? 'the base now' : undefined, 'the base after saving'), diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }, 'Changes to the base instructions')],
+    staleNote(edit),
+    // A first base has nothing to compare with: it is shown as it is. A changed one shows what changes.
+    edit.text === before ? null : before.trim() ? [legend('the base now', 'the base after saving'), diffView(diff, !!edit.fullDiff, () => { edit.fullDiff = true; rerender(); }, 'Changes to the base instructions')]
+      : [h('h3.base-subhead', {}, 'The base, for every tool'), ...previewBlock(edit.text, 'base-new', 'The base instructions', 'base-new-more')],
     plans.length > 1 || (plans.length && edit.text !== before) ? h('h3.base-subhead', {}, 'Each file') : plans.length ? null : h('p.ins-empty', {}, 'No tool is chosen, so no file changes. The base instructions are kept here for later.'),
     h('ul.plain-list.base-plan', {}, plans.map(({ file, plan }) => {
       const key = `plan-${file.tool}`;
       const changes = plan!.next !== file.text;
       return h('li.base-plan-row', {},
         h('div.base-plan-line', {}, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, fileName(file.path)), h('span.base-plan-says', {}, plan!.says),
-          changes ? button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide the file' : 'Show the file', id: `base-${key}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }) : null),
-        changes && shown.has(key) ? [legend(`${fileName(file.path)} now`, 'after saving'), diffView(lineDiff(file.text, plan!.next), shown.has(`${key}-all`), () => { shown.add(`${key}-all`); rerender(); }, `Changes to ${fileName(file.path)}`)] : null);
+          changes ? button({ variant: 'link', size: 'micro', label: shown.has(key) ? 'Hide changes' : 'Show changes', id: `base-${key}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) }) : null),
+        changes && shown.has(key) ? [legend(`${fileName(file.path)} now`, 'after saving'), diffView(lineDiff(file.text, plan!.next), shown.has(`${key}-all`), () => { shown.add(`${key}-all`); rerender(); }, `Changes to ${fileName(file.path)}`)] : null,
+        plan!.keeps?.trim() ? previewBlock(plan!.keeps, `keeps-${file.tool}`, `What ${fileName(file.path)} keeps of its own`, `base-keeps-more-${file.tool}`) : null,
+        changes ? notCarried(file, edit) : null);
     })),
     // While the discard question is open it is the only decision on screen.
     edit.confirmDiscard
-      ? h('div.ins-actions', {}, discardConfirm('the base instructions', { discard: 'base-review-discard-yes', keep: 'base-review-keep' }, 'Keep reviewing',
-        { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-save' }))
+      ? h('div.ins-actions', {}, discardConfirm(draftedBy(edit) ? `${draftedBy(edit)}’s draft` : 'the base instructions', { discard: 'base-review-discard-yes', keep: 'base-review-keep' }, 'Keep reviewing',
+        { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-save' }, !!draftedBy(edit)))
       : h('div.ins-actions', {},
-        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy, onclick: () => {
+        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy || stale, attrs: lockAttrsFor(stale ? 'Something changed after this draft was written. Discard it and have it written again.' : undefined), onclick: () => {
           // Exactly the files listed above, as they were when listed: anything else changed since stops the save.
           const seen = Object.fromEntries(plans.map(({ file }) => [file.tool, { path: file.path, hash: file.hash }]));
-          void applyBaseChange({ text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen, ...requestOf(edit) }, done);
+          void applyBaseChange({ text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen, ...requestOf(edit), ...(draftedBy(edit) ? { own: edit.own } : {}) }, done);
         } }),
-        button({ variant: 'ghost', size: 'small', label: startedInReview(edit) ? 'Cancel' : 'Back to editing', id: 'base-back', onclick: () => closeOrBack(edit) }),
-        startedInReview(edit) ? null : button({ variant: 'ghost', size: 'small', label: 'Discard changes', id: 'base-review-discard', onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById('base-review-keep')?.focus(); } })));
+        button({ variant: 'ghost', size: 'small', label: startedInReview(edit) ? 'Cancel' : draftedBy(edit) ? 'Edit the draft' : 'Back to editing', id: 'base-back', onclick: () => closeOrBack(edit) }),
+        startedInReview(edit) ? null : button({ variant: 'ghost', size: 'small', label: draftedBy(edit) ? 'Discard the draft' : 'Discard changes', id: 'base-review-discard', onclick: () => { edit.confirmDiscard = true; rerender(); document.getElementById('base-review-keep')?.focus(); } })));
+}
+
+/**
+ * Under a file a tool's draft sorted: its lines that the draft carries nowhere word for word, neither in the base nor in what
+ * it kept for the file. The tool was asked to lose nothing, and this shows where to look in case it did.
+ */
+function notCarried(file: InstructionFile, edit: BaseEdit) {
+  const drafted = readers(file).some(tool => edit.tools.includes(tool)) ? draftedOwn(readers(file), edit.own) : undefined;
+  if (drafted === undefined) return null;
+  const lines = linesNotCarried(splitBase(file.text).own, edit.text, drafted);
+  if (!lines.length) return null;
+  const key = `lost-${file.tool}`;
+  // Said quietly: a draft that merges what files share rewords lines as a matter of course.
+  return [h('p.base-explain.base-not-carried', {}, icon('info', 13, 'tone-muted'),
+    h('span', {}, lines.length === 1 ? `1 line of ${fileName(file.path)} isn’t in the draft as written. It may be reworded or left out.` : `${lines.length} lines of ${fileName(file.path)} aren’t in the draft as written. They may be reworded or left out.`),
+    button({ variant: 'link', size: 'micro', label: `${shown.has(key) ? 'Hide' : 'Show'} ${lines.length === 1 ? 'it' : 'them'}`, id: `base-${key}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),
+    shown.has(key) ? h('pre.ins-preview', { tabindex: '0', 'aria-label': `Lines of ${fileName(file.path)} not in the draft as written` }, lines.join('\n')) : null];
+}
+
+/** The base card while a tool is chosen to write a draft, and while it writes: what it will do, each tool that can, and Stop. */
+function draftPickView() {
+  const drafters = state.base?.drafters ?? [];
+  const by = state.drafting;
+  if (by) return h('div.ins-editor', {},
+    h('p.ins-review-title.base-writing', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), `${toolNames[by]} is writing a draft of the base instructions…`),
+    h('p.base-explain', {}, 'This can take a minute or two.'),
+    h('div.ins-actions', {}, button({ variant: 'outline', size: 'small', label: 'Stop', id: 'base-draft-stop', onclick: stopDraft })));
+  const problem = state.draftPick?.problem;
+  return h('div.ins-editor', { onkeydown: escapeTo('base-draft-cancel', 'base-draft-cancel') },
+    h('p.ins-readers', {}, 'A tool reads your instruction files and splits them: what every tool should get becomes the base, and the rest stays in each tool’s file. You check the draft before anything is saved.'),
+    problem ? h('p.ins-note.ins-warn', { id: 'base-draft-problem', role: 'alert', tabindex: '-1' }, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, problem)) : null,
+    h('div.ins-actions', { role: 'group', 'aria-label': 'Write the draft with' },
+      drafters.map(tool => button({ variant: 'outline', size: 'small', label: `Draft with ${toolNames[tool]}`, id: `base-draft-by-${tool}`, disabled: !!state.busy, onclick: () => void draftBaseWith(tool) })),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: 'base-draft-cancel', onclick: closeDraftPick })));
 }
 
 /** One chosen tool on the resting card: whether its file has the base as it is now, and the choice when it was edited there. */
@@ -223,6 +305,8 @@ export function baseCard(files: InstructionFile[]) {
   const base = state.base;
   if (!base) return null;
   const edit = state.baseEdit;
+  // What was opened in one review (a file's changes, lines a draft didn't carry) starts closed in the next.
+  if (!edit) for (const key of [...shown]) { if (key.startsWith('plan-') || key.startsWith('lost-')) shown.delete(key); }
   const readOnly = savingOff();
   // A tool's typed draft locks the base too; one whose tool left this home (no card) waits in the band above to be copied or discarded.
   const toolDraft = toolDraftTyped() ? state.instructionEdit : undefined;
@@ -242,15 +326,21 @@ export function baseCard(files: InstructionFile[]) {
     hasBase || edit ? pathText(shownPath(base.path), base.path) : null,
     !edit && hasBase ? h(`span.ins-missing${edited.length ? '.base-pill-warn' : ''}`, {}, (chosen.length ? `In ${plural(chosen.length, 'tool')}` : 'In no tool') + (edited.length ? ` · ${plural(edited.length, 'edited copy', 'edited copies')}` : '')) : null);
 
+  // A tool can write a draft when one is on this computer and some file has instructions of its own to sort.
+  const canDraft = !!base.drafters.length && draftable().length > 0;
+  const draftButton = () => (canDraft ? button({ variant: 'outline', size: 'small', icon: 'wand-sparkles', label: 'Draft with a tool…', id: 'base-draft', disabled: locked,
+    attrs: lockAttrs ?? { title: 'Have one of your tools sort your files into base instructions and what stays in each file; you review the draft before anything is saved' }, onclick: openDraftPick }) : null);
   let body: (Node | null)[];
   if (edit) body = [edit.stage === 'review' ? reviewView(files, edit) : editView(files, edit)];
+  else if (state.draftPick || state.drafting) body = [draftPickView()];
   else if (!hasBase) {
     body = [
-      h('p.ins-readers', {}, 'Write instructions once, and Central Knot adds them to the file of every tool you choose, after that tool’s own instructions. Each tool’s own instructions stay as they are.'),
+      h('p.ins-readers', {}, 'Write instructions once, and Central Knot adds them to the file of every tool you choose, after that tool’s own instructions.'),
       h('div.ins-actions.base-start', {},
+        draftButton(),
         button({ variant: 'outline', size: 'small', label: 'Write base instructions', id: 'base-write', disabled: locked, attrs: lockAttrs, onclick: () => startBaseEdit({ text: '', tools: files.map(file => file.tool) }) }),
-        starts.length ? h('span.base-explain', {}, 'or start from one tool’s instructions (they move into the base):') : null,
-        starts.map(file => button({ variant: 'outline', size: 'small', label: `${toolNames[file.tool]}’s ${fileName(file.path)}`, id: `base-from-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Its instructions move into the base, and the tools you choose get them too` },
+        starts.length ? h('span.base-explain', {}, 'or start from:') : null,
+        starts.map(file => button({ variant: 'outline', size: 'small', label: starts.some(other => other !== file && fileName(other.path) === fileName(file.path)) ? `${toolNames[file.tool]}’s ${fileName(file.path)}` : fileName(file.path), id: `base-from-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `${toolNames[file.tool]}’s instructions move into the base, and the tools you choose get them too` },
           onclick: () => startBaseEdit({ text: ownText(file), tools: files.map(entry => entry.tool), source: { kind: 'own', tool: file.tool } }) })),
         lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null),
     ];
@@ -270,10 +360,11 @@ export function baseCard(files: InstructionFile[]) {
         button({ variant: 'outline', size: 'small', label: 'Edit text or tools', id: 'base-edit', disabled: locked, attrs: lockAttrs, onclick: () => startBaseEdit({ text: base.text, tools: base.tools }) }),
         behind.length ? button({ variant: 'outline', size: 'small', label: `Update ${behind.length === 1 ? fileName(behind[0].path) : `${behind.length} files`}…`, id: 'base-update', disabled: locked, attrs: lockAttrs ?? { title: 'Review writing the base instructions as they are now into these files' },
           onclick: () => startBaseEdit({ text: base.text, tools: base.tools, stage: 'review', source: { kind: 'update' } }) }) : null,
+        draftButton(),
         lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null),
     ];
   }
-  const versions = edit ? null : versionsList(base.versions, { id: version => `base-load-${version}`, disabled: locked, why: lockedWhy, run: version => void loadBaseVersion(version) });
+  const versions = edit || state.draftPick || state.drafting ? null : versionsList(base.versions, { id: version => `base-load-${version}`, disabled: locked, why: lockedWhy, run: version => void loadBaseVersion(version) });
   return h('article.card.ins-card.base-card', { id: 'base-card', 'aria-label': 'Base instructions' }, head, ...body, versions);
 }
 

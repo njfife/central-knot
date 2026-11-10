@@ -775,3 +775,17 @@ What was left open after v0.5.0-preview.4, fixed or proven.
 **Validation.** 367 unit tests. Mac packaged e2e 534/534. Linux e2e 441/441. UI tour `plugin-versions` (new list shots at 860 and 1728), `plugins`, `harnesses`, `settings` on the Mac; every section run alone, 17 of 18 first time (the 18th was the scratch-folder delete, fixed).
 
 **Not proven.** The icon as a picture of the Dock itself (no tool here can capture the Dock; needs a glance). Where Claude desktop on Linux keeps the Code tab's copy (appears only after sign-in). The Copilot app's `.msi` location (from the package's own tables, not installed).
+
+## Instructions: a draft of the base written by one of your tools, November 10, 2026
+
+Nathan asked that a person be able to use one of their own tools, headless, to generate base instructions from the files they already have, with what each tool's file should become, and to have it installed in one step rather than editing files by hand; and to choose the tool when more than one can do it.
+
+- **Draft with a tool** on the Base instructions card (INS-06). Each tool with a CLI on this computer (or a desktop app carrying one) is offered by name. The tool runs once, in an empty folder, with every file's own text in its prompt and its own tools off where it has that switch (capability-data §6 lists each command). `src/draftbase.ts`.
+- **The draft opens as the base's ordinary review:** the base as it will be, then each file with the lines it keeps of its own. Lines of a file that the draft carries nowhere as written are noted under it. **Edit the draft** opens the base and each tool's part as text. One **Save** sets the base and each ticked file's own text (`BaseApply.own`), with the one Undo; an unticked file is not written, and a copy of the base edited in a file is left alone as before.
+- A tool that fails says why in its own words and changes nothing; Stop ends one that is writing; a draft made from a file that has since changed can't be saved.
+- Also on this card, for the hand-written flow too: a first base is shown as text rather than an all-added diff, "Show changes" for a file's diff, the tools' tick boxes sit beside their labels, and the start row is one line.
+
+**Validation.** Unit tests 8 new (`tests/draftbase.test.ts`), all passing with the rest. Linux e2e with a new flow (stand-in tools: a failing tool, Stop, review, edit, Save, Undo, a file changed after the draft). UI audits by Opus 5.5 (6 and 6 of 10 on the first design) and Fable 5.2 (7 and 6); their findings are applied; Astra could not run (ChatGPT usage limit). On macOS 26.6.2, a packaged ad hoc build opened through LaunchServices on the real home with four sample instruction files, driven over its debug port: Codex 0.167.0 and Claude Code 2.1.311 each wrote a draft (23 s and 8 s); Save wrote all four files and Undo put them back byte for byte; an edited draft with Pi unticked wrote three files and left Pi's alone; Copilot CLI and Pi failed with their own words on screen (a model that is not available; not signed in). Copilot CLI's command was exercised separately in a Terminal window with `--model auto`. The Mac's home was put back as it was.
+
+**Not done.** No Computer Use pass (another thread held the Mac's lock); the real window was driven over its debug port instead. A tool whose CLI is a `.cmd` shim on Windows is not handled (macOS only for now).
+

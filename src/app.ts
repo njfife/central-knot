@@ -41,8 +41,15 @@ export const harnessKindShown = (): Kind | undefined => { const tab = harnessTab
 export interface BaseEdit {
   text: string; hash: string; tools: HarnessId[]; stage: 'edit' | 'review';
   /** Where the draft came from: a tool's own instructions (they move into the base), a tool's edited copy (to use as the base),
-   *  the base going back into one tool whose copy was edited, the base written again where it is missing or older, or an earlier version. */
-  source?: { kind: 'own' | 'copy' | 'putBack' | 'update' | 'version'; tool?: HarnessId };
+   *  the base going back into one tool whose copy was edited, the base written again where it is missing or older, an earlier
+   *  version, or a draft one of the person's tools wrote from every tool's instructions. */
+  source?: { kind: 'own' | 'copy' | 'putBack' | 'update' | 'version' | 'draft'; tool?: HarnessId };
+  /** A draft a tool wrote (`source.kind` 'draft', `source.tool` wrote it): each sorted tool's own text as the draft left it, which
+   *  replaces that tool's own text on saving, and the hash of each file the draft was written from. */
+  own?: Partial<Record<HarnessId, string>>;
+  read?: Partial<Record<HarnessId, string>>;
+  /** The hash of the base that draft was written from. */
+  readBase?: string;
   confirmDiscard?: boolean; fullDiff?: boolean;
   /** Why the review is shown again: the base or a file changed since it was last shown. */
   conflict?: string;
@@ -90,6 +97,10 @@ export const state = {
   base: undefined as BaseView | undefined,
   /** The base being edited: its text and tools so far, the hash it was opened at, and where the draft came from. */
   baseEdit: undefined as BaseEdit | undefined,
+  /** The question of which tool writes a draft of the base is open on its card; `problem`: why the last try gave no draft. */
+  draftPick: undefined as { problem?: string } | undefined,
+  /** The tool writing a draft of the base right now. */
+  drafting: undefined as HarnessId | undefined,
   /** Sync notices the person has dismissed, by History event or item. */
   dismissed: new Set<string>(),
   // The page whose Apply result (and its Undo) stepped aside for a sync notice: the notice says where the Undo went.
@@ -229,6 +240,7 @@ function accept(view: HomeView) {
   // The base and its editor belong to the home they were read in.
   state.base = undefined;
   state.baseEdit = undefined;
+  state.draftPick = undefined;
   resetPageData(state.instructions);
   resetPageData(state.history);
   resetMarket();
@@ -739,8 +751,8 @@ const differsFromBase = (edit: BaseEdit) => {
 /** Saving this base draft does something: it differs from the base, or it starts somewhere (a tool's text, a copy, a version). */
 export const baseSaveDoesSomething = (edit: BaseEdit) => differsFromBase(edit) || !!edit.source;
 /** The open base editor holds work someone typed or chose. A review that only shows something stored (an edited copy, an
- *  earlier version, putting the base back, an update) holds none. */
-export const baseDraftTyped = () => { const edit = state.baseEdit; return !!edit && (!edit.source || edit.source.kind === 'own') && differsFromBase(edit); };
+ *  earlier version, putting the base back, an update) holds none; a draft a tool wrote took minutes to get, so it always counts. */
+export const baseDraftTyped = () => { const edit = state.baseEdit; return !!edit && (edit.source?.kind === 'draft' || ((!edit.source || edit.source.kind === 'own') && differsFromBase(edit))); };
 /** The open tool editor holds typed changes to that tool's own text (a stored version under review holds none). */
 export const toolDraftTyped = () => !!state.instructionEdit && !state.instructionEdit.restoring && draftUnsaved();
 
@@ -803,6 +815,7 @@ export function startBaseEdit(draft: Omit<BaseEdit, 'hash' | 'stage'> & { stage?
   if (askAboutOpenDraft()) return;
   if (state.outcome?.kind !== 'saved') state.outcome = undefined;
   if (!draftUnsaved()) state.instructionEdit = undefined;
+  state.draftPick = undefined;
   state.baseEdit = { stage: 'edit', ...draft, hash: state.base?.hash ?? '' };
   rerender();
   document.getElementById(state.baseEdit.stage === 'edit' ? 'base-text' : 'base-save')?.focus();
@@ -881,6 +894,76 @@ export const loadBaseVersion = (id: string) => askAboutOpenDraft() ? undefined :
   state.baseEdit = { text, hash: state.base?.hash ?? '', tools: state.base?.tools ?? [], stage: 'review', source: { kind: 'version' } };
   announce('Review going back to the earlier base instructions, then save to put them back.', true);
 });
+
+// ---------- A draft of the base, written by one of the person's tools (INS-06) ----------
+
+/** The files a tool's draft sorts: those with instructions of their own whose copy of the base wasn't edited there (the same
+ *  ones draftbase.ts gives the tool). */
+export const draftable = () => (state.instructions.data ?? []).filter(file => ownText(file).trim() && file.base?.state !== 'edited');
+
+/** What a draft was written from that holds something else now (files by tool, and the base itself): the draft knows nothing
+ *  of what changed there, so saving it would lose that. */
+export const draftStale = (edit: BaseEdit) => ({
+  files: (state.instructions.data ?? []).filter(file => edit.read?.[file.tool] !== undefined && edit.read[file.tool] !== file.hash),
+  base: edit.readBase !== undefined && edit.readBase !== (state.base?.hash ?? ''),
+});
+
+/** Opens the question of which tool writes the draft; an editor holding typed work is asked about first. */
+export function openDraftPick() {
+  if (askAboutOpenDraft()) return;
+  if (state.outcome?.kind !== 'saved') state.outcome = undefined;
+  if (!draftUnsaved()) state.instructionEdit = undefined;
+  state.baseEdit = undefined;
+  state.draftPick = {};
+  rerender();
+  document.getElementById(`base-draft-by-${state.base?.drafters[0]}`)?.focus();
+  document.getElementById('base-card')?.scrollIntoView({ block: 'nearest' });
+}
+export function closeDraftPick() {
+  state.draftPick = undefined;
+  rerender();
+  document.getElementById('base-draft')?.focus();
+}
+
+/**
+ * Has `tool` write a draft of the base from every tool's instructions, then opens it as a review: saving it there sets the
+ * base and updates each file in one step. Nothing is written before that. A failure is said where the tools are chosen, in
+ * the tool's own words, so another tool can be tried.
+ */
+export const draftBaseWith = (tool: HarnessId) => {
+  state.drafting = tool;
+  state.draftPick = {};
+  return busy(`${namedTools[tool]} is writing a draft of the base instructions…`, async () => {
+    try {
+      const result = await api().draftBase(tool, state.home!.home);
+      await rereadInstructions();
+      // A failure is read where it is said, so no tool's button looks chosen; after Stop, focus is back on the tool that was stopped.
+      const none = (why: string, problem = true) => { if (problem) state.draftPick = { problem: why }; focusAfterBusy = problem ? 'base-draft-problem' : `base-draft-by-${tool}`; announce(why); };
+      const draft = result.draft;
+      if (!draft) { none(result.cancelled ? 'Stopped. No draft was written, and nothing was changed.' : result.stopped ?? 'No draft was written.', !result.cancelled); return; }
+      // Written from the files as they were when it started: saving it over one that changed since would lose what is new there.
+      const files = state.instructions.data ?? [];
+      const changed = files.filter(file => draft.read[file.tool] !== undefined && draft.read[file.tool] !== file.hash).map(file => file.tool);
+      const base = state.base;
+      if (changed.length || draft.baseHash !== (base?.hash ?? '')) {
+        none(`${changed.length ? `${fileNames(changed)} changed` : 'The base instructions changed'} while the draft was being written, so the draft was dropped. Nothing was changed. Have it written again.`);
+        return;
+      }
+      // Every tool gets a first base, as when one is written by hand; a later draft keeps the list and adds the tools it sorted.
+      const sorted = Object.keys(draft.own);
+      const absent = (base?.tools ?? []).filter(listed => !files.some(file => file.tool === listed));
+      const tools = base?.text.trim() ? [...absent, ...files.map(file => file.tool).filter(each => base.tools.includes(each) || sorted.includes(each))] : files.map(file => file.tool);
+      state.draftPick = undefined;
+      state.baseEdit = { text: draft.base, hash: base?.hash ?? '', tools, stage: 'review', source: { kind: 'draft', tool }, own: draft.own, read: draft.read, readBase: draft.baseHash };
+      focusAfterBusy = 'base-save';
+      announce(`${namedTools[tool]} wrote a draft. Review it, then save to update the files.`, true);
+    } finally { state.drafting = undefined; }
+    // Focus is on Save, at the foot of the review; the page shows the draft from its top, where reading it starts.
+  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') document.getElementById('base-card')?.scrollIntoView({ block: 'start' }); });
+};
+
+/** Stops the draft being written; its request then answers that it was cancelled. */
+export const stopDraft = () => void api().cancelDraft();
 
 /**
  * The Undo an Apply all result offers: it names what it removes, and the tooltip says what stays. `alongside`: Disable, Enable or
