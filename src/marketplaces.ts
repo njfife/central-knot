@@ -1,7 +1,7 @@
 // Marketplaces in the main process: the list added here, each catalog as last read, what each tool has installed, and the
 // requests the Plugins page makes. Kept apart from the other features: createMarketplaces holds the logic as plain
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
-import { readFile, rm } from 'node:fs/promises';
+import { access, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
