@@ -137,6 +137,10 @@ export interface DesktopApi {
   /** The base instructions and the tools that get them (INS-03). */
   instructionBase(): Promise<BaseView | null>;
   applyBase(request: BaseApply, home: string): Promise<BaseResult>;
+  /** Has `tool` write a draft of the base from every tool's own instructions. Nothing is saved: the draft is reviewed first. */
+  draftBase(tool: HarnessId, home: string): Promise<BaseDraft>;
+  /** Stops the draft being written, if one is. */
+  cancelDraft(): Promise<void>;
   undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again, and `readId` (a view's) reuses the read that view was built from, when it is the latest. */
   plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
@@ -593,13 +597,23 @@ export interface InstructionVersion { id: string; at: string; firstLine: string;
 export interface InstructionSave { stopped?: string; saved?: boolean; problem?: string }
 
 /** The base instructions: one text Central Knot keeps in every chosen tool's file, after that tool's own text. */
-export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[] }
+export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[];
+  /** The tools on this computer that can write a draft of the base (INS-06): each has a CLI, or a desktop app carrying one. */
+  drafters: HarnessId[] }
 /** Set the base and its tools. `expected`: the base's hash when opened. `adopt`: the tool whose own text became the base.
- *  `overwrite`: tools whose edited copy is replaced by the base. */
+ *  `overwrite`: tools whose edited copy is replaced by the base. `own`: for a draft a tool wrote, each chosen tool's own text
+ *  as the draft sorted it, which replaces that tool's own text. */
 export interface BaseApply { text: string; expected: string; tools: HarnessId[];
   /** The files the review showed, by tool: the path and the hash it held then ('' for no file). Only these are written. */
   seen: Partial<Record<HarnessId, { path: string; hash: string }>>;
-  adopt?: HarnessId; overwrite?: HarnessId[] }
+  adopt?: HarnessId; overwrite?: HarnessId[]; own?: Partial<Record<HarnessId, string>> }
+/**
+ * A draft of the base written by one of the person's tools (INS-06): `stopped` says why there is none, `cancelled` that the
+ * person stopped it. The draft: who wrote it, the base, each sorted tool's own text (a tool's file that had none is not
+ * listed), and the hash of each file and of the base it was written from, so a review can tell what changed since.
+ */
+export interface BaseDraft { stopped?: string; cancelled?: true;
+  draft?: { by: HarnessId; base: string; own: Partial<Record<HarnessId, string>>; read: Partial<Record<HarnessId, string>>; baseHash: string } }
 /** What an apply or undo did per tool. */
 export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
   written: BaseWritten[];

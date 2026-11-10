@@ -56,6 +56,8 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 
+**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. Choose the tool (any with a CLI on this computer); it runs once and sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
+
 ### Plugins
 
 - **Marketplaces**: add one by Git URL, `owner/repo` or folder. A Git address is checked (`git ls-remote`) before it is added. Claude-format and Codex marketplaces (including `.agents/plugins/marketplace.json`) are read.

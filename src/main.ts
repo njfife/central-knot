@@ -14,6 +14,7 @@ import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
+import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
@@ -23,7 +24,7 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
 
@@ -681,6 +682,8 @@ async function startHome(): Promise<HomeView | null> {
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
+/** The draft of the base a tool is writing now, to stop it (draftbase.ts). */
+let drafting: AbortController | undefined;
 /** What a write answers when the page shows another home than the one open here. */
 const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
 
@@ -726,7 +729,8 @@ const isBaseApply = (value: unknown): value is BaseApply => {
   const request = value as BaseApply;
   return !!request && typeof request.text === 'string' && typeof request.expected === 'string' && isTools(request.tools)
     && isToolMap(request.seen, (seen: { path?: unknown; hash?: unknown }) => typeof seen?.path === 'string' && typeof seen.hash === 'string')
-    && (request.adopt === undefined || isTool(request.adopt)) && (request.overwrite === undefined || isTools(request.overwrite));
+    && (request.adopt === undefined || isTool(request.adopt)) && (request.overwrite === undefined || isTools(request.overwrite))
+    && (request.own === undefined || isToolMap(request.own, (text: unknown) => typeof text === 'string'));
 };
 const isBaseUndo = (value: unknown): value is BaseUndo => {
   const undo = value as BaseUndo;
@@ -811,7 +815,8 @@ const primary = smoke || app.requestSingleInstanceLock();
 if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
-app.on('before-quit', () => { quitting = true; });
+// A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
+app.on('before-quit', () => { quitting = true; drafting?.abort(); });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
 
@@ -820,6 +825,7 @@ app.whenReady().then(async () => {
   trimLog();
   await loadSyncSetting();
   await loadAppSettings();
+  void clearDraftFolders();
   applyAppearance();
   await firstSignIn();
   makeTray();
@@ -899,7 +905,26 @@ app.whenReady().then(async () => {
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));
   handle('instructions:version', async (tool, id) => (current && (tool === 'base' || isTool(tool)) && typeof id === 'string' ? instructionVersion(context(), tool, id) : undefined));
-  handle('instructions:base', async () => (current ? baseView(context()) : null));
+  // The tools that can write a draft are this computer's own, whichever home is on screen: the draft is written from the text
+  // it is given, so the tool never reads that home.
+  let drafters: Partial<Record<HarnessId, string>> = {};
+  handle('instructions:base', async () => {
+    if (!current) return null;
+    drafters = await draftTools(homedir(), await searchPath());
+    return baseView(context(), harnessIds.filter(tool => drafters[tool]));
+  });
+  // The files are read in turn with everything else; the tool then writes its draft outside the queue (it can take minutes,
+  // and writes nothing), so sync never waits behind it.
+  handleNow('instructions:draft-base', async (tool, home): Promise<BaseDraft> => {
+    if (home !== current?.home || !isTool(tool)) return { stopped: notOpenHome };
+    const binary = drafters[tool];
+    if (!binary) return { stopped: 'That tool was not found on this computer, so it can’t write a draft.' };
+    if (drafting) return { stopped: 'A draft is already being written.' };
+    const mine = drafting = new AbortController();
+    try { return await writeDraft(await queued(async () => draftSources(context(), await read())), tool, binary, { signal: mine.signal }); }
+    finally { if (drafting === mine) drafting = undefined; }
+  });
+  handleNow('instructions:cancel-draft', async () => { drafting?.abort(); });
   const otherHome = { stopped: notOpenHome, written: [], left: [] };
   handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
   handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));

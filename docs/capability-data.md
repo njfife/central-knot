@@ -175,6 +175,18 @@ Bind the file a reader actually uses, and never create a higher-precedence file 
 | Pi | `~/.pi/agent/AGENTS.md` | A new `AGENTS.md` beside `CLAUDE.md` shadows it (tested): warn. `AGENTS.override.md` is documented, untested: bind it if present |
 | OpenCode | `~/.config/opencode/AGENTS.md` | Needed for 2.x. On 1.x it replaces the `~/.claude/CLAUDE.md` fallback (Linux stub) |
 
+**One non-interactive answer from each tool (INS-06).** The prompt goes in on standard input, the tool runs in an empty folder, and the answer is read from standard output, except Codex, whose answer is the file named with `-o`.
+
+| Tool | Command | Evidence |
+| --- | --- | --- |
+| Claude Code | `claude -p --tools "" --strict-mcp-config --no-session-persistence` | Exercised, Linux, 2.1.322: answer alone on standard output; a sign-in warning goes to standard error. Signed out it prints `Not logged in · Please run /login` and exits 1 |
+| Codex | `codex exec --skip-git-repo-check --sandbox read-only --ephemeral --color never -o <file> -` | Exercised, macOS, 0.167.0: progress on standard output, the answer alone in the file |
+| Pi | `pi -p --no-tools --no-session` | Exercised, Linux, 1.5.2: answer alone on standard output; extension warnings go to standard error |
+| Copilot CLI | `copilot -s --no-color --no-ask-user` | Exercised, macOS, 1.0.107, from a Terminal window with `--model auto`: a piped prompt is answered, the answer alone on standard output, and a shell command the prompt asked for did not run (no approval). With a configured model that is unavailable it prints `Execution failed: Model "…" is not available.` and exits 1. Each run leaves a session in `~/.copilot/session-state` (no switch for that) |
+
+Over SSH on macOS, Claude Code and Copilot CLI cannot reach the login keychain and report that they are signed out; from the signed-in desktop session they can. From Central Knot opened through Finder's launcher on macOS (November 10, 2026), Codex 0.167.0 and Claude Code 2.1.311 each wrote a draft from four real files, in 23 and 8 seconds.
+
+
 ## 7. Marketplaces and plugins
 
 **Private GitLab route per surface.** No row has been tested against real GitLab [VF §4a].
