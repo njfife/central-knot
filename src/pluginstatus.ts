@@ -351,6 +351,14 @@ export function copyStale(entry: MarketplaceView, plugin: string, tool: HarnessI
 }
 
 /**
+ * The plugins whose files the list reads in the background, so copyStale is known without their pages being opened: those
+ * some tool has installed, other than as a copy loaded live from a folder marketplace (never stale).
+ */
+export const copiesToCompare = (view: PluginsView, entry: MarketplaceView): string[] => entry.plugins
+  .filter(plugin => view.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; }))
+  .map(plugin => plugin.name);
+
+/**
  * Whether Update is offered for a tool's installed copy: it is older than the version `offered` (another version than
  * the marketplace's, see versionDiffers, and not a newer one), or the same version with other content (copyStale, once
  * `detail` is read). A copy loaded live from a folder marketplace is always its own.

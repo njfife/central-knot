@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, partsOffer, comparableText, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
-import { readInto, type Read } from '../src/reads.ts';
+import { blocked, partsOffer, comparableText, copiesToCompare, copyStale, installsIn, limitNote, offeredVersion, partStillIn, pluginPlace, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable, updateTools } from '../src/pluginstatus.ts';
+import { readInTurn, readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
 const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name: 'm', kind: 'git', sourceLabel: 'GitHub: a/b', plugins: [{ name: 'p', description: '' }],
@@ -81,6 +81,36 @@ test('A background read is kept only while its own placeholder is still there', 
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(map.get('k'), { reading: false, value: 'fresh' });
   assert.equal(done, 1);
+});
+
+test('The list compares the files of plugins some tool has installed, a few at a time, each once', async () => {
+  const listed: MarketplaceView = { ...entry, plugins: ['p', 'q', 'r', 's'].map(name => ({ name, description: '' })), states: {
+    p: { 'claude-cli': { state: 'installed', path: '/x' } }, q: { 'codex-cli': { state: 'installed', path: '/y', live: true } }, r: { 'codex-cli': { state: 'held', reason: 'other' } }, s: {} } };
+  // Only p: q is loaded live from its folder (never stale), r is another marketplace's, s isn't installed.
+  assert.deepEqual(copiesToCompare(view, listed), ['p']);
+  const map = new Map<string, Read<string>>();
+  const releases = new Map<string, () => void>();
+  let landed = 0;
+  const turn = readInTurn(map, 2, () => { landed++; });
+  const read = (key: string) => [key, () => new Promise<string>(resolve => releases.set(key, () => resolve(key)))] as [string, () => Promise<string>];
+  map.set('known', { reading: false, value: 'kept' });
+  turn.set([read('known'), read('a'), read('b'), read('c'), read('d')]);
+  assert.deepEqual([...releases.keys()], ['a', 'b'], 'two at a time; one already read is not read again');
+  assert.deepEqual(map.get('a'), { reading: true, quiet: true }, 'nothing on screen says it is reading');
+  assert.equal(map.has('c'), false, 'one waiting has no placeholder yet');
+  // A new list replaces what waits (c and d), and a read still under way carries on.
+  turn.set([read('e')]);
+  releases.get('a')!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual([...releases.keys()], ['a', 'b', 'e']);
+  assert.deepEqual(map.get('a'), { reading: false, value: 'a' });
+  // A read whose placeholder went (a new view) is dropped when it lands.
+  map.delete('b');
+  releases.get('b')!();
+  releases.get('e')!();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(map.has('b'), false);
+  assert.equal(landed, 2);
 });
 
 test('A tool\'s installs say what is installed, what could not be checked and which marketplace could not be read', () => {

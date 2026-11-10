@@ -103,6 +103,16 @@ export interface DesktopApi {
   showLog(): Promise<ShownLog>;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
+  /** Updates (updates.ts): what this build is, whether it can update itself, and the last check or update. */
+  updates(): Promise<UpdateView>;
+  /** Asks GitHub now for a newer release; answers once the check is done. */
+  checkForUpdates(): Promise<UpdateView>;
+  /** Downloads the newer release and prepares it; progress and the outcome come through onUpdatesChanged. */
+  installUpdate(): Promise<UpdateView>;
+  /** Restarts into the prepared update, once no write is under way. */
+  restartToUpdate(): Promise<void>;
+  /** Main's update state changed (a check, download progress, ready, failed). */
+  onUpdatesChanged(callback: (view: UpdateView) => void): void;
   /** `choice`: which overwritten edit to put back, for an event with several. */
   restore(eventId: string, resume: boolean, home: string, choice?: string): Promise<ApplyResult>;
   deleteEverywhere(key: string, resume: boolean, home: string): Promise<ApplyResult>;
@@ -116,8 +126,8 @@ export interface DesktopApi {
   showFile(path: string): Promise<void>;
   /** A marketplace's own README, from the copy already read. */
   marketplaceReadme(source: string): Promise<string | null>;
-  /** One plugin's contents and README; null when its files can't be found. */
-  pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
+  /** One plugin's contents and README; null when its files can't be found, or with `local` when they would have to be fetched first. */
+  pluginDetail(source: string, plugin: string, local?: boolean): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
   /** `restoring`: an earlier version put back (or a save undone): its base copy is judged again, counting as one Central Knot
@@ -329,7 +339,7 @@ export interface HistoryEvent {
    * what Undo puts back), and a hash of what it wrote (Undo goes ahead only while the file still holds that).
    */
   settingsFile?: { path: string; kept: string; wrote: string };
-  /** 'deleted' by Pull, of the base instructions (key 'instructions:base'): what the base's own Undo puts back, the base and its tools. */
+  /** 'edit' or 'deleted' by Pull, of the base instructions (key 'instructions:base'): what the base's own Undo puts back, the base and its tools. */
   base?: BaseUndo;
 }
 
@@ -623,6 +633,22 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+/** Why this copy can't update itself (see updates.ts for each one's words). */
+export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
+/** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */
+export interface UpdateRelease { tag: string; zip: string; size: number; page: string }
+/**
+ * Updates as the main process has them. `shown`: false where there are no releases (not macOS), and nothing is said anywhere.
+ * `tag`: the release tag this build was made from; `reason`: why it can't update itself. `checked`: the last check, and why
+ * it failed. `available`: a newer release; `step` and `progress` (0 to 1): an update under way; `failed`: why the last update
+ * stopped (the installed app unchanged). `updated`: this launch is the first after an update to that release.
+ */
+export interface UpdateView {
+  shown: boolean; version: string; tag?: string; reason?: { key: UpdateReason; text: string };
+  checking: boolean; checked?: { at: number; failed?: string };
+  available?: UpdateRelease; step?: 'downloading' | 'installing' | 'ready'; progress?: number; failed?: string;
+  updated?: { tag: string; page: string };
+}
 /** How many days History keeps changes and deleted items (Settings); the choices are in model.ts. */
 export type HistoryDays = 7 | 30 | 90;
 /**
