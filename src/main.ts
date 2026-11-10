@@ -23,8 +23,9 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
+import { startUpdater, type PendingUpdate } from './updater.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -33,6 +34,12 @@ function log(line: string) {
   try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
+// Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
+// a test build carries its throwaway home, data folder and debug port in its environment (Info.plist LSEnvironment) instead
+// of HOME, --user-data-dir and --remote-debugging-port (scripts/update-proof.mjs).
+if (process.env.CK_TEST_HOME) process.env.HOME = process.env.CK_TEST_HOME;
+if (process.env.CK_TEST_USER_DATA) app.setPath('userData', process.env.CK_TEST_USER_DATA);
+if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.CK_TEST_DEBUG_PORT);
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
 const BUILD = 'com.centralknot.firstlook';
@@ -117,14 +124,14 @@ async function saveSyncSetting(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
@@ -247,6 +254,7 @@ const startedHidden = () => process.argv.includes('--hidden') || (process.platfo
 
 let tray: Tray | undefined;
 let quitting = false;
+let updater: ReturnType<typeof startUpdater> | undefined;
 /** Sync changed something while the window was closed or in the background: the menu bar icon shows it until seen. */
 let unseen = false;
 function showWindow() {
@@ -355,6 +363,7 @@ function appMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: app.name, submenu: [
       { role: 'about' },
+      { label: 'Check for Updates…', click: () => { showPage('settings/updates'); void updater?.check(); } },
       { label: 'Settings…', accelerator: 'Command+,', click: () => showPage('settings') },
       profileMenu(),
       // The same status line as the menu bar menu: where, and any news.
@@ -798,6 +807,18 @@ app.whenReady().then(async () => {
     return changeHistoryWindow(days);
   });
   handleNow('settings:show-log', showLog);
+  // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
+  updater = smoke ? undefined : startUpdater({
+    log, send: view => send('updates:changed', view), hasPage: () => !!window && !window.isDestroyed(),
+    // The restart also waits for Central Knot's own settings file, which is written outside the queue.
+    queued: work => queued(async () => { await settingsWrites; return work(); }),
+    pending: () => appSettings.update, savePending: update => saveAppSettings({ update }), quitting: on => { quitting = on; },
+  });
+  const noUpdates = async (): Promise<UpdateView> => ({ shown: false, version: app.getVersion(), checking: false });
+  handleNow('updates:view', () => updater?.view() ?? noUpdates());
+  handleNow('updates:check', () => updater?.check() ?? noUpdates());
+  handleNow('updates:install', () => updater?.install() ?? noUpdates());
+  handleNow('updates:restart', async () => { await updater?.restart(); });
   handle('discovery:select', async mode => {
     if (!['fixture', 'custom', 'actual'].includes(String(mode))) throw new Error('Invalid home selection.');
     if (smoke && mode !== 'fixture') throw new Error('Smoke test is fixture-only.');
