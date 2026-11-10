@@ -36,14 +36,14 @@ export function standing(history: HistoryEvent[], undoing?: HistoryEvent): Histo
 
 /**
  * Whether a switch `past` flipped was changed again after it, so an Undo of `past` leaves it: by hand (a Disable or Enable on the
- * Skills page, or its Undo: each one is a choice made by hand, even when an Undo cancels the other) or by a later profile switch
- * that still stands.
+ * Skills or MCP servers page, or its Undo: each one is a choice made by hand, even when an Undo cancels the other) or by a later
+ * profile switch that still stands. A server's 'switched' event is keyed "mcp:<name>", which is its profile item id already.
  */
 export function changedSince(history: HistoryEvent[], past: HistoryEvent): (flip: Pick<ProfileFlip, 'item' | 'tool'>) => boolean {
   const later = history.slice(history.indexOf(past) + 1);
   const at = (item: string, tool: HarnessId) => `${item}|${tool}`;
   const touched = new Set([
-    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => at(itemId('skill', entry.key), tool))),
+    ...later.filter(entry => entry.kind === 'switched').flatMap(entry => (entry.switched ?? []).map(({ tool }) => at(entry.key.startsWith('mcp:') ? entry.key : itemId('skill', entry.key), tool))),
     ...standing(later).filter(entry => entry.kind === 'profile').flatMap(entry => entry.profile?.flips.map(flip => at(flip.item, flip.tool)) ?? []),
   ]);
   return flip => touched.has(at(flip.item, flip.tool));

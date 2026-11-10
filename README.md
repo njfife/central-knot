@@ -37,7 +37,7 @@ Skills also have, per tool and for any skill, managed or not:
 - **Remove** takes that tool's copy out. History keeps it for Restore.
 - **Delete everywhere** (unmanaged skills) removes every copy Central Knot may change, kept in History.
 
-MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone.
+MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone. Open a server to **disable or enable** it in one tool, with that tool's own switch (the table under Profiles); its entry stays, and History has the Undo.
 
 Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
 
@@ -78,7 +78,7 @@ A profile is a named set of skills and MCP servers to have on, such as *Incident
 | Pi | a `-skills/…` filter in `settings.json` | `"enabled": false` in `mcp.json` |
 
 - A switch is one History row, and **Undo switch** puts back what it changed.
-- A skill you disabled by hand stays off; profiles only turn back on what a profile turned off.
+- A skill or server you disabled by hand stays off; profiles only turn back on what a profile turned off.
 - A managed item a profile turned off still receives edits. Profiles never change Managed.
 - Agents have no off switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json`. A switch takes effect from each tool's next session.
 
