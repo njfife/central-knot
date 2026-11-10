@@ -20,6 +20,8 @@ export const repo = {
   draftBranch: '',
   /** What stopped the last Connect, Pull, Push or Disconnect, in plain words. */
   problem: undefined as string | undefined,
+  /** Which field the last failed Connect points at. */
+  problemField: 'url' as 'url' | 'branch',
   /** Disconnect asks once, in place. */
   confirmDisconnect: false,
 };
@@ -64,7 +66,7 @@ export async function loadRepo(check = false): Promise<void> {
   // What the check found, in the status bar, so it never disagrees with the page.
   if (view?.connected && state.page === 'repo') {
     const { pull: toPull, push: toPush } = waitingCounts(view);
-    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? pushCountText(view, toPush) : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
+    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
   }
   rerender();
 }
@@ -87,8 +89,8 @@ const connect = () => busy('Connecting to the repo…', async () => {
   const waiting = view.connected ? waitingCounts(view).pull : 0;
   await settle(result, `Connected. Nothing changed in your tools${waiting ? `; Pull brings in ${plural(waiting, 'item')} from the repo` : ''}.`);
   if (!result.stopped) { repo.draftUrl = ''; repo.draftBranch = ''; }
-  // A failed Connect points at what to fix: the address, marked invalid until it is edited.
-  else requestAnimationFrame(() => document.getElementById('repo-url')?.focus());
+  // A failed Connect points at what to fix (the branch, when the branch was refused; else the address), marked until edited.
+  else { repo.problemField = result.field ?? 'url'; requestAnimationFrame(() => document.getElementById(`repo-${repo.problemField}`)?.focus()); }
 });
 
 const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard) keepFocus('repo-pull'); });
@@ -104,7 +106,7 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   const rest = [missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
     claudeWaits.length ? `To add ${andList(claudeWaits)} to Claude Code, close Claude Code, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
   // One wording for the promise, always with History one click away.
-  await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : 'any of them'} in History.` : undefined);
+  await settle(result, [text, ...rest].join(' '), count ? `Undo ${count === 1 ? 'it' : `any of the ${count}`} in History.` : undefined);
   if (claudeWaits.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
@@ -187,6 +189,12 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
 
 /** Changes waiting each way, leaving out items that can't move. */
 export const waitingCounts = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
+
+/** "The same commit", and what of it hasn't come in, so the facts stay true when an item is held. */
+function sameCommitText(view: Extract<RepoView, { connected: true }>): string {
+  const held = view.incoming.filter(change => change.held && !change.retry).length;
+  return held ? `The same commit, except ${plural(held, 'item')} that can’t come in` : 'The same commit';
+}
 
 /** Push's count as the toolbar and status bar say it: waiting on Pull when Push can't run yet. */
 const pushCountText = (view: Extract<RepoView, { connected: true }>, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
@@ -278,9 +286,9 @@ function connectedPage(view: Extract<RepoView, { connected: true }>) {
         h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), h('span.mono.repo-url', {}, view.url), h('span.repo-branch', { title: 'Branch' }, view.branch)),
         h('dl.facts.repo-facts', {},
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
-          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, 'The same commit')),
+          h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(view))),
           h('dt', {}, 'Activity'), h('dd', {}, h('span.repo-activity', {}, activity)))),
-      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `What differs is from the last time the repo could be reached${view.latest ? '' : ' (never, so far)'}; Pull and Push wait until it can be reached again.`) : null,
+      view.problem ? h('p.repo-stale', { id: WAITING_ID }, icon('info', 12), `${view.latest ? 'These lists are from the last time the repo was reached' : 'The repo hasn’t been reached yet'}; Pull and Push wait until it can be.`) : null,
       inSync && view.branchGone ? h('div.repo-in-sync', {}, h('span', {}, `Nothing else differs. Push puts the branch ${view.branch} back in the repo.`), pushControl)
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
         : inSync ? h('p.repo-in-sync', {}, 'Nothing to pull or push. Refresh checks the repo for new commits.')
@@ -316,7 +324,7 @@ function connectForm(allowed: boolean) {
   const field = (id: string, label: string, placeholder: string, value: string, set: (text: string) => void, hint?: string, below?: Node) => h('div.repo-field', {},
     h('label.market-add-label', { for: id }, label, hint ? h('span.repo-field-hint', {}, hint) : null),
     h('input.market-add-input', { id, type: 'text', placeholder, value, spellcheck: 'false', autocomplete: 'off', disabled: !!state.busy || !allowed, 'aria-describedby': below ? `${id}-below` : undefined,
-      'aria-invalid': id === 'repo-url' && repo.problem ? 'true' : undefined,
+      'aria-invalid': repo.problem && id === `repo-${repo.problemField}` ? 'true' : undefined,
       // Typing a new address or branch answers the last failure: its band goes.
       oninput: (event: Event) => { set((event.target as HTMLInputElement).value); if (repo.problem) { repo.problem = undefined; rerender(); } refresh(); }, onkeydown: (event: KeyboardEvent) => { if (event.key === 'Enter') go(); } }),
     below ? h('span.repo-field-below', { id: `${id}-below` }, below) : null);

@@ -443,4 +443,4 @@ export type RepoView =
     branchGone?: boolean;
   };
 
-export interface RepoResult { view: RepoView; stopped?: string; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }
+export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the field the refusal concerns. */ field?: 'url' | 'branch'; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }

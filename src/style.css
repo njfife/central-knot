@@ -319,7 +319,7 @@ ul { list-style: none; }
 .tool-title { flex: none; font-size: 14px; line-height: 20px; font-weight: 600; }
 .tool-body { padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px 24px; }
 .tool-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-@container (min-width: 704px) { .tool-body { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); } }
+@container (min-width: 704px) { .tool-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 .link-row { margin-left: -8px; }
 .plain-list { display: flex; flex-direction: column; gap: 4px; }
 
@@ -1349,8 +1349,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 
 
 /* Git repo: the Managed set kept in a git repo, with Pull and Push. */
-.repo-state { display: inline-flex; align-items: center; gap: 16px; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; }
-.repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+/* The state line wraps to a second row rather than clip; each part stays whole. */
+.repo-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-width: 0; font-weight: 500; }
+.toolbar.repo-toolbar { height: auto; min-height: 37px; padding-top: 4px; padding-bottom: 4px; }
+.repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
 .repo-state-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* This page spans the window: its header, bands and empty state are not held to the older 900px content edge. */
 body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; }
@@ -1366,7 +1368,10 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-address > svg { flex: none; }
 /* The address wraps rather than shortening: it is how a user knows which repo is in use. */
 .repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
-.repo-page .market-add-input[aria-invalid='true'] { border-color: var(--danger); }
+.repo-page .market-add-input[aria-invalid='true'], .repo-page .market-add-input[aria-invalid='true']:focus { border-color: var(--danger); outline-color: var(--danger); }
+/* Bands on this page pin their icon to the first line, as its notes do. */
+.repo-page > .bands > .band { align-items: flex-start; }
+.repo-page > .bands > .band > svg { margin-top: 1px; }
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
 .repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
 .repo-facts dd { min-width: 0; }
@@ -1414,7 +1419,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
 #repo-disconnect-confirm { border-color: currentColor; }
 /* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
-.repo-page .band-done .tone-faint { color: inherit; }
+.repo-page .band-done .tone-faint { color: inherit; opacity: 1; }
 /* Wide windows: the intro lines up with the form and "What goes where" below it. */
 /* The intro lines up with the form at every width, as the connected page does. */
 .repo-page > .scroll > .empty { align-items: flex-start; text-align: left; }
@@ -1428,7 +1433,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-start { width: 100%; display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
 .repo-start-side { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; }
 /* Wide windows: the form and what goes where sit side by side, so the start page uses the room instead of a narrow column. */
-@container (min-width: 960px) { .repo-start { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
+@container (min-width: 960px) { .repo-start { width: 100%; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
 .repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
 .repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .repo-fields { display: flex; flex-direction: column; gap: 12px; }

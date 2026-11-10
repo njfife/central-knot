@@ -512,7 +512,7 @@ export function connectRepo(context: ShareContext, url: string, branch: string, 
     if (!address) return refusal(context, 'Enter the repo’s address: the one you would give `git clone`.', options.base);
     // An option-looking value would reach git as a flag: refused, like a branch name git itself would refuse.
     if (address.startsWith('-')) return refusal(context, 'That isn’t a repo address.', options.base);
-    if (wanted && (wanted.startsWith('-') || (await runGit(['check-ref-format', '--branch', wanted], 10_000)).code !== 0)) return refusal(context, `“${wanted}” isn’t a branch name git accepts.`, options.base);
+    if (wanted && (wanted.startsWith('-') || (await runGit(['check-ref-format', '--branch', wanted], 10_000)).code !== 0)) return { ...await refusal(context, `“${wanted}” isn’t a branch name git accepts.`, options.base), field: 'branch' };
     if (await openClone(context)) return refusal(context, 'A repo is already connected. Disconnect it first.', options.base);
     const dir = cloneFolder(context.home);
     const stage = `${dir}.${randomUUID()}`;
@@ -524,7 +524,7 @@ export function connectRepo(context: ShareContext, url: string, branch: string, 
       const empty = !(await commitOf(stage, 'HEAD'));
       const head = (await git(stage, ['symbolic-ref', '--short', 'HEAD'])).output.trim();
       const chosen = wanted || (empty ? 'main' : head) || 'main';
-      if (!empty && !(await commitOf(stage, `refs/remotes/origin/${chosen}`))) { await removeTree(stage); return refusal(context, `That repo has no branch named “${chosen}”.`, options.base); }
+      if (!empty && !(await commitOf(stage, `refs/remotes/origin/${chosen}`))) { await removeTree(stage); return { ...await refusal(context, `That repo has no branch named “${chosen}”.`, options.base), field: 'branch' }; }
       // The clone keeps line endings and file names exactly as written, whatever this computer's git settings say.
       for (const [name, value] of [['core.autocrlf', 'false'], ['core.precomposeunicode', 'true'], ['core.quotepath', 'false']]) await gitOrThrow(stage, ['config', name, value]);
       if (empty) await gitOrThrow(stage, ['symbolic-ref', 'HEAD', `refs/heads/${chosen}`]);
