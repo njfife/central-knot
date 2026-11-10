@@ -164,8 +164,10 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
     : { added: 'New here', changed: 'Changed here', removed: 'Removed here' }[change.change];
   // Held from the repo: Push never touches it there (unless it was only waiting on the last Pull, which Pull retries).
   // Held: what can't happen is said in warning colour; the why, in the note's own soft ink.
-  const heldLead = (lead: string, rest: string) => [h('span.tone-warning', {}, lead), ` ${rest}`];
-  const note = change.held ? (side === 'in' ? heldLead('Can’t come in.', `${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}`) : heldLead('Stays out of the repo.', change.held))
+  // (One span, so the note's flex row keeps lead and reason as one wrapping sentence.)
+  const heldLead = (lead: string, rest: string) => h('span', {}, h('span.tone-warning', {}, lead), ` ${rest}`);
+  const note = change.held ? (side === 'out' ? heldLead('Stays out of the repo.', change.held)
+    : change.retry ? heldLead('Didn’t come in yet.', change.held) : heldLead('Can’t come in.', `${change.held} Push leaves it in the repo as it is.`))
     : change.alsoHere === 'removed' ? 'Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.'
     : change.alsoHere === 'unmanaged' ? `${/^[aeiou]|^MCP/i.test(kind.label) ? 'An' : 'A'} ${kind.label.replace(/^[A-Z][a-z]/, word => word.toLowerCase())} named ${change.name} is already in your tools, not Managed. Pull replaces it; yours stays in History.`
     : change.alsoHere ? `Changed here too. Pull uses the repo’s version; yours stays in History.`
