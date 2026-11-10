@@ -337,7 +337,8 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
     h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}`, { type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`, disabled: state === 'cannot' || (!!skill.held && !differs), 'data-state': state,
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
-      adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'glyph-fill' : '') : null,
+      // A managed item's empty box is a tool left out on purpose: a faint dash tells it from "no copy" (unmanaged, dotted).
+      adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, state === 'present' ? 13 : 16, state === 'present' ? 'glyph-fill' : '') : state === 'absent' && skill.managed ? icon('minus', 12, 'tone-faint') : null,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
       on && kind === 'agents' && skill.managed && oneWaySource(skill) === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
 }
@@ -688,7 +689,7 @@ function legend(list: SampleSkill[]) {
     seen.has('present') || seen.has('off') ? entry('Has its own copy', swatch('present', false)) : null,
     // A managed item's empty box is a tool left out of syncing (solid); an unmanaged item's is just no copy (dotted).
     list.some(skill => !skill.managed && toolList().some(tool => cellOf(skill, tool) === 'absent')) ? entry('No copy', swatch('absent', false)) : null,
-    list.some(skill => skill.managed && toolList().some(tool => cellOf(skill, tool) === 'absent')) ? entry('Left out of syncing', h('span.legend-cell.legend-left-out', { 'aria-hidden': 'true' })) : null,
+    list.some(skill => skill.managed && toolList().some(tool => cellOf(skill, tool) === 'absent')) ? entry('Left out of syncing', h('span.legend-cell.legend-left-out', { 'aria-hidden': 'true' }, icon('minus', 10, 'tone-faint'))) : null,
     seen.has('cannot') ? entry('Can’t load it', swatch('cannot', false)) : null,
     // The dashed blue Managed switch is a pending mark too.
     list.some(skill => view.draft.has(skill.key) && skill.managed && !committedOf(skill.key).managed) ? entry('Becomes Managed on Apply all', h('span.legend-switch', { 'aria-hidden': 'true' }, h('span.switch-knob'))) : null);
@@ -980,7 +981,7 @@ function helpBand(): HTMLElement | null {
     h('span.band-text.band-lines', {},
       h('span', {}, `Turn on Managed to keep ${one} the same in every tool you include. Nothing is written until Apply all.`),
       h('span.tone-muted', {}, ...(kind === 'agents' && list.some(skill => Object.keys(skill.limits ?? {}).length)
-        ? [focus ? 'Tick a tool’s box to add an agent there; once it’s Managed, untick a box to leave that tool out.' : 'Once it’s Managed, click a tool’s box to leave that tool out.']
+        ? [focus ? 'Tick a tool’s box to add an agent there; once it’s Managed, untick a box to leave that tool out. “One-way” means edits flow only from the tool named.' : 'Once it’s Managed, click a tool’s box to leave that tool out.']
         : ['Click a tool’s box to include it or leave it out. Turning Managed off keeps existing copies.']))),
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }
@@ -994,7 +995,7 @@ export function caughtUpBand(manage: ManageView, items: string[]): HTMLElement |
   if (!items.length || state.dismissed.has(key)) return null;
   const tools = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && items.includes(result.item) && result.harness).map(result => names[result.harness!]))];
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}. To stop a tool getting a skill back, turn that tool off for it.`),
+    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}, because ${items.length === 1 ? 'it is' : 'they are'} Managed. To leave a tool out, click its box on that row.`),
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
