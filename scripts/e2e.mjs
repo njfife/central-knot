@@ -1577,6 +1577,40 @@ async function practiceFlow() {
  * The base instructions through a git repo, in two homes, as people click it: Push from one, Pull into the other, an edit, and
  * a deletion, said before Pull, carried out by the base's own apply and undone from History (the base and its tools come back).
  */
+/**
+ * The Plugins list knows, after a fresh launch and with no plugin's page opened, that a tool's copy differs from the
+ * marketplace's at the same version: it reads the installed plugins' files in the background once the list is drawn.
+ */
+async function listDiffersFlow() {
+  const home = join(scratch, 'home-list-differs'), data = join(scratch, 'list-differs-data'), market = join(scratch, 'market-list-differs');
+  writeMarket(market, 'ck-test-market');
+  const marketText = path => readFileSync(join(market, 'plugins', path), 'utf8');
+  // Claude Code has three plugins at the marketplace's versions: two edited by hand since, one as the marketplace has it.
+  writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', '2.0.0', { 'skills/triage/SKILL.md': `${marketText('issue-tracker/skills/triage/SKILL.md')}\nA line added by hand.\n` });
+  writeClaudeInstall(home, 'ck-test-market', 'document-tools', '1.2.0', { 'skills/pdf-reader/SKILL.md': marketText('document-tools/skills/pdf-reader/SKILL.md'), 'skills/spreadsheet/SKILL.md': `${marketText('document-tools/skills/spreadsheet/SKILL.md')}\nMine.\n` });
+  writeClaudeInstall(home, 'ck-test-market', 'release-helper', '0.4.1', { 'commands/release-notes.md': marketText('release-helper/commands/release-notes.md'), 'agents/release-reviewer.md': marketText('release-helper/agents/release-reviewer.md') });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const first = await launch(data);
+  same('the marketplace is added', await first.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await first.quit();
+  const a = await launch(data);
+  const row = name => `[data-plugin="${name}"] .plugin-row-warning`;
+  const started = Date.now();
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 200 && !(await a.exists('[data-plugin="issue-tracker"]')); tries++) await wait(10);
+  const drawn = Date.now() - started;
+  for (let tries = 0; tries < 100 && !(await a.exists(row('document-tools'))); tries++) await wait(50);
+  const known = Date.now() - started;
+  await a.settle();
+  same('after a fresh launch, with no plugin page opened, the list says which copies differ and offers Update', [await a.text(row('issue-tracker')), await a.text(row('document-tools')), await a.exists(row('release-helper')),
+    await a.text('#pupdate-0-issue-tracker'), await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), /2 plugins have an update/.test(await a.text('#plugins-scroll') ?? ''), await a.exists('#plugin-back')],
+  ['Claude Code differs from the marketplace’s copy', 'Claude Code differs from the marketplace’s copy', false, 'Update in Claude Code', 'outdated', true, false]);
+  console.log(`(Plugins list drawn ${drawn} ms after opening it; the differing copies known after ${known} ms)`);
+  same('no page errors, list differs', a.pageErrors, []);
+  await a.quit();
+}
+
 async function repoBaseFlow() {
   const git = (...rest) => spawnSync('git', rest, { encoding: 'utf8' });
   if (git('--version').status !== 0) { console.log('repo base: skipped, no git on this machine'); return; }
@@ -1945,6 +1979,7 @@ try {
   await practiceFlow();
   await releasedStartupFlow();
   await fewToolsFlow();
+  await listDiffersFlow();
   await repoBaseFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
