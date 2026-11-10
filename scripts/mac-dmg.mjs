@@ -11,6 +11,13 @@ const appName = 'Central Knot.app';
 const customIconFlag = '0000000000000000040000000000000000000000000000000000000000000000';
 
 const run = (command, args, options) => execFileSync(command, args, { stdio: ['ignore', 'ignore', 'inherit'], ...options });
+// macOS can still be holding an image it was just handed ("Resource busy"); a moment later it mounts.
+const attach = (image, mount, ...flags) => {
+  for (let tries = 1; ; tries++) {
+    try { return run('/usr/bin/hdiutil', ['attach', image, '-nobrowse', '-noautoopen', '-mountpoint', mount, ...flags]); }
+    catch (error) { if (tries === 3) throw error; run('/bin/sleep', ['2']); }
+  }
+};
 // A disk that Spotlight or Finder has just looked at can refuse to eject once.
 const detach = mount => { try { run('/usr/bin/hdiutil', ['detach', mount]); } catch { run('/usr/bin/hdiutil', ['detach', mount, '-force']); } };
 
@@ -33,7 +40,7 @@ export function buildDmg({ bundle, dmg, identity, notaryProfile }) {
     const writable = join(work, 'writable.dmg');
     const mount = join(work, 'volume');
     run('/usr/bin/hdiutil', ['create', '-volname', volumeName, '-srcfolder', stage, '-fs', 'HFS+', '-format', 'UDRW', writable]);
-    run('/usr/bin/hdiutil', ['attach', writable, '-nobrowse', '-noautoopen', '-mountpoint', mount]);
+    attach(writable, mount);
     try {
       run('/usr/bin/xattr', ['-wx', 'com.apple.FinderInfo', customIconFlag, mount]);
       rmSync(join(mount, '.fseventsd'), { recursive: true, force: true });
@@ -50,7 +57,7 @@ export function buildDmg({ bundle, dmg, identity, notaryProfile }) {
     }
 
     // What someone who opens it gets: the app, intact, and a shortcut that leads to Applications.
-    run('/usr/bin/hdiutil', ['attach', dmg, '-nobrowse', '-noautoopen', '-readonly', '-mountpoint', mount]);
+    attach(dmg, mount, '-readonly');
     try {
       run('/usr/bin/codesign', ['--verify', '--deep', '--strict', join(mount, appName)]);
       if (readlinkSync(join(mount, 'Applications')) !== '/Applications') throw new Error('The disk image’s Applications shortcut doesn’t lead to /Applications.');

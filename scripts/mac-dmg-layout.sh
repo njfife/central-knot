@@ -13,9 +13,11 @@ format = "UDZO"
 files = ["$work/Central Knot.app"]
 symlinks = {"Applications": "/Applications"}
 background = "$work/background.tiff"
-# Icon centres, in the 660 by 400 picture: the arrow is drawn between them.
+# Icon centres, in the picture: the arrow is drawn between them.
 icon_locations = {"Central Knot.app": (170, 180), "Applications": (490, 180)}
-window_rect = ((200, 120), (660, 400))
+# The window's height includes its title bar: 32 points on macOS 26, leaving 400 for the picture. The picture is 420 tall,
+# so a shorter title bar (28 before macOS 26) shows more of it, never a white strip.
+window_rect = ((200, 120), (660, 432))
 default_view = "icon-view"
 include_icon_view_settings = True
 show_icon_preview = False
