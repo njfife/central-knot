@@ -773,7 +773,9 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
       unavailable.length > 20 ? h('li', {}, `and ${unavailable.length - 20} more`) : null) : null,
     plan.differ.length ? h('div.add-conflict', {},
       h('span.add-group', { 'data-group': 'different', title: plan.differ.map(entry => `${entry.skill.name ?? entry.skill.key}: ${entry.here ? `${names[to]}’s copy differs` : `no copy in ${names[to]}; ${andList(entry.replaced.map(tool => names[tool]))} differs`}`).slice(0, 12).join('\n') },
-        swatch('differs', true), plan.differ.length === 1 ? null : h('strong', {}, String(plan.differ.length)), h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: ${names[from]}’s copy would replace this one` : `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}: added from ${names[from]}’s copy; ${andList(plan.differ[0].replaced.map(tool => `${names[tool]}’s`))} is replaced too` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
+        // One item is named in bold, as the other groups name theirs; several are counted.
+        swatch('differs', true), h('strong', {}, plan.differ.length === 1 ? `${plan.differ[0].skill.name ?? plan.differ[0].skill.key}:` : String(plan.differ.length)),
+        h('span', {}, plan.differ.length === 1 ? plan.differ[0].here ? `${names[from]}’s copy would replace this one` : `added from ${names[from]}’s copy; ${andList(plan.differ[0].replaced.map(tool => `${names[tool]}’s`))} is replaced too` : `with different copies; ${plan.differ.length === 2 ? 'both get' : 'all get'} ${names[from]}’s copy if included`)),
       h('span.add-conflict-label', {}, 'Include'),
       toggle(conflicts, `Also add the ${plan.differ.length} with different copies, using ${names[from]}’s copy`, on => { if (on) view.addConflicts.add(key); else view.addConflicts.delete(key); rerender(); }, false, `menu-conflicts-${from}-${to}`)) : null,
     conflicts ? h('p.add-conflict-note', { id: `menu-conflicts-note-${from}-${to}`, role: 'note' }, icon('triangle-alert', 13, 'tone-warning'),
@@ -894,6 +896,9 @@ function shownStrip(shown: SampleSkill[]) {
 /** Whether the table draws a Managed section, so a move is told on it rather than on Unmanaged. */
 let managedDrawn = false;
 
+/** A note after a section heading, after one separating dot that is spaced the same on both sides for every note. */
+const sectionNote = (...children: (Node | string)[]) => h('span.ov-section-after', {}, h('span.ov-section-dot', { 'aria-hidden': 'true' }, '·'), ...children);
+
 /** Rows grouped under one heading. `role`: managed or unmanaged (this harness has them, on its page), or away (only other tools have them). */
 function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], after: number) {
   if (!list.length) return null;
@@ -906,16 +911,15 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
     h(`div.ov-section${role === 'away' ? '.ov-section-away' : ''}`, { role: 'row' },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
         // A move is told once: on the section it joins, or on Unmanaged when everything there joins Managed.
-        after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
-          : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
+        after > list.length ? sectionNote(`${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
+          : managing && after < list.length && !managedDrawn ? sectionNote(after === 0 ? `${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
         // Items only other tools have, turned on here: told on their own section, so the counts add up.
-        // The dot stands apart (as on the copy-choice note above), so every note under a heading is spaced the same.
-        becoming ? h('span.ov-section-after', {}, '·', h('span', {}, `${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`))
-          : role === 'away' ? h('span.ov-section-after', {}, '·', h('span', {}, `tick a ${names[focus!]} box to add and manage it here`)) : null,
+        becoming ? sectionNote(h('span', {}, `${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`))
+          : role === 'away' ? sectionNote(h('span', {}, `tick a ${names[focus!]} box to add and manage it here`)) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);
-          return waiting.length ? h('span.ov-section-after', {}, '· ', smallAction(waiting.length === 1 ? `${waiting[0].name ?? waiting[0].key} needs a copy choice first` : `${waiting.length} need a copy choice first`, 'section-choose', () => openRow(waiting[0].key))) : null;
+          return waiting.length ? sectionNote(smallAction(waiting.length === 1 ? `${waiting[0].name ?? waiting[0].key} needs a copy choice first` : `${waiting.length} need a copy choice first`, 'section-choose', () => openRow(waiting[0].key))) : null;
         })() : null),
       variant === 'a' && target.length ? h('div.ov-section-action', {}, smallAction(managing ? `Manage all ${target.length}` : `Unmanage all ${target.length}`, `group-${managing ? 'manage' : 'unmanage'}`, () => setManaged(target.map(skill => skill.key), managing))) : null),
     sorted.flatMap(row));
@@ -981,7 +985,7 @@ function helpBand(): HTMLElement | null {
 /** What the catch-up after a read copied: shown on the Skills tables, and on the Harnesses list, so it is never news only in one place. */
 export function caughtUpBand(names: string[]): HTMLElement {
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''} to tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`));
+    h('span.band-text', {}, `Caught up: copied ${names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : andList(names)} to the tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`));
 }
 
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
