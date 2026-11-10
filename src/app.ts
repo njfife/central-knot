@@ -10,11 +10,15 @@ const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'harnesses' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'settings';
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
-export type HarnessTab = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'about';
+/** The kinds of item the tables manage. */
+export type Kind = 'skills' | 'mcp' | 'agents';
+export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
+export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
+export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
 /** The tab of the harness page on screen, if one is (Harnesses with a harness open). */
 export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
-export const harnessKindShown = (): 'skills' | 'mcp' | 'agents' | undefined => { const tab = harnessTabShown(); return tab === 'skills' || tab === 'mcp' || tab === 'agents' ? tab : undefined; };
+export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 
 export const state = {
   home: undefined as HomeView | undefined,
@@ -99,6 +103,8 @@ function accept(view: HomeView) {
   // Another home has other instruction files: the pages that show them read again.
   state.instructions = undefined;
   instructionReads.clear();
+  // A harness page belongs to the home it was opened in.
+  state.harness = undefined;
   resetMarket();
   if (state.page === 'plugins') void loadPlugins();
 }
@@ -328,7 +334,7 @@ export const saveInstructionText = (file: InstructionFile, text: string) => busy
   // Undo is one click: the replaced text goes back through the same checked save, which keeps this version in turn.
   const saved = state.instructions?.find(entry => entry.tool === file.tool);
   const before = file.exists && result.saved ? file.text : undefined;
-  state.outcome = { page, item: name, instruction: { path: file.path, saved: !!result.saved && file.exists }, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${({ 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' } as Record<string, string>)[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
+  state.outcome = { page, item: name, instruction: { path: file.path, saved: !!result.saved && file.exists }, text: result.saved ? `${file.exists ? 'Saved' : 'Created'} ${name}. ${file.exists ? '' : 'Central Knot never deletes instruction files; edit it here to change it. '}Start a new ${namedTools[file.tool]} session to use the change.` : `${name} already said that; nothing was written.`,
     act: before !== undefined && saved ? { label: 'Undo', id: 'outcome-undo-instruction', run: () => void undoInstruction(saved, before) } : undefined };
   announce(state.outcome.text, true);
 });

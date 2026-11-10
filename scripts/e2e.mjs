@@ -184,6 +184,8 @@ async function harnessFlow() {
   await applyAll(a);
   check('Apply all on a harness page writes the copy, and only where the menu said', existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')) && !existsSync(join(practice, '.codex/skills/release-notes')));
   check('and says so there', await a.exists('.harness-page .band-done'), await a.text('.harness-page'));
+  await a.click('#nav-harnesses');
+  check('the sidebar’s Harnesses leaves that result behind', !(await a.exists('.band-done')), await a.text('#page'));
   await a.click('#nav-skills');
   same('the Skills page shows the same change', await switchOn(a, 'release-notes'), true);
   check('and is its usual self: Claude Code first, no "Not in" section', (await a.text('.ov-head .ov-tool-head') ?? '').includes('Claude Code') && !(await a.all('.ov-section-label strong')).some(label => label.startsWith('Not in')), await a.text('.ov-head'));

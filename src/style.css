@@ -1374,15 +1374,14 @@ button.harness-card-main:disabled { cursor: default; }
 .title-harness { flex: none; }
 .title-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--ink-soft); margin-left: 4px; }
 .harness-bar { flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 0; border-bottom: 1px solid var(--line); min-height: 44px; }
-.harness-bar > .harness-tabs { flex: 1; min-width: 0; }
 .harness-switch { flex: none; display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--hover); }
 .harness-switch-item { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--ink-soft); cursor: pointer; white-space: nowrap; }
 .harness-switch-item:hover:not(:disabled) { color: var(--ink); }
 .harness-switch-item:disabled { opacity: 0.5; cursor: default; }
 .harness-switch-item.selected { background: var(--surface); color: var(--ink); box-shadow: var(--lift); }
 .harness-switch-item:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.harness-tabs { flex: none; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
-/* The tabs look like the marketplace tabs (shared rules above); here they are inline-flex for the count, and never wrap. */
+.harness-tabs { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px; padding: 0 16px; }
+/* The tabs look like the marketplace tabs (shared rules above); each is inline-flex for its count and keeps its label on one line. */
 .harness-tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .harness-tab:hover:not(:disabled) { color: var(--ink); }
 .harness-tab:disabled { opacity: 0.5; cursor: default; }
@@ -1395,7 +1394,6 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Its groups sit side by side at a readable distance; past two groups' width the card keeps its edge and the rest stays empty on purpose. */
 /* Its two groups sit side by side from about 860px of pane, each growing to 640px and then staying beside the other; the card
    is as wide as its groups, so no empty frame runs on past them. */
 .harness-about { padding: 16px; display: flex; flex-wrap: wrap; gap: 16px 48px; width: fit-content; max-width: 100%; }
@@ -1415,14 +1413,13 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
 /* The description shows only when its column has room; otherwise it goes under the name and the name column takes the free
    width instead, with the tool columns at their narrow size so the name and description get the room. Measured on the table's
-   own width, per number of tool columns n: name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep
+   own width, per number of tool columns n (one to four): name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep
    in step with --ov-columns above). */
 .harness-page .ov { --narrow-columns: minmax(170px, 1fr) 76px repeat(var(--tool-count, 3), minmax(92px, 124px)) 16px; }
 @container (max-width: 768px) { .harness-page .ov[data-tools="1"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
 @container (max-width: 900px) { .harness-page .ov[data-tools="2"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
 @container (max-width: 1032px) { .harness-page .ov[data-tools="3"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
 @container (max-width: 1164px) { .harness-page .ov[data-tools="4"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
-@container (max-width: 1296px) { .harness-page .ov[data-tools="5"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] .ov-name-sub { display: block; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
@@ -1449,7 +1446,7 @@ button.harness-card-main:focus-visible { outline: 0; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 }
 }
-/* A file's text keeps a reading measure; the card around it spans the pane. */
+/* A file's text keeps a reading measure. */
 .harness-page .ins-card pre, .harness-page .ins-card textarea { max-width: 110ch; }
 .harness-page .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 120px; }
 .tool-menu-empty { margin: 4px 0 8px; color: var(--ink-soft); }

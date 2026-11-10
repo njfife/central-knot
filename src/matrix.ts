@@ -36,7 +36,8 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
 const rowOf = (fact: SkillFacts, waiting: Set<string>): SampleSkill => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
 
 /** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
-export type Kind = 'skills' | 'mcp' | 'agents';
+export type { Kind } from './app.ts';
+import type { Kind } from './app.ts';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
@@ -560,7 +561,7 @@ function details(skill: SampleSkill, closable = true) {
     kind !== 'skills' || designMode || (!closable && allSame) ? null : h('div.compare-foot', {},
       h('span.compare-foot-start', {},
         // Skills have files: the Files view shows each copy's files and contents, and differing copies side by side.
-        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => { if (state.page !== 'skills') showPage('skills'); state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
+        !designMode && kind === 'skills' && closable && !(differs && !draft) ? smallAction('Files and contents', `files-${skill.key}`, () => openFiles(skill.key)) : null),
       // Delete everywhere (DEL-02): removes a managed skill from every tool it syncs to; History keeps it for Restore.
       !designMode && kind === 'skills' && committedOf(skill.key).managed
         ? view.confirmDelete === skill.key
@@ -598,7 +599,7 @@ function compareChoices(skill: SampleSkill) {
   return h('div.compare-block', {},
     h('p.compare-title', {}, icon('diff', 14, 'tone-warning'), h('span', {}, 'Which copy of ', h('strong.item-name', {}, skill.name ?? skill.key), ` should ${compared.length + receiving.length > 2 ? 'every tool' : 'both tools'} use?`),
       // Comparing comes before choosing: the full files side by side, next to the question.
-      !designMode && kind === 'skills' ? smallAction('Read both copies', `diff-${skill.key}`, () => { state.skillsView = 'files'; state.item = skill.key; rerender(); }) : null),
+      !designMode && kind === 'skills' ? smallAction('Read both copies', `diff-${skill.key}`, () => openFiles(skill.key)) : null),
     h('p.compare-note', {}, 'Nothing changes until Apply all. Replaced copies are kept in History, and the chosen copy then stays in sync everywhere.'),
     h('div.compare-choices', {}, compared.map(choice)),
     // The third way is quieter: it decides nothing about content, so it is a line, not a card.
@@ -757,7 +758,7 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
   return h(`div.add-target${conflicts ? '.add-target-conflicts' : ''}`, { 'data-target': to },
     h('div.tool-menu-row', {},
       brandMark(shown, 16), h('span.tool-menu-name', {}, names[shown]),
-      idle ? h('span.tool-menu-count', {}, plan.synced.length ? 'Has them all' : 'Nothing to add') : null,
+      idle ? h('span.tool-menu-count', {}, plan.synced.length ? `${names[to]} has them all` : 'Nothing to add') : null,
       idle ? null : button({ variant: count ? 'outline' : 'ghost', size: 'small', label, name: `${copies ? 'Add' : 'Manage'} ${count} ${names[from]} skills in ${names[to]}`, id: `menu-add-${from}-${to}`, disabled: !count,
         onclick: () => { send(from, to, list, conflicts); view.toolMenu = undefined; rerender(); } })),
     h('div.add-groups', {},
@@ -1257,11 +1258,25 @@ function syncNotice(notice: Told, writeClaude?: () => void) {
  * (this harness has nothing that differs) goes back to All, so the table is never empty with no chip pressed.
  */
 function useTable(which: Kind, harness?: Tool) {
+  // Coming from a harness's page to the Skills, MCP servers or Agents page: that page starts with no filter or Find text of its own.
+  const leftHarness = focus !== undefined && harness === undefined;
   kind = which;
   view = views[which];
   focus = harness;
   forgetOtherHomes();
-  if (view.filter === 'attention' && !committedList().some(needsChoice)) view.filter = 'all';
+  if (leftHarness) { view.filter = 'all'; view.find = ''; }
+  if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
+}
+
+/** Whether the Copies differ chip is drawn: something differs now, or will once pending changes apply. filterBar draws by this too. */
+const copiesDifferChipShown = () => committedList().some(skill => needsChoice(skill) || needsChoice(effective(skill)));
+
+/** A skill's files and contents: the Skills page's files view, from wherever its details were opened. */
+function openFiles(key: string) {
+  if (state.page !== 'skills') showPage('skills');
+  state.skillsView = 'files';
+  state.item = key;
+  rerender();
 }
 
 /** A kind with nothing in any tool, on a harness's page: the empty state under the same bands (problems, access, results) as its table. */

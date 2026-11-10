@@ -11,7 +11,6 @@ import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
-export { fileName } from './model.ts';
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */
 function words(line: { kind: string; text: string }, diff: { kind: string; text: string }[]): (string | Node)[] {
@@ -35,7 +34,7 @@ const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : '
 document.addEventListener('keydown', event => {
   const edit = state.instructionEdit;
   // Only where the editor is on screen: Instructions, or a harness's Instructions tab.
-  const shown = state.page === 'instructions' || harnessTabShown() === 'instructions';
+  const shown = state.page === 'instructions' || (harnessTabShown() === 'instructions' && edit?.tool === state.harness);
   if (event.key !== 'Escape' || !shown || edit?.stage !== 'review') return;
   event.preventDefault();
   if (edit.restoring) state.instructionEdit = undefined; else edit.stage = 'edit';
