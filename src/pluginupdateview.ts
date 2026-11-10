@@ -81,10 +81,11 @@ async function closeNote(what: 'updated' | 'failed') {
   try { take(await window.centralKnot.closePluginUpdates(what)); } catch { announce('Couldn’t close the note. Try again.'); }
 }
 
-/** One group of the note: what it is about, then a line per plugin (its name opens its page), newest first, and the way to close it. */
+/** One group of the note: what it is about, then a line per plugin (its name opens its page), and the way to close it. */
 function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: string): HTMLElement | null {
   if (!lines.length) return null;
-  const newest = [...lines].reverse();
+  // The newest check first; within one check, the order the updates ran in.
+  const newest = [...lines].sort((first, second) => second.at - first.at);
   const shown = pluginUpdates.all[what] ? newest : newest.slice(0, LINES_SHOWN);
   const open = (line: PluginUpdateLine) => browse({ source: line.source, plugin: line.plugin, tab: 'plugins', find: '', category: undefined });
   return h(`div.band.plugin-auto-note${what === 'failed' ? '.plugin-problems' : ''}`, { role: 'status', id: `plugin-updates-${what}` },

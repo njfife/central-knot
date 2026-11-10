@@ -1,5 +1,6 @@
 // Drives the real app end to end over its debug port, in a throwaway HOME, so "This Mac's home" is disposable too.
-// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
+// Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n] [--flow name,…]
+// `--flow` runs only the named flows (pluginUpdatesFlow, say), for working on one; a full run is the check.
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -15,6 +16,7 @@ const flag = name => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const shots = option('--shots');
 const crashRounds = Number(option('--crash-rounds', 6));
+const onlyFlows = option('--flow')?.split(',');
 const canWriteRealHome = process.platform === 'darwin';
 const root = resolve(import.meta.dirname, '..');
 const packaged = join(root, 'release/Central Knot-darwin-arm64/Central Knot.app/Contents/MacOS/Central Knot');
@@ -2322,6 +2324,137 @@ async function draftFlow() {
   await a.quit();
 }
 
+/**
+ * Plugin updates that arrive by themselves, in a folder home with stand-in tools. The schedule runs every two seconds here
+ * (CK_PLUGIN_UPDATES_EVERY_MS). With the window closed, the marketplace moves on and drops a plugin: Claude Code's copies are
+ * updated through its own command, the plugin turned off there is off afterwards, Codex (which never had them) gets nothing,
+ * and the dropped plugin stays, marked. The note and the Settings row say so after a restart; a failure is said and tried
+ * again; with the switch off nothing runs.
+ */
+async function pluginUpdatesFlow() {
+  const home = join(scratch, 'home-auto'), data = join(scratch, 'auto-data'), market = join(scratch, 'market-auto'), tools = join(scratch, 'tools-auto'), stage = join(scratch, 'stage-auto');
+  writeMarket(market, 'ck-test-market');
+  const catalogPath = join(market, '.claude-plugin/marketplace.json');
+  const publish = (versions, dropped = []) => { const catalog = JSON.parse(readFileSync(catalogPath, 'utf8')); catalog.plugins = catalog.plugins.filter(plugin => !dropped.includes(plugin.name)).map(plugin => ({ ...plugin, ...(versions[plugin.name] ? { version: versions[plugin.name] } : {}) })); writeFileSync(catalogPath, JSON.stringify(catalog, null, 2)); };
+  const marketText = path => readFileSync(join(market, 'plugins', path), 'utf8');
+  const copies = { 'issue-tracker': { 'skills/triage/SKILL.md': marketText('issue-tracker/skills/triage/SKILL.md') }, 'document-tools': { 'skills/pdf-reader/SKILL.md': marketText('document-tools/skills/pdf-reader/SKILL.md'), 'skills/spreadsheet/SKILL.md': marketText('document-tools/skills/spreadsheet/SKILL.md') }, 'release-helper': { 'commands/release-notes.md': marketText('release-helper/commands/release-notes.md') } };
+  // Each record Claude Code's stand-in moves to, written ahead with the copies it names; the last one written is where it starts.
+  const recordPath = join(home, '.claude/plugins/installed_plugins.json');
+  mkdirSync(stage, { recursive: true });
+  for (const [name, issue, docs] of [['docs', '1.9.0', '1.2.0'], ['issue-2.0.0', '2.0.0', '1.2.0'], ['issue-3.0.0', '3.0.0', '1.2.0'], ['start', '1.9.0', '1.1.0']]) {
+    rmSync(recordPath, { force: true });
+    writeClaudeInstall(home, 'ck-test-market', 'issue-tracker', issue, copies['issue-tracker']);
+    writeClaudeInstall(home, 'ck-test-market', 'document-tools', docs, copies['document-tools']);
+    writeClaudeInstall(home, 'ck-test-market', 'release-helper', '0.4.1', copies['release-helper']);
+    writeFileSync(join(stage, `record-${name}.json`), readFileSync(recordPath, 'utf8'));
+  }
+  // Claude Code added the marketplace itself, and has document-tools turned off. Codex is here too and has none of the plugins.
+  writeFileSync(join(home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'git', url: market } } }));
+  const claudeSettings = join(home, '.claude/settings.json');
+  writeFileSync(claudeSettings, '{"enabledPlugins":{"document-tools@ck-test-market":false}}');
+  mkdirSync(join(home, '.codex'), { recursive: true });
+  writeFileSync(join(home, '.codex/config.toml'), 'model = "gpt-test"\n');
+  // The stand-ins: Claude Code's update moves its record on (and, for document-tools, turns the plugin on, as a tool might); Codex notes anything it is asked.
+  mkdirSync(join(tools, '.local/bin'), { recursive: true });
+  writeFileSync(join(tools, '.local/bin/claude'), `#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.322 (Claude Code)" && exit 0
+echo "$*" >> "$HOME/claude-calls.txt"
+case "$*" in
+  "plugin update document-tools@ck-test-market --scope user") cp '${join(stage, 'record-docs.json')}' "$HOME/.claude/plugins/installed_plugins.json"; printf '{"enabledPlugins":{"document-tools@ck-test-market":true}}' > "$HOME/.claude/settings.json" ;;
+  "plugin disable document-tools@ck-test-market --scope user") printf '{"enabledPlugins":{"document-tools@ck-test-market":false}}' > "$HOME/.claude/settings.json" ;;
+  "plugin update issue-tracker@ck-test-market --scope user") if [ -f "$HOME/issue-fails" ]; then echo "Failed to update issue-tracker: the download stopped."; exit 1; fi; cp "${stage}/record-issue-$(cat "$HOME/issue-next").json" "$HOME/.claude/plugins/installed_plugins.json" ;;
+  *) exit 9 ;;
+esac
+`, { mode: 0o755 });
+  writeFileSync(join(tools, '.local/bin/codex'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\necho "$*" >> "$HOME/codex-calls.txt"\nexit 9\n', { mode: 0o755 });
+  writeFileSync(join(home, 'issue-next'), '2.0.0');
+  const versions = () => Object.fromEntries(Object.entries(JSON.parse(readFileSync(recordPath, 'utf8')).plugins).map(([id, [entry]]) => [id.split('@')[0], entry.version]));
+  const calls = () => (existsSync(join(home, 'claude-calls.txt')) ? readFileSync(join(home, 'claude-calls.txt'), 'utf8').trim().split('\n') : []);
+  const noted = () => (existsSync(join(data, 'plugin-updates.json')) ? JSON.parse(readFileSync(join(data, 'plugin-updates.json'), 'utf8')) : {});
+  const until = async (test, ms = 30000) => { for (let spent = 0; spent < ms; spent += 200) { if (await test()) return true; await wait(200); } return false; };
+  mkdirSync(data, { recursive: true });
+  // The first close's "still running" dialog was answered before.
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home }, closeExplained: true }));
+  // To begin with the marketplace offers what Claude Code has: nothing is due.
+  publish({ 'issue-tracker': '1.9.0', 'document-tools': '1.1.0' });
+  const first = await launch(data, [], tools);
+  same('the marketplace is added', await first.run(`window.centralKnot.addMarketplace(${JSON.stringify(market)}).then(result => result.problem ?? 'added')`), 'added');
+  await first.quit();
+
+  // 1. The schedule, with the window closed.
+  let a = await launch(data, [], tools, { CK_PLUGIN_UPDATES_EVERY_MS: '2000' });
+  check('with nothing behind, the first check by itself changes nothing and says so', await until(() => noted().checked?.at) && noted().checked.updated === 0 && calls().length === 0 && versions()['issue-tracker'] === '1.9.0', JSON.stringify(noted()));
+  await a.click('#nav-settings');
+  for (let tries = 0; tries < 50 && !/Last checked/.test(await a.text('#setting-plugin-updates') ?? ''); tries++) await wait(100);
+  check('Settings has the switch, on, and what the last check came to', await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`) === 'true' && /Last checked today at .*\. Nothing needed updating\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && await a.exists('#check-plugin-updates'), await a.text('#setting-plugin-updates'));
+  // A page-made close destroys the window outright (see the practice flow): from here on this launch has no window at all.
+  await a.run(`setTimeout(() => window.close(), 50), true`);
+  await wait(800);
+  // The marketplace moves both plugins on and drops release-helper.
+  publish({ 'issue-tracker': '2.0.0', 'document-tools': '1.2.0' }, ['release-helper']);
+  check('with the window closed, the plugins Claude Code has are updated by themselves, through its own command', await until(() => versions()['issue-tracker'] === '2.0.0' && versions()['document-tools'] === '1.2.0' && noted().updated?.length === 2), JSON.stringify([versions(), calls(), noted()]));
+  const dock = () => { const found = spawnSync('lsappinfo', ['find', `pid=${a.child.pid}`], { encoding: 'utf8' }).stdout.trim(); return spawnSync('lsappinfo', ['info', '-only', 'ApplicationType', found], { encoding: 'utf8' }).stdout.trim(); };
+  same('the app ran on with no window through it (on a Mac, from its menu bar icon alone)', [a.child.exitCode, process.platform === 'darwin' ? dock() : 'no Dock'], [null, process.platform === 'darwin' ? '"ApplicationType"="UIElement"' : 'no Dock']);
+  same('the plugin turned off in Claude Code is off again after its update, by Claude Code’s own switch', [JSON.parse(readFileSync(claudeSettings, 'utf8')).enabledPlugins['document-tools@ck-test-market'], calls()],
+    [false, ['plugin update document-tools@ck-test-market --scope user', 'plugin disable document-tools@ck-test-market --scope user', 'plugin update issue-tracker@ck-test-market --scope user']]);
+  check('Codex, which has neither plugin, is asked for nothing: an update installs nowhere new', !existsSync(join(home, 'codex-calls.txt')));
+  check('the plugin the marketplace dropped is kept as it was', versions()['release-helper'] === '0.4.1' && existsSync(join(home, '.claude/plugins/cache/ck-test-market/release-helper/0.4.1/commands/release-notes.md')), JSON.stringify(versions()));
+  const logged = readFileSync(join(data, 'central-knot.log'), 'utf8');
+  check('the log says what was checked and what each update came to', /plugin updates: checked: 2 due/.test(logged) && /plugins:update \(by itself\) issue-tracker@ck-test-market in claude-cli: updated: Updated to 2\.0\.0\./.test(logged) && /document-tools@ck-test-market in claude-cli: updated: Updated to 1\.2\.0\. It is still off in Claude Code\./.test(logged), logged.split('\n').filter(line => /plugin/.test(line)).join('\n'));
+  const before = calls().length;
+  await wait(5000);
+  check('once up to date, later checks run nothing', calls().length === before && noted().checked.updated === 0, JSON.stringify([calls(), noted().checked]));
+  await a.quit();
+
+  // 2. After a restart, the note and the Settings row say what happened; the dropped plugin is marked.
+  a = await launch(data, [], tools);
+  await a.run(`(document.querySelector('#nav-plugins').click(), true)`);
+  for (let tries = 0; tries < 100 && !(await a.exists('#plugin-updates-updated')); tries++) await wait(100);
+  await a.settle();
+  const note = await a.text('#plugin-updates-updated') ?? '';
+  check('the Plugins page keeps a plain note: which plugins, which version, which tool', /Updated automatically\./.test(note) && /document-tools: updated to 1\.2\.0 in Claude Code, which can’t be undone · today at/.test(note) && /issue-tracker: updated to 2\.0\.0 in Claude Code, which can’t be undone · today at/.test(note) && !(await a.exists('#plugin-updates-failed')), note);
+  same('the plugins show as up to date, and the dropped one as no longer offered, still installed in Claude Code',
+    [await a.run(`document.querySelector('#pcell-0-issue-tracker-claude-cli')?.dataset.state`), await a.text('[data-plugin="release-helper"] .plugin-chip-gone'), await a.run(`document.querySelector('#pcell-0-release-helper-claude-cli')?.dataset.state`), await a.run(`document.querySelector('#pcell-0-release-helper-codex-cli')?.dataset.state`)],
+    ['installed', 'No longer offered', 'installed', 'cannot']);
+  await a.click('#plugin-updates-updated-0');
+  check('a plugin named in the note opens its page', (await a.text('.crumb-here')) === 'document-tools', await a.text('.plugins-toolbar'));
+  await a.click('#plugin-back');
+  await a.click('#plugin-updates-updated-close');
+  check('closing the note takes it away, and it stays away', !(await a.exists('#plugin-updates-updated')) && noted().updated.length === 0, JSON.stringify(noted()));
+
+  // 3. A failure is said in the tool's own words, in the note and in Settings, and Check now tries it again.
+  publish({ 'issue-tracker': '3.0.0' });
+  writeFileSync(join(home, 'issue-next'), '3.0.0');
+  writeFileSync(join(home, 'issue-fails'), '');
+  await a.click('#nav-settings');
+  await a.click('#check-plugin-updates');
+  for (let tries = 0; tries < 100 && !/couldn’t be made/.test(await a.text('#setting-plugin-updates-notice') ?? ''); tries++) await wait(100);
+  check('Check now says what it came to: one update couldn’t be made, with the way to the note', /Last checked today at .*\. 1 update couldn’t be made\./.test(await a.text('#setting-plugin-updates-notice') ?? '') && (await a.text('#setting-plugin-updates-notice-action')) === 'See Plugins', await a.text('#setting-plugin-updates'));
+  check('Check now takes the focus back once it can be pressed again', await a.run(`document.activeElement?.id`) === 'check-plugin-updates', await a.run(`document.activeElement?.id`));
+  await a.click('#setting-plugin-updates-notice-action');
+  for (let tries = 0; tries < 50 && !(await a.exists('#plugin-updates-failed')); tries++) await wait(100);
+  check('the note says what couldn’t be updated, in the tool’s own words, and that it is tried again', /Couldn’t update automatically; Central Knot tries again later\./.test(await a.text('#plugin-updates-failed') ?? '') && /issue-tracker: Claude Code: Still 2\.0\.0 in Claude Code; the marketplace has 3\.0\.0\. Failed to update issue-tracker: the download stopped\./.test(await a.text('#plugin-updates-failed') ?? '')
+    && versions()['issue-tracker'] === '2.0.0' && /`claude plugin update issue-tracker@ck-test-market --scope user` failed: Failed to update issue-tracker: the download stopped\./.test(readFileSync(join(data, 'central-knot.log'), 'utf8')), await a.text('#plugin-updates-failed'));
+
+  // 4. The switch: off, nothing runs by itself; on again, the failed update is tried and goes through.
+  await a.click('#nav-settings');
+  await a.click('#plugin-updates-on');
+  for (let tries = 0; tries < 50 && (await a.run(`document.querySelector('#plugin-updates-on')?.getAttribute('aria-checked')`)) !== 'false'; tries++) await wait(100);
+  check('the switch turns it off: saved, with no Check now and no status', JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).pluginUpdates === false && !(await a.exists('#check-plugin-updates')) && !(await a.exists('#setting-plugin-updates-notice')), await a.text('#setting-plugin-updates'));
+  same('no page errors, plugin updates', a.pageErrors, []);
+  await a.quit();
+  rmSync(join(home, 'issue-fails'));
+  a = await launch(data, [], tools, { CK_PLUGIN_UPDATES_EVERY_MS: '2000' });
+  const whileOff = calls().length;
+  await wait(6000);
+  check('turned off, the schedule runs nothing, though an update is waiting', calls().length === whileOff && versions()['issue-tracker'] === '2.0.0', JSON.stringify(calls()));
+  await a.click('#nav-settings');
+  await a.click('#plugin-updates-on');
+  check('turned on again, the update that failed goes through by itself, and its note goes', await until(() => versions()['issue-tracker'] === '3.0.0' && noted().failures?.length === 0) && noted().updated.some(line => line.plugin === 'issue-tracker' && /updated to 3\.0\.0 in Claude Code/.test(line.text)), JSON.stringify([versions(), noted()]));
+  same('no page errors, plugin updates on a schedule', a.pageErrors, []);
+  await a.quit();
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -2329,7 +2462,7 @@ const started = Date.now();
 try {
   seedHome();
   // Each flow's time is printed, so a run that grows slow says where.
-  for (const flow of [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, listDiffersFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])]) {
+  for (const flow of [harnessFlow, practiceFlow, releasedStartupFlow, updateFlow, fewToolsFlow, listDiffersFlow, pluginUpdatesFlow, repoBaseFlow, draftFlow, realHomeFlow, ...(canWriteRealHome && crashRounds > 0 ? [crashFlow] : [])].filter(flow => !onlyFlows || onlyFlows.includes(flow.name))) {
     const from = Date.now();
     await flow();
     console.log(`${flow.name}: ${Math.round((Date.now() - from) / 1000)}s`);
