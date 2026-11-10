@@ -331,8 +331,9 @@ function partSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginVie
  * Every reason a skill's switch can't change is on the page, not only in hover text: once above the list when it holds for
  * a whole column (Claude Code, which has no such switch, with its mark; a missing CLI; a preview-only home), otherwise on
  * the skill's row, which also says what its chosen switches will do on Apply all. Why a part can't go in is said in "Its parts".
+ * `said` is shared by a page's lists, so what a part's switch does is explained once.
  */
-function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, kind: PartKind, rows: SwitchRow[]): RowExtras {
+function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, kind: PartKind, rows: SwitchRow[], said: { parts: boolean }): RowExtras {
   const tools = kind === 'skill' ? view.tools.filter(tool => installed(entry, plugin.name, tool)) : [];
   const switchable = tools.filter(tool => !NO_SKILL_SWITCH[tool]);
   const plans = plansFor(entry, plugin);
@@ -357,12 +358,14 @@ function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: Plugin
     return notes.filter(Boolean).join(' ') || undefined;
   };
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
-  const word = partWords[kind][0];
+  // What a part's switch does is said once, above the first list that has one.
+  const explain = picking.length > 0 && !said.parts;
+  if (explain) said.parts = true;
   return {
     className: columns.length ? `plugin-switched${kind === 'skill' ? '.plugin-skills' : ''}` : kind === 'skill' ? 'plugin-skills' : '',
     head: [
       switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin; nothing changes until Apply all.') : null,
-      picking.length ? line(`${andList(picking.map(tool => names[tool]))} ${picking.length > 1 ? 'don’t' : 'doesn’t'} have the plugin itself: a switch there puts one ${word} in as a separate item, or takes it out again${switchable.length ? '' : '; nothing changes until Apply all'}.`) : null,
+      explain ? line(`${andList(picking.map(tool => names[tool]))} ${picking.length > 1 ? 'don’t' : 'doesn’t'} have the plugin itself: a switch there puts that one skill, MCP server or agent in as a separate item, or takes it out again${switchable.length ? '' : '; nothing changes until Apply all'}.`) : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
       ...[...columnWide].map(reason => line(reason)),
       // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
@@ -515,22 +518,23 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
   const files = (['skills', 'commands', 'agents'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
   const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   const idFor = partIds(`pfile-${marketIndex}`);
+  const said = { parts: false };
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem)
       : !detail.offered ? h('p.plugin-muted', {}, 'Its files live outside this marketplace, so its skills, commands and agents are read from the tools that installed it.') : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'commands' ? undefined
-      : switchColumns(view, entry, plugin, marketIndex, kind === 'skills' ? 'skill' : 'agent', parts.map(part => ({ name: part.name, part: partRef(kind === 'skills' ? 'skill' : 'agent', part.key) }))))),
+      : switchColumns(view, entry, plugin, marketIndex, kind === 'skills' ? 'skill' : 'agent', parts.map(part => ({ name: part.name, part: partRef(kind === 'skills' ? 'skill' : 'agent', part.key) })), said))),
     detail.hooks.length ? h('div.plugin-group', {}, h('h4', {}, 'Hooks'), h('p.plugin-part-what', {}, `Runs on ${andList(detail.hooks)}. Hooks run commands in the tool while you work.`)) : null,
-    detail.mcpServers.length ? serverGroup(view, entry, plugin, marketIndex, owner, detail.mcpServers) : null,
+    detail.mcpServers.length ? serverGroup(view, entry, plugin, marketIndex, owner, detail.mcpServers, said) : null,
     detail.lspServers.length ? h('div.plugin-group', {}, h('h4', {}, `Language servers (${detail.lspServers.length})`), partList(`${owner}\u0000lsp`, detail.lspServers.map(name => ({ name, text: '' })))) : null,
     detail.bin ? h('div.plugin-group', {}, h('h4', {}, 'Programs'), partList(`${owner}\u0000bin`, [{ name: 'bin/', text: 'A folder of programs the plugin puts on the tool’s path.' }])) : null);
 }
 
 /** The plugin's MCP servers, each with what it runs, and its switch under each tool that takes single parts (see switchColumns). */
-function serverGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, owner: string, servers: PluginDetail['mcpServers']) {
+function serverGroup(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, owner: string, servers: PluginDetail['mcpServers'], said: { parts: boolean }) {
   const rows = servers.map(server => ({ name: server.name, part: { kind: 'mcp' as const, name: server.name } }));
-  const extras = switchColumns(view, entry, plugin, marketIndex, 'mcp', rows);
+  const extras = switchColumns(view, entry, plugin, marketIndex, 'mcp', rows, said);
   return h(`div.plugin-group${extras.className ? `.${extras.className}` : ''}`, {}, h('h4', {}, `MCP servers (${servers.length})`), ...extras.head,
     partList(`${owner}\u0000mcp`, servers.map((server, at) => ({ name: server.name, text: server.runs, mono: true, end: extras.end?.(rows[at]!), note: extras.note(rows[at]!) }))));
 }

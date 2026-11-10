@@ -1053,6 +1053,9 @@ span.ins-confirm { margin-top: 0; }
 .plugin-outcome-plain .plugin-outcome-row { padding: 3px 0; border-top: 0; }
 .plugin-outcome-what { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
 .plugin-outcome-item { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+/* A line led by its mark runs on beside it: long text wraps under itself, never leaving the mark alone on a line. */
+.plugin-outcome-item:has(> svg:first-child) { display: block; position: relative; padding-left: 18px; }
+.plugin-outcome-item > svg:first-child { position: absolute; left: 0; top: 3px; }
 .plugin-outcome-tools { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .plugin-group { margin: 10px 0 0; }
 .plugin-group h4 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
