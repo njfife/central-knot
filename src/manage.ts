@@ -5,14 +5,13 @@ import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
 import { harnesses, writeRoot } from './harnesses.ts';
+import { presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
-/** Tools shown as columns: those installed or holding skills. */
-export const presentTools = (snapshots: Snapshot[]) => snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => snapshot.harness);
 
 const bodyLine = (content: string) => content.replace(/^﻿?---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|$)/, '').split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) ?? '';
 
@@ -298,9 +297,13 @@ async function writable(context: ShareContext, tool: HarnessId, directory: strin
   } catch { return false; }
 }
 
-/** The page's view of a home. Reads only; writes nothing. */
-export async function manageView(context: ShareContext, caughtUp: DestinationResult[] = [], notices: SyncNotice[] = []): Promise<ManageView> {
-  const snapshots = await context.read();
+/**
+ * The page's view of a home. Reads only; writes nothing. `caughtUp` and `notices` are what passes did since the page last
+ * read. `snapshots` is the read of the home the rest of the page was built from, so every page shows the same tools;
+ * without it the home is read now.
+ */
+export async function manageView(context: ShareContext, { caughtUp = [], notices = [], snapshots: given }: { caughtUp?: DestinationResult[]; notices?: SyncNotice[]; snapshots?: Snapshot[] } = {}): Promise<ManageView> {
+  const snapshots = given ?? await context.read();
   const { record } = await readRecord(context.home);
   const gathered = await gather(context, snapshots, record);
   // Edits waiting to spread (Sync off, or a pass still settling): the page shows them as pending, not as a choice to make.

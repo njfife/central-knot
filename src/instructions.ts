@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { lineDiff } from './diff.ts';
+import { isPresent } from './presence.ts';
 import { storeDirectory, writeAccess, writeFileChecked, type ShareContext } from './share.ts';
 import type { HarnessId, InstructionFile, InstructionSave, Snapshot } from './types.ts';
 
@@ -62,8 +63,8 @@ async function versions(home: string, tool: HarnessId, now = '') {
 /** Every detected tool's instruction file, read as it is now. */
 export async function instructionsView(context: ShareContext, snapshots: Snapshot[]): Promise<InstructionFile[]> {
   const files: InstructionFile[] = [];
-  // Only tools found in this home: an absent tool has no file to edit, and a folder is never created for it here.
-  for (const snapshot of snapshots.filter(entry => entry.detection !== 'Not found' || entry.skills.length > 0)) {
+  // Only tools in this home (presence.ts): an absent tool has no file to edit, and a folder is never created for it here.
+  for (const snapshot of snapshots.filter(isPresent)) {
     const { path, readers, notes } = await bind(snapshot.harness, snapshot.root);
     const text = await readText(path);
     // Lines starting with @ pull other files into Claude's context; those files are not shown or changed here.
@@ -77,8 +78,9 @@ export async function instructionsView(context: ShareContext, snapshots: Snapsho
 export async function saveInstruction(context: ShareContext, snapshots: Snapshot[], tool: HarnessId, text: string, expected: string): Promise<InstructionSave> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason };
+  // Only a tool in this home (presence.ts): a save never recreates the folder of a tool that has gone.
   const snapshot = snapshots.find(entry => entry.harness === tool);
-  if (!snapshot) return { stopped: 'That tool is not in this home.' };
+  if (!snapshot || !isPresent(snapshot)) return { stopped: 'That tool is not in this home.' };
   const { path } = await bind(tool, snapshot.root);
   const current = await readText(path);
   if ((current === undefined ? '' : sha(current)) !== expected) return { stopped: 'The file changed since you opened it, so nothing was saved. Read it again and redo the edit.' };

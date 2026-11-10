@@ -1,7 +1,7 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
-import { announce, rerender } from './app.ts';
-import { button, h, icon, toggle, trayName } from './dom.ts';
+import { announce, machine, rerender } from './app.ts';
+import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
@@ -140,7 +140,7 @@ const save = <Answer extends AppPreferences | HistoryWindowSaved>(row: string, c
   }, error => saveFailure(error, kept));
 
 /** What starting at sign-in does. A reason it can't be changed here takes this line's place. */
-const signInHint = `Opens hidden in the ${trayName} when you sign in, so sync keeps running without the window.`;
+const signInHint = `Opens hidden in ${machine.tray} when you sign in, so sync keeps running without the window.`;
 /** Opens the system's own place for it (main says which, in the system's words); where that fails, says the way there. */
 const openSignInPlace = ({ open, unopened }: SignInPlace) => ({ label: open, run: () => void window.centralKnot.openSignInSettings().catch(() => announce(unopened)) });
 

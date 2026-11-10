@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, limitNote, missingTools, unavailable } from '../src/pluginstatus.ts';
+import { blocked, limitNote, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { MarketplaceView, PluginsView } from '../src/types.ts';
 
@@ -9,11 +9,11 @@ const entry: MarketplaceView = { source: 'a/b', origins: ['central-knot'], name:
 const view: PluginsView = { home: '/h', tools: ['claude-cli', 'copilot-cli', 'codex-cli'], clis: { 'claude-cli': true, 'copilot-cli': true, 'codex-cli': true }, canWrite: true, marketplaces: [entry] };
 
 test('A tool can take a plugin only when its CLI is there, it is not held or refused, and it is not installed yet', () => {
-  assert.deepEqual(missingTools(view, entry, 'p'), ['copilot-cli']);
+  assert.deepEqual(toolsWithoutPlugin(view, entry, 'p'), ['copilot-cli']);
   assert.match(blocked({ ...view, clis: {} }, entry, 'claude-cli') ?? '', /command-line tool wasn’t found/);
   assert.match(blocked({ ...view, clis: {}, desktopOnly: ['codex-cli'] }, entry, 'codex-cli') ?? '', /Only ChatGPT desktop/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
-  assert.deepEqual(missingTools(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
+  assert.deepEqual(toolsWithoutPlugin(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
   assert.equal(unavailable(view, entry, 'p', 'codex-cli'), 'other');
   assert.equal(unavailable({ ...view, clis: {} }, entry, 'p', 'claude-cli'), undefined);

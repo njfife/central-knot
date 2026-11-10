@@ -10,6 +10,7 @@ import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, 
 import { componentsFrom } from './pluginoutcomes.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { heldReason, noCli } from './pluginstatus.ts';
+import type { PluginTool } from './presence.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 import { toolNames } from './words.ts';
 import type { ActionReport, Catalog, CatalogPlugin, Components, HarnessId, InstallState, NativeRun } from './types.ts';
@@ -37,8 +38,6 @@ function once<T>(context: PluginContext, key: string, read: () => Promise<T>): P
   return context.reads.get(key) as Promise<T>;
 }
 
-export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
-export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 
 // ---------- Sources and access ----------
 

@@ -58,7 +58,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; outcome: 'written' | 'kept' | 'held' | 'removed' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -111,10 +111,10 @@ export interface DesktopApi {
   saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
   instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
-  plugins(fresh?: boolean): Promise<PluginsView | null>;
+  /** Marketplaces and installs; `readId` (a view's) reuses the read that view was built from, when it is the latest. */
+  plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
   /** Adds a marketplace; `source` is how it was stored, so the page can open exactly that one. */
   addMarketplace(source: string): Promise<{ problem?: string; view?: PluginsView; source?: string }>;
-  refreshMarketplace(source: string): Promise<PluginsView | null>;
   forgetMarketplace(source: string): Promise<PluginsView | null>;
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;

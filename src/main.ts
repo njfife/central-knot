@@ -9,7 +9,8 @@ import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
-import { applyChanges, deleteEverywhere, eventChange, manageView, presentTools, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
+import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
+import { presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
@@ -18,6 +19,7 @@ import { trayIconPng } from './trayicon.ts';
 import { defaultHistoryDays, historyDayChoices } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import { machineNames } from './machine.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -62,8 +64,11 @@ async function read(): Promise<Snapshot[]> {
   })));
 }
 
-/** The tools as last read, for features that need what was detected (the Plugins page: bundled-only copies). */
-let latestSnapshots: Snapshot[] = [];
+/**
+ * The read the page's latest view was built from, handed over as the view's readId. A request made right after it
+ * (Plugins after a Refresh or a home switch) passes the id back and uses this read rather than reading the home again.
+ */
+let handoff = { id: 0, home: '', snapshots: [] as Snapshot[] };
 
 function context(): ShareContext {
   return {
@@ -88,6 +93,11 @@ async function saveSyncSetting(on: boolean) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
   refreshTray();
+}
+
+/** Sends the page a message, when there is a window to send it to. */
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate', ...args: unknown[]) {
+  if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
@@ -120,7 +130,7 @@ function saveAppSettings(change: Partial<AppSettings>): Promise<void> {
     // The login item follows the saved choice before anyone hears of it, so what they read back is the system's answer to it.
     if ('startAtSignIn' in change) applySignIn();
     refreshTray();
-    if (window && !window.isDestroyed()) window.webContents.send('settings:changed');
+    send('settings:changed');
   });
   settingsWrites = write.catch(() => undefined);
   return write;
@@ -177,7 +187,7 @@ function applyAppearance() {
 /** Shows the window on one of its pages (the Settings… menu item). */
 function showPage(page: string) {
   showWindow();
-  if (window && !window.isDestroyed()) window.webContents.send('navigate', page);
+  send('navigate', page);
 }
 
 const signInFacts = () => ({ platform: process.platform, packaged: app.isPackaged, exe: app.getPath('exe'), smoke });
@@ -239,7 +249,7 @@ function trayMenu() {
     // The status line says where, and any news; the checkbox below already says whether sync is on.
     { label: statusLine(), enabled: unseen, click: showWindow },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
+    { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
     // Linux has no start at sign-in yet, so its tray never offers one.
     { ...signInItem(), visible: process.platform !== 'linux' },
@@ -254,11 +264,13 @@ function refreshTray() {
   tray.setToolTip(unseen ? 'Central Knot: sync made changes' : 'Central Knot');
   if (process.platform === 'darwin') tray.setTitle(unseen ? '•' : '');
 }
+/** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
+const syncOnce = () => fromTray(async () => { keepMcpAndAgents((await pass(await read(), true)).mcpAndAgents); });
 /** Menu bar actions take their turn like the page's, then tell the page. */
 async function fromTray(work: () => Promise<void>) {
   await queued(work).catch(() => undefined);
   refreshTray();
-  if (window && !window.isDestroyed()) window.webContents.send('sync:changed');
+  send('sync:changed');
 }
 /**
  * The app menu carries the menu bar's controls too, so they are always reachable: a crowded menu bar (or the notch) can hide the
@@ -275,7 +287,7 @@ function appMenu() {
       { label: statusLine(), enabled: unseen, click: showWindow },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
-      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void fromTray(async () => { keepMcpAndAgents((await pass(true)).mcpAndAgents); }) },
+      { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
       signInItem(),
       { type: 'separator' },
       { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
@@ -306,19 +318,22 @@ let lastStopped: string | undefined;
 interface McpAndAgentsResult { failures: DestinationResult[]; stopped: DestinationResult[]; mcpNotices: SyncNotice[]; agentNotices: SyncNotice[]; changed: boolean; settling: boolean }
 interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
 
-/** One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence. */
-async function pass(explicit = false): Promise<PassResult> {
-  const shared = context();
+/**
+ * One pass on the open home: writes only with Sync on (or when asked explicitly), otherwise it just keeps the evidence.
+ * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
+ */
+async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
+  const shared: ShareContext = { ...context(), read: async () => snapshots };
   if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
   if (!syncOn && !explicit) return { skills };
-  const tools = (await manageView(shared)).tools;
+  const present = presentTools(snapshots);
   const crashes: DestinationResult[] = [];
   const crashed = (item: string) => (error: unknown) => { crashes.push({ item, outcome: 'failed', message: `${item} could not finish: ${error instanceof Error ? error.message : String(error)}` }); return undefined; };
-  const mcp = await applyMcp(shared, tools, []).catch(crashed('MCP sync'));
+  const mcp = await applyMcp(shared, present, []).catch(crashed('MCP sync'));
   // Agents follow the same switch and rules (D-32).
-  const agents = await applyAgents(shared, tools, []).catch(crashed('Agents sync'));
+  const agents = await applyAgents(shared, present, []).catch(crashed('Agents sync'));
   return { skills, mcpAndAgents: {
     failures: [...crashes, ...[...(mcp?.results ?? []), ...(agents?.results ?? [])].filter(entry => entry.outcome === 'failed')],
     stopped: ([['MCP sync', mcp?.stopped], ['Agents sync', agents?.stopped]] as const).filter(([, why]) => why).map(([item, why]) => ({ item, outcome: 'failed' as const, message: why! })),
@@ -337,21 +352,27 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 
 async function syncThenView(explicit = false): Promise<HomeView> {
   const shared = context();
-  const { skills, mcpAndAgents } = await pass(explicit);
+  const before = await read();
+  const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);
   // A pass that could not finish says so on the page instead of failing quietly.
   const caughtUp = [...pendingResults.splice(0), ...(skills?.results ?? []), ...(skills?.stopped ? [{ item: 'Sync', outcome: 'failed' as const, message: skills.stopped }] : [])];
   const notices = [...pendingNotices.splice(0), ...(skills?.notices ?? [])];
-  const snapshots = await read();
-  latestSnapshots = snapshots;
+  // The home is read again after a pass that may have written (Sync on, or Sync once): a pass that stopped part-way reports
+  // no writes, yet may have made some. An observe-only pass, or one that couldn't run, wrote nothing.
+  const snapshots = skills && (syncOn || explicit) ? await read() : before;
   const writable = (await writeAccess(shared)).allowed;
-  if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
+  const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(),
-    manage: await manageView(shared, caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices),
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId,
+    manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
+  // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
+  handoff = { id: readId, home: current!.home, snapshots };
+  toolsChangedHere(snapshots);
+  if (writable !== homeWritable) { homeWritable = writable; refreshTray(); }
   // How many items are managed, so the first-close note says truthfully whether anything syncs.
   lastManagedCount = [...made.manage.skills, ...made.mcp.servers, ...(made.agents?.servers ?? [])].filter(fact => fact.managed).length;
   return made;
@@ -367,43 +388,89 @@ let followUp: NodeJS.Timeout | undefined;
 /** A watcher event since the last pass: with Sync off nothing is written, but the page still shows the edit as pending. */
 let touched = false;
 
+/** The tools in the open home, read now: the one way the requests below learn them. */
+const presentNow = async (): Promise<HarnessId[]> => presentTools(await read());
+
+/**
+ * The home for a request that names the read it follows (`readId`, from the page's view): that read when it is the one
+ * just handed over, else a new read. A new read that finds the tools changed tells the page, so the sidebar and every
+ * page follow it, not only the request that noticed.
+ */
+async function readFor(readId?: number): Promise<Snapshot[]> {
+  if (current && readId === handoff.id && handoff.home === current.home) return handoff.snapshots;
+  const snapshots = await read();
+  if (toolsChangedHere(snapshots)) send('sync:changed');
+  return snapshots;
+}
+
+/** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
+let lastPresent = { home: '', tools: '' };
+
+/**
+ * Notes which tools are in the open home and says whether they changed while that home stayed open. Then the folders
+ * are watched again, so a tool that appeared is watched like the rest. A home just opened is only noted (false): opening
+ * it starts watching (selectHome), and the page reads it anyway.
+ */
+function toolsChangedHere(snapshots: Snapshot[]): boolean {
+  const tools = presentTools(snapshots).join(), home = current?.home ?? '';
+  if (home === lastPresent.home && tools === lastPresent.tools) return false;
+  const sameHome = home === lastPresent.home;
+  lastPresent = { home, tools };
+  if (sameHome) void startWatching();
+  return sameHome;
+}
+
 function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }
 
 async function backgroundPass() {
   if (!current) return;
   const fromEvent = touched;
   touched = false;
-  const { skills, mcpAndAgents } = await pass();
+  // The home is read once per pass, whatever Sync or write access say (reading writes nothing), and the pass uses that read.
+  // Whatever the pass finds, the page is told once, at the end (it keeps the news until it can read).
+  const snapshots = await read();
+  // A tool installed or removed changes every page's columns.
+  let changed = toolsChangedHere(snapshots);
+  const { skills, mcpAndAgents } = await pass(snapshots);
   keepMcpAndAgents(mcpAndAgents);
   // Sync off: an edit or deletion is only noted. The page reads again quietly so it shows as waiting, not as Synced.
-  if (fromEvent && !syncOn && !window.isDestroyed()) window.webContents.send('sync:changed');
+  if (fromEvent && !syncOn) changed = true;
   // A deletion waits out its settle window: look again just after it, so it finishes without a click. Otherwise wait for an event or the poll.
   if (skills?.settling || mcpAndAgents?.settling) { clearTimeout(followUp); followUp = setTimeout(queueBackgroundPass, 2_500); }
   if (skills?.stopped && skills.stopped !== lastStopped) {
     pendingResults.push({ item: 'Sync', outcome: 'failed', message: skills.stopped });
-    if (!window.isDestroyed()) window.webContents.send('sync:changed');
+    changed = true;
   }
   lastStopped = skills?.stopped;
-  if (!skills || (!skills.harnessWrites && !skills.notices?.length && !mcpAndAgents?.changed)) return;
-  pendingResults.push(...skills.results);
-  pendingNotices.push(...(skills.notices ?? []));
-  if (!window.isDestroyed()) window.webContents.send('sync:changed');
-  // Nobody saw it: the window is closed, gone or behind other windows (D-36).
-  if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
+  const wrote = !!skills && !!(skills.harnessWrites || skills.notices?.length || mcpAndAgents?.changed);
+  if (wrote) {
+    pendingResults.push(...skills!.results);
+    pendingNotices.push(...(skills!.notices ?? []));
+    // Nobody saw it: the window is closed, gone or behind other windows (D-36).
+    if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseen = true; refreshTray(); }
+  }
+  if (changed || wrote) send('sync:changed');
 }
 
 const nudge = () => { touched = true; clearTimeout(soon); soon = setTimeout(queueBackgroundPass, DEBOUNCE_MS); };
 
-function stopWatching() {
+/** Stops watching the folders and the poll; passes already due (an edit's debounce, a deletion's settle) still run. */
+function closeWatchers() {
   for (const watcher of watchers) watcher.close();
   watchers = [];
-  clearInterval(poller); clearTimeout(soon); clearTimeout(followUp);
+  clearInterval(poller);
   poller = undefined;
+}
+
+/** Stops everything background work would do on the open home: the watch, the poll and any pass already due. */
+function stopWatching() {
+  closeWatchers();
+  clearTimeout(soon); clearTimeout(followUp);
 }
 
 /** Watches each tool's skills folders (an event only prompts a read, CON-04), with polling as the fallback (T-08: at most 30 s). */
 async function startWatching() {
-  stopWatching();
+  closeWatchers();
   if (!current || smoke) return;
   const roots = new Set<string>(harnessIds.map(id => writeRoot(harnesses[id], current!.home, overrideFor(id))));
   roots.add(join(current.home, '.agents/skills'));
@@ -443,13 +510,15 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     }
     // A chosen folder is called by its own name everywhere: status bar, results and sidebar.
     next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
-  } else if (mode === 'actual') next = { mode, home: homedir(), label: process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home' };
+  } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform).home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
   // A switch that fails changes nothing: the home on screen stays the home open here.
   const previous = current;
   current = next;
   try {
     const shown = await syncThenView();
+    // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
+    stopWatching();
     void startWatching();
     // Saving the settings rebuilds the menus with the new home.
     await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
@@ -459,9 +528,10 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
 
 /**
  * The Practice copy (throwaway sample files) exists only in dev builds and tests. A released app works on this
- * computer's own home, and other folders can still be opened.
+ * computer's own home, and other folders can still be opened. Tests switch either way: `--practice-copy` offers it in a
+ * packaged build, and `--as-released` makes a development build start as a released one.
  */
-const practiceAvailable = () => !app.isPackaged || smoke || process.argv.includes('--practice-copy');
+const practiceAvailable = () => smoke || process.argv.includes('--practice-copy') || (!app.isPackaged && !process.argv.includes('--as-released'));
 
 /**
  * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
@@ -526,14 +596,14 @@ function createWindow(show: boolean) {
     // show the sign-in start it turned on, so neither a hidden window nor a login item is a surprise.
     if (!appSettings.closeExplained && !smoke) {
       void saveAppSettings({ closeExplained: true });
-      const icon = process.platform === 'darwin' ? 'menu bar' : 'system tray';
+      const icon = machineNames(process.platform).trayIcon;
       const syncing = syncOn && homeWritable && lastManagedCount > 0;
       // The checkbox shows the system's answer as the dialog opens; only a change the person makes to it is saved.
       const signedIn = signIn();
       void dialog.showMessageBox({
         type: 'info', buttons: ['OK', 'Quit instead'], defaultId: 0, cancelId: 0,
         message: syncing ? 'Central Knot keeps syncing in the background' : 'Central Knot is still running',
-        detail: syncing ? `Open it again from its ${icon} icon, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} icon or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
+        detail: syncing ? `Open it again from its ${icon}, or open Central Knot again. To stop syncing, choose Quit Central Knot there.` : `Nothing is syncing yet. Open it again from its ${icon} or by opening Central Knot again. To quit, choose Quit Central Knot from that icon.`,
         ...(signedIn.available ? { checkboxLabel: 'Start Central Knot at sign-in', checkboxChecked: signedIn.on } : {}),
       }).then(({ response, checkboxChecked }) => {
         if (signedIn.available && checkboxChecked !== signedIn.on) saveSignInQuietly(checkboxChecked);
@@ -546,7 +616,7 @@ function createWindow(show: boolean) {
   window.webContents.on('did-finish-load', () => log('page loaded'));
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event.
-  window.on('focus', () => { unseen = false; refreshTray(); window?.webContents.send('settings:changed'); });
+  window.on('focus', () => { unseen = false; refreshTray(); send('settings:changed'); });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
 }
@@ -605,8 +675,8 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
   registerMarketplaces({ handle, handleNow }, {
-    home: () => (current ? { home: current.home, snapshots: latestSnapshots, overrides: context().overrides } : undefined),
-    tools: async () => presentTools(latestSnapshots),
+    home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
+    read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
@@ -619,7 +689,7 @@ app.whenReady().then(async () => {
   handle('file:show', async path => { if (typeof path === 'string' && isAbsolute(path)) shell.showItemInFolder(path); });
   handle('history:change', async eventId => (current && typeof eventId === 'string' ? eventChange(context(), eventId) : undefined));
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
-    ? convertAgentToSkill(context(), presentTools(await read()), key)
+    ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
   handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
@@ -629,7 +699,7 @@ app.whenReady().then(async () => {
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const key = (await readHistory(context())).find(entry => entry.id === eventId)?.key ?? '';
-      const tools = (await manageView(context())).tools;
+      const tools = await presentNow();
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       return restoreFromHistory(context(), eventId, resume === true, typeof choice === 'string' ? choice : undefined);
@@ -643,10 +713,10 @@ app.whenReady().then(async () => {
   // With Sync off, Apply all writes exactly the skills it shows; spreading anything else waits for Sync.
   // MCP: Apply all writes every tool but Claude Code; Claude Code only through Write now, once Claude is closed (MCP-02).
   handle('mcp:apply', async (list, resume, home) => (home === current?.home
-    ? applyMcp(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    ? applyMcp(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('agents:apply', async (list, resume, home) => (home === current?.home
-    ? applyAgents(context(), (await manageView(context())).tools, changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
+    ? applyAgents(context(), await presentNow(), changes(list), { resume: resume === true, ...(syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
@@ -656,7 +726,7 @@ app.whenReady().then(async () => {
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), (await manageView(context())).tools, [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await presentNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => (home === current?.home
     ? applyChanges(context(), changes(list), resume === true, syncOn ? {} : { only: new Set(changes(list).map(change => change.key)) })

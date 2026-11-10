@@ -6,7 +6,8 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { install, installState, parseCatalog, readCatalog, uninstall, type PluginContext, type PluginTool } from '../../src/plugins.ts';
+import { install, installState, parseCatalog, readCatalog, uninstall, type PluginContext } from '../../src/plugins.ts';
+import type { PluginTool } from '../../src/presence.ts';
 import type { HarnessId } from '../../src/types.ts';
 
 const which = (name: string) => { try { return execFileSync('/bin/sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).trim() || undefined; } catch { return undefined; } };

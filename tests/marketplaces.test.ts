@@ -19,8 +19,8 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
   const host: MarketplaceHost = {
-    home: () => ({ home, snapshots: [] }),
-    tools: async () => ['claude-cli', 'copilot-cli', 'codex-cli'],
+    home: () => ({ home }),
+    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
@@ -113,7 +113,7 @@ test('A Git marketplace that can’t be reached is not fetched again on every vi
     assert.match(first.marketplaces[0]!.problem ?? '', /reach|access|Git/);
     await box.markets.view();
     assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 1, box.calls.join('\n'));
-    await box.markets.view('https://127.0.0.1:1/gone.git');
+    await box.markets.view(true);
     assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 2, 'Refresh tries again');
   } finally { await box.cleanup(); }
 });
@@ -179,7 +179,7 @@ test('A tool holding a different marketplace under the same name is left alone',
   } finally { await box.cleanup(); }
 });
 
-test('Refreshing a marketplace lets go of its plugins’ copies from other repositories, so they are read again', async () => {
+test('Refresh lets go of the copies a marketplace’s plugins keep from other repositories, so they are read again', async () => {
   const box = await setup();
   try {
     const root = join(box.base, 'market');
@@ -189,7 +189,7 @@ test('Refreshing a marketplace lets go of its plugins’ copies from other repos
     await put(join(copy, 'plugin/README.md'), 'old');
     await box.markets.view();
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), true, 'a plain view keeps the copy');
-    await box.markets.refresh(root);
+    await box.markets.view(true);
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), false);
   } finally { await box.cleanup(); }
 });

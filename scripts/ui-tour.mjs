@@ -1,8 +1,11 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
+// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
+// sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
+// (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { spawn } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -36,11 +39,19 @@ async function launch() {
   const page = await connect(target.webSocketDebuggerUrl);
   const { send, run } = page;
   const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
-  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  const viewport = { width: 1280, height: 800 };
+  /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
+  const size = async (width, height) => {
+    Object.assign(viewport, { width, height });
+    await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false });
+    await run(`window.dispatchEvent(new Event('resize'))`);
+    await settle();
+  };
+  await size(1280, 800);
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
   await settle();
   return {
-    run, send, settle,
+    run, send, settle, size, viewport, inspect,
     main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
@@ -49,12 +60,28 @@ async function launch() {
   };
 }
 
+/**
+ * One request from the page slowed or made to fail until `restore`, through the main process's debugger (development
+ * runs only, cdp.mjs), so the tour can show a page reading again, or a read that failed. Null in a packaged run.
+ */
+async function requestHandles(a) {
+  if (!a.main) return null;
+  const main = await a.main();
+  const handlers = 'electron.ipcMain._invokeHandlers';
+  return {
+    slow: (channel, ms) => main.run(`(() => { const real = ${handlers}.get(${JSON.stringify(channel)}); globalThis.ckAside = real; ${handlers}.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${ms})).then(() => real(...args))); return true; })()`),
+    fail: channel => main.run(`(() => { globalThis.ckAside = ${handlers}.get(${JSON.stringify(channel)}); ${handlers}.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the tour.'); }); return true; })()`),
+    restore: channel => main.run(`(() => { ${handlers}.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close: main.close,
+  };
+}
+
 let feature = '';
 let step = 0;
 const begin = name => { feature = name; step = 0; mkdirSync(join(out, name), { recursive: true }); writeFileSync(join(out, name, 'tour.md'), `# ${name}\n\nEach step: what was just done, then the screenshot and visible text with the same number.\n\n`); };
 const wanted = name => !only || only.includes(name);
-/** `pointer`: where the mouse rests for the shot (to show a hover); by default out of the way. */
-async function shot(a, name, caption, pointer = { x: 2, y: 798 }) {
+/** Takes a screenshot. `pointer`: where the mouse rests for it (to show a hover); by default out of the way, in the corner. */
+async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2 }) {
   step++;
   const base = `${String(step).padStart(2, '0')}-${name}`;
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
@@ -67,7 +94,7 @@ async function shot(a, name, caption, pointer = { x: 2, y: 798 }) {
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
 
-const a = await launch();
+let a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
 
 // ---------- First run, homes and navigation ----------
@@ -134,7 +161,8 @@ if (wanted('mcp')) {
   edit(join(practice, '.copilot/mcp-config.json'), text => text.replace('"command": "npx"', '"command": "npx-edited"'));
   await waitFor(a, `!!document.querySelector('.sync-notice')`);
   await shot(a, 'mcp-edit-notice', 'Outside the app, the files server\'s command was changed in Copilot\'s settings. A few seconds later.');
-  const first = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
   if (first) { await a.click(`#${first}`); await shot(a, 'mcp-details', 'Opened a server\'s details.'); }
   if (await a.has('#open-files')) { if (first) await a.click(`#${first}`); await a.click('#open-files'); await shot(a, 'mcp-waiting-details', 'Opened the files server\'s details while it waits for Write to Claude Code.'); }
 }
@@ -196,6 +224,265 @@ if (wanted('instructions')) {
   await a.click('#ins-review-claude-cli'); await shot(a, 'instructions-review', 'Changed one line, added another, and clicked Review changes.');
   await a.click('#ins-save-claude-cli'); await wait(400); await shot(a, 'instructions-saved', 'Clicked Save.');
   await a.click('#ins-edit-copilot-cli'); await shot(a, 'instructions-new-file', 'Clicked "Write instructions" on Copilot CLI, which has no file yet.');
+  // Near the cards' column breakpoint (each about 320px), a card's review and discard confirmation wrap within it.
+  await a.size(1240, 800);
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await shot(a, 'instructions-1240-saved-unsaved', 'At 1240×800: Claude Code\'s card says Saved with Undo save, Copilot CLI\'s says Unsaved changes, and Codex\'s card is plain; the headers line up.');
+  await a.click('#ins-review-copilot-cli'); await shot(a, 'instructions-review-1240', 'At 1240×800, three cards across: wrote a first draft for Copilot CLI and clicked Review new file.');
+  await a.click('#ins-review-discard-copilot-cli'); await shot(a, 'instructions-discard-confirm-1240', 'Clicked Discard changes: the confirmation wraps within the card.');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await a.size(1280, 800);
+  await a.click('#ins-edit-copilot-cli');
+  // A draft whose tool leaves the home: kept, and offered to copy or discard.
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.copilot'), join(practice, '.copilot-away'));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#ins-orphan')`);
+  await shot(a, 'instructions-orphan-draft', 'Typed a draft for Copilot CLI, then moved Copilot CLI\'s folder away outside the app and clicked Refresh: the card is gone, and the draft is offered to copy or discard.');
+  await a.click('#ins-orphan-discard');
+  renameSync(join(practice, '.copilot-away'), join(practice, '.copilot'));
+  await a.click('#header-refresh');
+}
+
+// ---------- Window sizes: every page from the window's minimum to a large display, full screen ----------
+/** Adds the fixture marketplace once, so the Plugins pages have something to show. */
+async function ensureMarket() {
+  await a.click('#nav-plugins');
+  await waitFor(a, `!!document.querySelector('.market-list, #marketplace-source')`);
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  if (await a.has('.market-list')) return;
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await waitFor(a, `!!document.querySelector('.market-list')`, 30000);
+}
+
+/** One shot of each page at the current size; `tag` names the size in the file names. */
+async function everyPage(tag) {
+  const at = `at ${a.viewport.width}×${a.viewport.height}`;
+  await a.click('#nav-overview'); await shot(a, `${tag}-overview`, `The Overview ${at}.`);
+  await a.click('#nav-skills'); await shot(a, `${tag}-skills`, `Skills ${at}.`);
+  // notes, when there: a skill whose copies agree, so its details offer Files and contents.
+  const first = await a.run(`(document.querySelector('#open-notes') ?? document.querySelector('.ov-row[data-key] .row-open'))?.id ?? ''`);
+  if (first) {
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${first}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The skill's details did not open ${at}.`);
+    await shot(a, `${tag}-skills-details`, `Opened notes's details ${at} (beside the table from 1200px of content).`);
+    const files = await a.run(`document.querySelector('[id^="files-"]')?.id ?? ''`);
+    if (files) {
+      await a.click(`#${files}`); await shot(a, `${tag}-skills-files`, `Clicked "Files and contents": the list and one skill's files ${at}.`);
+      // Where each copy is: open from the start in a wide pane, in its column beside the file; stacked, below the file.
+      if (await a.has('.details-paths:not([open]) summary')) { await a.click('.details-paths:not([open]) summary'); await shot(a, `${tag}-skills-files-where`, `Clicked "Where each copy is", below the file, ${at}: then Delete everywhere….`); }
+      else if (await a.has('.details-paths[open]')) { await a.run(`document.querySelector('.details-paths').scrollIntoView({ block: 'nearest' })`); await shot(a, `${tag}-skills-files-where`, `"Where each copy is" is open from the start ${at}: the skill's details in their column at the right, the status first and Delete everywhere… last.`); }
+      const toggle = await a.run(`document.querySelector('[id^="detail-switch-"]')?.id ?? ''`);
+      if (toggle) { await a.click(`#${toggle}`); await shot(a, `${tag}-skills-files-pending`, `Turned Managed for it in the Files view: the change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+      await a.click('#skills-table');
+    }
+    if (await a.has('.ov-row.open')) await a.click(`#${first}`);
+  }
+  // The last column's menu: the one most likely to run past the window's edge.
+  const head = await a.run(`[...document.querySelectorAll('.tool-head-button')].at(-1)?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-tool-menu`, `Opened the last tool column's menu ${at}.`); await a.click(`#${head}`); }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#use-draft-copilot-cli')) { await a.click('#use-draft-copilot-cli'); await shot(a, `${tag}-skills-choice`, `Chose Copilot CLI's copy of draft, whose copies differ: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
+  if (await a.has('#decide-draft')) {
+    await a.click('#decide-draft');
+    if (await a.has('#separate-draft')) { await a.click('#separate-draft'); await shot(a, `${tag}-skills-separate`, `Chose to keep draft's differing copies separate: the choice waits for Apply all ${at}.`); }
+    if (await a.has('#discard')) await a.click('#discard');
+  }
+  const off = await a.run(`document.querySelector('.ov-row[data-key] .cell-button.cell-on:not([disabled])')?.id ?? ''`);
+  if (off) { await a.click(`#${off}`); await shot(a, `${tag}-skills-pending-removal`, `Clicked a synced box: it stops syncing on Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  const cell = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+  if (cell) { await a.click(`#${cell}`); await shot(a, `${tag}-skills-pending`, `Clicked one box: a change waits for Apply all ${at}.`); if (await a.has('#discard')) await a.click('#discard'); }
+  await a.click('#nav-mcp'); await shot(a, `${tag}-mcp`, `MCP servers ${at}, with the notice of an edit made outside the app.`);
+  const server = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (server) {
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${server}`);
+    if (await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`)) await shot(a, `${tag}-mcp-details`, `Opened the first MCP server's details ${at} (docked beside the table from 1200px of content).`);
+    if (await a.has('.ov-row.open')) await a.click(`#${server}`);
+  }
+  await a.click('#nav-agents'); await shot(a, `${tag}-agents`, `Agents ${at}.`);
+  const agent = await a.run(`document.querySelector('.ov-row[data-key] .row-open')?.id ?? ''`);
+  if (agent) {
+    // An earlier step may have left the row open: a click would close it, so it is clicked only while closed.
+    if (!(await a.has('.ov-row.open, .dock'))) await a.click(`#${agent}`);
+    if (!(await waitFor(a, `!!document.querySelector('.ov-row.open, .dock')`))) throw new Error(`The agent's details did not open ${at}.`);
+    await shot(a, `${tag}-agents-details`, `Opened the first agent's details ${at} (beside the table from 1200px of content).`);
+    await a.click(`#${agent}`);
+  }
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `Instructions ${at}.`);
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `Plugins, the marketplace's list ${at}.`);
+  if (await a.has('[id^="popen-0-"]')) {
+    await a.click('[id^="popen-0-"]'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted')`);
+    await shot(a, `${tag}-plugin-page`, `A plugin's page ${at}.`); await a.click('#plugin-back');
+  }
+  await a.click('#nav-history');
+  // The pointer over the second row, so its full-width hover shows.
+  const hovered = await a.run(`(() => { const row = document.querySelectorAll('.history-row')[1]?.getBoundingClientRect(); return row ? [row.left + row.width / 2, row.top + row.height / 2] : null; })()`);
+  const pointer = hovered ? { x: hovered[0], y: hovered[1] } : undefined;
+  if (pointer) await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pointer });
+  const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
+  await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
+  await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
+}
+
+/** An edit to Copilot CLI's MCP settings made outside the app, so the MCP page shows its notice and actions. */
+async function editMcpOutside() {
+  edit(join(practice, '.copilot/mcp-config.json'), text => (text.includes('"npx-edited"') ? text.replace('"npx-edited"', '"npx"') : text.replace('"command": "npx"', '"command": "npx-edited"')));
+  await a.click('#nav-mcp');
+  await waitFor(a, `!!document.querySelector('.sync-notice')`, 10000);
+}
+
+if (wanted('sizes')) {
+  begin('sizes');
+  // Four tools: Pi gets its own folder in the practice copy, so every table has its widest set of columns.
+  cpSync(join(practice, '.claude/skills/notes'), join(practice, '.pi/agent/skills/notes'), { recursive: true });
+  // A skill whose copies differ, so a copy choice can be shown waiting for Apply all.
+  for (const [tool, body] of [['.claude', 'Claude Code’s draft.'], ['.copilot', 'Copilot CLI’s draft.']]) {
+    mkdirSync(join(practice, tool, 'skills/draft'), { recursive: true });
+    writeFileSync(join(practice, tool, 'skills/draft/SKILL.md'), `---\nname: draft\ndescription: Turn notes into a first draft.\n---\n\n${body}\n`);
+  }
+  await a.click('#nav-skills'); await a.click('#header-refresh');
+  await editMcpOutside();
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.size(width, height);
+    if (width === 860) {
+      // An edit made outside the app while the Overview is open: the rail marks Skills with a dot until it is seen.
+      await a.click('#nav-overview');
+      edit(join(practice, '.codex/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex for the rail.\n'));
+      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Codex) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
+    }
+    await everyPage(`${width}`);
+    // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
+    if (width >= 1728) { await a.click('#sidebar-toggle'); await everyPage(`${width}-rail`); await a.click('#sidebar-toggle'); }
+    // Pi's mark as the window shows it at 100% zoom, on an Overview card and in the table's header.
+    if (width === 1280) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+      await a.click('#nav-overview'); await shot(a, '1280-overview-1x', 'The Overview at 1280×800 at 100% zoom (one screen pixel per pixel), where the tools\' small marks, Pi\'s among them, are drawn at 12px.');
+      await a.click('#nav-skills'); await shot(a, '1280-skills-1x', 'Skills at 100% zoom: the tool marks in the column headers.');
+      await a.size(width, height);
+    }
+    // At the minimum the sidebar folds to its rail; the person can open it, leaving the content about 650px.
+    if (width === 860) {
+      await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
+      // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
+      await a.click('#nav-skills');
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+      if (box) {
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
+        await a.click('#sidebar-toggle');
+        await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-sidebar-open-status-message', 'The same with the sidebar open: with too little room for the message, a mark stands in, the message its tooltip.');
+        await a.click('#sidebar-toggle');
+      }
+    }
+  }
+  await a.theme('light');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) { await a.size(width, height); await everyPage(`${width}-light`); }
+  await a.theme('dark');
+  // Reading again, and a read again that failed: a page keeps what it showed, and says so in a quiet band.
+  const main = await requestHandles(a);
+  if (main) {
+    await a.size(1728, 1117);
+    await ensureMarket();
+    await main.slow('plugins:view', 4000);
+    await a.click('#header-refresh');
+    if (await waitFor(a, `!!document.querySelector('.rereading')`, 2000)) await shot(a, '1728-plugins-rereading', 'Clicked Refresh on Plugins at 1728×1117: while the marketplaces are read again (slowed here to show it), the last read stays, with a quiet band saying so.');
+    await main.restore('plugins:view');
+    await waitFor(a, `!document.querySelector('.rereading')`, 8000);
+    await a.click('#nav-history');
+    await main.fail('history:list');
+    await a.click('#nav-history');
+    if (await waitFor(a, `!!document.querySelector('.reread-failed')`, 3000)) await shot(a, '1728-history-reread-failed', 'Opened History again while its read was made to fail: the last read stays on screen, and a quiet band says it could not read again.');
+    await main.restore('history:list');
+    await a.click('#nav-history');
+    main.close();
+  }
+  // A marketplace with a long name and long facts, with a change waiting, at the smallest window.
+  await a.size(860, 560);
+  await ensureMarket();
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace'); await waitFor(a, `document.querySelectorAll('.market-item').length > 1`, 30000);
+  const box = await a.run(`document.querySelector('.plugin-row .cell-button:not([disabled])')?.id ?? ''`);
+  if (box) await a.click(`#${box}`);
+  await shot(a, '860-long-marketplace', 'Added a marketplace with a long name and a long maker\'s name, and chose one install, at 860×560.');
+  await a.click('#sidebar-toggle'); await shot(a, '860-sidebar-open-long-marketplace', 'The same with the sidebar open: the change waiting for Apply all keeps the toolbar\'s right end.'); await a.click('#sidebar-toggle');
+  await a.size(1280, 800); await shot(a, '1280-long-marketplace', 'The same at 1280×800: the facts that don\'t fit beside the name drop whole.');
+  if (await a.has('#plugins-discard')) await a.click('#plugins-discard');
+  await a.click('#market-tab-about'); await shot(a, '1280-long-marketplace-about', 'Its About tab: every fact, where it comes from, and Remove.');
+  if (await a.has('[id^="forget-"]')) await a.click('[id^="forget-"]');
+  await a.size(1280, 800);
+}
+
+// ---------- A home with only some tools ----------
+// Copilot CLI's column, its header menu entry, its Plugins box and its Instructions card, shown first in the practice copy
+// and then gone in a folder that holds only Claude Code's and Codex's folders. A folder home looks for no installed apps,
+// so this holds on any machine. The app starts again with that folder remembered, as choosing one opens a system dialog.
+/** The views where a tool can appear as an option, each shot once; `tag` says which home. */
+async function toolViews(tag, home) {
+  await a.click('#nav-skills');
+  const head = await a.run(`document.querySelector('.tool-head-button')?.id ?? ''`);
+  if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
+  await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
+  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+}
+
+if (wanted('missing')) {
+  begin('missing');
+  await a.click('#home-fixture');
+  await toolViews('before', 'The practice copy, with every tool');
+  // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
+  await a.click('#home-actual'); await a.click('#nav-tools');
+  await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
+  await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
+  const folder = join(scratch, 'two-tools');
+  for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(folder, name), { recursive: true });
+  a.quit();
+  await wait(500);
+  const settings = join(scratch, 'data/app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: folder } }));
+  a = await launch();
+  await toolViews('after', 'A folder with only Claude Code and Codex');
+  await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
+  await a.size(2560, 1440);
+  await a.click('#nav-tools'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
+  await a.size(1280, 800);
+  await a.size(860, 560);
+  await a.click('#nav-skills'); await shot(a, 'after-860-skills', 'The same folder\'s Skills at 860×560.');
+  await a.size(1280, 800);
+  // A folder whose only tool is Pi, which takes no plugins: the Plugins page says so instead of drawing an empty table.
+  const piOnly = join(scratch, 'pi-only');
+  cpSync(join(root, 'fixtures/home/.claude/skills/notes'), join(piOnly, '.pi/agent/skills/notes'), { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
+  a = await launch();
+  await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
+  await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
+  // A folder with no tools at all: every page stays, each saying so.
+  const empty = join(scratch, 'no-tools');
+  mkdirSync(empty, { recursive: true });
+  a.quit();
+  await wait(500);
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
+  a = await launch();
+  await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
+  await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
+  await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
+  await a.size(1280, 800);
 }
 
 // ---------- Settings ----------

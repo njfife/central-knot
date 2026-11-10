@@ -2,7 +2,7 @@
 // Usage: node scripts/e2e.mjs [--electron] [--no-sandbox] [--shots dir] [--crash-rounds n]
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, renameSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -104,9 +104,9 @@ if (process.platform === 'linux') {
   chmodSync(join(scratch, 'bin/xdg-open'), 0o755);
 }
 let app;
-async function launch(userData = join(scratch, 'data'), extra = []) {
+async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
   const port = 9400 + randomInt(500);
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
@@ -129,7 +129,7 @@ async function launch(userData = join(scratch, 'data'), extra = []) {
   const settle = async () => { await wait(120); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.mx,.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(60); };
   app = {
     child, run, send, settle, pageErrors,
-    main: inspect && (() => mainProcess(inspect)),
+    inspect, main: inspect && (() => mainProcess(inspect)),
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.click(); })()`); await settle(); },
     exists: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
     text: selector => run(`document.querySelector(${JSON.stringify(selector)})?.textContent ?? null`),
@@ -146,19 +146,132 @@ async function launch(userData = join(scratch, 'data'), extra = []) {
   return app;
 }
 
+/**
+ * The main process's own debugger, for a development run launched with --inspect=port. A test uses it only to do what a
+ * person does outside the window (click an item in the menu bar menu), or to make one request fail.
+ */
+/** The branch's own handles on main (debugger on `port`): the menu, and one request slowed, failed or answered late. */
+async function mainHelpers(port) {
+  let target;
+  for (let attempt = 0; attempt < 100 && !target; attempt++) {
+    try { [target] = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { /* still starting */ }
+    if (!target) await wait(100);
+  }
+  if (!target) throw new Error('The main process did not open its debug port.');
+  const { send, run, close } = await connect(target.webSocketDebuggerUrl);
+  const electron = `process.mainModule.require('electron')`;
+  return {
+    /** Clicks the checkbox item `label` in the live menu bar menu, where it now reads `checked`; returns how many it clicked. */
+    clickMenu: async (label, checked) => {
+      await send('HeapProfiler.collectGarbage');
+      const prototype = await send('Runtime.evaluate', { expression: `${electron}.Menu.prototype` });
+      if (!prototype.result?.result?.objectId) throw new Error('No Electron Menu in the main process: the menu test cannot find the menu bar menu.');
+      const menus = await send('Runtime.queryObjects', { prototypeObjectId: prototype.result.result.objectId });
+      const clicked = await send('Runtime.callFunctionOn', { objectId: menus.result.objects.objectId, arguments: [{ value: label }, { value: checked }], returnByValue: true,
+        // Every object with Menu's prototype comes back, not only menus: only a menu has .items.
+        functionDeclaration: `function (label, checked) { const items = this.filter(menu => Array.isArray(menu.items)).flatMap(menu => menu.items).filter(item => item.label === label && item.checked === checked); for (const item of items) item.click({}, undefined, undefined); return items.length; }` });
+      return clicked.result.result.value;
+    },
+    /** Makes one request from the page fail until `restore` runs; the real handler stays aside meanwhile. */
+    failRequest: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the failed-Refresh test needs another way to make a request fail.'); globalThis.ckAside = handlers.get(${JSON.stringify(channel)}); handlers.set(${JSON.stringify(channel)}, () => { throw new Error('Refused for the test.'); }); return !!globalThis.ckAside; })()`),
+    /** Makes one request from the page take `ms` longer until `restore` runs. */
+    slowRequest: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; if (!(handlers instanceof Map)) throw new Error('This Electron has no ipcMain._invokeHandlers: the busy test needs another way to slow a request.'); const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => new Promise(done => setTimeout(done, ${Number(ms)})).then(() => real(...args))); return true; })()`),
+    /** Makes one request's reply reach the page `ms` later (the work itself runs at once), until `restore` runs. */
+    slowReply: (channel, ms) => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers; const real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; handlers.set(${JSON.stringify(channel)}, (...args) => Promise.resolve(real(...args)).then(value => new Promise(done => setTimeout(() => done(value), ${Number(ms)})))); return true; })()`),
+    /** Sends the page a message, as the main process does after a background pass. */
+    tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
+    close,
+  };
+}
+
 // ---------- Flows ----------
 const rowKeys = a => a.all('.ov-row[data-key]', 'e.dataset.key');
 const cellState = (a, key, tool) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] [data-tool=${JSON.stringify(tool)}] .cell-button')?.dataset.state ?? null`);
 const switchOn = (a, key) => a.run(`document.querySelector('.ov-row[data-key=${JSON.stringify(key)}] .switch')?.getAttribute('aria-checked') === 'true'`);
 const applyAll = async a => { await a.click('#apply'); await a.settle(); };
 
+// ---------- Fit: nothing is cut off ----------
+// In the page, on both axes: each control (button, switch, input, filter chip, tool label) that the window or a clipping
+// ancestor cuts. A control a scroll area can bring into view is reachable there, but that scroll area's own viewport must
+// still be visible within every clipping boundary outside it, up to the window. Also each region that scrolls sideways,
+// each bar the app's own fitting (dom.ts fitBars) marks as still too wide, and an open menu outside its scroll area.
+// Empty when everything fits.
+const CUT_OFF = `(() => {
+  const out = [];
+  const label = node => node.id || node.getAttribute('aria-label') || (node.textContent || '').trim().slice(0, 40) || String(node.className);
+  const inside = (box, edge, axis) => axis === 'x' ? box.left >= edge.left - 1 && box.right <= edge.right + 1 : box.top >= edge.top - 1 && box.bottom <= edge.bottom + 1;
+  const overflow = (style, axis) => style[axis === 'x' ? 'overflowX' : 'overflowY'];
+  const scrolls = (node, style, axis) => ['auto', 'scroll'].includes(overflow(style, axis)) && (axis === 'x' ? node.scrollWidth > node.clientWidth + 1 : node.scrollHeight > node.clientHeight + 1);
+  const view = { left: 0, right: innerWidth, top: 0, bottom: innerHeight };
+  for (const node of document.querySelectorAll('button, [role="switch"], input:not(.hidden-input), .chip, .ov-tool-head, .plugin-tool-name')) {
+    const own = node.getBoundingClientRect();
+    if (own.width < 2 || own.height < 2) continue;
+    // What must be visible on each axis: the control itself, until a scroll area can bring it into view; then that area.
+    const subject = { x: own, y: own };
+    let cut = '';
+    for (let up = node.parentElement; up && up !== document.body && !cut; up = up.parentElement) {
+      const style = getComputedStyle(up), edge = up.getBoundingClientRect();
+      for (const axis of ['x', 'y']) {
+        if (cut || overflow(style, axis) === 'visible') continue;
+        if (scrolls(up, style, axis)) subject[axis] = edge;
+        else if (!inside(subject[axis], edge, axis)) cut = (axis === 'x' ? 'cut sideways by ' : 'cut off below or above by ') + (up.id || up.className);
+      }
+    }
+    for (const axis of ['x', 'y']) if (!cut && !inside(subject[axis], view, axis)) cut = axis === 'x' ? 'off the window' : 'below or above the window';
+    if (cut) out.push(cut + ': ' + label(node));
+  }
+  for (const node of document.querySelectorAll('.scroll, .toolbar, .band, #header, .market-chips')) if (node.scrollWidth > node.clientWidth + 1) out.push('scrolls sideways: ' + (node.id || node.className));
+  for (const bar of document.querySelectorAll('.fit-bar[data-overflows]')) out.push('too wide even when fitted: ' + bar.className);
+  for (const menu of document.querySelectorAll('.tool-menu')) {
+    const box = menu.getBoundingClientRect(), area = menu.closest('.scroll').getBoundingClientRect();
+    if (!inside(box, area, 'x') || !inside(box, area, 'y')) out.push('menu outside its area: ' + menu.getAttribute('aria-label'));
+  }
+  return out;
+})()`;
+
+/** Sizes the page as the window would be, and lets the app hear the resize. */
+async function sizeTo(a, width, height) {
+  await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+async function fullSize(a) {
+  await a.send('Emulation.clearDeviceMetricsOverride');
+  await a.run(`window.dispatchEvent(new Event('resize'))`);
+  await a.settle();
+}
+
+/**
+ * At the smallest window, first with the sidebar folded to its rail and then open, nothing on this page is cut off.
+ * `again` puts back what the sidebar toggle's click closes, such as an open menu.
+ */
+async function fitsAtMinimum(a, where, again = async () => {}) {
+  await sizeTo(a, 860, 560); await again();
+  same(`nothing cut off at 860×560 with the rail: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle'); await again();
+  same(`nothing cut off at 860×560 with the sidebar open: ${where}`, await a.run(CUT_OFF), []);
+  await a.click('#sidebar-toggle');
+  await fullSize(a);
+}
+
 async function practiceFlow() {
+  // A development run also opens the main process's debugger, for the menu bar menu and a failed Refresh.
   const a = await launch(undefined, ['--practice-copy']);
+  const main = a.inspect ? await mainHelpers(a.inspect) : undefined;
   same('opens on the practice copy', await a.text('#home-label'), 'Practice copy');
   await wait(1500);
   same('one window at launch (macOS activate never makes a second)', await a.pages(), 1);
   check('the Overview sums up every kind', (await a.exists('#overview-skills')) && (await a.exists('#overview-mcp')) && (await a.exists('#overview-agents')), await a.text('#page'));
   check('the practice copy explains itself', (await a.text('.intro') ?? '').includes('practice copy'), await a.text('#page'));
+  // The newest message wins: Discard right after opening a home says so, rather than the home's "Opened …" standing.
+  await a.click('#home-fixture');
+  await a.click('#nav-skills');
+  const openedSaid = await a.run(`document.querySelector('#announcement').dataset.text`);
+  await a.click('#manage-all');
+  await a.click('#discard');
+  same('Discard right after opening a home says so', [/^Opened Practice copy\./.test(openedSaid ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`)], [true, 'Changes discarded. Nothing was written.']);
+  await a.click('#nav-overview');
   await a.click('#overview-skills');
   same('rows', (await rowKeys(a)).sort(), ['notes', 'release-notes', 'review', 'standup']);
   same('nothing is managed at first', await Promise.all(['notes', 'release-notes', 'review', 'standup'].map(key => switchOn(a, key))), [false, false, false, false]);
@@ -170,6 +283,26 @@ async function practiceFlow() {
   const reviewClaude = readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8');
   const reviewCopilot = readFileSync(join(practice, '.copilot/skills/review/SKILL.md'), 'utf8');
 
+  // The sweep itself: a button in a scroll area that an outer clipping box hides must be reported, not passed as scrollable.
+  const fixture = await a.run(`(() => {
+    const outer = document.createElement('div'), inner = document.createElement('div'), tall = document.createElement('div'), button = document.createElement('button');
+    for (const [node, props] of [[outer, { position: 'fixed', left: '0', top: '0', width: '200px', height: '40px', overflow: 'hidden' }], [inner, { marginTop: '60px', height: '120px', overflow: 'auto' }], [tall, { height: '400px' }]]) Object.assign(node.style, props);
+    button.id = 'clip-fixture-button'; button.textContent = 'Hidden';
+    tall.append(button); inner.append(tall); outer.append(inner); document.body.append(outer);
+    const found = ${CUT_OFF};
+    outer.remove();
+    return found;
+  })()`);
+  check('the cut-off sweep reports a scroll area its outer box clips', fixture.some(line => line.endsWith('clip-fixture-button')), fixture);
+  // An open column menu fits at the smallest window, and keeps fitting while the window shrinks and grows under it.
+  await fitsAtMinimum(a, 'Skills with Codex’s menu open', async () => { if (!(await a.exists('.tool-menu'))) await a.click('#tool-codex-cli'); });
+  await a.click('#tool-codex-cli');
+  for (const [width, height] of [[860, 560], [1728, 1117], [860, 560], [1280, 800]]) {
+    await sizeTo(a, width, height);
+    same(`the open menu still fits after resizing to ${width}×${height}`, [await a.exists('.tool-menu'), ...(await a.run(CUT_OFF))], [true]);
+  }
+  await a.press('Escape');
+  await fullSize(a);
   // Add all from Copilot CLI to Claude Code: new, same and different are told apart, and differing copies are opt-in.
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + (group.dataset.count ?? '1'))`);
@@ -232,6 +365,18 @@ async function practiceFlow() {
   await a.settle();
   same('Restore brings it back to every tool', [existsSync(join(practice, '.claude/skills/release-notes/SKILL.md')), existsSync(join(practice, '.copilot/skills/release-notes/SKILL.md')), existsSync(join(practice, '.codex/skills/release-notes/SKILL.md'))], [true, true, true]);
 
+  // The practice copy has no Pi folder, only a skill in the shared .agents folder that Pi (and others) read: that makes no
+  // tool present, so Pi is no column, box or menu, and Tools shows no card for it.
+  mkdirSync(join(practice, '.agents/skills/shared-only'), { recursive: true });
+  writeFileSync(join(practice, '.agents/skills/shared-only/SKILL.md'), text('shared-only'));
+  await a.click('#nav-skills');
+  await a.click('#header-refresh');
+  check('a tool not in this home has no column or box', !(await a.exists('[data-tool="pi-cli"], #tool-pi-cli')));
+  await a.click('#nav-tools');
+  check('nor a card on Tools', !(await a.exists('.tool-card[aria-label^="Pi"]')) && await a.exists('.tool-card[aria-label^="Codex"]'));
+  // Copilot CLI and Codex do read the shared folder, so its skill is theirs; it goes again before the checks that count skills.
+  rmSync(join(practice, '.agents'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   // Watching: an edit on disk spreads with no click (an event prompts a read; polling is the fallback).
   await a.click('#nav-skills');
   writeFileSync(standupPath('copilot'), standupBefore.replace(/\n*$/, '\nEdited in Copilot, watched.\n'));
@@ -279,7 +424,7 @@ async function practiceFlow() {
 
   // Details open under a row.
   await a.click('#open-release-notes');
-  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in Claude Code, Copilot CLI and Codex'), await a.text('.details'));
+  check('details say every tool has the same copy', (await a.text('.details')).includes('same copy in all 3 tools'), await a.text('.details'));
   await a.click('#open-release-notes');
 
   // Choose which copy to use.
@@ -290,6 +435,20 @@ async function practiceFlow() {
   check('the choice waits for Apply all', readFileSync(join(practice, '.claude/skills/review/SKILL.md'), 'utf8') === reviewClaude);
   same('the choice previews as a pending sync', [await cellState(a, 'review', 'claude-cli'), await cellState(a, 'review', 'copilot-cli')], ['synced', 'synced']);
   check('the pill gives way to the choice', !(await a.exists('#decide-review')) && (await a.exists('#undo-review')));
+  // With four tools beside an open sidebar the name column is narrowest: the chosen copy still fits, Change included.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#header-refresh');
+  check('a Pi folder makes Pi a fourth column', await a.exists('#tool-pi-cli') && await a.exists('#undo-review'));
+  await fitsAtMinimum(a, 'a chosen copy waiting, with four tools');
+  // Keeping separate copies is a choice waiting too; its short form keeps Change in the narrowest table.
+  await a.click('#undo-review');
+  await a.click('#separate-review');
+  check('keeping separate waits for Apply all', ((await a.text('.ov-row[data-key="review"] .decided')) ?? '').includes('Keeping separate'));
+  await fitsAtMinimum(a, 'keeping separate copies waiting, with four tools');
+  await a.click('#undo-review');
+  await a.click('#use-review-copilot-cli');
+  rmSync(join(practice, '.pi'), { recursive: true, force: true });
+  await a.click('#header-refresh');
   const nameFits = await a.run(`(() => { const cell = document.querySelector('.ov-row[data-key="review"] .ov-name'); return cell.scrollWidth <= cell.clientWidth + 1 && cell.getBoundingClientRect().height < 44; })()`);
   check('the name cell does not overflow or wrap', nameFits);
   await a.shot('practice-choice-made');
@@ -370,13 +529,56 @@ async function practiceFlow() {
   await a.click('#files-standup');
   same('the Skills list has every skill', await a.run(`[...document.querySelectorAll('.list-row')].map(row => row.id)`), ['list-notes', 'list-release-notes', 'list-review', 'list-standup']);
   await a.click('#list-standup');
-  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details')), await a.text('.pane-title'));
-  check('its folders and contents are shown', (await a.text('#detail-scroll .details')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  check('the details show the skill', (await a.text('.pane-title')).includes('standup') && (await a.exists('#detail-scroll .details-paths')), await a.text('.pane-title'));
+  check('its folders and contents are shown', (await a.text('#detail-scroll .details-paths')).includes('/.copilot/skills/standup') && (await a.text('#detail-scroll pre.content')).includes('name:'), await a.text('#detail-scroll'));
+  // Stacked (this window), the file comes before where each copy is, and nothing to delete sits above the file.
+  same('stacked, the file comes first, then where each copy is', await a.run(`(() => { const order = [...document.querySelectorAll('#detail-scroll pre.content, #detail-scroll .details-paths, #detail-scroll [id^="delete-"]')].map(e => e.matches('pre') ? 'file' : e.matches('.details-paths') ? 'where' : 'delete'); return order.filter((entry, index) => order.indexOf(entry) === index); })()`), ['file', 'where']);
+  // A wide pane (here at 1728) puts the details in a column at the right: where each copy is open from the start, the
+  // file's box spanning to meet it.
+  await sizeTo(a, 1728, 1117);
+  for (let tries = 0; tries < 20 && !(await a.exists('#detail-scroll .files-tail .details-paths[open]')); tries++) await wait(50);
+  const filesWide = await a.run(`(() => { const pane = document.querySelector('#detail-scroll').getBoundingClientRect(), file = document.querySelector('#detail-scroll pre.content').getBoundingClientRect(), details = document.querySelector('#detail-scroll .files-tail').getBoundingClientRect(); return { open: !!document.querySelector('#detail-scroll .files-tail .details-paths[open]'), beside: details.left > file.right, gap: Math.round(details.left - file.right), edge: Math.round(pane.right - details.right) }; })()`);
+  check('at 1728 the details sit beside the file, open, with the file spanning to them', filesWide.open && filesWide.beside && filesWide.gap <= 40 && filesWide.edge <= 40, JSON.stringify(filesWide));
+  await fullSize(a);
   const standupManaged = await a.run(`document.querySelector('#detail-switch-standup').getAttribute('aria-checked') === 'true'`);
   await a.click('#detail-switch-standup');
   check('a change here waits for Apply all', (await a.exists('#discard')) && (await a.exists('#list-standup.list-changed')));
+  await fitsAtMinimum(a, 'the Files view with a change waiting');
   await a.shot('practice-skills');
-  await a.click('#skills-table');
+  await a.press('Escape');
+  check('Escape leaves the Files view for the table', !(await a.exists('.split')) && await a.exists('.ov-row[data-key="standup"]'));
+  // A later skill chosen in the side-by-side Files view stays in view when the window narrows into the stacked list.
+  for (let n = 1; n <= 6; n++) { mkdirSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true }); writeFileSync(join(practice, `.claude/skills/zz-${n}/SKILL.md`), text(`zz-${n}`)); }
+  await a.click('#header-refresh');
+  if (!(await a.exists('#files-standup'))) await a.click('#open-standup');
+  await a.click('#files-standup');
+  await a.click('#list-zz-6');
+  await sizeTo(a, 860, 560);
+  check('the chosen row stays in view in the stacked list', await a.run(`(() => { const list = document.querySelector('#skills-list'), row = document.querySelector('#list-zz-6'), head = list.querySelector('.list-head'); const area = list.getBoundingClientRect(), box = row.getBoundingClientRect(); return box.top >= area.top + head.offsetHeight - 1 && box.bottom <= area.top + list.clientHeight + 1; })()`));
+  await fullSize(a);
+  await a.press('Escape');
+  // A scrolled table keeps its place when the window crosses the dock's breakpoint (a redraw), both ways.
+  const tableTop = () => a.run(`document.querySelector('#table-skills')?.scrollTop ?? -1`);
+  await sizeTo(a, 1280, 560);
+  // Partway down, so the same position exists however tall the table's area is at either width.
+  await a.run(`(() => { const table = document.querySelector('#table-skills'); table.scrollTop = Math.min(100, table.scrollHeight - table.clientHeight); })()`);
+  const scrolled = await tableTop();
+  await sizeTo(a, 2560, 560);
+  const docked = await tableTop();
+  await sizeTo(a, 1280, 560);
+  check('a scrolled table keeps its place across the dock breakpoint, both ways', scrolled > 0 && docked === scrolled && await tableTop() === scrolled, { scrolled, docked, back: await tableTop() });
+  await fullSize(a);
+  for (let n = 1; n <= 6; n++) rmSync(join(practice, `.claude/skills/zz-${n}`), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  // A large display docks an open row's details beside the table, and nothing on it is cut off; laptop full screen docks too.
+  await sizeTo(a, 2560, 1440);
+  if (!(await a.exists('.ov-row.open[data-key="standup"]'))) await a.click('#open-standup');
+  check('at 2560 the details dock beside the table', await a.exists('.ov-page.docked .dock .details') && !(await a.exists('.ov-row + .details')));
+  same('nothing cut off at 2560×1440 with details docked', await a.run(CUT_OFF), []);
+  await sizeTo(a, 1728, 1117);
+  check('at 1728 the details dock too', await a.exists('.dock .details'));
+  await a.click('#dock-close');
+  await fullSize(a);
   same('the table shows the same pending change', await switchOn(a, 'standup'), !standupManaged);
   await a.click('#discard');
   same('discarding there clears it everywhere', await switchOn(a, 'standup'), standupManaged);
@@ -443,6 +645,8 @@ async function practiceFlow() {
   let mcpSpread = false;
   for (let tries = 0; tries < 24 && !mcpSpread; tries++) { await wait(250); mcpSpread = readFileSync(join(practice, '.codex/config.toml'), 'utf8').includes('command = "npx-edited"'); }
   check('an MCP edit in Copilot reaches Codex within 6 s', mcpSpread);
+  for (let tries = 0; tries < 20 && !(await a.exists('.sync-notice[data-kind="edit"]')); tries++) await wait(250);
+  await fitsAtMinimum(a, 'MCP servers with the edit’s notice and its actions');
 
   // Agents: each tool's agents on one page. A plain agent is two-way; one with Claude-only fields reaches the others With limits.
   await a.click('#nav-agents');
@@ -488,11 +692,131 @@ async function practiceFlow() {
   check('no marketplaces yet', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
   await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#add-marketplace');
-  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-page-head')).includes('By Platform team'), await a.text('#plugins-scroll'));
+  check('the marketplace is listed and opened, with its plugins', (await a.text('.market-list')).includes('ck-test-market') && await a.exists('[data-plugin="document-tools"]') && (await a.text('.market-title-line')).includes('By Platform team'), await a.text('#plugins-scroll'));
   check('a root-level entry counts only the skills it lists', (await a.text('[data-plugin="starter-skills"]')).includes('1 skill'), await a.text('[data-plugin="starter-skills"]'));
   // Read ahead from its own repository when the network allows: what it holds; otherwise where it comes from.
   check('a plugin elsewhere says what it holds, that it is reading it, or where it comes from', /From GitHub: github\/copilot-plugins\/plugins\/spark|Reading what it holds…|\d+ skills?/.test(await a.text('[data-plugin="spark"]')), await a.text('[data-plugin="spark"]'));
   same('every tool column shows, none installed', await a.run(`[...document.querySelectorAll('[data-plugin="document-tools"] .cell-button')].map(cell => cell.dataset.state)`), ['absent', 'absent', 'absent']);
+  // A tool that goes away while Plugins is open leaves its column on Refresh, and comes back with its folder.
+  const codexKept = join(scratch, 'codex-kept');
+  cpSync(join(practice, '.codex'), codexKept, { recursive: true });
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 2; tries++) await wait(100);
+  same('Refresh on Plugins drops a tool that went away', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 2);
+  // It comes back as a new folder while Automatic sync is off, and nothing else changes: no folder being watched sees it,
+  // so the background poll alone (no Refresh, no file event) finds the tool, and Plugins follows.
+  await a.click('#sync-switch');
+  same('Automatic sync is off', await a.run(`document.querySelector('#sync-switch').getAttribute('aria-checked')`), 'false');
+  // Passes still due from the folder going away (a deletion's settle window) run out first, so only a later pass can find it.
+  await wait(5000);
+  cpSync(codexKept, join(practice, '.codex'), { recursive: true });
+  const polled = Date.now();
+  for (let tries = 0; tries < 300 && (await a.all('[data-plugin="document-tools"] .cell-button')).length !== 3; tries++) await wait(100);
+  same('with sync off, the background poll brings its column back on Plugins', (await a.all('[data-plugin="document-tools"] .cell-button')).length, 3);
+  console.log(`(the poll found Codex after ${Math.round((Date.now() - polled) / 1000)} s)`);
+  rmSync(join(practice, '.codex-away'), { recursive: true, force: true });
+  await a.click('#sync-switch');
+  // A tool change told while the page is busy (here, a Refresh reading the home slowly) is kept, and read once the work is
+  // done, with no second Refresh.
+  if (main) {
+    const columns = async () => (await a.all('[data-plugin="document-tools"] .cell-button')).length;
+    check('the refresh request is slowed', await main.slowRequest('discovery:refresh', 3000));
+    await a.run(`(document.querySelector('#header-refresh').click(), true)`);
+    await wait(1000);
+    const busyThen = await a.run(`document.body.dataset.busy`);
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await main.restore('discovery:refresh');
+    for (let tries = 0; tries < 80 && (await columns()) !== 2; tries++) await wait(100);
+    same('a tool change told while the page is busy is read once the work is done', [busyThen, await columns()], ['true', 2]);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 30 && (await columns()) !== 3; tries++) await wait(100);
+    // Two tool changes told back to back, on Skills (whose columns are the home's tools): the first read sees Codex gone,
+    // and the second change (Codex back) arrives while that read is still on its way. It is owed, and read as soon as the
+    // first ends, so the page ends right.
+    await a.click('#nav-skills');
+    const heads = () => a.all('.tool-head-button', 'e.id');
+    const all = (await heads()).length;
+    check('the refresh reply is slowed', await main.slowReply('discovery:refresh', 1500));
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await main.tellPage('sync:changed');
+    await wait(300);
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    await main.tellPage('sync:changed');
+    await main.restore('discovery:refresh');
+    for (let tries = 0; tries < 80 && (await heads()).length !== all - 1; tries++) await wait(50);
+    const between = (await heads()).length;
+    for (let tries = 0; tries < 80 && (await heads()).length !== all; tries++) await wait(100);
+    same('two tool changes told back to back: the first read shows, then the second', [between, (await heads()).length], [all - 1, all]);
+    // Nothing is left owed: a later action's result stays, rather than being wiped by a read that ran late.
+    await wait(2500);
+    await a.click('#header-refresh');
+    const result = await a.text('#announcement');
+    await wait(2500);
+    same('and a later result stays said', [await a.text('#announcement'), (await heads()).length], [result, all]);
+    check('that result says what was read', /^Read \d/.test(result ?? ''), result);
+    // A sync:changed right after an action keeps that action's message: the read it starts brings no new notice.
+    await a.click('#nav-skills');
+    await a.run(`(document.querySelector('.ov-row[data-key] .cell-button:not([disabled])').click(), true)`);
+    await a.click('#discard');
+    await main.tellPage('sync:changed');
+    await wait(1500);
+    same('a sync:changed right after an action keeps its message', await a.run(`document.querySelector('#announcement').dataset.text`), 'Changes discarded. Nothing was written.');
+    // A tool that appears is noticed by whichever read sees it first. Opening Plugins before the poll reads the home for
+    // its columns, and the page as a whole hears of the new tool: Skills gets its column too, with no Refresh.
+    await a.click('#nav-skills');
+    renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 40 && (await heads()).length !== all - 1; tries++) await wait(100);
+    const without = (await heads()).length;
+    renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+    const back = Date.now();
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 50 && (await columns()) !== 3; tries++) await wait(100);
+    const pluginColumns = await columns();
+    await a.click('#nav-skills');
+    for (let tries = 0; tries < 50 && (await heads()).length !== all; tries++) await wait(100);
+    same('opening Plugins first: its columns and then Skills follow the tool that came back', [without, pluginColumns, (await heads()).length], [all - 1, 3, all]);
+    console.log(`(Skills followed the returned tool after ${Math.round((Date.now() - back) / 100) / 10} s)`);
+    // After a home switch, History says it is reading while it reads (never that it couldn't), then shows what it read.
+    await a.click('#nav-history');
+    check('the History request is slowed', await main.slowRequest('history:list', 1500));
+    await a.run(`(document.querySelector('#home-fixture').click(), true)`);
+    for (let tries = 0; tries < 40 && await a.run(`document.body.dataset.busy`) === 'true'; tries++) await wait(50);
+    const whileReading = await a.text('#page');
+    await main.restore('history:list');
+    for (let tries = 0; tries < 60 && !(await a.exists('.history-row')); tries++) await wait(100);
+    check('after a home switch History says it is reading, then shows its rows', /Reading History…/.test(whileReading ?? '') && !/could not be read/.test(whileReading ?? '') && await a.exists('.history-row'), whileReading);
+    // A read again that fails keeps the last read on screen, and says so.
+    check('the History request is made to fail', await main.failRequest('history:list'));
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && !(await a.exists('.reread-failed')); tries++) await wait(100);
+    const failedAgain = [await a.exists('.history-row'), await a.text('.reread-failed')];
+    await main.restore('history:list');
+    same('a failed read again keeps the last read and says so', failedAgain, [true, 'Could not read again; showing the last read.']);
+    await a.click('#nav-history');
+    for (let tries = 0; tries < 30 && await a.exists('.reread-failed'); tries++) await wait(100);
+    check('and a read that works again clears it', !(await a.exists('.reread-failed')));
+    // Plugins after Refresh: while the marketplaces are read again, the last read stays with a quiet band saying so.
+    await a.click('#nav-plugins');
+    for (let tries = 0; tries < 30 && !(await a.exists('[data-plugin="document-tools"]')); tries++) await wait(100);
+    check('the marketplace request is slowed', await main.slowRequest('plugins:view', 2000));
+    await a.click('#header-refresh');
+    const rereading = [await a.exists('.rereading'), await a.exists('[data-plugin="document-tools"]')];
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 50 && await a.exists('.rereading'); tries++) await wait(100);
+    same('Plugins says it is reading again, keeping what it showed, until the read is done', [...rereading, await a.exists('.rereading')], [true, true, false]);
+  }
+  // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
+  if (main) {
+    check('the refresh request is made to fail', await main.failRequest('discovery:refresh'));
+    await a.click('#header-refresh');
+    const said = await a.text('#announcement');
+    await main.restore('discovery:refresh');
+    check('a failed Refresh keeps its message, and Plugins what it showed', /could not finish/.test(said ?? '') && await a.exists('[data-plugin="document-tools"]'), said);
+  }
   await a.click('#market-tab-about');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme-body')); tries++) await wait(100);
   check('About shows the README, with its HTML dropped and its link kept', (await a.text('.plugin-readme-body')).includes('What is inside') && !(await a.text('.plugin-readme-body')).includes('<p') && await a.exists('.plugin-readme-body .md-link'), await a.text('.plugin-readme-body'));
@@ -504,9 +828,26 @@ async function practiceFlow() {
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   check('and shows the plugin’s own README and skill descriptions', (await a.text('.plugin-page')).includes('Two skills for everyday documents') && (await a.text('.plugin-page')).includes('Reads PDF files'), await a.text('.plugin-page'));
+  // A description cut at two lines offers Show more; a width change with the page open, and no redraw, measures it again.
+  // Narrower than any window here, with the sidebar open, so the description is held to its two lines; then wide enough
+  // for it, still below the sidebar's and the dock's breakpoints, so nothing redraws the page.
+  const pdfCut = () => a.run(`(() => { const li = [...document.querySelectorAll('.plugin-parts li')].find(li => li.textContent.includes('pdf-reader')); const what = li?.querySelector('.plugin-part-what'); return [li?.classList.contains('clamped') ?? null, what?.clientWidth]; })()`);
+  await sizeTo(a, 720, 560); await a.click('#sidebar-toggle'); await wait(200);
+  const narrow = await pdfCut();
+  await sizeTo(a, 960, 560); await wait(200);
+  const wide = await pdfCut();
+  same('Show more follows the description’s width with the same plugin open', [narrow[0], wide[0]], [true, false]);
+  if (narrow[0] !== true || wide[0] !== false) console.error('description widths', narrow[1], wide[1]);
+  await a.click('#sidebar-toggle'); await fullSize(a);
   await a.click('#pinstall-0-document-tools');
   same('Choose all only chooses: every box waits for Apply all', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'install']);
-  check('the change bar counts what will run', /1 plugin to change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  check('the change bar counts what will run', /1 change · 3 installs/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  await fitsAtMinimum(a, 'a plugin page with changes waiting for Apply all');
+  await a.click('#plugin-back');
+  await fitsAtMinimum(a, 'the plugin table with its tool labels and changes waiting');
+  check('a crowded toolbar keeps a short count, with the full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.plugins-toolbar .apply-count'); return !!count && count.title.includes('3 installs'); })()`));
+  await a.click('#popen-0-document-tools');
+  for (let tries = 0; tries < 30 && !(await a.exists('.plugin-readme')); tries++) await wait(100);
   await a.click('#pcell-0-document-tools-codex-cli');
   same('clicking a chosen box takes it back', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].map(cell => cell.dataset.state)`), ['install', 'install', 'absent']);
   await a.click('#pcell-0-document-tools-codex-cli');
@@ -515,8 +856,27 @@ async function practiceFlow() {
   await a.shot('practice-plugins');
   same('and nothing is claimed installed', await a.run(`[...document.querySelectorAll('.plugin-tool .cell-button')].filter(cell => cell.dataset.state === 'installed').length`), 0);
   await a.click('#plugin-back');
+  // About has every fact about the marketplace, and Remove.
+  await a.click('#market-tab-about');
+  check('About names who made the marketplace and where it comes from', /By Platform team[\s\S]*market/.test(await a.text('.market-about-head') ?? ''), await a.text('.market-about-head'));
   await a.click('#forget-0');
   check('Remove forgets it here only', (await a.text('#plugins-scroll')).includes('No marketplaces yet'));
+  // A marketplace with a long name and long facts, with a change waiting: nothing is cut off at the smallest window, and
+  // where the facts don't fit beside the name they drop whole rather than being cut mid-word.
+  const longMarket = join(scratch, 'market-long');
+  writeMarket(longMarket, 'platform-engineering-shared-developer-tools-marketplace', 'The Platform Engineering and Developer Experience Group');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(longMarket)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+  await a.click('#pcell-0-document-tools-claude-cli');
+  await fitsAtMinimum(a, 'a long-named marketplace with a change waiting');
+  await sizeTo(a, 1280, 800);
+  const factsWhole = `(() => { const line = document.querySelector('.market-title-line'); if (!line) return 'no title line'; const box = line.getBoundingClientRect();
+    return [...line.querySelectorAll('.market-fact')].every(fact => { const at = fact.getBoundingClientRect(); return at.top >= box.bottom - 1 || (at.right <= box.right + 1 && at.bottom <= box.bottom + 1); }); })()`;
+  same('the long marketplace’s facts show whole or not at all', await a.run(factsWhole), true);
+  await fullSize(a);
+  await a.click('#plugins-discard');
+  await a.click('#market-tab-about');
+  await a.click('#forget-0');
   // Instructions (INS-01, INS-02): each tool's own file, a diff before saving, the replaced version kept.
   await a.click('#nav-instructions');
   for (let tries = 0; tries < 40 && !(await a.exists('#ins-edit-claude-cli')); tries++) await wait(100);
@@ -540,6 +900,32 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // A card's edit, review and discard-confirm rows wrap by its width: nothing spills out around the cards' column breakpoints.
+  await a.click('#ins-edit-copilot-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-copilot-cli'); area.value = '# How I work\\n- Explain the plan first.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  const insFits = async state => { for (const width of [1180, 1240, 1320]) { await sizeTo(a, width, 800); same(`nothing cut off in Instructions (${state}) at ${width}×800`, await a.run(CUT_OFF), []); } };
+  await insFits('editing');
+  await a.click('#ins-review-copilot-cli');
+  await insFits('review');
+  await a.click('#ins-review-discard-copilot-cli');
+  await insFits('discard confirmation');
+  await a.shot('instructions-discard-confirm');
+  await a.click('#ins-review-discard-yes-copilot-cli');
+  await fullSize(a);
+  // A draft whose tool leaves the home is kept, offered to copy or discard, and never silently replaced by another edit.
+  await a.click('#ins-edit-codex-cli');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-codex-cli'); area.value = area.value + 'Codex draft.'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  renameSync(join(practice, '.codex'), join(practice, '.codex-away'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-orphan')); tries++) await wait(100);
+  check('a draft whose tool left the home is offered to copy or discard', await a.exists('#ins-orphan-copy') && /Codex is no longer in this home/.test(await a.text('#ins-orphan') ?? '') && !(await a.exists('#ins-text-codex-cli')), await a.text('#ins-orphan'));
+  check('and no other edit can replace it', await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`));
+  await a.shot('instructions-orphan-draft');
+  await a.click('#ins-orphan-discard');
+  check('Discard draft lets it go', !(await a.exists('#ins-orphan')) && !(await a.run(`document.querySelector('#ins-edit-claude-cli').disabled`)));
+  renameSync(join(practice, '.codex-away'), join(practice, '.codex'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 30 && !(await a.exists('#ins-edit-codex-cli')); tries++) await wait(100);
   // Settings: the appearance choice changes the page's colour scheme at once, and System is the default.
   await a.click('#nav-settings');
   const dark = () => a.run(`matchMedia('(prefers-color-scheme: dark)').matches`);
@@ -731,6 +1117,22 @@ async function practiceFlow() {
     main.close();
   }
   await a.click('#nav-skills');
+  // Full screen: nothing on the Overview, History or Plugins is cut off at 2560×1440.
+  await sizeTo(a, 2560, 1440);
+  for (const page of ['overview', 'history', 'plugins']) {
+    await a.click(`#nav-${page}`);
+    await wait(300);
+    same(`nothing cut off at 2560×1440 on ${page}`, await a.run(CUT_OFF), []);
+  }
+  // Every card grid at full screen: as many columns as its cards, up to four, so four tools sit in one row. (Settings is rows.)
+  for (const page of ['tools', 'instructions']) {
+    await a.click(`#nav-${page}`);
+    for (let tries = 0; tries < 30 && !(await a.exists('.card-grid')); tries++) await wait(100);
+    const rows = await a.run(`(() => { const cards = [...document.querySelectorAll('.card-grid > *')]; return [cards.length, new Set(cards.map(card => Math.round(card.getBoundingClientRect().top))).size]; })()`);
+    same(`at 2560×1440 the ${page} cards (${rows[0]}) sit in one row`, rows[1], 1);
+  }
+  await fullSize(a);
+  await a.click('#nav-skills');
   same('no page errors, practice', a.pageErrors, []);
   // With no window at all, Central Knot keeps running from the menu bar and sync keeps going (PLT-04). A page-made close
   // destroys the window outright (a real close only hides it), which is the stronger case: background work needs no window.
@@ -742,13 +1144,64 @@ async function practiceFlow() {
   let spreadClosed = false;
   for (let tries = 0; tries < 80 && !spreadClosed; tries++) { await wait(250); spreadClosed = readFileSync(join(practice, '.claude/agents/release-notes.md'), 'utf8').includes('Edited with no window.'); }
   check('an agent edit spreads in the background with no window', spreadClosed);
+  main?.close();
+  await a.quit();
+}
+
+/** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
+async function releasedStartupFlow() {
+  // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
+  const a = await launch(join(scratch, 'released-data'), flag('--electron') ? ['--as-released'] : []);
+  const realHome = process.platform === 'darwin' ? 'This Mac’s home' : 'This computer’s home';
+  same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], [realHome, false]);
+  same('and its main process refuses the practice copy', await a.run(`window.centralKnot.selectHome('fixture').then(() => 'opened', () => 'refused')`), 'refused');
+  await a.quit();
+}
+
+/**
+ * A home with no tools, then with Pi alone, then with Claude Code too. With no tools every page stays, each saying so; a
+ * kind no tool here can hold (agents, plugins with Pi alone) is left out of the sidebar and the Overview, named once; a
+ * tool that holds it brings it back.
+ */
+async function fewToolsFlow() {
+  const home = join(scratch, 'home-few');
+  mkdirSync(home, { recursive: true });
+  const a = await launch(join(scratch, 'few-data'), flag('--electron') ? ['--as-released'] : [], home);
+  const pages = () => a.all('#nav [id^="nav-"]', 'e.id.slice(4)');
+  same('a home with no tools shows only the pages that hold no kind', await pages(), ['overview', 'history', 'tools', 'settings']);
+  same('its Overview says no tools were found, once, with another home to choose, and no "Also here"', [await a.text('.overview-lead'), await a.exists('#overview-choose-home'), await a.exists('#overview-instructions')], ['No tools were found in this home.', true, false]);
+  check('its status bar says only that the home opened', /^Opened [^.]+\.$/.test(await a.run(`document.querySelector('#announcement').dataset.text`) ?? ''), await a.run(`document.querySelector('#announcement').dataset.text`));
+  same('with nothing to sync, the switch is shown, not offered', await a.run(`[document.querySelector('#sync-switch').getAttribute('aria-disabled'), document.querySelector('#sync-switch .sync-state').textContent]`), ['true', 'Nothing to sync']);
+  await fitsAtMinimum(a, 'a home with no tools');
+  await a.click('#nav-tools');
+  const toolsSays = await a.text('.page');
+  check('Tools says the same sentence, with Choose another home…, and points nowhere on screen', toolsSays.includes('No tools were found in this home.') && await a.exists('#tools-choose-home') && !/bottom left/.test(toolsSays) && !(await a.exists('.tools-note')), toolsSays);
+  await a.click('#nav-history');
+  for (let tries = 0; tries < 30 && !(await a.exists('#history-choose-home')); tries++) await wait(100);
+  check('History says the same, in the same place, rather than offering Skills', await a.exists('#history-choose-home') && !(await a.exists('#history-go-skills')), await a.text('.page'));
+  await a.click('#nav-overview');
+  mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
+  writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
+  await a.click('#header-refresh');
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']);
+  check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
+  mkdirSync(join(home, '.claude'), { recursive: true });
+  await a.click('#header-refresh');
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
+  await a.click('#nav-agents');
+  rmSync(join(home, '.claude'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']]);
+  const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
+  check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
+  same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
 }
 
 async function realHomeFlow() {
   const before = { rich: tree(join(CLAUDE, 'rich')), unrelated: readFileSync(join(HOME, '.claude/unrelated.json'), 'utf8') };
   const a = await launch();
-  same('a released build opens this computer’s home, never the practice copy', [await a.text('#home-label'), await a.exists('#home-fixture')], ['This Mac’s home', false]);
   await a.click('#home-actual');
   await a.click('#nav-skills');
   same('the disposable HOME is what "this Mac" reads', await a.run(`document.querySelector('.status-home').title`), HOME);
@@ -757,7 +1210,9 @@ async function realHomeFlow() {
   const tools = await a.text('#tools-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
   check('Codex says where new copies go', tools.includes('/.codex/skills'), tools.slice(0, 600));
-  await a.click('#nav-skills');
+  // A tool card's skill count opens Skills.
+  await a.click('#tool-skills-claude-cli');
+  same('a tool’s skill count opens the Skills page', await a.text('.page-title'), 'Skills');
   const rows = await rowKeys(a);
   for (const name of ['rich', '名前-skill', '.dot-skill', 'linked', 'from-copilot', 'has-link']) check(`row for ${name}`, rows.includes(name), rows);
   check('names keep their case', (await a.text('.ov-row[data-key="mixedcase"]')).includes('MixedCase'), await a.text('.ov-row[data-key="mixedcase"]'));
@@ -765,6 +1220,13 @@ async function realHomeFlow() {
   same('the linked skill is already one copy', [await cellState(a, 'linked', 'claude-cli'), await cellState(a, 'linked', 'copilot-cli')], ['present', 'present']);
   same('refused names and dot folders cannot go to Copilot', [await cellState(a, '名前-skill', 'copilot-cli'), await cellState(a, '.dot-skill', 'copilot-cli'), await cellState(a, 'plain', 'copilot-cli')], ['cannot', 'cannot', 'cannot']);
   check('a skill with a link inside is held', await a.exists('.ov-row[data-key="has-link"] .held-pill'));
+  // Changes waiting for Apply all fill the toolbar most: still nothing is cut off at the smallest window.
+  await a.click('#manage-all');
+  await fitsAtMinimum(a, 'Skills with changes waiting for Apply all');
+  await sizeTo(a, 860, 560);
+  check('the pending count stays at the smallest window, its full summary as its tooltip', await a.run(`(() => { const count = document.querySelector('.toolbar .apply-count'); return !!count && count.getBoundingClientRect().width > 0 && /\\d+ changes?/.test(count.title); })()`));
+  await fullSize(a);
+  await a.click('#discard');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 960, height: 640, deviceScaleFactor: 1, mobile: false });
   await a.click(`[id="open-very-long-${'n'.repeat(150)}"]`);
   const fits = await a.run(`({ page: document.documentElement.scrollWidth, window: innerWidth })`);
@@ -907,6 +1369,8 @@ const started = Date.now();
 try {
   seedHome();
   await practiceFlow();
+  await releasedStartupFlow();
+  await fewToolsFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
   execChmod();
