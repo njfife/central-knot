@@ -77,7 +77,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
   }
   // Each tool's own switch (Disable): read and parsed once, then asked about every copy there. Why a tool can't take a new
-  // Disable (its settings file, or a build older than the one verified) applies to a copy it is about to get, too.
+  // Disable (its settings file) applies to a copy it is about to get, too; so does the note on an unverified build.
   const switches = new Map(await Promise.all(tools.map(async tool => [tool, await readSwitchFile(context, tool)] as const)));
   const unverified = new Map(tools.map(tool => [tool, unverifiedBuild(tool, snapshots.find(snapshot => snapshot.harness === tool)?.probe.version)] as const));
   for (const entry of map.values()) {
@@ -508,10 +508,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       continue;
     }
     // A Disable that can't be carried out changes nothing either: otherwise the copy would arrive enabled.
-    const cantDisable = change.disable?.find(tool => entry.facts.switchProblem?.[tool] || entry.facts.disableUnverified?.[tool]);
+    const cantDisable = change.disable?.find(tool => entry.facts.switchProblem?.[tool]);
     if (cantDisable) {
-      const why = entry.facts.switchProblem?.[cantDisable] ? problemText(entry.facts.switchProblem[cantDisable]!) : entry.facts.disableUnverified![cantDisable]!;
-      results.push({ item: entry.facts.name, harness: cantDisable, outcome: 'held', message: `Disable isn’t available in ${toolName(cantDisable)}: ${why} Nothing was changed.` });
+      results.push({ item: entry.facts.name, harness: cantDisable, outcome: 'held', message: `Disable isn’t available in ${toolName(cantDisable)}: ${problemText(entry.facts.switchProblem![cantDisable]!)} Nothing was changed.` });
       continue;
     }
     const item: RecordItem = record.items[change.key] ?? { name: entry.facts.name, hash: '', state: 'dont-share', startId: '', observedAt: new Date().toISOString(), copies: [] };
@@ -1216,19 +1215,15 @@ async function undoAdded(context: ShareContext, record: SyncRecord, history: His
 
 /**
  * Undo of Disable or Enable: each switch entry the event changed goes back (named as it was, so this works even if the copy is
- * gone), a Claude Code override to what it held before. A tool already back as it was needs nothing. On a build older than the
- * one verified, no new Disable is written: that tool stays as it is and the event stays undoable. A new 'switched' event records
+ * gone), a Claude Code override to what it held before. A tool already back as it was needs nothing. A new 'switched' event records
  * what was flipped, and its own Undo flips it again.
  */
 async function undoSwitched(context: ShareContext, history: HistoryEvent[], past: HistoryEvent): Promise<ApplyResult> {
   if (past.undoneBy) return { stopped: 'That change was already undone.', results: [], harnessWrites: 0 };
-  const snapshots = await context.read();
   const results: DestinationResult[] = [];
   const back: SwitchRecord[] = [];
   let pending = false;
   for (const { tool, disabled, before, target } of past.switched ?? []) {
-    const unverified = !disabled && unverifiedBuild(tool, snapshots.find(snapshot => snapshot.harness === tool)?.probe.version);
-    if (unverified) { pending = true; results.push({ item: past.item, harness: tool, outcome: 'held', message: unverified }); continue; }
     let flipped: { changed: boolean; previous?: string };
     try { flipped = await setDisabled(context, tool, target, !disabled, before); }
     catch (error) { pending = true; results.push({ item: past.item, harness: tool, outcome: 'failed', message: `Could not change it in ${toolName(tool)}: ${switchFailure(error)}` }); continue; }
@@ -1236,7 +1231,7 @@ async function undoSwitched(context: ShareContext, history: HistoryEvent[], past
     back.push({ tool, disabled: !disabled, target, ...(flipped.previous ? { before: flipped.previous } : {}) });
     results.push({ item: past.item, harness: tool, outcome: 'switched', disabled: !disabled, message: `${disabled ? 'Enabled' : 'Disabled'} again in ${toolName(tool)}.` });
   }
-  if (pending && !back.length) return { stopped: results.find(result => result.outcome === 'failed' || result.outcome === 'held')!.message, results, harnessWrites: 0 };
+  if (pending && !back.length) return { stopped: results.find(result => result.outcome === 'failed')!.message, results, harnessWrites: 0 };
   // Done once nothing is left to retry. The new event exists only when something flipped, so "Undo again" always has one to use.
   const id = back.length ? randomUUID() : undefined;
   if (!pending) past.undoneBy = id ?? ALREADY_AS_IT_WAS;

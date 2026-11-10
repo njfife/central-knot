@@ -50,7 +50,7 @@ export interface SampleSkill {
   disabled?: Tool[];
   /** Skills: why a tool's switch can't be used at all (its settings file, named in `file`). */
   switchProblem?: Partial<Record<Tool, SwitchProblem>>;
-  /** Skills: why a new Disable isn't offered in a tool (an older build); Enable stays available. */
+  /** Skills: a quiet note that Disable isn't verified on a tool's build (older, or unreadable); the switch is offered anyway. */
   disableUnverified?: Partial<Record<Tool, string>>;
   /** Skills: whether Central Knot may change each tool's copy (not a link or a shared folder), so Remove can be offered. */
   writable?: Partial<Record<Tool, boolean>>;

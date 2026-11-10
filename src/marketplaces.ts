@@ -14,7 +14,7 @@ import { installParts, partsDigest, planParts, readParts, removeParts, undoParts
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, heldReason, partsTools, untestedBuild } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, heldReason, partsTools } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed } from './values.ts';
 
 /** What the marketplace feature needs from the app around it. */
@@ -407,8 +407,6 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx = await context({ clis: true });
-    const untested = on ? undefined : untestedBuild(tool, await buildOf(ctx, tool, (await host.read()).snapshots), !!ctx.binaries[tool]);
-    if (untested) return { reports: failedFor([tool], untested) };
     // Its marketplace entry says where its skills are, so the installed copy is read as the page reads the marketplace's.
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };

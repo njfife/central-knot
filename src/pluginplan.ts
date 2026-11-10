@@ -155,8 +155,7 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
 
 /**
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
- * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. Turning a
- * skill back on is undone by turning it off, which, like any turn-off, is refused with the reason on an untested build. A
+ * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. A
  * parts run is undone by its own record (undo-parts), so a later step that took what an earlier one freed, such as a
  * skill name, is undone first.
  */

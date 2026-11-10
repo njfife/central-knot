@@ -201,7 +201,7 @@ export interface SkillFacts {
   disabled?: HarnessId[];
   /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
-  /** Skills: why a new Disable isn't offered in a tool (a build older than the one verified). Enable stays available. */
+  /** Skills: a quiet note that Disable isn't verified on a tool's build (older than verified, or unreadable). Disable is still offered. */
   disableUnverified?: Partial<Record<HarnessId, string>>;
 }
 

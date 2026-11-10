@@ -74,8 +74,22 @@ test('Each tool’s switch: Disable writes its own form, Enable takes it out, an
     await writeFile(claude, '\uFEFF{ "model": "opus" }\n');
     await setDisabled(box.context, 'claude-cli', target, true);
     assert.ok((await readFile(claude, 'utf8')).startsWith('\uFEFF{'));
-    // A new Disable is offered from the build where each switch was seen working; an unknown build is not held back.
-    assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, false]);
+    // Below the build where each switch was seen working, or with no build read, a note says so; nothing more.
+    assert.deepEqual(['2.1.300', '2.1.311', '2.2.0', undefined].map(version => !!unverifiedBuild('claude-cli', version)), [true, false, false, true]);
+  } finally { await box.cleanup(); }
+});
+
+test('Disable is best effort: a build older than the one verified only gets a note, and the switch is still written', async () => {
+  const box = await sandbox(['claude-cli', 'codex-cli']);
+  const read = box.context.read;
+  box.context.read = async () => (await read()).map(snapshot => snapshot.harness === 'codex-cli' ? { ...snapshot, probe: { ...snapshot.probe, version: '0.100.0' } } : snapshot);
+  try {
+    await skill(box.home, 'claude-cli', 'notes');
+    await applyChanges(box.context, [{ key: 'notes', managed: true, off: [] }]);
+    assert.match((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disableUnverified?.['codex-cli'] ?? '', /Not checked on this version of Codex \(0\.100\.0\)/);
+    const result = await applyChanges(box.context, [{ key: 'notes', managed: true, off: [], disable: ['codex-cli'] }]);
+    assert.ok(result.results.some(entry => entry.outcome === 'switched' && entry.harness === 'codex-cli'), JSON.stringify(result));
+    assert.deepEqual((await manageView(box.context)).skills.find(item => item.key === 'notes')!.disabled, ['codex-cli']);
   } finally { await box.cleanup(); }
 });
 
