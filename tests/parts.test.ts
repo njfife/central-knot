@@ -7,6 +7,7 @@ import { pluginFiles } from '../src/catalogdetail.ts';
 import { discover } from '../src/discovery.ts';
 import { applyChanges } from '../src/manage.ts';
 import { installParts, partsDigest, readParts, removeParts, undoParts } from '../src/parts.ts';
+import { saveProfile, switchProfile } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
 
@@ -197,10 +198,10 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
     assert.ok((await readParts(box.home)).some(entry => entry.items.some(item => item.kind === 'mcp')));
     await writeFile(config, good);
     // A setting of Codex's own added to the server is an edit: removing the parts leaves that server.
-    await writeFile(config, (await readFile(config, 'utf8')).replace('[mcp_servers.figma]\n', '[mcp_servers.figma]\nenabled = false\n'));
+    await writeFile(config, (await readFile(config, 'utf8')).replace('[mcp_servers.figma]\n', '[mcp_servers.figma]\nstartup_timeout_sec = 30\n'));
     const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
     assert.match(removed.notes?.join(' ') ?? '', /MCP server “figma” as it is: it was changed/);
-    assert.match(await readFile(config, 'utf8'), /enabled = false/);
+    assert.match(await readFile(config, 'utf8'), /startup_timeout_sec = 30/);
 
     // A skills folder made a link later: the skill needs no write, so an update that changes only another part still succeeds.
     await writeFile(config, '');
@@ -227,5 +228,24 @@ test('A Disable of a part skill in its tool keeps the kept copy that Undo of Rem
     const undone = await undoParts(box.context, removed.partsRun!);
     assert.equal(undone?.outcome, 'installed', undone?.message ?? '');
     assert.equal(await readFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), 'utf8'), SKILL);
+  } finally { await box.cleanup(); }
+});
+
+test('A profile turning a part MCP server off is no edit: Remove parts still takes it out of Codex and Pi', async () => {
+  const box = await sandbox();
+  box.context.settleMs = 0;
+  try {
+    for (const tool of ['codex-cli', 'pi-cli'] as const) {
+      box.context.read = async () => [await discover({ home: box.home, mode: 'custom', harness: tool })];
+      assert.equal((await installParts(box.context, { ...target, tool }, await box.files())).outcome, 'installed');
+      const profile = (await saveProfile(box.context, { name: `Off ${tool}`, items: [] })).id!;
+      assert.equal((await switchProfile(box.context, profile)).stopped, undefined);
+      const file = join(box.home, tool === 'codex-cli' ? '.codex/config.toml' : '.pi/agent/mcp.json');
+      assert.match(await readFile(file, 'utf8'), /"?enabled"?\s*[=:]\s*false/);
+      const removed = await removeParts(box.context, { ...target, tool });
+      assert.equal(removed.outcome, 'uninstalled', removed.message);
+      assert.doesNotMatch(await readFile(file, 'utf8'), /mcp_servers\.figma\b|"figma"/);
+      await switchProfile(box.context, null);
+    }
   } finally { await box.cleanup(); }
 });

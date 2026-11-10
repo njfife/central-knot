@@ -192,8 +192,9 @@ const skillDir = (context: ShareContext, tool: HarnessId, name: string) => join(
 
 /**
  * A part as it is in the tool now, read fresh: absent, there but unreadable right now, or there with `seen`, its fingerprint.
- * For an MCP entry `seen` covers the tool's own settings on it too (a Codex `enabled = false`, a narrowed Copilot `tools`),
- * so an edit to those counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against.
+ * For an MCP entry `seen` covers the tool's own settings on it too (a narrowed Copilot `tools`, say), so an edit to those
+ * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's
+ * and Pi's `enabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
  */
 /** An agent part's file in a tool. Only tools with agents get agent parts (planParts), so any other tool is a bug, not a state. */
 const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
@@ -212,7 +213,9 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
     const read = await readTool(context, tool);
     if (read.problem || read.invalid?.includes(item.name)) return { state: 'unreadable' };
     const entry = read.entries.find(candidate => candidate.name === item.name);
-    return entry ? { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(entry.extras)])), neutralHash: entry.hash } : { state: 'absent' };
+    if (!entry) return { state: 'absent' };
+    const { enabled: _switch, ...settings } = entry.extras;
+    return { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(tool === 'codex-cli' || tool === 'pi-cli' ? settings : entry.extras)])), neutralHash: entry.hash };
   }
   const text = await readFile(agentFile(context, tool, item.name), 'utf8').catch(error => (errorCode(error) === 'ENOENT' ? undefined : null));
   return text === undefined ? { state: 'absent' } : text === null ? { state: 'unreadable' } : { state: 'there', seen: sha256(text) };
