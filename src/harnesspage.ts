@@ -1,7 +1,7 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
 // tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, harnessFound as found, leaveResults, realHomeName, titles, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
+import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -9,14 +9,15 @@ import { fileName, fullToolName, plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
 import { brandMark } from './brand.ts';
 import type { HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
-import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, kindNoun, outcomeBand, showFiltered } from './matrix.ts';
+import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
-import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
-import { copyButton, fact, kindEmpty, notRead } from './pages.ts';
+import { browse, loadPlugins, market } from './pluginstate.ts';
+import { kindNouns } from './presence.ts';
+import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
 const TABS: HarnessTab[] = ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about'];
 /** A tab's name: the page of the same name's title. */
-const tabLabel = (tab: HarnessTab) => (tab === 'about' ? 'About' : titles[tab]);
+const tabLabel = (tab: HarnessTab) => (tab === 'about' ? 'About' : kindNouns[tab].title);
 
 /** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
 const dirname = (path: string) => path.replace(/^[A-Za-z]:\\/.test(path) ? /[/\\][^/\\]*$/ : /\/[^/]*$/, '');
@@ -29,7 +30,7 @@ const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode =
 
 const supports = (home: HomeView, kind: Kind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
 /** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
-const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t use ${kindNoun[kind][1]}`;
+const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t use ${kindNouns[kind].many}`;
 
 /**
  * What one tool has of one kind: every item with a copy there, how many of those are managed, and how many have copies that
@@ -41,7 +42,7 @@ function tally(home: HomeView, kind: Kind, tool: HarnessId) {
   return { kind, supported: source.tools.includes(tool), total: here.length, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
 }
 
-const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions?.find(file => file.tool === tool);
+const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions.data?.find(file => file.tool === tool);
 
 /**
  * Plugins in this tool: `reading` or `failed` while the marketplaces are not read (the last good read is kept and shown), `unsupported`
@@ -50,16 +51,13 @@ const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.in
 type PluginsHere = { state: 'reading' } | { state: 'failed' } | { state: 'unsupported' } | ({ state: 'read' } & NonNullable<ReturnType<typeof installsIn>>);
 function pluginsIn(tool: HarnessId): PluginsHere {
   const view = market.view;
-  if (!view) return peekState() === 'failed' ? { state: 'failed' } : { state: 'reading' };
+  if (!view) return market.read.state === 'failed' ? { state: 'failed' } : { state: 'reading' };
   const installs = installsIn(view, tool);
   return installs ? { state: 'read', ...installs } : { state: 'unsupported' };
 }
 
 /** What a tool that takes no marketplace plugins (Pi) says about them: on its card, its tab's tooltip and its Plugins tab. */
 const pluginsNotHandled = (tool: HarnessId) => `Central Knot doesn’t move ${names[tool]}’s plugins`;
-
-/** Header Refresh on Harnesses: instruction files and installs are read again along with the home. */
-export function refreshHarnessExtras() { readInstructionsQuietly(true); peekPlugins(true); }
 
 /** How the tool was found, short: a sample or chosen folder is only a folder; on this computer, installed (with its version) or not. */
 const detectionLine = (snapshot: Snapshot, home: HomeView) => {
@@ -86,7 +84,7 @@ function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>
 
 function instructionCount(tool: HarnessId): Count {
   // Files already read stay shown if a later read fails, here as on the Instructions tab.
-  if (!state.instructions) return instructionReadState() === 'failed' ? { value: '—', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
+  if (!state.instructions.data) return state.instructions.state === 'failed' ? { value: '—', note: 'couldn’t be read', faint: true } : { value: '…', faint: true };
   // A file, not a number: its name and length, or that there is none yet.
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
@@ -111,7 +109,7 @@ function attentionLinks(snapshot: Snapshot, kinds: ReturnType<typeof tally>[]) {
   const link = (id: string, glyph: 'diff' | 'triangle-alert', text: string, open: () => void) =>
     h('button.harness-card-attention', { type: 'button', id, disabled: !!state.busy, onclick: open }, icon(glyph, 13), text, icon('arrow-right', 12));
   const links = [
-    ...kinds.filter(({ differing }) => differing).map(({ kind, differing }) => link(`harness-${tool}-differ-${kind}`, 'diff', `${differing} ${kindNoun[kind][differing === 1 ? 0 : 1]} with different copies`,
+    ...kinds.filter(({ differing }) => differing).map(({ kind, differing }) => link(`harness-${tool}-differ-${kind}`, 'diff', `${differing} ${(differing === 1 ? kindNouns[kind].one : kindNouns[kind].many)} with different copies`,
       () => goHarness(tool, kind, { showOnly: kind }))),
     ...(issues.length ? [link(`harness-${tool}-problems`, 'triangle-alert', plural(issues.length, 'read problem'), () => goHarness(tool, 'about'))] : []),
   ];
@@ -167,9 +165,14 @@ function everyHarness(home: HomeView) {
   const cards = listed(home);
   // What the read's catch-up copied is news here too, not only on the Skills tables.
   const caught = caughtUpBand(home.manage);
+  // A home with no tools says so as every page does, with another home to choose; on this computer, which tools were looked for.
+  if (!home.manage.tools.length) {
+    const looked = home.mode === 'actual' ? `Not found on ${thisMachine}: ${andList(home.snapshots.map(snapshot => names[snapshot.harness]))}. Central Knot looks for them again each time it reads this home.` : undefined;
+    return h('div.page', {}, done ? h('div.bands', {}, done) : null, noToolsState('harnesses-choose-home', looked));
+  }
   return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
-      h('p.page-note', {}, icon('info', 14, 'tone-muted'),
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
         h('span', {}, home.manage.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
           : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
@@ -216,7 +219,7 @@ function switcher(home: HomeView, tool: HarnessId) {
 /** A kind the tool has no place for (Pi's agents): what it has instead. */
 function unsupported(kind: Kind, tool: HarnessId) {
   const body = kind === 'agents' ? `On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
-    : `Central Knot can’t read or write ${kindNoun[kind][1]} for ${names[tool]}.`;
+    : `Central Knot can’t read or write ${kindNouns[kind].many} for ${names[tool]}.`;
   return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', kindNotUsed(tool, kind), body,
     kind === 'agents' ? button({ variant: 'outline', label: 'Open Agents', id: 'harness-open-agents', onclick: () => showPage('agents') }) : undefined));
 }
@@ -225,15 +228,16 @@ function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
   if (kindSource(home, kind).facts.length) return designOverview(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
-  return emptyKind(kind, tool, emptyState(kindEmpty[kind].glyph, kindEmpty[kind].title, kindEmpty[kind].body));
+  const empty = kindEmpty(kind);
+  return emptyKind(kind, tool, emptyState(empty.glyph, empty.title, empty.body));
 }
 
 /** This tool's instruction file, with the same card, bands and editor as the Instructions page. */
 function instructionsTab(tool: HarnessId) {
   const file = instructionOf(tool);
-  const body = !state.instructions ? instructionsNotRead()
+  const body = !state.instructions.data ? instructionsNotRead()
     : !file ? h('p.empty', {}, `${names[tool]} has no instruction file Central Knot reads.`)
-      : [h('p.page-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
+      : [h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
         button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file, { titled: false, goToOther: other => goHarness(other, 'instructions') })];
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
@@ -253,15 +257,15 @@ function pluginsTab(tool: HarnessId) {
   const plugins = pluginsIn(tool);
   const page = (...body: (Node | null)[]) => h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
   if (plugins.state === 'reading') return page(h('p.empty', {}, 'Reading marketplaces…'));
-  if (plugins.state === 'failed') return page(emptyState('circle-alert', 'Marketplaces could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'harness-plugins-retry', onclick: () => peekPlugins(true) })));
+  if (plugins.state === 'failed') return page(emptyState('circle-alert', 'Marketplaces could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'harness-plugins-retry', onclick: () => void loadPlugins(false, state.home?.readId) })));
   if (plugins.state === 'unsupported') return page(emptyState('puzzle', pluginsNotHandled(tool), `Central Knot installs marketplace plugins into ${andList((market.view?.tools ?? []).map(each => names[each]))}. ${names[tool]}’s own packages stay as they are.`));
   // What could not be checked is said, so the list is never taken for everything installed.
   const unsure = [...plugins.unknown.map(({ plugin, reason }) => `${pluginTitle(plugin)}: ${reason}`), ...plugins.unreadable.map(name => `${name} could not be read.`)];
-  const unsureNote = unsure.length ? h('p.page-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
+  const unsureNote = unsure.length ? h('p.tools-note', { role: 'status' }, icon('circle-alert', 14, 'tone-warning'), h('span', {}, `Not known for ${plural(unsure.length, 'plugin')}: ${unsure.join(' ')} `,
     button({ variant: 'link', size: 'micro', label: 'Open Plugins', id: 'harness-plugins-unsure', onclick: () => showPage('plugins') }))) : null;
   if (!plugins.installed.length) return page(unsureNote, emptyState('puzzle', `No plugins in ${names[tool]}`, `None of the plugins in your marketplaces is installed in ${names[tool]}.`,
     button({ variant: 'outline', label: 'Browse plugins', id: 'harness-browse-plugins', onclick: () => showPage('plugins') })));
-  return page(h('p.page-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`),
+  return page(h('p.tools-note', {}, icon('info', 14, 'tone-muted'), `Installed in ${names[tool]} from your marketplaces. Open one to uninstall it, or to install it in another tool.`),
     unsureNote, h('div.harness-plugins', { role: 'list' }, plugins.installed.map(pluginRow)));
 }
 
@@ -330,9 +334,6 @@ export function harnessTitle(): (Node | null)[] | undefined {
 export function harnessesPage() {
   const home = state.home;
   if (!home) return notRead();
-  // The summary's instruction files and installs, read quietly once per home (each read checks what it already has).
-  readInstructionsQuietly();
-  peekPlugins();
   // A harness no longer found (after a Refresh) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
   const snapshot = openSnapshot(home);
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);

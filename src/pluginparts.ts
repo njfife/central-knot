@@ -53,7 +53,7 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   if (status.state === 'not-known') {
     return box({ look: 'cell-differs', state: 'not-known', title: `${status.reason} ${preview || 'Click to install again on Apply all.'}`, glyph: icon('circle-question-mark', 16), action: 'install' });
   }
-  return box({ look: 'cell-absent.plugin-add', state: 'absent', title: `Not installed in ${name}. ${preview || 'Click to install on Apply all.'}`, glyph: icon('plus', 14, 'plugin-add-glyph'), action: 'install' });
+  return box({ look: 'cell-absent.plugin-add', state: 'absent', title: `Plugin not installed in ${name}. ${preview || 'Click to install on Apply all.'}`, glyph: icon('plus', 14, 'plugin-add-glyph'), action: 'install' });
 }
 
 /** Rendered READMEs by text and context: a redraw (every box click) reuses the built nodes instead of parsing again. */

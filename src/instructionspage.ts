@@ -1,10 +1,11 @@
 // Instructions: each tool's own instruction file, with who reads it, a plain editor, a diff before saving and earlier versions
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
-import { harnessTabShown, instructionReadState, loadInstructionVersion, readInstructionsQuietly, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
+import { announce, machine, draftFile, draftUnsaved, harnessTabShown, loadInstructionVersion, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
 import { fileName, plural } from './model.ts';
-import { button, emptyState, h, icon, pathText } from './dom.ts';
+import { button, cardGrid, h, icon, pathText, rereadBand } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
+import { noToolsState } from './pages.ts';
 import type { HarnessId, InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
@@ -27,7 +28,7 @@ const ago = (at: string) => {
   return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} d ago`;
 };
 
-const keys = `Esc to cancel · ${navigator.userAgent.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to review`;
+const keys = `Esc to cancel · ${machine.modifierKey}+Enter to review`;
 
 // In the review, Esc goes back to editing.
 document.addEventListener('keydown', event => {
@@ -120,19 +121,20 @@ function editor(file: InstructionFile) {
 const open = new Set<string>();
 
 /** This card's last save, shown on the card itself so nothing on the page moves; its Undo stays while other cards are edited. */
-const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== file.tool && state.outcome?.page === state.page && !!state.outcome.instruction?.saved && state.outcome.instruction.path === file.path;
+const savedHere = (file: InstructionFile) => draftFile() !== file && state.outcome?.page === state.page && state.outcome.item === fileName(file.path) && state.outcome.kind === 'saved';
 
 /**
  * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
- * page, where the header already names the tool, so the card leads with the file's path.
+ * page, where the header already names the tool, so the card leads with the file's path. `goToOther`: where the open
+ * draft's own card is on another page (another harness's), a link goes there.
  */
 export function instructionCard(file: InstructionFile, { titled = true, goToOther }: { titled?: boolean; goToOther?: (tool: HarnessId) => void } = {}) {
-  const editing = state.instructionEdit?.tool === file.tool;
-  const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
+  const editing = draftFile() === file;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
-  const otherDirty = !!other && state.instructionEdit!.text !== other.text;
+  const otherDirty = !editing && draftUnsaved();
   const readOnly = !!state.home && !state.home.manage.access.allowed;
-  const lockedWhy = readOnly ? 'Saving is off in this home.' : otherDirty ? `Finish or cancel the ${fileName(other!.path)} edit first.` : undefined;
+  const lockedWhy = readOnly ? 'Saving is off in this home.' : !otherDirty ? undefined
+    : draftFile() ? `Finish or cancel the ${fileName(state.instructionEdit!.from.path)} edit first.` : 'Copy or discard the unsaved draft above first.';
   const preview = file.text.replace(/\n$/, '').split('\n');
   return h('article.card.ins-card', { 'aria-label': `${names[file.tool]} instructions` },
     h('header.ins-head', {}, titled ? [brandMark(file.tool, 18), h('h2.tool-title', {}, names[file.tool])] : null, pathText(shownPath(file.path), file.path),
@@ -148,43 +150,56 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
           preview.length > 14 ? button({ variant: 'link', size: 'micro', label: open.has(file.tool) ? 'Show less' : `Show all ${preview.length} lines`, id: `ins-more-${file.tool}`, onclick: () => { if (open.has(file.tool)) open.delete(file.tool); else open.add(file.tool); rerender(); } }) : null]
           : file.exists ? h('p.ins-empty', {}, 'The file is empty.') : null,
         h('div.ins-actions', {},
-          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || (editing && !!state.instructionEdit), attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
-            const open = state.instructionEdit, openFile = open && state.instructions?.find(entry => entry.tool === open.tool);
+          button({ variant: 'outline', size: 'small', label: file.exists ? 'Edit' : 'Write instructions', id: `ins-edit-${file.tool}`, disabled: !!state.busy || readOnly || otherDirty || editing, attrs: lockedWhy ? { title: lockedWhy, 'aria-description': lockedWhy } : undefined, onclick: () => {
+            const open = state.instructionEdit;
             // Typed since the page was drawn: ask on that editor rather than drop the draft.
-            if (open && openFile && open.text !== openFile.text) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
+            if (open && draftUnsaved() && draftFile()) { open.confirmDiscard = true; open.stage = 'edit'; rerender(); return; }
             startInstructionEdit(file);
           } }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy,
-            // Where the other file's editor is on another page (a harness's), `goToOther` goes there.
-            otherDirty && goToOther ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, disabled: !!state.busy, onclick: () => goToOther(other!.tool) })] : null) : null)),
+            otherDirty && goToOther && draftFile() ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[draftFile()!.tool]}’s file`, id: `ins-go-${draftFile()!.tool}`, disabled: !!state.busy, onclick: () => goToOther(draftFile()!.tool) })] : null) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
         h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),
-        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || readOnly || otherDirty || (editing && state.instructionEdit!.text !== file.text), attrs: lockedWhy || editing ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
+        button({ variant: 'link', size: 'micro', label: 'Restore…', id: `ins-load-${file.tool}-${version.id}`, disabled: !!state.busy || readOnly || otherDirty || (editing && draftUnsaved()), attrs: lockedWhy || editing ? { title: editing ? 'Finish or cancel this edit first.' : lockedWhy } : undefined, onclick: () => void loadInstructionVersion(file, version.id) }))))) : null);
 }
 
-/** Shown while the files are not here yet: reading, or a failed read with Try again. Starts the read if none is running. */
-export function instructionsNotRead(): HTMLElement {
-  readInstructionsQuietly();
-  // No read under way while idle means the read had nothing to start from (no home read) or answered for a home since left.
-  return instructionReadState() === 'failed' || (!state.busy && !instructionReadState())
-    ? emptyState('circle-alert', 'Instruction files could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'ins-retry', onclick: () => readInstructionsQuietly(true) }))
-    : h('p.empty', {}, 'Reading instruction files…');
+/**
+ * A draft with unsaved changes whose file is no longer on the page (its tool left this home, or another home is open):
+ * it can't be saved here, so it is offered to copy or to discard, and it stays until one of them.
+ */
+function orphanDraft() {
+  const edit = state.instructionEdit;
+  if (!edit || draftFile() || !draftUnsaved()) return null;
+  const name = fileName(edit.from.path);
+  const why = edit.from.home === state.home?.home ? `${names[edit.tool]} is no longer in this home` : 'it was opened in another home';
+  return h('div.band.ins-orphan', { role: 'status', id: 'ins-orphan' }, icon('triangle-alert', 14, 'tone-warning'),
+    h('span.band-text', {}, `Your unsaved draft of ${name} can’t be saved here: ${why}. Copy it to keep it, or discard it.`),
+    button({ variant: 'outline', size: 'small', icon: 'copy', label: 'Copy draft', id: 'ins-orphan-copy',
+      onclick: () => void navigator.clipboard.writeText(edit.text).then(() => announce(`Copied your draft of ${name}.`), () => announce('Could not copy the draft.')) }),
+    button({ variant: 'ghost', size: 'small', label: 'Discard draft', id: 'ins-orphan-discard', onclick: () => { state.instructionEdit = undefined; rerender(); } }));
 }
 
-/** The bands above instruction cards: the last result (a save's own result sits on its card instead) and, where saving is off, why. */
+/** Shown while the files are not here yet: their read is under way, or it failed (Refresh reads again). */
+export const instructionsNotRead = (): HTMLElement => h('p.empty', {}, state.instructions.state === 'failed' ? 'Instruction files could not be read.' : 'Reading instruction files…');
+
+/** The bands above instruction cards: a re-read under way, an orphaned draft, the last result (a save's own result sits on its card instead) and, where saving is off, why. */
 export function instructionBands(): HTMLElement | null {
-  const done = state.outcome?.instruction?.saved ? null : outcomeBand();
+  const done = state.outcome?.kind === 'saved' ? null : outcomeBand();
   const access = state.home?.manage.access;
   const preview = access && !access.allowed ? h('div.band', { role: 'status' }, icon('lock', 14, 'tone-warning'), h('span.band-text', {}, 'Preview only: you can read these files here, but saving is off in this home.')) : null;
-  return done || preview ? h('div.bands', {}, done, preview) : null;
+  const orphan = orphanDraft();
+  const reread = rereadBand(state.instructions);
+  return done || preview || orphan || reread ? h('div.bands', {}, reread, orphan, done, preview) : null;
 }
 
 export function instructionsPage() {
-  const files = state.instructions;
+  // From the files' own read (pagedata.ts): what it found, else that it is reading or could not read.
+  const files = state.instructions.data;
   if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
+  if (!files.length) return h('div.page', {}, noToolsState('instructions-choose-home'));
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.page-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
-      files.length ? files.map(file => instructionCard(file)) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
+      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
+      cardGrid(files.map(file => instructionCard(file)))));
 }
