@@ -106,10 +106,10 @@ function actions(event: HistoryEvent, action?: string) {
   // Only an 'added' undo is narrower: it removes the copies Apply all (or Pull) added, in those tools alone.
   const touched = event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : 'in all tools';
-  // A switch's Undo says what it does: Enable where it was disabled, Disable where it was enabled.
+  // A switch's Undo says that it is one, and what it does: enable where it was disabled, disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
   const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
-    : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Enable' : 'Disable') : action;
+    : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Undo: enable' : 'Undo: disable') : action;
   const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
   control.title = actionHelp(event, action);
