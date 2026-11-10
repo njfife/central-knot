@@ -184,6 +184,8 @@ const newView = () => ({
   whereOpen: undefined as boolean | undefined,
 });
 const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp: newView(), agents: newView() };
+/** Changes chosen in the skills, MCP servers and agents tables and not yet applied. */
+export const changesWaiting = () => Object.values(views).reduce((sum, view) => sum + view.draft.size, 0);
 /**
  * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
  * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
