@@ -79,7 +79,7 @@ export const state = {
    * What the status bar says (announce): the newest message, whether it is for screen readers only, and its place in
    * the order messages were said, so the newest always wins.
    */
-  said: { text: '', quiet: false, seq: 0 },
+  said: { text: '', quiet: false, seq: 0 } as { text: string; quiet: boolean; seq: number; link?: { label: string; run: () => void } },
   /** What the last action did, said on the page it happened on until the next action or page (Outcome). */
   outcome: undefined as Outcome | undefined,
   /** Each tool's instruction file: read when the Instructions page opens or the home changes (pagedata.ts). */
@@ -123,8 +123,8 @@ export const setPracticeNote = (open: boolean): void => writeFlag(PRACTICE_NOTE,
  * Says something in the status bar, kept in state (state.said) so a redraw paints the same thing. The newest message is
  * the one shown. A quiet announcement is for screen readers only: the page already shows the same thing (a band).
  */
-export function announce(text: string, quiet = false) {
-  state.said = { text, quiet, seq: state.said.seq + 1 };
+export function announce(text: string, quiet = false, link?: { label: string; run: () => void }) {
+  state.said = { text, quiet, seq: state.said.seq + 1, link };
   paintStatusMessage();
 }
 
@@ -150,6 +150,9 @@ export function paintStatusMessage() {
     region.replaceChildren(...(told.text ? [h('span.said-first', {}, first), rest ? h('span.said-rest', {}, ` ${rest.trim()}`) : null].filter((part): part is HTMLElement => !!part) : []));
   }
   region.title = told.text;
+  // A link that belongs to the message (the release notes after an update) goes with it.
+  const link = document.getElementById('said-link');
+  if (link) { link.hidden = !told.link || told.quiet; link.textContent = told.link?.label ?? ''; link.onclick = told.link?.run ?? null; }
   // Only a message that repeats what the page shows (announced quiet) is for screen readers alone. A result the page didn't
   // draw (no band on this page, or held back) is shown here after all: the drawn result is marked data-outcome.
   const quiet = told.quiet && !(state.outcome && told.text === state.outcome.text && !document.querySelector('[data-outcome]'));
@@ -199,7 +202,7 @@ export async function busy(message: string, work: () => Promise<void>) {
     announce(state.home ? `That could not finish. Still on ${state.home.label}. Click Refresh to see where things stand.` : 'Could not read this home. Nothing changed. Try again.');
   }
   // When the work said nothing since its "Reading…", what was said before comes back.
-  if (state.said.seq === working) announce(before.text, before.quiet);
+  if (state.said.seq === working) announce(before.text, before.quiet, before.link);
   state.busy = undefined;
   document.body.dataset.busy = 'false';
   rerender();
@@ -966,7 +969,11 @@ let refreshOwed = false;
 let setAside: HomeView | undefined;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
-api().onNavigate(page => { if (isPage(page)) showPage(page); });
+api().onNavigate(page => {
+  // "Check for Updates…" opens Settings on its Updates row.
+  if (page === 'settings/updates') { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); }
+  else if (isPage(page)) showPage(page);
+});
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
 api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });

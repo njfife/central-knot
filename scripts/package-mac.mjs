@@ -1,7 +1,7 @@
 import { packager } from '@electron/packager';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 
 if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the selected Mac, not a cross-platform stand-in.');
 
@@ -25,6 +25,18 @@ if (release && !notarize) throw new Error('A release must be notarized; CK_NOTAR
 // The version is package.json's: a release bumps it there and nowhere else.
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
+// The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
+// or the version tag on the commit being built (other tags, such as checkpoints, don't count). A build with neither never offers
+// updates. A release must have one.
+const versionTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const tagOf = () => { try { return execFileSync('git', ['tag', '--points-at', 'HEAD'], { encoding: 'utf8' }).split('\n').find(name => versionTag.test(name)) ?? ''; } catch { return ''; } };
+const tag = process.env.CK_RELEASE_TAG ?? tagOf();
+if (tag && !versionTag.test(tag)) throw new Error(`CK_RELEASE_TAG ${tag} isn’t a version tag like v0.5.0-preview.5.`);
+if (release && !tag) throw new Error('A release is built from its tag: tag the commit (or set CK_RELEASE_TAG), so the app can tell a newer release.');
+// Written for this package only, then removed, so a dev run or a later untagged build never claims the tag.
+await rm('dist/build-info.json', { force: true });
+if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`);
+
 await mkdir('release', { recursive: true });
 const packages = await packager({
   dir: '.', out: 'release', name: 'Central Knot', executableName: 'Central Knot',
@@ -34,12 +46,15 @@ const packages = await packager({
   icon: 'assets/icon.icns',
   // Optional: a folder already holding the Electron zip, for when GitHub's downloads are failing (CK_ELECTRON_ZIP_DIR).
   ...(process.env.CK_ELECTRON_ZIP_DIR ? { electronZipDir: process.env.CK_ELECTRON_ZIP_DIR } : {}),
+  // Tests only: environment the app is always opened with (LSEnvironment), so an update's restart stays in a test's throwaway
+  // folders (scripts/update-proof.mjs). A JSON object of variables; never set for a release.
+  ...(process.env.CK_TEST_ENVIRONMENT && !release ? { extendInfo: { LSEnvironment: JSON.parse(process.env.CK_TEST_ENVIRONMENT) } } : {}),
   // @electron/osx-sign's defaults: hardened runtime and the entitlements Electron needs (JIT and its helpers).
   ...(identity ? { osxSign: { identity } } : {}),
   // notarytool with a stored keychain profile; the app is stapled, so it opens offline on first launch.
   ...(notarize ? { osxNotarize: { keychainProfile: notaryProfile } } : {}),
   ignore: [/^\/src(?:\/|$)/, /^\/tests(?:\/|$)/, /^\/scripts(?:\/|$)/, /^\/.github(?:\/|$)/, /^\/release(?:\/|$)/, /^\/docs(?:\/|$)/, /^\/LEDGER\.md$/, /^\/README\.md$/],
-});
+}).finally(() => rm('dist/build-info.json', { force: true }));
 const bundle = `${packages[0]}/Central Knot.app`;
 // Unsigned builds: packager leaves Electron's stock signature, whose seal no longer matches the renamed bundle.
 if (!identity) execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', bundle]);
@@ -50,4 +65,4 @@ if (notarize) {
 }
 const archive = `release/Central-Knot-${version}-mac-arm64.zip`;
 execFileSync('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', bundle, archive]);
-console.log(`Package: ${archive} (${identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc'})`);
+console.log(`Package: ${archive}, ${tag ? `release ${tag}` : 'no release tag'} (${identity ? `${identity}${notarize ? ', notarized and stapled' : ', not notarized'}` : 'signed ad hoc'})`);

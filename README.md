@@ -92,7 +92,13 @@ Keeps the Managed set (skills, MCP servers, agents and base instructions) in a g
 
 ### Settings
 
-Start at sign-in, Appearance (System, Light or Dark), Keep history for (7, 30 or 90 days) and Show log file.
+Start at sign-in, Appearance (System, Light or Dark), Updates, Keep history for (7, 30 or 90 days) and Show log file.
+
+### Updates
+
+The Mac app updates itself from this project's [GitHub releases](https://github.com/njfife/central-knot/releases). Shortly after it opens, and every few hours while it runs (window closed too), it asks GitHub's public API for the releases; nothing about you is sent. When there is a newer one, the version at the bottom right becomes **Update to …**: one click downloads it, shows progress, and restarts into it. If an instructions draft isn't saved or changes wait for Apply all, it waits and the button says **Restart to update**. It never restarts during a write. Afterwards the status bar says once which version is now running, with its release notes.
+
+A build made from a preview is offered newer previews and finals; one made from a final release, finals only. The new app must be signed by the same developer before it replaces the old one (Electron's Squirrel.Mac checks this), and a failed or interrupted update leaves the installed app as it was. Settings › **Updates** shows the version and release tag in use, **Check now** and the last result. An app outside the Applications folder (or `~/Applications`), an unsigned or untagged build and a development build don't update themselves; Settings says why and links the release page. Windows and Linux have no releases yet, so nothing is shown there. **Check for Updates…** is in the app menu.
 
 ## State
 
@@ -120,7 +126,7 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 
 ### Packaging and release
 
-`npm run package:mac` (`scripts/package-mac.mjs`) builds `release/Central-Knot-<version>-mac-arm64.zip` on an Apple silicon Mac. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. Releases are published on GitHub with their checks in the release notes.
+`npm run package:mac` (`scripts/package-mac.mjs`) builds `release/Central-Knot-<version>-mac-arm64.zip` on an Apple silicon Mac. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. The release tag is recorded in the app (`build-info.json`) from the version tag on the commit being built (`v0.5.0-preview.5`), or `CK_RELEASE_TAG`; a release build refuses to package without one, and an untagged build never offers updates. Each release must carry the Mac zip named `Central-Knot-<version>-mac-arm64.zip`, as now: that is what the app looks for. `node scripts/update-proof.mjs` proves an update between two signed test builds in throwaway folders (instructions at its top). Releases are published on GitHub with their checks in the release notes.
 
 ### Logo
 

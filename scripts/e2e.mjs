@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
+import { serveReleases } from './update-fixture.mjs';
 import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
@@ -112,9 +113,9 @@ const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
-async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
+async function launch(userData = join(scratch, 'data'), extra = [], home = HOME, more = {}) {
   const port = 9400 + randomInt(500);
-  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
+  const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
   // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
@@ -1597,6 +1598,85 @@ async function repoBaseFlow() {
   await first.quit();
 }
 
+/**
+ * Updates, with a stand-in for GitHub's releases and the install step stubbed (CK_UPDATE_STUB: the app acts as an installed copy
+ * of that release, and "installing" records the update and quits; scripts/update-proof.mjs proves the real install on a Mac).
+ * The status bar offers the newer release after the first check; one click downloads it with progress; changes waiting for
+ * Apply all hold the restart, and the button says so; the next launch says once that it is on the new version.
+ */
+async function updateFlow() {
+  const zip = join(scratch, 'update.zip');
+  writeFileSync(zip, Buffer.alloc(3_000_000, 7));
+  const releases = [{ tag: 'v0.5.0-preview.5', zip, bytesPerSecond: 1_000_000 }];
+  const fixture = await serveReleases(releases);
+  const data = join(scratch, 'update-data');
+  const as = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: fixture.releasesUrl });
+  try {
+    let a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.4'));
+    same('the status bar names the build by its release', await a.text('#status-end'), 'Central Knot 0.5.0 preview 4');
+    // The first check runs shortly after launch, on its own.
+    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
+    same('after the first check the version becomes the Update button', await a.text('#update-button'), 'Update to 0.5.0 preview 5');
+    await a.click('#nav-settings');
+    const row = await a.text('#setting-updates') ?? '';
+    check('Settings › Updates names the build and what is available', row.includes('0.5.0 preview 4, from release v0.5.0-preview.4') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    // Something chosen and not applied holds the restart.
+    await a.click('#nav-skills');
+    await a.click('#manage-all');
+    await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
+    await a.click('#update-button');
+    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
+    const labels = await a.run('window.ckLabels');
+    check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);
+    same('changes waiting for Apply all hold the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
+    await wait(1500);
+    check('and the app is still running', a.child.exitCode === null);
+    check('the status bar says why', /ready\. .*wait for Apply all/.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
+    check('so does the button', /wait for Apply all/.test(await a.run(`document.querySelector('#update-button').title`)), await a.run(`document.querySelector('#update-button').title`));
+    same('no page errors while updating', a.pageErrors, []);
+    // Clicking it is the person's choice: the app restarts (here: quits, the stub's install).
+    const exited = new Promise(done => a.child.once('exit', done));
+    await a.run(`document.querySelector('#update-button').click()`);
+    check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
+    const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
+    same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
+    // The next launch is the new version: it says so once, with the release notes.
+    a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.5'));
+    for (let i = 0; i < 40 && !/now on/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('after the restart it says once that it is on the new version', await a.text('#announcement'), 'Central Knot is now on 0.5.0 preview 5.');
+    same('with a link to the release notes', [await a.run(`document.getElementById('said-link').hidden`), await a.text('#said-link')], [false, 'Release notes']);
+    same('the status bar names the new build', await a.text('#status-end'), 'Central Knot 0.5.0 preview 5');
+    check('the record is cleared once said', !JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update);
+    await a.click('#nav-settings');
+    await a.click('#check-updates');
+    for (let i = 0; i < 40 && !/Up to date/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
+    check('Check now: up to date', (await a.text('#setting-updates') ?? '').includes('Up to date.'), await a.text('#setting-updates'));
+    await a.quit();
+    // An update that didn't take (the old build opens again) says so, in Settings.
+    writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, cut: 0.5 });
+    a = await launch(data, ['--practice-copy'], HOME, as('v0.5.0-preview.5'));
+    await a.click('#nav-settings');
+    check('an update that didn’t finish is said in Settings', (await a.text('#setting-updates') ?? '').includes('The update to 0.5.0 preview 6 didn’t finish. Central Knot 0.5.0 preview 5 is still in use.'), await a.text('#setting-updates'));
+    // An interrupted download says so and offers the update again.
+    await a.click('#check-updates');
+    for (let i = 0; i < 40 && !(await a.exists('#update-button')); i++) await wait(250);
+    await a.click('#update-button');
+    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
+    check('an interrupted download is said, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.'), await a.text('#setting-updates'));
+    same('and the button offers it again', (await a.text('#update-button'))?.trim(), 'Update to 0.5.0 preview 6');
+    same('no page errors after updating', a.pageErrors, []);
+    await a.quit();
+    // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
+    a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
+    await a.click('#nav-settings');
+    if (process.platform === 'darwin') check('an untagged or development build says it doesn’t update itself', /(development build|wasn’t made from a release)/.test(await a.text('#setting-updates') ?? ''), await a.text('#setting-updates'));
+    else same('off macOS there is no Updates row', await a.exists('#setting-updates'), false);
+    same('and no Update button', await a.exists('#update-button'), false);
+    await a.quit();
+  } finally { await fixture.close(); }
+}
+
 /** A released build starts on this computer's home and offers no Practice copy, and its main process refuses one. */
 async function releasedStartupFlow() {
   // A development build (--electron) starts as a released one with --as-released; a packaged build needs no switch.
@@ -1875,6 +1955,7 @@ try {
   await harnessFlow();
   await practiceFlow();
   await releasedStartupFlow();
+  await updateFlow();
   await fewToolsFlow();
   await repoBaseFlow();
   await realHomeFlow();
