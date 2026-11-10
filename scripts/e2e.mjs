@@ -2160,6 +2160,108 @@ async function crashFlow() {
   check('at least one round really interrupted copying', interrupted > 0, interrupted);
 }
 
+/**
+ * A draft of the base instructions written by one of the person's tools (INS-06), as people click it: choose the tool, a tool
+ * that fails says why, a slow one is stopped, and a draft is reviewed, changed and saved in one step, then undone. The tools
+ * are stand-ins in the HOME the app is given: each notes the prompt it was sent and answers as `mode` says.
+ */
+async function draftFlow() {
+  const realHome = join(scratch, 'draft-real'), home = join(scratch, 'draft-home'), data = join(scratch, 'draft-data');
+  const claudeMd = join(home, '.claude/CLAUDE.md'), agentsMd = join(home, '.codex/AGENTS.md'), copilotMd = join(home, '.copilot/copilot-instructions.md');
+  for (const folder of ['.claude', '.codex', '.copilot']) mkdirSync(join(home, folder), { recursive: true });
+  const claude0 = '# Style\nBe brief.\n\n# Claude\nUse the Task tool.\nDropped by the draft.\n', codex0 = 'Be brief.\nRun codex review before pushing.\n';
+  writeFileSync(claudeMd, claude0);
+  writeFileSync(agentsMd, codex0);
+  mkdirSync(join(realHome, '.local/bin'), { recursive: true });
+  mkdirSync(data, { recursive: true });
+  writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: home } }));
+  const mode = join(realHome, 'draft-mode'), got = join(realHome, 'draft-got');
+  const draft = ['<<<CENTRAL KNOT: base>>>', '# Style', 'Be brief.', '<<<CENTRAL KNOT: claude-cli>>>', '# Claude', 'Use the Task tool.', '<<<CENTRAL KNOT: codex-cli>>>', 'Run codex review before pushing.', '<<<CENTRAL KNOT: end>>>'].join('\n');
+  const answers = `case "$(cat '${mode}')" in\n  fail) echo "Not logged in · Please run /login" >&2; exit 1 ;;\n  slow) cat > /dev/null; sleep 60 ;;\nesac\ncat > '${got}'\npwd > '${got}.cwd'\n`;
+  const stub = (name, version, answer) => { writeFileSync(join(realHome, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\n${answers}${answer}\n`); chmodSync(join(realHome, '.local/bin', name), 0o755); };
+  stub('claude', '2.1.322 (Claude Code)', `[ "$1" = "-p" ] || exit 9\ncat <<'EOF'\n${draft}\nEOF`);
+  stub('codex', 'codex-cli 0.167.0', `[ "$1" = "exec" ] || exit 9\nprev=""\nfor arg; do [ "$prev" = "-o" ] && out="$arg"; prev="$arg"; done\necho "working"\ncat > "$out" <<'EOF'\n${draft}\nEOF`);
+  writeFileSync(mode, 'fail');
+
+  const a = await launch(data, [], realHome);
+  const says = async selector => (await a.text(selector)) ?? '';
+  const untilThere = async selector => { for (let tries = 0; tries < 80 && !(await a.exists(selector)); tries++) await wait(100); return a.exists(selector); };
+  await a.click('#nav-instructions');
+  check('with tools that can write one, the base card offers a draft', await untilThere('#base-draft'), await says('#base-card'));
+  await a.shot('draft-entry');
+  await a.click('#base-draft');
+  // Claude Code and Codex have a CLI in the HOME the app is given. Copilot CLI has only its folder in the home on screen, so
+  // it is offered only on a machine that has its CLI in a system folder (which no test home can hide).
+  const offered = await a.all('#base-card [id^="base-draft-by-"]', 'e.textContent');
+  check('each tool with a CLI on this computer is offered by name', offered.includes('Draft with Claude Code') && offered.includes('Draft with Codex') && offered.every(label => label.startsWith('Draft with ')), offered);
+  if (!existsSync('/opt/homebrew/bin/copilot') && !existsSync('/usr/local/bin/copilot')) check('and a tool with no CLI is not', !offered.includes('Draft with Copilot CLI'), offered);
+  check('before a tool is chosen, the card says what it will do and that the draft is seen first', /splits them/.test(await says('#base-card')) && /before anything is saved/.test(await says('#base-card')), await says('#base-card'));
+  await a.click('#base-draft-by-claude-cli');
+  check('a tool that can’t answer says why in its own words, and the other tool can still be tried', (await says('#base-draft-problem')).includes('Claude Code could not write a draft: “Not logged in · Please run /login”. Nothing was changed.') && await a.exists('#base-draft-by-codex-cli'), await says('#base-card'));
+  same('and nothing was written', [readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd), existsSync(join(home, '.central-knot/instructions/base.md'))], [claude0, codex0, false, false]);
+  await a.shot('draft-problem');
+
+  // A tool that takes its time: the card says it is writing, and Stop ends it.
+  writeFileSync(mode, 'slow');
+  await a.run(`document.querySelector('#base-draft-by-codex-cli').click()`);
+  check('while a tool writes, the card says so and offers Stop', await untilThere('#base-draft-stop') && /Codex is writing a draft of the base instructions/.test(await says('#base-card')), await says('#base-card'));
+  await a.shot('draft-writing');
+  await a.click('#base-draft-stop');
+  check('Stop goes back to choosing a tool, with nothing said to be wrong', await untilThere('#base-draft-by-codex-cli') && !(await a.exists('#base-draft-problem')), await says('#base-card'));
+
+  // A draft: reviewed first, each file's change said, and what the draft carried nowhere pointed out.
+  writeFileSync(mode, 'ok');
+  await a.click('#base-draft-by-codex-cli');
+  check('the draft opens as a review that names who wrote it', await untilThere('#base-save') && (await says('.ins-review-title')) === 'Codex’s draft. Check it, then save.', await says('#base-card'));
+  const prompt = readNow(got);
+  check('the tool was sent each file’s own text', prompt.includes(`<<<FILE: claude-cli, Claude Code’s CLAUDE.md>>>\n${claude0}<<<END OF FILE>>>`) && prompt.includes(`<<<FILE: codex-cli, Codex’s AGENTS.md>>>\n${codex0}<<<END OF FILE>>>`), prompt);
+  check('and ran in a folder of its own, gone afterwards', readNow(`${got}.cwd`).includes('central-knot-draft-') && !existsSync(readNow(`${got}.cwd`).trim()), readNow(`${got}.cwd`));
+  const plan = await says('.base-plan');
+  same('the review shows the base as it will be', await a.all('#base-card .ins-editor > pre.ins-preview', 'e.textContent'), ['# Style\nBe brief.']);
+  check('and says what each file becomes', plan.includes('Its own instructions become 2 lines, then the base:') && plan.includes('Its own instructions become 1 line, then the base:') && plan.includes('copilot-instructions.md is created, holding only the base instructions.'), plan);
+  same('with the lines each file keeps in view', await a.all('.base-plan pre.ins-preview', 'e.textContent'), ['# Claude\nUse the Task tool.', 'Run codex review before pushing.']);
+  check('a line the draft carried nowhere is pointed out under its file', plan.includes('1 line of CLAUDE.md isn’t in the draft as written. It may be reworded or left out.'), plan);
+  await a.click('#base-lost-claude-cli');
+  same('and shown on request', (await a.all('.base-plan pre.ins-preview', 'e.textContent'))[1], 'Dropped by the draft.');
+  same('nothing is written by reviewing', [readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd)], [claude0, codex0, false]);
+  await a.shot('draft-review');
+  for (const width of [860, 1180, 1320, 1728]) { await sizeTo(a, width, 800); same(`nothing cut off in a draft’s review at ${width}×800`, await a.run(CUT_OFF), []); }
+  await fullSize(a);
+
+  // The draft is the person's to change: the base, and what stays in each file.
+  await a.click('#base-back');
+  same('Edit the draft opens the base and each file’s own part', [await a.run(`document.querySelector('#base-text').value`), await a.run(`document.querySelector('#base-own-claude-cli').value`), await a.run(`document.querySelector('#base-own-codex-cli').value`)], ['# Style\nBe brief.\n', '# Claude\nUse the Task tool.\n', 'Run codex review before pushing.\n']);
+  await a.run(`(() => { const area = document.querySelector('#base-own-claude-cli'); area.value += 'Dropped by the draft.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  for (const width of [860, 1180, 1728]) { await sizeTo(a, width, 800); same(`nothing cut off editing a draft at ${width}×800`, await a.run(CUT_OFF), []); }
+  await fullSize(a);
+  await a.shot('draft-edit');
+  await a.click('#base-cancel');
+  check('leaving the editor asks about the draft by name, since it took minutes to get', (await says('#base-card')).includes('Discard Codex’s draft?'), await says('#base-card'));
+  await a.click('#base-keep');
+  await a.click('#base-review');
+  check('a line put back by hand is no longer pointed out', !(await says('.base-plan')).includes('in the draft as written'), await says('.base-plan'));
+  await a.click('#base-save');
+  const block = '<!-- Central Knot base instructions: start (shared by your tools; edit them in Central Knot) -->\n# Style\nBe brief.\n<!-- Central Knot base instructions: end -->\n';
+  same('one Save sets the base and each file: its own part, then the base', [readNow(claudeMd), readNow(agentsMd), readNow(copilotMd), readNow(join(home, '.central-knot/instructions/base.md'))],
+    [`# Claude\nUse the Task tool.\nDropped by the draft.\n\n${block}`, `Run codex review before pushing.\n\n${block}`, block, '# Style\nBe brief.\n']);
+  check('the result says which files were updated, with Undo', /Base instructions saved in CLAUDE.md, copilot-instructions.md and AGENTS.md/.test(await says('.bands')) && await a.exists('#outcome-undo-base'), await says('.bands'));
+  await a.shot('draft-saved');
+  await a.shot('draft-entry-with-base');
+  await a.click('#outcome-undo-base');
+  same('Undo puts every file back as it was', [readNow(claudeMd), readNow(agentsMd), existsSync(copilotMd)], [claude0, codex0, false]);
+
+  // A file that changes after the draft was written: the draft knows nothing of it, so it can't be saved.
+  await a.click('#base-draft'); await a.click('#base-draft-by-claude-cli');
+  await untilThere('#base-save');
+  writeFileSync(claudeMd, `${claude0}Typed after the draft.\n`);
+  await a.click('#header-refresh');
+  check('a file changed after the draft was written stops its save, and says so', await untilThere('#base-draft-stale') && await a.run(`document.querySelector('#base-save').disabled`) && /Claude Code’s file changed after this draft was written/.test(await says('#base-draft-stale')), await says('#base-card'));
+  await a.click('#base-review-discard'); await a.click('#base-review-discard-yes');
+  check('discarding the draft leaves the card as it was', await a.exists('#base-draft') && !(await a.exists('#base-save')) && readNow(claudeMd) === `${claude0}Typed after the draft.\n`, await says('#base-card'));
+  same('no page errors, draft', a.pageErrors, []);
+  await a.quit();
+}
+
 const execChmod = () => spawnSync('chmod', ['-R', 'u+rwx', scratch]);
 
 // ---------- Run ----------
@@ -2173,6 +2275,7 @@ try {
   await fewToolsFlow();
   await listDiffersFlow();
   await repoBaseFlow();
+  await draftFlow();
   await realHomeFlow();
   if (canWriteRealHome && crashRounds > 0) await crashFlow();
   execChmod();

@@ -1280,6 +1280,9 @@ span.ins-confirm { margin-top: 0; }
 .base-card { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
 .base-tools { border: 0; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .base-tools legend { padding: 0; margin-bottom: 4px; font-size: 12.5px; color: var(--ink-soft); }
+/* A tick box sits beside its label, on one line, and shows keyboard focus. */
+.base-tools .tick { display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer; }
+.base-tools .tick:has(.hidden-input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .base-tools .tick-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
 .base-file { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; color: var(--ink-faint); }
 .base-subhead { margin: 6px 0 0; font-size: 12.5px; font-weight: 600; }
@@ -1304,6 +1307,14 @@ span.ins-confirm { margin-top: 0; }
 .base-pill-warn { color: var(--ink); border-color: color-mix(in oklab, var(--warning, #d29922) 60%, transparent); }
 .base-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px 24px; align-items: start; }
 .base-column { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* A draft a tool wrote: what stays only in each tool's file, edited under the base; and a file's lines the draft didn't carry. */
+.base-own-list { display: flex; flex-direction: column; gap: 8px; }
+.base-own { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.base-own-label { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12.5px; }
+.base-not-carried { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; max-width: none; }
+.base-not-carried > span { flex: 1 1 260px; min-width: 0; }
+#base-draft-problem:focus { outline: none; }
+.base-writing { display: flex; align-items: center; gap: 8px; }
 /* A wide base card puts the tools beside the text. */
 @container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 /* Marker comments and code read as typed: no ligatures turning <!-- into an arrow. */
