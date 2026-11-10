@@ -50,8 +50,8 @@ export const searchPath = (): Promise<string> =>
 /**
  * Where a tool's desktop app may be, where the version of the tool it carries is written, and where that copy of the tool
  * is (CD §2): Claude desktop keeps each Code tab build in a folder named by its version (`<version>/<build>/<binary>`),
- * the GitHub Copilot app names its runtime's version in a file and on macOS unpacks that runtime, a whole Copilot CLI,
- * into the user's caches by that version, and ChatGPT desktop carries a Codex that answers --version. The app is found,
+ * the GitHub Copilot app names its runtime's version in a file and, when it first runs, unpacks that runtime, a whole
+ * Copilot CLI, into the user's caches by that version, and ChatGPT desktop carries a Codex that answers --version. The app is found,
  * never run, and never counts as the CLI (CD §3); its copy of the tool runs plugin commands only when there is no CLI
  * (PLG-04). A candidate names that copy's binary only where its plugin commands were run in a disposable home on that
  * platform (capability-data §3); elsewhere it gives the version alone. `app` is the app's folder, or with `alias` the
@@ -76,12 +76,13 @@ export function appCandidates(home: string, binary: string, platform: string = p
   const own: Record<string, Record<string, AppCandidate[]>> = {
     win32: {
       claude: [{ name: 'Claude desktop', app: aliases('Claude_pzs8sxrjxfjjc'), alias: true, versionFile: 'app/resources/app.asar', carries: 'Code tab', carried: { folders: join(local, 'Claude-Data', 'claude_pzs8sxrjxfjjc', 'claude-code'), binary: 'claude.exe' } }],
-      copilot: [join(process.env.ProgramFiles ?? 'C:\\Program Files', 'GitHub Copilot'), join(local, 'GitHub Copilot')].map(app => ({ name: 'GitHub Copilot app', app, carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts' } })),
+      // The setup program installs for one person under Programs; the .msi for everyone under Program Files.
+      copilot: [join(local, 'Programs', 'GitHub Copilot'), join(process.env.ProgramFiles ?? 'C:\\Program Files', 'GitHub Copilot')].map(app => ({ name: 'GitHub Copilot app', app, carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts', runtimes: join(local, 'github-copilot-sdk', 'cli'), binary: 'copilot.exe' } })),
       codex: [{ name: 'ChatGPT desktop', app: aliases('OpenAI.Codex_2p2nqsd0c76g0'), alias: true, versionFile: 'app/resources/app.asar', carries: 'Codex', carried: { binary: 'app/resources/codex.exe' } }],
     },
     linux: {
       claude: [{ name: 'Claude desktop', app: '/usr/lib/claude-desktop', versionFile: 'resources/app.asar', carries: 'Code tab', carried: { folders: join(home, '.config/Claude/claude-code') } }],
-      copilot: [{ name: 'GitHub Copilot app', app: '/usr/lib/GitHub Copilot', carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts' } }],
+      copilot: [{ name: 'GitHub Copilot app', app: '/usr/lib/GitHub Copilot', carries: 'Copilot runtime', carried: { file: 'copilot-sdk/cliVersion.d.ts', runtimes: join(home, '.cache/github-copilot-sdk/cli'), binary: 'copilot' } }],
       codex: ['/usr/lib/chatgpt', join(home, '.local/opt/chatgpt')].map(app => ({ name: 'ChatGPT desktop', app, versionFile: 'resources/app.asar', carries: 'Codex', carried: { binary: 'resources/codex' } })),
     },
   };

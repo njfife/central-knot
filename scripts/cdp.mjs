@@ -25,6 +25,28 @@ export async function connect(url, onEvent = () => {}) {
   return { send, run, close: () => socket.close() };
 }
 
+/**
+ * The debug ports an app opened, for an app started with `--remote-debugging-port=0` (and `--inspect=0` in a dev run, `inspect`)
+ * and its stderr piped: `port` for its page, `inspect` for its main process. Asked for port 0, each app gets free ports of its
+ * own from the system and says them on stderr. A run that picked a number itself could pick one another run's app was already
+ * listening on (two tours, or a tour and the e2e, on one machine), and then drove that app instead of its own.
+ */
+export function debugPorts(child, inspect = false) {
+  return new Promise((done, fail) => {
+    let said = '';
+    const stop = setTimeout(() => fail(new Error('The app did not open a debug port.')), 30000);
+    child.once('exit', () => { clearTimeout(stop); fail(new Error('The app closed before it opened a debug port.')); });
+    // Read on after the ports are known too, so the app never waits on a full pipe.
+    child.stderr.on('data', chunk => {
+      if (said.length > 100000) return;
+      said += chunk;
+      const page = /DevTools listening on ws:\/\/[^/]*:(\d+)\//.exec(said)?.[1];
+      const main = /Debugger listening on ws:\/\/[^/]*:(\d+)\//.exec(said)?.[1];
+      if (page && (main || !inspect)) { clearTimeout(stop); done({ port: Number(page), inspect: inspect ? Number(main) : undefined }); }
+    });
+  });
+}
+
 /** Connects to the main process inspecting on `port`; its `run(expression)` has `electron` in scope. */
 export async function mainProcess(port) {
   let target;
