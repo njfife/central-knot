@@ -993,7 +993,7 @@ if (wanted('base')) {
   await waitFor(a, `!!document.querySelector('#base-card')`);
   await a.run(`(() => { document.activeElement?.blur(); document.querySelector('#instructions-scroll').scrollTop = 0; })()`);
   await shot(a, 'base-start', 'Clicked "Instructions". The Base instructions card is at the top; nothing is set up yet.');
-  await a.click('#base-from-claude-cli'); await shot(a, 'base-from-claude', 'Clicked "Claude Code’s CLAUDE.md" beside "or start from".');
+  await a.click('#base-from-claude-cli'); await shot(a, 'base-from-claude', 'Clicked "CLAUDE.md" beside "or start from".');
   await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Write tests for every bug fix.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
   await a.click('#base-review'); await shot(a, 'base-review', 'Added a line to the draft and clicked "Review changes".');
   await a.click('#base-plan-codex-cli'); await shot(a, 'base-review-file', 'Clicked "Show changes" on the Codex row.');

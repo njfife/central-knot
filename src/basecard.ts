@@ -252,7 +252,8 @@ function notCarried(file: InstructionFile, edit: BaseEdit) {
   const lines = linesNotCarried(splitBase(file.text).own, edit.text, drafted);
   if (!lines.length) return null;
   const key = `lost-${file.tool}`;
-  return [h('p.base-explain.base-not-carried', {}, icon('triangle-alert', 13, 'tone-warning'),
+  // Said quietly: a draft that merges what files share rewords lines as a matter of course.
+  return [h('p.base-explain.base-not-carried', {}, icon('info', 13, 'tone-muted'),
     h('span', {}, lines.length === 1 ? `1 line of ${fileName(file.path)} isn’t in the draft as written. It may be reworded or left out.` : `${lines.length} lines of ${fileName(file.path)} aren’t in the draft as written. They may be reworded or left out.`),
     button({ variant: 'link', size: 'micro', label: `${shown.has(key) ? 'Hide' : 'Show'} ${lines.length === 1 ? 'it' : 'them'}`, id: `base-${key}`, attrs: { 'aria-expanded': String(shown.has(key)) }, onclick: () => toggle(key) })),
     shown.has(key) ? h('pre.ins-preview', { tabindex: '0', 'aria-label': `Lines of ${fileName(file.path)} not in the draft as written` }, lines.join('\n')) : null];
@@ -304,6 +305,8 @@ export function baseCard(files: InstructionFile[]) {
   const base = state.base;
   if (!base) return null;
   const edit = state.baseEdit;
+  // What was opened in one review (a file's changes, lines a draft didn't carry) starts closed in the next.
+  if (!edit) for (const key of [...shown]) { if (key.startsWith('plan-') || key.startsWith('lost-')) shown.delete(key); }
   const readOnly = savingOff();
   // A tool's typed draft locks the base too; one whose tool left this home (no card) waits in the band above to be copied or discarded.
   const toolDraft = toolDraftTyped() ? state.instructionEdit : undefined;
@@ -337,7 +340,7 @@ export function baseCard(files: InstructionFile[]) {
         draftButton(),
         button({ variant: 'outline', size: 'small', label: 'Write base instructions', id: 'base-write', disabled: locked, attrs: lockAttrs, onclick: () => startBaseEdit({ text: '', tools: files.map(file => file.tool) }) }),
         starts.length ? h('span.base-explain', {}, 'or start from:') : null,
-        starts.map(file => button({ variant: 'outline', size: 'small', label: `${toolNames[file.tool]}’s ${fileName(file.path)}`, id: `base-from-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `Its instructions move into the base, and the tools you choose get them too` },
+        starts.map(file => button({ variant: 'outline', size: 'small', label: starts.some(other => other !== file && fileName(other.path) === fileName(file.path)) ? `${toolNames[file.tool]}’s ${fileName(file.path)}` : fileName(file.path), id: `base-from-${file.tool}`, disabled: locked, attrs: lockAttrs ?? { title: `${toolNames[file.tool]}’s instructions move into the base, and the tools you choose get them too` },
           onclick: () => startBaseEdit({ text: ownText(file), tools: files.map(entry => entry.tool), source: { kind: 'own', tool: file.tool } }) })),
         lockedWhy ? h('span.ins-locked', {}, lockedWhy) : null),
     ];

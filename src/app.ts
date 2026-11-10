@@ -950,7 +950,8 @@ export const draftBaseWith = (tool: HarnessId) => {
       focusAfterBusy = 'base-save';
       announce(`${namedTools[tool]} wrote a draft. Review it, then save to update the files.`, true);
     } finally { state.drafting = undefined; }
-  });
+    // Focus is on Save, at the foot of the review; the page shows the draft from its top, where reading it starts.
+  }).then(() => { if (state.baseEdit?.source?.kind === 'draft') document.getElementById('base-card')?.scrollIntoView({ block: 'start' }); });
 };
 
 /** Stops the draft being written; its request then answers that it was cancelled. */

@@ -151,8 +151,12 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
   });
 }
 
-/** The last thing a tool said when it failed, short enough for a sentence: its own words are what the person can act on. */
-const lastWords = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map(line => line.trim()).filter(Boolean).slice(-3).join(' ').slice(-300);
+/** The last thing a tool said when it failed, short enough for a sentence (its last few lines, from their start): its own
+ *  words are what the person can act on. */
+function lastWords(text: string) {
+  const said = text.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map(line => line.trim()).filter(Boolean).slice(-4).join(' ');
+  return said.length > 240 ? `${said.slice(0, 240).trimEnd()}…` : said;
+}
 
 /**
  * Has `by` write a draft from `sources`. The answer comes back sorted, with the hash of everything it was written from, so a

@@ -179,4 +179,6 @@ test('The tools that can write a draft are those with a CLI on this computer', a
 test('A file’s lines a draft carries nowhere word for word are found, whichever part would have held them', () => {
   assert.deepEqual(linesNotCarried('# Style\nBe brief.\n\nUse the Task tool.\n  Indented counts the same.\nDropped line.\n', '# Style\nBe brief.\n', 'Use the Task tool.\nIndented counts the same.\n'), ['Dropped line.']);
   assert.deepEqual(linesNotCarried('Be brief.\n', 'Be brief.\n', ''), []);
+  // A heading the draft dropped or renamed is not an instruction lost.
+  assert.deepEqual(linesNotCarried('# How I work\nBe brief.\n## Git\nNever push to main.\n', '# Style\nBe brief.\n', ''), ['Never push to main.']);
 });

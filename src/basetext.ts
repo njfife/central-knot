@@ -96,9 +96,10 @@ export function baseAction(readers: HarnessId[], { adopt, overwrite }: { adopt?:
 
 /**
  * The lines of a file's own text that a draft carries nowhere word for word: neither in the base nor in what it kept for that
- * file (blank lines aside). The tool that wrote the draft reworded them, merged them or left them out; a review shows them.
+ * file. The tool that wrote the draft reworded them, merged them or left them out; a review shows them. Blank lines and
+ * headings don't count: a heading says nothing by itself, and sorting moves lines under other headings.
  */
 export function linesNotCarried(before: string, base: string, own: string): string[] {
   const carried = new Set(`${base}\n${own}`.split('\n').map(line => line.trim()));
-  return before.split('\n').map(line => line.trim()).filter(line => line && !carried.has(line));
+  return before.split('\n').map(line => line.trim()).filter(line => line && !/^#{1,6}\s/.test(line) && !carried.has(line));
 }
