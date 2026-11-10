@@ -81,6 +81,9 @@ test('what the Update button says at each step', () => {
   assert.deepEqual([held.label, held.busy], ['Restart to update', false]);
   assert.match(held.title, /loses your unsaved instructions draft\. Click to restart anyway\.$/, 'the button says what restarting loses');
   assert.equal(updateButton({ ...base, step: 'downloading' })!.busy, true);
+  // While it downloads the button says whether it will restart by itself: not with something unsaved open.
+  assert.equal(updateButton({ ...base, step: 'downloading' })!.title, 'Downloading 0.5.0 preview 5. Central Knot restarts into it when it’s ready.');
+  assert.equal(updateButton({ ...base, step: 'downloading' }, { held: 'Restarting now loses 1 change waiting for Apply all.' })!.title, 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
   assert.equal(label({ failed: 'The download didn’t finish.' }), 'Update to 0.5.0 preview 5', 'after a failure it can be tried again');
 });
 
@@ -93,6 +96,12 @@ test('what the Settings row says about the last check or update', () => {
   assert.equal(updateStatus({ ...base, checked: { at: 1, failed: 'Couldn’t check.' } })?.tone, 'failure');
   assert.equal(updateStatus({ ...base, checked: { at: 2, failed: 'Couldn’t check.' }, available: { tag: 'v0.5.0-preview.5', zip: '', size: 1, page: '' } })?.text, 'Couldn’t check.', 'the newest check failing is said');
   assert.equal(updateStatus({ ...base, failed: 'The download didn’t finish.', checked: { at: 1 } })?.text, 'The download didn’t finish.');
+  // The launch after an update says so all launch, with that release's notes, until a newer release takes the line.
+  const updated = { tag: 'v0.5.0-preview.4', page: 'https://example.test/4' };
+  assert.deepEqual(updateStatus({ ...base, updated }), { text: 'Updated to 0.5.0 preview 4.', tone: 'done', page: 'https://example.test/4' });
+  assert.deepEqual(updateStatus({ ...base, updated, checked: { at: 1 } }), { text: 'Updated to 0.5.0 preview 4, the newest release.', tone: 'done', page: 'https://example.test/4' });
+  assert.deepEqual(updateStatus({ ...base, updated, checked: { at: 1 }, available: { tag: 'v0.5.0-preview.5', zip: '', size: 1, page: 'https://example.test/5' } })?.page, 'https://example.test/5');
+  assert.equal(updateStatus({ ...base, checked: { at: 1 } })?.page, undefined);
   assert.match(checkFailure({ limited: true, status: 403 }), /limiting/);
   assert.match(checkFailure({ offline: true }), /couldn’t be reached/);
   assert.match(checkFailure({ status: 500 }), /answered 500/);

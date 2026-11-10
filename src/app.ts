@@ -1,5 +1,6 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
+import { checkNow } from './updateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
@@ -1052,8 +1053,8 @@ let setAside: HomeView | undefined;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => {
-  // "Check for Updates…" opens Settings on its Updates row.
-  if (page === 'settings/updates') { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); }
+  // "Check for Updates…" opens Settings on its Updates row and checks from there, so the result is announced and Check now has the focus.
+  if (page === 'settings/updates') { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); void checkNow(true); }
   else if (isPage(page)) showPage(page);
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an

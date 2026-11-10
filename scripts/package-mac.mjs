@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { buildDmg } from './mac-dmg.mjs';
+import { releaseTagHere } from './release-tag.mjs';
 
 if (process.platform !== 'darwin') throw new Error('Mac packaging runs on the selected Mac, not a cross-platform stand-in.');
 
@@ -27,13 +28,9 @@ if (release && !notarize) throw new Error('A release must be notarized; CK_NOTAR
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 
 // The release tag this build is made from, recorded inside the app so it can tell a newer release (updates.ts): CK_RELEASE_TAG,
-// or the highest version tag on the commit being built (other tags, such as checkpoints, don't count). A build with neither never offers
-// updates. A release must have one.
-const versionTag = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-const tagOf = () => { try { return execFileSync('git', ['-c', 'versionsort.suffix=-', 'tag', '--points-at', 'HEAD', '--sort=-version:refname'], { encoding: 'utf8' }).split('\n').find(name => versionTag.test(name)) ?? ''; } catch { return ''; } };
-const tag = process.env.CK_RELEASE_TAG ?? tagOf();
-if (tag && !versionTag.test(tag)) throw new Error(`CK_RELEASE_TAG ${tag} isn’t a version tag like v0.5.0-preview.5.`);
-if (release && !tag) throw new Error('A release is built from its tag: tag the commit (or set CK_RELEASE_TAG), so the app can tell a newer release.');
+// or the highest version tag on the commit being built. A checkout with changes of its own doesn't take the commit's tag, and
+// can't be a release (release-tag.mjs). A build with no tag never offers updates.
+const tag = releaseTagHere(release);
 // Written for this package only, then removed, so a dev run or a later untagged build never claims the tag.
 await rm('dist/build-info.json', { force: true });
 if (tag) await writeFile('dist/build-info.json', `${JSON.stringify({ tag })}\n`);

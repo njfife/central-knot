@@ -1745,15 +1745,25 @@ async function updateFlow() {
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    // Check now from the keyboard: the button is disabled under the focus while it checks, and takes the focus back.
+    const focused = () => a.run(`document.activeElement?.id ?? ''`);
+    const press = id => a.run(`(document.getElementById('${id}').focus(), document.getElementById('${id}').click(), true)`);
+    await press('check-updates');
+    for (let i = 0; i < 40 && await focused() !== 'check-updates'; i++) await wait(250);
+    same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
+    same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
+    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32]);
     // Something chosen and not applied holds the restart.
     await a.click('#nav-skills');
     await a.click('#manage-all');
     await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
-    await a.click('#update-button');
+    await press('update-button');
+    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
     for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
     const labels = await a.run('window.ckLabels');
     check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);
     same('changes waiting for Apply all hold the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
+    same('the button, disabled while it worked, takes the focus back', await focused(), 'update-button');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
@@ -1773,10 +1783,15 @@ async function updateFlow() {
     same('with a link to the release notes', [await a.run(`document.getElementById('said-link').hidden`), await a.text('#said-link')], [false, 'Release notes']);
     same('the status bar names the new build', await a.text('#status-end'), 'Central Knot 0.5.0 preview 5');
     check('the record is cleared once said', !JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update);
+    // The status bar's note goes at the first page switch; Settings keeps saying it for the whole launch, with the release notes.
+    await a.click('#nav-skills');
+    same('the note leaves the status bar with the page', await a.run(`document.getElementById('announcement').dataset.text`), '');
     await a.click('#nav-settings');
+    const updatedLine = async () => [await a.text('#setting-updates-notice .setting-message-text'), await a.text('#setting-updates-notice-action')];
+    check('Settings says the launch came from an update, with the release notes', /^Updated to 0\.5\.0 preview 5(, the newest release)?\.$/.test((await updatedLine())[0] ?? '') && (await updatedLine())[1] === 'Release notes', await updatedLine());
     await a.click('#check-updates');
-    for (let i = 0; i < 40 && !/Up to date/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('Check now: up to date', (await a.text('#setting-updates') ?? '').includes('Up to date.'), await a.text('#setting-updates'));
+    for (let i = 0; i < 40 && !/newest release/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
+    same('Check now: nothing newer, and the note stays', await updatedLine(), ['Updated to 0.5.0 preview 5, the newest release.', 'Release notes']);
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.
     writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
@@ -1787,11 +1802,64 @@ async function updateFlow() {
     // An interrupted download says so and offers the update again.
     await a.click('#check-updates');
     for (let i = 0; i < 40 && !(await a.exists('#update-button')); i++) await wait(250);
-    await a.click('#update-button');
-    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('an interrupted download is said, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.'), await a.text('#setting-updates'));
+    // Started from the status bar on another page: said there, and still said in Settings afterwards.
+    await a.click('#nav-skills');
+    await a.run(`(document.getElementById('update-button').focus(), document.getElementById('update-button').click(), true)`);
+    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('an interrupted download is said in the status bar', await a.run(`document.getElementById('announcement').dataset.text`), 'The download didn’t finish. Central Knot wasn’t changed. Try again.');
+    same('and the button takes the focus back', await a.run(`document.activeElement?.id ?? ''`), 'update-button');
+    await a.click('#nav-settings');
+    check('an interrupted download is still said in Settings, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.') && await a.text('#setting-updates-notice-action') === 'Open the release page', await a.text('#setting-updates'));
     same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
+    await a.quit();
+    // The narrowest window with the status bar at its fullest: a folder home named as long as "This Mac’s home", a profile in
+    // use with a long name, and sync on with nothing managed yet. Nothing may run into its neighbour in any state of the button.
+    const narrowHome = join(scratch, 'this-macs-home'), narrowData = join(scratch, 'update-narrow-data');
+    cpSync(join(root, 'fixtures/home'), narrowHome, { recursive: true });
+    mkdirSync(narrowData, { recursive: true });
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: narrowHome } }));
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, bytesPerSecond: 1_000_000 });
+    // What in the status bar runs into what follows it, or past the window's edge; empty when everything fits.
+    const crowding = () => a.run(`(() => {
+      const named = node => node.id || String(node.className);
+      const parts = [...document.querySelectorAll('#status-facts > *'), ...['announcement', 'said-link', 'message-mark'].map(id => document.getElementById(id)), document.getElementById('status-end')]
+        .filter(node => node && !node.hidden && !node.classList.contains('visually-hidden') && node.getBoundingClientRect().width > 0);
+      const found = [];
+      parts.forEach((node, at) => {
+        const box = node.getBoundingClientRect(), next = parts[at + 1]?.getBoundingClientRect();
+        if (next && box.right > next.left + 0.5) found.push(named(node) + ' runs ' + Math.round(box.right - next.left) + 'px into ' + named(parts[at + 1]));
+        if (box.right > innerWidth + 0.5) found.push(named(node) + ' runs past the window');
+      });
+      const facts = document.getElementById('status-facts');
+      if (facts.scrollWidth > facts.clientWidth) found.push('the facts need ' + (facts.scrollWidth - facts.clientWidth) + 'px more than they have');
+      return found;
+    })()`);
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.5'));
+    await a.click('#nav-profiles');
+    await a.click('#profile-new');
+    await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await a.settle();
+    await a.click('#pf-skill\\:notes');
+    await a.click('#profile-switch');
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
+    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing managed', true]);
+    same('at 860 wide nothing in the status bar runs into its neighbour: Update', await crowding(), []);
+    await a.click('#nav-skills');
+    await a.click('#manage-all');
+    await a.click('#update-button');
+    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await a.text('#update-button'))?.trim() ?? ''); i++) await wait(100);
+    same('nor while downloading', await crowding(), []);
+    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
+    same('nor with the restart held and its reason as a mark', [await a.run(`getComputedStyle(document.getElementById('message-mark')).display !== 'none'`), await crowding()], [true, []]);
+    await a.quit();
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(narrowData, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.6'));
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 40 && !/now on/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
+    same('no page errors in the narrow window', a.pageErrors, []);
     await a.quit();
     // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
