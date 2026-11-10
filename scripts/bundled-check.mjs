@@ -146,7 +146,7 @@ if (writes) {
   check('each was given the folder in the build’s own data folder', addedBy('claude')[0] === marketFolder && addedBy('codex')[0] === marketFolder, addedBy('claude'));
   check('Copilot CLI, which refuses this marketplace, was not asked', addedBy('copilot').length === 0);
   check('nothing was installed by it', !existsSync(join(HOME, '.claude/plugins/installed_plugins.json')));
-  check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code and Codex.')`), await a.run(`document.querySelector('#announcement').textContent`));
+  check('the status bar says once that nothing was installed, and where the marketplace is now listed', await a.until(`document.querySelector('#announcement').textContent.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code and Codex (see Plugins).')`), await a.run(`document.querySelector('#announcement').textContent`));
   await a.shot('first-open-1280');
   await a.size(860, 560);
   await a.shot('first-open-860');
@@ -224,7 +224,7 @@ if (writes) {
   await b.click('#market-tab-about');
   check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('.market-in-tools')?.textContent`));
   check('it was not added again by itself', addedBy('claude').length === 1 && addedBy('codex').length === 1, { claude: addedBy('claude'), codex: addedBy('codex') });
-  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('.market-in-tools p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Nothing was installed. Remove it in a tool and it stays out. Claude Code doesn’t.`, await b.run(`document.querySelector('.market-in-tools p').textContent`));
+  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('.market-in-tools p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Claude Code doesn’t list it. Nothing was installed. Remove it in a tool and it stays out.`, await b.run(`document.querySelector('.market-in-tools p').textContent`));
   await b.shot('about-add-1280');
   await b.size(860, 560);
   check('About with its button fits at 860', await b.fits());
@@ -232,6 +232,7 @@ if (writes) {
   await b.size(1280, 800);
   await b.click('[id^="add-carried-"][id$="claude-cli"]');
   check('List in Claude Code adds it, and the page says so', await b.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  await b.shot('about-listed-1280');
   check('the status bar says what happened', await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code.')), await b.run(`document.querySelector('#announcement').textContent`));
 }
 check('a second open keeps the unpacked marketplace as it is', statSync(marketFolder).ino === before);

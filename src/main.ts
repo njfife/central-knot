@@ -545,7 +545,7 @@ function addCarriedSoon(present: HarnessId[]) {
     if (!added.length) return;
     // The page reads the tools again, and the status bar says once what was done on the person's behalf: first, that nothing was installed.
     send('sync:changed');
-    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is now listed in ${toolList(added)}. Its About tab says more.`);
+    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is now listed in ${toolList(added)} (see Plugins).`);
   }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 

@@ -199,12 +199,13 @@ function inToolsNote(view: PluginsView, entry: MarketplaceView, marketIndex: num
   const where = has.length > 1 ? 'those tools’ own plugin lists' : `${names[has[0]!]}’s own plugin list`;
   // Said as the app's own doing where it was: nothing was installed, and taking it out in a tool is respected.
   const byApp = has.length > 0 && has.every(tool => entry.bundled!.addedTo?.includes(tool));
+  // Which tools don't, said right after which do; then, where the app did the adding, what that did and didn't do.
+  const lacks = has.length && could.length ? ` ${listOf(could)} ${could.length > 1 ? 'don’t' : 'doesn’t'} list it.` : '';
   const said = !has.length ? 'None of your tools lists this marketplace yet.'
-    : byApp ? `${entry.bundled.app} added this marketplace to ${listOf(has)}, so these plugins also show in ${where}. Nothing was installed. Remove it in a tool and it stays out.`
-      : `${listOf(has)} ${has.length > 1 ? 'list' : 'lists'} this marketplace, so these plugins also show in ${where}.`;
-  const lacks = has.length && could.length ? ` ${listOf(could)} ${could.length > 1 ? 'don’t' : 'doesn’t'}.` : '';
+    : byApp ? `${entry.bundled.app} added this marketplace to ${listOf(has)}, so these plugins also show in ${where}.${lacks} Nothing was installed. Remove it in a tool and it stays out.`
+      : `${listOf(has)} ${has.length > 1 ? 'list' : 'lists'} this marketplace, so these plugins also show in ${where}.${lacks}`;
   return h('div.market-in-tools', {},
-    h('p', {}, said, lacks),
+    h('p', {}, said),
     could.map(tool => button({ variant: 'outline', size: 'small', label: `List in ${names[tool]}`, name: `List ${marketTitle(entry)} in ${names[tool]}’s own plugin list. Nothing is installed.`, id: `add-carried-${marketIndex}-${tool}`, disabled: !!app.busy, onclick: () => void addCarriedTo(entry, tool) })));
 }
 
