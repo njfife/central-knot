@@ -460,10 +460,19 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
 
+/**
+ * The marketplace a bundled build carries, as the page shows it: the app's name, the name and picture the build gave the
+ * marketplace, its release in words ("November 10, 2026 (GitHub: acme/plugins at 1a2b3c4d5e)"), and each plugin the
+ * marketplace lists whose files the build doesn't carry, with why.
+ */
+export interface BundledView { app: string; displayName?: string; logo?: string; release: string; unpackaged: { name: string; reason: string }[] }
+
 export interface MarketplaceView {
   source: string;
-  /** Where it is known from: added in Central Knot, or already added in a tool. */
-  origins: ('central-knot' | HarnessId)[];
+  /** Where it is known from: added in Central Knot, carried by this build (a bundled build), or already added in a tool. */
+  origins: ('central-knot' | 'bundle' | HarnessId)[];
+  /** Set for the marketplace this build carries. */
+  bundled?: BundledView;
   name: string;
   kind: 'folder' | 'git';
   fetchedAt?: string;
@@ -646,7 +655,7 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
 /** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; /** A custom build's own lines about itself (bundle.ts aboutBuild); none for the standard app. */ build?: string[] }
 /** Why this copy can't update itself (see updates.ts for each one's words). */
 export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
 /** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */

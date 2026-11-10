@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; /** A bundled build: the marketplace it carries is in this folder under the base, and these plugins are not packed. */ bundled?: { folder: string; unpackaged?: string[] } } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -26,6 +26,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
     openExternal: async () => {},
+    ...(options.bundled ? { bundled: () => ({ source: join(base, options.bundled!.folder), view: { app: 'Acme Knot', displayName: 'Acme plugins', release: 'November 10, 2026 (GitHub: acme/plugins)', unpackaged: (options.bundled!.unpackaged ?? []).map(name => ({ name, reason: 'It is an npm package.' })) } }) } : {}),
   };
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
@@ -286,5 +287,28 @@ test('Turning a plugin skill off is offered on a build older than the one tested
     // Codex updated while the app is open: Refresh all reads its build again.
     await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.167.0"\n', { mode: 0o755 });
     assert.equal((await box.markets.view(true)).versions?.['codex-cli'], '0.167.0');
+  } finally { await box.cleanup(); }
+});
+
+test('A bundled build’s own marketplace is listed first, stays listed, and offers no install of a plugin it doesn’t carry', async () => {
+  const box = await setup({ bundled: { folder: 'carried', unpackaged: ['xlsx'] } });
+  try {
+    const carried = join(box.base, 'carried'), other = join(box.base, 'other');
+    await marketplace(carried, 'team', ['pdf', 'xlsx']);
+    await marketplace(other, 'other', ['notes']);
+    // Nothing was added, and it is there; one added later comes after it.
+    const first = await box.markets.view();
+    assert.deepEqual(first.marketplaces.map(entry => [entry.name, entry.origins, entry.sourceLabel, entry.bundled?.displayName]), [['team', ['bundle'], 'Comes with Acme Knot', 'Acme plugins']]);
+    const added = await box.markets.add(other);
+    assert.deepEqual(added.view!.marketplaces.map(entry => [entry.name, !!entry.bundled]), [['team', true], ['other', false]]);
+    // Removing it from the list does nothing: it is part of the build.
+    assert.deepEqual((await box.markets.forget(carried)).marketplaces.map(entry => entry.name), ['team', 'other']);
+    // A carried plugin installs by the usual route; the one the build has no files for fails with the reason, and nothing runs.
+    const installed = await box.markets.install(carried, 'team', 'pdf', ['claude-cli'], box.home);
+    assert.deepEqual(installed.reports.map(report => report.outcome), ['installed']);
+    const refused = await box.markets.install(carried, 'team', 'xlsx', ['claude-cli', 'codex-cli'], box.home);
+    assert.deepEqual(refused.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
+    assert.match(refused.reports[0]!.message, /This build doesn’t carry its files.*It is an npm package\./);
+    assert.deepEqual(box.calls.filter(call => call.startsWith('install')), ['install pdf claude-cli']);
   } finally { await box.cleanup(); }
 });

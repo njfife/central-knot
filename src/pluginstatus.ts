@@ -21,6 +21,9 @@ export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.'
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
+/** Why a plugin a bundled build's marketplace lists can't be installed from it: the build carries no files for it (`reason`: why it couldn't be packed). */
+export const notCarried = (reason: string) => `This build doesn’t carry its files, so it can’t be installed from here. ${reason}`;
+
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI and no copy in its desktop app, a Codex-only marketplace, or Copilot refusing it. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
   if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
@@ -60,7 +63,9 @@ export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: s
   if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
-  return state.state === 'installed' ? undefined : blocked(view, entry, tool);
+  if (state.state === 'installed') return undefined;
+  const left = entry.bundled?.unpackaged.find(item => item.name === plugin);
+  return left ? notCarried(left.reason) : blocked(view, entry, tool);
 }
 
 /**
@@ -251,7 +256,7 @@ export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin
   view.tools.filter(tool => installed(entry, plugin, tool) && !cantUninstall(view, entry, plugin, tool));
 
 /** A marketplace's name for headings and messages: the name it gives itself, or where it comes from until it is read. */
-export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourceLabel;
+export const marketTitle = (entry: MarketplaceView) => entry.bundled?.displayName || entry.name || entry.sourceLabel;
 
 /** Tools that can still take this plugin: available there and not installed yet. */
 export const toolsWithoutPlugin = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
