@@ -306,9 +306,9 @@ type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface
 interface Target { tool: AgentTool; entry?: AgentEntry; recorded?: CopyNow } type AgentOutcome = 'done' | 'settling';
 /**
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
- * shows and nothing else spreads (SYN-03).
+ * shows and nothing else spreads (SYN-03). `decideNow`: agents (by key) whose missing copies count as deleted at once (a
+ * deletion the person asked for, as Pull's); the rest keep the settle window.
  */
-/** `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's); the rest keep the settle window. */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; resume?: boolean; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const refused = await prepareSyncRecord(context, changes.length > 0, options.resume);
   if (refused) return refused;

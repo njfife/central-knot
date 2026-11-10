@@ -192,6 +192,11 @@ const digestOf = (ready: PartItem[], unread: Set<string>, files: PluginFiles) =>
 // ---------- What a tool holds now ----------
 
 const skillDir = (context: ShareContext, tool: HarnessId, name: string) => join(writeRoot(harnesses[tool], context.home, context.overrides?.[tool]), name);
+/** An agent part's file in a tool. Only tools with agents get agent parts (planParts), so any other tool is a bug, not a state. */
+const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
+  if (!isAgentTool(tool)) throw new Error(`${toolNames[tool]} has no agents.`);
+  return fileFor(context, tool, name);
+};
 
 /**
  * A part as it is in the tool now, read fresh: absent, there but unreadable right now, or there with `seen`, its fingerprint.
@@ -199,11 +204,6 @@ const skillDir = (context: ShareContext, tool: HarnessId, name: string) => join(
  * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's
  * and Pi's `enabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
  */
-/** An agent part's file in a tool. Only tools with agents get agent parts (planParts), so any other tool is a bug, not a state. */
-const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
-  if (!isAgentTool(tool)) throw new Error(`${toolNames[tool]} has no agents.`);
-  return fileFor(context, tool, name);
-};
 type OnDisk = { state: 'absent' } | { state: 'unreadable' } | { state: 'there'; seen: string; neutralHash?: string };
 async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartItem, 'kind' | 'name'>): Promise<OnDisk> {
   if (item.kind === 'skill') {

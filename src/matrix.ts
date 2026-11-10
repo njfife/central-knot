@@ -298,7 +298,6 @@ const removeEverywhere = (key: string) => {
 /** Whether a tool's cell shows this skill as disabled there: the switch is off (or queued off) and the tool has, or gets, a copy. */
 const shownDisabled = (skill: SampleSkill, tool: Tool) => !!skill.disabled?.includes(tool) && !['cannot', 'absent'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool);
 
-/** Tools where this skill's copy can be removed: there, and not a link or shared folder Central Knot doesn't change. */
 /** Tools whose copy isn't queued for removal: a removal stops syncing there on Apply all, so status lines don't count it. */
 const keptTools = (skill: SampleSkill) => toolList().filter(tool => !skill.removing?.includes(tool));
 
@@ -1509,7 +1508,6 @@ export function caughtUpBand(manage: ManageView): HTMLElement | null {
     closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
-/** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
 /**
  * MCP servers waiting for Claude Code's own Write step, not already told by a notice: the same inset amber notice as a
  * waiting edit, so Write has one look wherever the step waits. `all` is every waiting server, which Write writes.

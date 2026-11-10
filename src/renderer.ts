@@ -36,8 +36,8 @@ function applyLayout(): { rail: boolean; wide: boolean } {
   return { rail, wide };
 }
 
-/** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. */
-/** `countTitle` says the count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
+/** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. `countTitle` says the
+ * count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
 function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string, quiet = false) {
   const current = state.page === page;
   return h('button.nav-row', {
