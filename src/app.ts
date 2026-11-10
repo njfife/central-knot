@@ -527,7 +527,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
     return;
   }
   const everywhere = touchedToolsPhrase(where);
-  // A Pull's deletion of the base instructions: its Undo has no event of its own to offer again.
+  // A Pull's edit or deletion of the base instructions: its Undo has no event of its own to offer again.
   if (past?.base) {
     const said = result.results.filter(entry => entry.harness || entry.outcome !== 'written').map(entry => entry.message);
     tell(result.stopped ? undefined : { page: state.page, item: past.item, text: ['The base instructions are back.', ...said].join(' ') }, result.stopped);

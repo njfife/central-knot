@@ -1660,6 +1660,17 @@ async function repoBaseFlow() {
   check('and shows as changed in the repo', (await rowSays(second, 'Changed in the repo')).includes('Changed in the repo'), await second.text('#repo-incoming'));
   await pull(second, 'Be briefer.\n');
   same('Pull brings the edit in', [baseText('second'), claudeText('second').includes('Be briefer.')], ['Be briefer.\n', true]);
+  const undoneSays = (a, words) => a.run(`[...document.querySelectorAll('.history-row.history-undone')].some(row => row.textContent.includes(${JSON.stringify(words)}))`);
+  await second.click('#nav-history');
+  const edit = await api(second, `return (await api.history()).events.filter(event => event.key === 'instructions:base' && event.kind === 'edit').at(-1)?.id ?? null;`);
+  await until(async () => second.exists(`#history-${edit}`));
+  check('History has the pulled edit, with an Undo of the pull', edit && (await second.text('.history-list') ?? '').includes('Changed in the git repo, so Pull updated the base instructions in Claude Code.') && await second.text(`#history-${edit}`) === 'Undo pull in Claude Code', await second.text('.history-list'));
+  await second.click(`#history-${edit}`);
+  await until(async () => baseText('second') === 'Be brief.\n');
+  same('its Undo puts the earlier base back, in Claude Code too', [baseText('second'), claudeText('second').includes('Be brief.'), claudeText('second').includes('Be briefer.')], ['Be brief.\n', true, false]);
+  check('and the row reads as undone', await until(() => undoneSays(second, 'Pull updated the base instructions')), await second.text('.history-list'));
+  // Saved again as the repo has it, so nothing waits to go out before the deletion below.
+  same('the repo’s text saved again', await setBase(second, 'Be briefer.\n'), 'saved');
 
   same('the first home deletes the base and pushes', [await setBase(first, ''), await push(first)], ['saved', 'pushed']);
   const deleting = await rowSays(second, 'Removed in the repo');
@@ -1667,12 +1678,12 @@ async function repoBaseFlow() {
   await pull(second, '');
   same('Pull empties the base and takes it out of Claude Code, which keeps its own text', [baseText('second'), claudeText('second').includes('Be briefer.'), claudeText('second').includes('My own notes.')], ['', false, true]);
   await second.click('#nav-history');
-  const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base')?.id ?? null;`);
+  const event = await api(second, `return (await api.history()).events.find(event => event.key === 'instructions:base' && event.kind === 'deleted')?.id ?? null;`);
   await until(async () => second.exists(`#history-${event}`));
   check('History has the deletion, with an Undo', event && /Pull emptied the base instructions/.test(await second.text('.history-list') ?? ''), await second.text('.history-list'));
   await second.click(`#history-${event}`);
   same('Undo puts the base back, and Claude Code gets it again', [baseText('second'), claudeText('second').includes('Be briefer.'), await api(second, `return (await api.instructionBase()).tools;`)], ['Be briefer.\n', true, ['claude-cli']]);
-  check('and the row reads as undone', await until(async () => (await second.text('.history-row.history-undone') ?? '').includes('Base instructions')), await second.text('.history-list'));
+  check('and the row reads as undone', await until(() => undoneSays(second, 'Pull emptied the base instructions')), await second.text('.history-list'));
   await second.quit();
   await first.quit();
 }
