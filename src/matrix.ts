@@ -1,16 +1,17 @@
 // The Overview table in design preview: three layout options with no row checkboxes.
 // Managed says whether Central Knot keeps a skill in sync; each tool's cell says what that tool has.
 // Changes collect until "Apply all".
+import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { DAY_MS } from './model.ts';
 import { kindNouns } from './presence.ts';
 import { andList, byToolOrder, capitalToolsPhrase, orList, problemText, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
-import { saidInStatusBar, tell, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
-import { afterLayout, button, closeButton, emptyState, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
+import { whyReadOnly, saidInStatusBar, tell, type Outcome, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
+import type { Change, DestinationResult, SkillFacts, SyncNotice, HarnessId, PartsInstall } from './types.ts';
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
@@ -89,6 +90,8 @@ const word = (n: number) => (n === 1 ? kindNouns[kind].one : kindNouns[kind].man
 /** `n` of the kind, counted: "1 skill", "2 MCP servers". */
 const counted = (n: number) => plural(n, kindNouns[kind].one, kindNouns[kind].many);
 let kind: Kind = 'skills';
+/** Whether a profile switch turned this item off in this tool, not a Disable made by hand. */
+const turnedOffByProfile = (key: string, tool: Tool) => kind !== 'agents' && !!state.home?.profiles.offByProfile[itemId(kind === 'mcp' ? 'mcp' : 'skill', key)]?.includes(tool as HarnessId);
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
@@ -321,7 +324,7 @@ function filterBar() {
 const pendingSyncs = (list: SampleSkill[]) => list.filter(skill => !skill.edited?.length && toolList().some(tool => cellOf(skill, tool) === 'will-sync' && !(kind === 'mcp' && tool === 'claude-cli'))).length;
 const manageable = () => committedList().filter(skill => !skill.held).filter(skill => !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) !== 'attention');
 
-const canWrite = () => designMode || (!!state.home && state.home.manage.access.allowed && state.home.manage.gate.state !== 'stopped' && !state.busy);
+const canWrite = () => designMode || (!!state.home && !whyReadOnly(state.home) && !state.busy);
 const resumeNeeded = () => !designMode && state.home?.manage.gate.state === 'needs-resume';
 
 /** What Apply all will do with the queued changes: "2 changes · 1 new copy · 1 copy to disable". */
@@ -451,17 +454,19 @@ function cell(skill: SampleSkill, tool: Tool, inDetails = false) {
   // A cell whose copies differ opens the comparison instead of toggling: a decision comes first.
   const action = drawn === 'cannot' ? '' : differs ? 'Compare the copies' : on ? `Stop syncing to ${names[tool]}` : `Sync to ${names[tool]}`;
   const oneWay = !!skill.limits?.[tool] && on;
-  const text = cellTooltip(skill, tool);
+  // Turned off by a profile switch (not by hand): said, and marked apart, so turning it back on here is not a surprise later.
+  const byProfile = disabled && !switching && turnedOffByProfile(skill.key, tool);
+  const text = byProfile ? `${cellTooltip(skill, tool)} by a profile (see Profiles)` : cellTooltip(skill, tool);
   const glyph = adds ? icon('plus', 16) : replaces ? icon('refresh-cw', 14) : look.glyph ? icon(look.glyph, drawn === 'present' ? 13 : 16, drawn === 'present' ? 'glyph-fill' : '') : null;
   return h('div.ov-cell', { role: 'cell', 'data-tool': tool },
-    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}${disabled ? '.cell-disabled' : ''}${switching ? '.cell-switch-queued' : ''}`, {
+    h(`button.cell-button.${look.tone}${on ? '.cell-on' : ''}${pending ? '.cell-pending-edit' : ''}${oneWay ? '.cell-oneway' : ''}${disabled ? '.cell-disabled' : ''}${byProfile ? '.cell-profile-off' : ''}${switching ? '.cell-switch-queued' : ''}`, {
       type: 'button', id: `cell-${skill.key}-${tool}${inDetails ? '-details' : ''}`, 'data-state': drawn,
       title: action ? `${text}. Click to ${action.charAt(0).toLowerCase()}${action.slice(1)}.${kind === 'skills' && skill.copies[tool] !== undefined && !switching ? ' To disable or remove it here, open the skill.' : ''}` : text, 'aria-label': `${text}${action ? `. ${action}` : ''}`,
       disabled: drawn === 'cannot' || (!!skill.held && !differs),
       onclick: (event: Event) => { event.stopPropagation(); if (differs) { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); } else setTool([skill.key], tool, !on); } },
       glyph,
       oneWay ? h('span.cell-oneway-mark', { 'aria-hidden': 'true' }, icon('arrow-up-right', 9)) : null,
-      disabled ? h('span.cell-disabled-mark', { 'aria-hidden': 'true' }, icon('circle-off', 9)) : null,
+      disabled ? h(`span.cell-disabled-mark${byProfile ? '.cell-disabled-profile' : ''}`, { 'aria-hidden': 'true' }, icon(byProfile ? 'sliders-horizontal' : 'circle-off', 9)) : null,
       on && kind === 'agents' && skill.managed && skill.oneWay?.from === tool ? h('span.cell-source-mark', { 'aria-hidden': 'true' }) : null));
 }
 
@@ -608,6 +613,10 @@ function toolControls(skill: SampleSkill, tool: Tool) {
         toggle({ on: !disabled, label: `${skill.name ?? key} in ${names[tool]}: ${disabled ? 'disabled' : 'enabled'}${pending ? ' on Apply all' : ''}. Click to ${disabled ? 'enable' : 'disable'} it there.`, onchange: on => setDisabledIn(key, tool, !on), id: `enable-${key}-${tool}` })),
     remove);
 }
+
+/** What could not be done, item by item (the first four, then how many more), as a warning band. */
+export const problemsBand = (problems: DestinationResult[]) => h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
+  h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : '')));
 
 /** Names shown as names, so a server called "files" does not read as a word in the sentence. */
 const nameList = (items: string[]) => items.flatMap((item, index) => [index ? (index === items.length - 1 ? ' and ' : ', ') : '', h('strong.item-name', {}, item)]).filter(part => part !== '');
@@ -1062,7 +1071,13 @@ function legend(list: SampleSkill[]) {
   oneWaySwatch.classList.add('cell-oneway');
   oneWaySwatch.append(h('span.cell-oneway-mark', {}, icon('arrow-up-right', 8)));
   const fresh = list.some(skill => toolList().some(tool => cellOf(skill, tool) === 'will-sync' && skill.copies[tool] === undefined));
-  const disabledShown = list.some(skill => toolList().some(tool => shownDisabled(skill, tool) && !switchQueued(skill.key, tool)));
+  const shownOff = (skill: SampleSkill, tool: Tool) => shownDisabled(skill, tool) && !switchQueued(skill.key, tool);
+  const disabledShown = list.some(skill => toolList().some(tool => shownOff(skill, tool) && !turnedOffByProfile(skill.key, tool)));
+  // A switch a profile turned off is marked apart, and keyed apart, so it reads as the profile's doing.
+  const profileShown = list.some(skill => toolList().some(tool => shownOff(skill, tool) && turnedOffByProfile(skill.key, tool)));
+  const profileSwatch = swatch('synced', true);
+  profileSwatch.classList.add('cell-disabled');
+  profileSwatch.append(h('span.cell-disabled-mark.cell-disabled-profile', {}, icon('sliders-horizontal', 8)));
   const disabledSwatch = swatch('synced', true);
   disabledSwatch.classList.add('cell-disabled');
   disabledSwatch.append(h('span.cell-disabled-mark', {}, icon('circle-off', 8)));
@@ -1087,6 +1102,7 @@ function legend(list: SampleSkill[]) {
     // Differing copies chosen to stay separate: each keeps its own copy, drawn dashed until Apply all.
     list.some(skill => view.draft.get(skill.key)?.resolve === 'separate') ? entry('Keeps copies separate on Apply all', pendingOwnCopy()) : null,
     disabledShown ? entry('Disabled (copy kept)', disabledSwatch) : null,
+    profileShown ? entry('Off by a profile (see Profiles)', profileSwatch) : null,
     list.some(skill => skill.removing?.length) ? (() => { const made = entry('Removed on Apply all', removingSwatch); made.title = 'The removed copy is kept in History'; return made; })() : null,
     queuedSwitch(true) ? entry('Disabled on Apply all', queuedSwatch(true)) : null,
     queuedSwitch(false) ? entry('Enabled again on Apply all', queuedSwatch(false)) : null,
@@ -1461,16 +1477,14 @@ function notices() {
   // Skills that cannot go somewhere, or whose copies differ, already show that in their row; the band is for failures.
   const problems = applied ? applied.results.filter(result => result.outcome === 'failed' || (result.outcome === 'held' && !/^Copies differ\./.test(result.message))) : [];
   if (applied?.stopped) bands.push(h('div.band.band-danger', { role: 'status' }, icon('circle-alert', 14), h('span.band-text', {}, applied.stopped)));
-  else if (problems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, problems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (problems.length > 4 ? ` · and ${problems.length - 4} more` : ''))));
+  else if (problems.length) bands.push(problemsBand(problems));
   // What sync did on its own (CON-02): each notice names the item, the winning action and where, says whether the order was proved,
   // and offers its Undo, Restore or Delete everywhere right there.
   const syncNotices = toldNotices().filter(notice => !state.dismissed.has(notice.history || notice.item));
   if (syncNotices.length) bands.push(h('div.band.sync-notices', { role: 'status' }, h('div.sync-notice-lines', {}, syncNotices.slice(0, 6).map(notice => syncNotice(notice)),
     syncNotices.length > 6 ? h('p.sync-notice', {}, `and ${syncNotices.length - 6} more in `, smallAction('History', 'notices-history', () => showPage('history'))) : null), dismissNotices(syncNotices)));
   const caughtProblems = applied ? [] : manage.caughtUp.filter(result => result.outcome !== 'written' && result.outcome !== 'removed');
-  if (caughtProblems.length) bands.push(h('div.band', { role: 'status' }, icon('triangle-alert', 14, 'tone-warning'),
-    h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
+  if (caughtProblems.length) bands.push(problemsBand(caughtProblems));
   // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
   const told = new Set(syncNotices.map(notice => notice.item));
   const caughtNames = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && !told.has(result.item)).map(result => result.item))];
@@ -1657,8 +1671,7 @@ export function designOverview(which: Kind = 'skills') {
   const needle = view.find.trim().toLowerCase();
   const shown = all.filter(skill => (view.filter === 'all' || (view.filter === 'managed' ? committedOf(skill.key).managed : view.filter === 'unmanaged' ? !committedOf(skill.key).managed : syncOf(skill, toolList()) === 'attention'))
     && (!needle || skill.key.includes(needle) || skill.description.toLowerCase().includes(needle)));
-  const find = h('input.find-input', { id: 'find', type: 'text', placeholder: 'Find', 'aria-label': 'Find', value: view.find, spellcheck: 'false',
-    oninput: (event: Event) => { view.find = (event.target as HTMLInputElement).value; rerender(); document.getElementById('find')?.focus(); } });
+  const find = findInput({ id: 'find', label: 'Find', value: view.find, onInput: text => { view.find = text; rerender(); } });
   const open = docked() ? all.find(skill => skill.key === view.comparing) : undefined;
   const table = [
     h('div.toolbar.fit-bar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, changeBar())),
@@ -1776,8 +1789,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   },
     middle(skill.name ?? skill.key, 12, 'list-name'),
     h('span.list-cells', { 'aria-hidden': 'true' }, toolList().map(tool => miniCell(skill, tool))));
-  const find = h('input.find-input', { id: 'skills-find', type: 'text', placeholder: 'Find', 'aria-label': 'Find a skill', value: view.listFind, spellcheck: 'false',
-    oninput: (event: Event) => { view.listFind = (event.target as HTMLInputElement).value; rerender(); document.getElementById('skills-find')?.focus(); } });
+  const find = findInput({ id: 'skills-find', label: 'Find a skill', value: view.listFind, onInput: text => { view.listFind = text; rerender(); } });
   const list = shown.length
     ? h('div', { role: 'group', 'aria-label': 'Skills' }, shown.map(listRow))
     : emptyState('search-x', 'Nothing matches', `“${view.listFind}”`);

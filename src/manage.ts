@@ -45,7 +45,7 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
         const info = await stat(join(skill.directory, 'SKILL.md'));
         const copy: ToolCopy = {
           hash: tree.hash, directory: skill.directory, rootLabel: skill.rootLabel, lines: skill.content.split(/\r?\n/).length, modified: info.mtime.toISOString(),
-          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, writable: await writable(context, snapshot.harness, skill.directory, problems),
+          summary: bodyLine(skill.content).slice(0, 140), folder: skill.folder, name: skill.name, writable: await writable(context, snapshot.harness, skill.directory, problems),
         };
         entry.locations.push({ tool: snapshot.harness, copy });
         if (!entry.facts.copies[snapshot.harness]) entry.facts.copies[snapshot.harness] = copy;
@@ -178,7 +178,8 @@ const ownCopyDir = (context: ShareContext, tool: HarnessId, folder: string) => j
 interface Seen { verifiedAt?: number; changed?: string; firstSeen?: number; missingSince?: number }
 const evidence = new Map<string, Seen>();
 const mark = (directory: string) => { let seen = evidence.get(directory); if (!seen) { seen = {}; evidence.set(directory, seen); } return seen; };
-const clock = (context: ShareContext) => context.now?.() ?? Date.now();
+/** Now, as this home's context tells it (tests set it). */
+export const clock = (context: ShareContext) => context.now?.() ?? Date.now();
 
 /** The fixed tie-break when order is unknown (D-04): each location ranks by its highest-ordered reader in SPEC §5.1, then by path. */
 const surfaceRank: Record<HarnessId, number> = { 'copilot-cli': 0, 'claude-cli': 1, 'codex-cli': 2, 'pi-cli': 3 };

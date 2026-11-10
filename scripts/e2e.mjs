@@ -357,6 +357,31 @@ async function practiceFlow() {
   same('Restore in History puts it back', readFileSync(join(practice, '.codex/skills/notes/SKILL.md'), 'utf8'), readFileSync(join(practice, '.claude/skills/notes/SKILL.md'), 'utf8'));
   await a.click('#nav-skills');
 
+  // Profiles: a profile with only notes in it turns every other skill and MCP server off with each tool's own switch, in one
+  // History step; the copies and MCP entries stay where they are, and Undo puts every switch back.
+  const switchFiles = ['.claude/settings.json', '.copilot/settings.json', '.codex/config.toml'].map(file => join(practice, file));
+  const readSwitches = () => switchFiles.map(file => (existsSync(file) ? readFileSync(file, 'utf8') : ''));
+  const switchesBefore = readSwitches();
+  const claudeJsonBefore = readFileSync(join(practice, '.claude.json'), 'utf8');
+  await a.click('#nav-profiles');
+  await a.click('#profile-new');
+  await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+  await a.settle();
+  await a.click('#pf-skill\\:notes');
+  check('ticking only edits the profile', JSON.stringify(readSwitches()) === JSON.stringify(switchesBefore));
+  await a.click('#profile-switch');
+  const [claudeSwitches, copilotSwitches, codexSwitches] = readSwitches();
+  same('the switch turns the rest off in each tool’s own settings, and leaves notes (ticked) on', [JSON.parse(claudeSwitches).skillOverrides?.notes ?? 'on', (JSON.parse(copilotSwitches).disabledSkills ?? []).includes('notes'), JSON.parse(claudeSwitches).skillOverrides?.standup, JSON.parse(claudeSwitches).deniedMcpServers, JSON.parse(copilotSwitches).disabledMcpServers, codexSwitches.split(/\n(?=\[)/).find(table => table.startsWith('[mcp_servers.files]'))?.includes('\nenabled = false\n')],
+    ['on', false, 'off', [{ serverName: 'docs' }], ['files'], true]);
+  same('nothing is moved: copies and MCP entries stay', [existsSync(join(practice, '.claude/skills/standup/SKILL.md')), readFileSync(join(practice, '.claude.json'), 'utf8') === claudeJsonBefore], [true, true]);
+  same('the status bar names the profile in use', (await a.text('#status-profile'))?.trim(), 'Incident');
+  await a.click('#outcome-undo');
+  // settings.json files the switch made hold only emptied switch lists afterwards; Codex's config.toml is byte for byte as it was.
+  const settled = (text, index) => (index === 2 ? text : JSON.stringify(Object.fromEntries(Object.entries(text.trim() ? JSON.parse(text) : {}).filter(([, value]) => !(value && typeof value === 'object' && !Object.keys(value).length)))));
+  same('Undo switch puts every switch back', readSwitches().map(settled), switchesBefore.map(settled));
+  same('…and No profile is in use again', (await a.text('#status-profile'))?.trim(), 'No profile');
+  await a.click('#nav-skills');
+
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
   const standupBefore = readFileSync(standupPath('claude'), 'utf8');
@@ -1169,7 +1194,7 @@ async function practiceFlow() {
     const listedMeanwhile = await a.text('#history-scroll') ?? '';
     same('while main is busy the row says it is updating and takes no other change; the newest request wins, the overtaken shorter ones remove nothing, and History opened meanwhile agrees with the window that won',
       [during, savedSettings().historyDays, agedOnFile(), [overtaken.pruned ?? 'none', newest.pruned], listedMeanwhile.includes('aged-20-days'), listedMeanwhile.includes('aged-60-days'), await a.text('.history-intro')],
-      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 30 days. Change in Settings.']);
+      [[true, 'Updating History…', false, false, 90, true], 30, ['aged-20', 'aged-5'], ['none', 'done'], true, false, 'What sync, Apply all and profile switches changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 30 days. Change in Settings.']);
     await a.click('#nav-settings');
     same('the row then shows the window that won and takes changes again', [await a.run(`document.querySelector('#history-days').value`), await a.run(`document.querySelector('#history-days').disabled`)], ['30', false]);
     await a.click('#appearance-system');
@@ -1202,7 +1227,7 @@ async function practiceFlow() {
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
     [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
-    [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 7 days. Change in Settings.', true]);
+    [7, ['aged-5'], true, false, true, false, 'What sync, Apply all and profile switches changed in your tools, newest first. Undo puts the earlier version back; Restore puts a removed copy back. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
   const signInReason = flag('--electron') ? 'Only the installed app can start at sign-in.' : 'Move Central Knot to the Applications folder first.';
@@ -1332,16 +1357,16 @@ async function fewToolsFlow() {
   mkdirSync(join(home, '.pi/agent/skills/notes'), { recursive: true });
   writeFileSync(join(home, '.pi/agent/skills/notes/SKILL.md'), text('notes'));
   await a.click('#header-refresh');
-  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']);
+  same('with Pi alone, Agents and Plugins are left out', await pages(), ['overview', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'tools', 'settings']);
   check('and the Overview names them once', (await a.text('#overview-absent') ?? '').includes('No tool here holds agents or plugins') && !(await a.exists('#overview-agents')), await a.text('#overview-absent'));
   mkdirSync(join(home, '.claude'), { recursive: true });
   await a.click('#header-refresh');
-  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'tools', 'settings']);
+  same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'tools', 'settings']);
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
   await a.click('#nav-agents');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
   await a.click('#header-refresh');
-  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'history', 'tools', 'settings']]);
+  same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'tools', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
   same('no page errors, few tools', a.pageErrors, []);

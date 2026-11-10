@@ -11,6 +11,7 @@ import { configRoot, harnessIds, harnesses } from './harnesses.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import { mcpSwitchFacts, readMcpSwitches } from './mcpswitch.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
@@ -301,6 +302,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
   if (problem) problems.unshift(problem);
   const servers: SkillFacts[] = [];
   const claudePending: string[] = [];
+  // Each tool's own switch (profiles turn servers off with it): read once, then asked about every server there.
+  const switches = await readMcpSwitches(context, present);
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[name];
     const entries = Object.values(slot) as McpEntry[];
@@ -312,7 +315,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {} });
+    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
+      ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }

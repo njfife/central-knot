@@ -79,6 +79,14 @@ export async function setDisabled(context: ShareContext, tool: HarnessId, target
   return { changed: true, previous: now.previous };
 }
 
+/**
+ * For a caller that edits several switches in one file with one checked write (profiles.ts): whether `text` turns this copy off,
+ * and `text` with it turned off or on. Both throw when the text isn't the tool's format.
+ */
+export const switchState = (context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget) => stateIn(context, tool, parse(tool, text), target).disabled;
+export const switchedText = (context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean) =>
+  withSwitch(context, { tool, path: '', text, exists: true, parsed: parse(tool, text) }, target, disabled);
+
 /** A switch change's failure in words: its own reason, or the plain one for a file system error. */
 export const switchFailure = (error: unknown) => (['CK_SWITCH', 'CK_CHANGED'].includes(errorCode(error)) && error instanceof Error ? error.message : plainError(error));
 const failure = (message: string) => Object.assign(new Error(message), { code: 'CK_SWITCH' });

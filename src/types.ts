@@ -58,7 +58,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -125,6 +125,13 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
+  saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
+  deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
+  /** Switches to a profile (null: No profile) with each tool's own switches. One History entry, with Undo. */
+  switchProfile(id: string | null, home: string): Promise<ProfileSwitchResult>;
+  /** A switch made from the menu bar: what it did, so the page can show it with Undo. */
+  onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
   /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
   setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
   /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
@@ -149,6 +156,8 @@ export interface ToolCopy {
   writable: boolean;
   /** Folder name as found, with its case. */
   folder: string;
+  /** Skills: the name this tool reads for this copy (its frontmatter name), which Copilot's switch goes by. */
+  name?: string;
 }
 
 /** What is true now for one skill, across every tool. The page derives its marks from this. */
@@ -183,9 +192,9 @@ export interface SkillFacts {
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, which Central Knot stopped updating (D-26). */
   stopped?: HarnessId[];
-  /** Skills: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
+  /** Skills and MCP servers: tools whose copy is turned off with the tool's own switch. The copy stays there and keeps syncing; the tool doesn't load it. */
   disabled?: HarnessId[];
-  /** Skills: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
+  /** Skills and MCP servers: why a tool's switch can't be used at all: its settings file can't be read or is in a form Central Knot doesn't edit. */
   switchProblem?: Partial<Record<HarnessId, SwitchProblem>>;
   /** Skills: why a new Disable isn't offered in a tool (a build older than the one verified). Enable stays available. */
   disableUnverified?: Partial<Record<HarnessId, string>>;
@@ -235,7 +244,7 @@ export interface Change {
   remove?: HarnessId[];
 }
 
-export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /** What sync did on its own: an edit spread, competing edits resolved, or a deletion spread or overruled. */
 export interface SyncNotice {
@@ -260,8 +269,11 @@ export interface HistoryEvent {
   item: string;
   /** 'added': Apply all wrote new copies of a skill that was not managed before; Undo removes them, if unchanged, and unmanages it.
    * 'switched': Apply all disabled or enabled it in some tools (`switched`); Undo flips them back.
-   * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there. */
-  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed';
+   * 'removed': Apply all removed it from the tools in `losers`, keeping each copy; Restore puts them back there.
+   * 'profile': a profile switch (key 'profiles:switch', item the profile's name); Undo switches back. */
+  kind: 'edit' | 'conflict' | 'deleted' | 'kept-edit' | 'restored' | 'chosen' | 'added' | 'switched' | 'removed' | 'profile';
+  /** 'profile': which profile was in use before and after, and every switch it flipped. */
+  profile?: { from?: string; fromName?: string; to?: string; toName?: string; flips: ProfileFlip[] };
   /** 'switched': each tool and whether it was disabled there (true) or enabled (false); `before`, a Claude Code override it replaced ("name-only"), for Undo. */
   switched?: SwitchRecord[];
   /** 'removed': tools whose copy Restore has put back so far; the event is done when all are. */
@@ -559,6 +571,35 @@ export interface HistoryWindowSaved { settings: AppPreferences; pruned?: History
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
 export interface ShownLog { selected: boolean; logged: boolean }
 
+// ---------- Profiles ----------
+
+/**
+ * A named set of skills and MCP servers to have on, chosen from what the home has. Switching to it turns everything else off with
+ * each tool's own switch (nothing is moved or deleted) and turns back on what an earlier switch turned off. Items are named by
+ * kind and key: `skill:<key>` and `mcp:<name>`.
+ */
+export interface Profile { id: string; name: string; items: string[] }
+
+export interface ProfilesView {
+  profiles: Profile[];
+  /** The profile last switched to; none means No profile. */
+  active?: string;
+  /** What profile switches turned off and have not turned back on, per item and tool. Switches turned off by hand are never here. */
+  offByProfile: Record<string, HarnessId[]>;
+  /** Why profiles can't be read or saved here, if they can't. */
+  problem?: string;
+}
+
+/**
+ * A profile to add (no `id`) or change: only the fields given change, so a rename and a tick never undo each other. `restore` makes
+ * a deleted profile again with its own `id` (Undo of Delete).
+ */
+export interface ProfileEdit { id?: string; name?: string; items?: string[]; restore?: boolean }
+
+/** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
+export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
+
+export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; /** It was already in use: its switches were applied again. */ again?: boolean; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }
 
 /** HistoryEvent.undoneBy for an Undo or Restore that found everything already as it was, so it wrote nothing and made no event. */
 export const ALREADY_AS_IT_WAS = 'already-as-it-was';

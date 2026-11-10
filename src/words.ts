@@ -21,6 +21,9 @@ export const lineCount = (text: string) => (text ? linesOf(text).length : 0);
 /** Joins items as a sentence does, with `word` before the last: "a", "a and b", "a, b and c". */
 const joined = (items: string[], word: 'and' | 'or') => (items.length > 2 ? `${items.slice(0, -1).join(', ')} ${word} ${items.at(-1)}` : items.join(` ${word} `));
 
+/** The text with its first letter capitalised, to start a sentence. */
+export const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+
 /** "a", "a and b", "a, b and c". */
 export const andList = (items: string[]) => joined(items, 'and');
 /** Tools by name, as an and-list: "Claude Code, Copilot CLI and Codex". */

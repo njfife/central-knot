@@ -25,6 +25,11 @@ export function icon(name: IconName, size = 16, extraClass = ''): SVGElement {
   return holder.content.firstElementChild as SVGElement;
 }
 
+/** A Find field: each keystroke hands the text to `onInput` (which redraws), and the redrawn field keeps the focus. */
+export const findInput = (field: { id: string; label: string; value: string; onInput: (text: string) => void; onKeydown?: (event: KeyboardEvent) => void }) =>
+  h('input.find-input', { id: field.id, type: 'text', placeholder: 'Find', 'aria-label': field.label, value: field.value, spellcheck: 'false', onkeydown: field.onKeydown,
+    oninput: (event: Event) => { field.onInput((event.target as HTMLInputElement).value); document.getElementById(field.id)?.focus(); } });
+
 export const hiddenText = (text: string) => h('span.hidden-text', {}, text);
 
 interface ButtonOptions {
@@ -85,14 +90,18 @@ export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }
     h('span.switch-knob'));
 }
 
-export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
-  return h('label.tick', {},
+/**
+ * A tick box drawn with the app's icons over a hidden native checkbox. `mixed` draws a box for a group with only some ticked;
+ * `name` and `help` are read with it (`help` also shows on hover) when it has no visible `label`; `look` is the label's class.
+ */
+export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void; mixed?: boolean; name?: string; help?: string; look?: string }, ...label: Child[]): HTMLElement {
+  return h(`label.${options.look ?? 'tick'}`, { title: options.help },
     h('input.hidden-input', {
-      type: 'checkbox', id: options.id, checked: options.checked, disabled: options.disabled,
+      type: 'checkbox', id: options.id, checked: options.checked, disabled: options.disabled, 'aria-label': options.name, 'aria-description': options.help,
       onchange: (event: Event) => options.onchange((event.target as HTMLInputElement).checked),
     }),
-    icon(options.checked ? 'square-check' : 'square', 14, 'tick-box'),
-    h('span.tick-label', {}, ...label));
+    icon(options.checked ? 'square-check' : options.mixed ? 'square-minus' : 'square', 14, 'tick-box'),
+    label.length ? h('span.tick-label', {}, ...label) : null);
 }
 
 export function emptyState(glyph: IconName, title: string, body: string | undefined, action?: Node): HTMLElement {
