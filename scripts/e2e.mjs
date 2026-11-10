@@ -470,9 +470,9 @@ async function practiceFlow() {
   // stays; and the switch's result shows over the pending changes, with its Undo.
   const switchFromBar = async name => { await a.click('#status-profile'); await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
   const statusShown = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
-  if (!(await a.run(`!!document.querySelector('#enable-notes-claude-cli')`))) await a.click('#open-notes');
-  await a.click('#enable-notes-claude-cli');
-  await a.click('#open-standup'); await a.click('#enable-standup-claude-cli');
+  const openRow = async (key, probe) => { if (!(await a.exists(probe))) await a.click(`#open-${key}`); };
+  await openRow('notes', '#enable-notes-claude-cli'); await a.click('#enable-notes-claude-cli');
+  await openRow('standup', '#enable-standup-claude-cli'); await a.click('#enable-standup-claude-cli');
   await switchFromBar('Incident');
   check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));
   check('the switch’s result shows over pending changes, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
@@ -484,11 +484,15 @@ async function practiceFlow() {
   const rowsBeforeSwitch = await profileRows();
   await switchFromBar('Incident');
   check('a switch from the status bar on History is listed at once and said', (await profileRows()) === rowsBeforeSwitch + 1 && /^Incident is the profile now/.test(await statusShown() ?? ''), [rowsBeforeSwitch, await profileRows(), await statusShown()]);
+  // Claude Code's switch for standup is turned back on by hand: the Undo leaves it, and says so where it can be seen.
+  const claudeSettings = JSON.parse(readFileSync(switchFiles[0], 'utf8'));
+  delete claudeSettings.skillOverrides.standup;
+  writeFileSync(switchFiles[0], JSON.stringify(claudeSettings, null, 2));
   await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
-  check('its Undo from History says what it did in the status bar', /^Undone:/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
+  check('its Undo from History says what it did, and what it left, in the status bar', /^Undone:/.test(await statusShown() ?? '') && /changed since, so it was left as it is/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
   await a.click('#nav-skills');
   // An armed Delete everywhere stays on the visit it was clicked on.
-  const standupOpen = async () => { if (!(await a.exists('#delete-standup, #delete-confirm-standup'))) await a.click('#open-standup'); };
+  const standupOpen = () => openRow('standup', '#delete-standup, #delete-confirm-standup');
   await standupOpen(); await a.click('#delete-standup');
   await a.click('#nav-overview'); await a.click('#nav-skills'); await standupOpen();
   check('an armed Delete everywhere is disarmed by leaving the page', await a.exists('#delete-standup') && !(await a.exists('#delete-confirm-standup')), await a.all('.delete-armed button'));
