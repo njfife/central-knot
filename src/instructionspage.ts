@@ -115,7 +115,7 @@ function card(file: InstructionFile) {
       editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === own }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
-    editing ? [editor(file), baseStrip(file, lockedWhy)]
+    editing ? [editor(file), baseStrip(file, 'Finish or cancel this edit first.')]
       : h('div.ins-body', {},
         file.exists && own.trim() ? previewBlock(own, file.tool, `${fileName(file.path)} contents`, `ins-more-${file.tool}`)
           : file.base?.copy !== undefined ? h('p.base-explain', {}, `No instructions of its own: ${toolNames[file.tool]} reads only the base instructions below.`)

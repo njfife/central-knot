@@ -226,6 +226,20 @@ if (wanted('base')) {
   await a.click('#base-edit'); await a.click('#base-tool-copilot-cli'); await a.click('#base-review');
   await shot(a, 'base-untick-review', 'Clicked "Edit text or tools", unticked Copilot CLI, and clicked "Review changes".');
   await a.click('#base-back'); await a.click('#base-cancel'); if (await a.has('#base-discard')) await a.click('#base-discard');
+  // Stop sharing with every tool: Codex's hand-edited copy stays, and its card offers taking the block out.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-stop');
+  await shot(a, 'base-stop-review', 'Clicked "Edit text or tools", then "Stop sharing with every tool…".');
+  await a.click('#base-save'); await shot(a, 'base-stopped', 'Clicked the save button.');
+  await a.run(`document.querySelector('#ins-base-out-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-stray-block', 'Scrolled to Codex: its edited block stays, with "Take the block out…".');
+  await a.click('#ins-base-out-codex-cli'); await shot(a, 'base-take-out-review', 'Clicked "Take the block out…".');
+  await a.click('#ins-back-codex-cli');
+  // Share it with every tool again for the steps below.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#base-tool-${tool}`);
+  await a.click('#base-review'); await a.click('#base-save');
   await a.click('#ins-edit-claude-cli'); await shot(a, 'base-own-edit', 'Clicked "Edit" on Claude Code’s card: the editor holds only Claude Code’s own instructions.');
   await a.click('#ins-cancel-claude-cli');
   await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`); await shot(a, 'base-light', 'The same page in the light appearance.'); await a.theme('dark');

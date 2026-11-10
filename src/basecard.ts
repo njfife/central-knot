@@ -59,18 +59,18 @@ function planFor(file: InstructionFile, edit: BaseEdit): { next: string; says: s
   const { next } = planned;
   const says = (text: string) => ({ next, says: text });
   if (next === file.text) return says(chosen ? 'No change: it already has these base instructions.' : 'No change: the base isn’t in this file.');
-  if (!chosen) return says(own.trim() ? 'The base instructions come out. Its own instructions stay.'
-    : `${readerNames(file)} keeps this text as its own instructions, since ${name} would otherwise be empty. Delete it on its card if you don’t want it.`);
+  if (!chosen) return says(own.trim() ? 'Stops getting base updates: the base instructions come out, and its own instructions stay.'
+    : `Stops getting base updates. The text stays in ${name} as ${readerNames(file)}’s own instructions, since the file would otherwise be empty; delete it on its card if you don’t want it.`);
   if (action === 'putBack') return says(`Its edited copy of the base is replaced by the base. The edited text is kept under ${toolNames[file.tool]}’s Earlier versions.`);
   if (!file.exists) return says(`${name} is created, holding only the base instructions.`);
   if (copy === undefined && file.base?.leftPlain) return says('Its plain copy of the base goes back into the base block, so it isn’t there twice.');
   if (action === 'adopt') return says(sameBase(own, edit.text) ? `Its ${plural(lineCount(own), 'line')} move into the base block, so ${toolNames[file.tool]} reads the same as now. The file as it was stays under Earlier versions.`
-    : `Its own text is replaced by the base as edited here, inside the block: lines you took out of the draft leave ${name}. The file as it was stays under Earlier versions.`);
+    : `${name} will hold only the base: its ${plural(lineCount(own), 'line')} move into it, with your edits. The file as it was stays under Earlier versions.`);
   // Its own text already says what the base says (as when the base started from another tool with the same file): it stays, so
   // the tool reads it twice until that own text is removed on its card.
   if (copy === undefined && own.trim() && sameBase(own, edit.text)) return says(`Added after its own ${plural(lineCount(own), 'line')}, which already say the same, so ${toolNames[file.tool]} reads them twice. Remove its own copy on its card after saving if you don’t want that.`);
   if (copy === undefined) return says(own.trim() ? `Added after its own ${plural(lineCount(own), 'line')}.` : 'The base instructions are added.');
-  return says('Its copy of the base is updated. Its own instructions stay.');
+  return says(own.trim() ? 'Its copy of the base is updated. Its own instructions stay.' : 'Its copy of the base is updated.');
 }
 
 /** The base editor: its text, the tools that get it, and Review / Cancel (with a discard question for a typed draft). */
@@ -139,8 +139,9 @@ function reviewWords(edit: BaseEdit, writes: InstructionFile[], putBackFile: str
   const save = writes.length ? `Save and update ${writesText}` : 'Save';
   if (kind === 'version') return { title: `Going back to earlier base instructions: ${counts || 'the same text'}.`, save, done: saved('The earlier base instructions are back') };
   if (kind === 'copy') return { title: `Using ${from}’s edited copy as the base instructions: ${counts}.`, save, done: saved('Base instructions saved') };
+  if (!edit.tools.length && state.base?.tools.length) return { title: 'Stop sharing the base with every tool. Each file below says what stays in it; the base is kept here for later.',
+    save, done: (written: string) => `Stopped sharing the base instructions${written ? `; ${written} no longer ${written.includes(' and ') ? 'get' : 'gets'} them` : ''}. The base is kept here for later.` };
   const title = !before.trim() ? `Review the base instructions: ${plural(lineCount(edit.text), 'line')}.`
-    : !edit.tools.length && state.base?.tools.length ? 'Stop sharing the base with every tool. Each file below says what stays in it; the base is kept here for later.'
     : edit.text === before ? 'Review: the base instructions stay the same; the tools that get them change.'
     : `Review the base instructions: ${counts}.`;
   return { title, save, done: saved('Base instructions saved') };
@@ -273,7 +274,7 @@ export function baseStrip(file: InstructionFile, lockedWhy?: string) {
   if (!base || base.copy === undefined) return null;
   const key = `strip-${file.tool}`;
   const lines = lineCount(base.copy);
-  const said = !base.chosen ? 'not on the base list, so Central Knot leaves this block as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file' : 'an older version';
+  const said = !base.chosen ? 'not on the base list; left as it is' : base.state === 'same' ? 'matches the base' : base.state === 'edited' ? 'edited in this file' : 'an older version';
   // Edited or behind: the choice is on the Base instructions card, on the row of the first tool reading this file; this goes there.
   const row = (state.instructions ?? []).find(entry => entry.tool === file.tool || file.sameFile.includes(entry.tool))?.tool ?? file.tool;
   const goTo = base.chosen && base.state !== 'same' ? (base.state === 'edited' ? `base-restore-${row}` : 'base-update') : undefined;
