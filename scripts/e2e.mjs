@@ -1636,7 +1636,8 @@ async function updateFlow() {
     same('no page errors while updating', a.pageErrors, []);
     // Clicking it is the person's choice: the app restarts (here: quits, the stub's install).
     const exited = new Promise(done => a.child.once('exit', done));
-    await a.run(`document.querySelector('#update-button').click()`);
+    // Clicked a moment later, from the page: the app quits at once, so a reply to the click itself might never come.
+    await a.run(`(setTimeout(() => document.querySelector('#update-button').click(), 100), true)`);
     check('Restart to update quits for the update', await Promise.race([exited.then(() => true), wait(15000).then(() => false)]));
     const pending = JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update;
     same('the update is recorded for the next launch', pending && [pending.tag, pending.from], ['v0.5.0-preview.5', 'v0.5.0-preview.4']);
