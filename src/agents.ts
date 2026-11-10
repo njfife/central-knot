@@ -270,7 +270,8 @@ const missingSince = new Map<string, number>();
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
  */
-export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
+/** `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), the rest keeping the settle window. */
+export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -356,7 +357,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
     if (options.only && !chosenNow.has(key) && (changed.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); continue; }
     for (const copy of recorded.values()) if (slot[copy.tool] || away(copy.tool)) missingSince.delete(copy.file);
     let waiting = false;
-    for (const copy of missing) { if (!missingSince.has(copy.file)) missingSince.set(copy.file, now); if (now - missingSince.get(copy.file)! < settle) waiting = true; }
+    for (const copy of missing) { if (!missingSince.has(copy.file)) missingSince.set(copy.file, now); if (now - missingSince.get(copy.file)! < (options.decideNow?.has(key) ? 0 : settle)) waiting = true; }
     if (waiting) { settling = true; continue; }
     let raced: { deleted: HarnessId[] } | undefined;
     if (missing.length) {

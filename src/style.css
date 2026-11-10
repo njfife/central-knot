@@ -1398,7 +1398,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
 .repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
-.repo-side-note { display: flex; align-items: baseline; gap: 6px; margin: 0; padding: 8px 0 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-side-note { display: flex; align-items: baseline; gap: 6px; max-width: 76ch; margin: 0; padding: 8px 0 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
 .repo-side-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
 .repo-activity { color: var(--ink); }
 .repo-activity-part { white-space: nowrap; }

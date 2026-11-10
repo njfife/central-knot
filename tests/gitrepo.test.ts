@@ -444,7 +444,7 @@ test('A protected branch is said as refused, not as a repo that moved on', () =>
   assert.match(whyPushFailed(1, '! [rejected] main -> main (fetch first)'), /changed just now/);
 });
 
-test('Removed here but edited in the repo: the edit comes back on Pull', () => {
+test('classify: an edit in the repo brings back an item removed here; an edit here still beats a deletion after an unfinished Pull; a deletion waits while Automatic sync is off', () => {
   const item = (id: string): SideItem => ({ key: 'skill:review', kind: 'skill', name: 'review', id, paths: [] });
   const sides = { base: new Map([['skill:review', item('old')]]), latest: new Map([['skill:review', item('new')]]), here: new Map(), unsent: new Map() };
   assert.deepEqual(classify(sides).incoming.map(row => [row.change, row.alsoHere]), [['changed', 'removed']]);

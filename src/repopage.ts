@@ -1,7 +1,7 @@
 // Git repo: the Managed set kept in a git repo (GitHub, GitLab or any git server), with Pull to bring the repo's changes into the
 // tools and Push to send this computer's. The page says which repo and commit are in use, when it last pulled and pushed, and
 // what differs each way; nothing moves until Pull or Push is clicked.
-import { announce, busy, rerender, showPage, state } from './app.ts';
+import { announce, busy, rerender, setSync, showPage, state } from './app.ts';
 import { button, closeButton, emptyState, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
@@ -95,34 +95,47 @@ const connect = () => busy('Connecting to the repo…', async () => {
 });
 
 const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard) keepFocus('repo-pull'); });
-const pullNow = () => busy('Pulling from the repo…', async () => {
-  const result = await api().pullRepo(state.home!.home);
+/**
+ * What a Pull did, for its band: what came in, what it left (one left is named; ones waiting for Automatic sync were foreseen by
+ * their rows, any other is a surprise and warns), what a tool didn't take, and Claude Code's own step. `names` are the items named.
+ */
+export function pullSummary(result: RepoResult): { text: string; note?: string; warn: boolean; names: string[]; claudeWaits: string[] } {
   const count = result.pulled ?? 0;
+  const claudeWaits = result.waitsForClaude ?? [];
+  const leftRows = result.view.connected ? result.view.incoming.filter(change => change.retry) : [];
+  const surprise = leftRows.some(change => change.sync !== 'waits');
+  const lone = leftRows.length === 1 ? leftRows[0] : undefined;
+  const base = result.view.connected ? result.view.base : undefined;
+  // A Pull that moved no item still moved this computer to the repo's commit: named as Push names its commit.
+  const moved = base ? `Moved to ${base.id.slice(0, 7)} “${base.subject}”` : 'Pulled';
+  const opening = count ? `Pulled ${plural(count, 'change')} into your tools.`
+    : !leftRows.length ? `${moved}. Nothing in your tools needed to change.`
+    : surprise ? '' : `${moved};`;
+  const leftText = !leftRows.length ? ''
+    : !surprise ? (lone ? `${lone.name} still waits for Automatic sync.` : `${leftRows.length} items still wait for Automatic sync.`)
+    : lone ? `${lone.name} ${lone.change === 'removed' ? 'wasn’t deleted here yet' : 'didn’t come in yet'}; its row says why.`
+    : `${leftRows.length} items didn’t come in yet; their rows say why.`;
   // Claude Code's MCP settings wait for Write to Claude Code on purpose (the MCP servers page offers it); anything else a tool
-  // didn't take is said in the result, by tool.
+  // didn't take is said, by tool.
   const missed = result.results.filter(entry => entry.harness && (entry.outcome === 'failed' || entry.outcome === 'held'))
     .map(entry => `${entry.item} didn’t reach ${toolName(entry.harness!)} (${entry.message.replace(/\.$/, '')})`);
-  const claudeWaits = result.waitsForClaude ?? [];
-  // Items Pull left are listed below with why. Ones waiting for Automatic sync were foreseen (their rows said so); any other is a
-  // surprise, said with a warning rather than a tick.
-  const leftRows = result.view.connected ? result.view.incoming.filter(change => change.retry) : [];
-  const left = leftRows.length;
-  const surprise = leftRows.some(change => change.sync !== 'waits');
-  // A Pull that moved no item still moved this computer to the repo's commit: named as Push names its commit.
-  const base = result.view.connected ? result.view.base : undefined;
-  const moved = base ? `Moved to ${base.id.slice(0, 7)} “${base.subject}”` : 'Pulled';
-  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : left && surprise ? '' : !left ? `${moved}.` : `${moved};`;
-  // One left is named, in its row's words; more are counted.
-  const leftText = !left ? (count ? '' : 'Nothing in your tools needed to change.')
-    : !surprise ? (left === 1 ? `${leftRows[0].name} still waits for Automatic sync.` : `${left} items still wait for Automatic sync.`)
-    : left === 1 ? `${leftRows[0].name} ${leftRows[0].change === 'removed' ? 'wasn’t deleted here yet' : 'didn’t come in yet'}; its row says why.`
-    : `${left} items didn’t come in yet; their rows say why.`;
-  const rest = [leftText, missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '',
-    claudeWaits.length ? `${andList(claudeWaits)} ${claudeWaits.length === 1 ? 'waits' : 'wait'} for Claude Code: close it, then click Write to Claude Code on MCP servers.` : ''].filter(Boolean);
-  // One wording for the promise, always with History one click away.
-  await settle(result, [text, ...rest].filter(Boolean).join(' '), count ? `Undo ${count === 1 ? 'it' : `any of the ${count}`} in History.` : undefined, surprise);
-  if (state.outcome && left === 1) state.outcome.item = leftRows[0].name;
-  if (claudeWaits.length && state.outcome) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
+  const missedText = missed.length ? `${missed.slice(0, 3).join('; ')}${missed.length > 3 ? `; and ${missed.length - 3} more` : ''}.` : '';
+  const claudeText = claudeWaits.length ? `${andList(claudeWaits)} ${claudeWaits.length === 1 ? 'waits' : 'wait'} for Claude Code: close it, then click Write to Claude Code on MCP servers.` : '';
+  return {
+    text: [opening, leftText, missedText, claudeText].filter(Boolean).join(' '),
+    // One wording for the promise, always with History one click away.
+    note: count ? `Undo ${count === 1 ? 'it' : `any of the ${count}`} in History.` : undefined,
+    warn: surprise, names: [...(lone ? [lone.name] : []), ...claudeWaits], claudeWaits,
+  };
+}
+
+const pullNow = () => busy('Pulling from the repo…', async () => {
+  const result = await api().pullRepo(state.home!.home);
+  const summary = pullSummary(result);
+  await settle(result, summary.text, summary.note, summary.warn);
+  if (!state.outcome) return;
+  state.outcome.items = summary.names;
+  if (summary.claudeWaits.length) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
 const push = (byKeyboard: boolean) => void pushNow().then(() => { if (byKeyboard) keepFocus('repo-push'); });
@@ -188,7 +201,7 @@ function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLE
   // Left by the last Pull: a deletion isn't "coming in", so it says what didn't happen.
   const notYet = change.change === 'removed' ? 'Not deleted here yet.' : 'Didn’t come in yet.';
   if (state === 'waits') return change.retry ? lead(notYet, 'It waits for Automatic sync: turn it on (at the bottom), then Pull again.')
-    : lead('Waits for Automatic sync.', 'Turn it on (at the bottom); Pull then deletes it from your tools. History can restore it.');
+    : lead('Waits for Automatic sync.', 'Pull deletes it once sync is on; History can restore it.');
   // Waited for sync at the last Pull, and sync is on now: only the click is left.
   if (change.sync === 'ready') return plain('Automatic sync is on now: Pull again deletes it from your tools. History can restore it.');
   if (state === 'again') return lead(notYet, change.held!);
@@ -224,11 +237,11 @@ const stuckRow = (change: RepoChange, side: 'in' | 'out') => (side === 'in' ? ['
  * One direction: its items, the button that moves them, what of them the button won't move (beside it, in the state line's words),
  * and a note under it (why the button can't run, or what it does when it moves none of the rows).
  */
-function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, stuck: string, note?: { id?: string; text: string; warns: boolean }) {
+function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, stuck: string, note?: { id?: string; text: string; warns: boolean; act?: HTMLElement }) {
   return h('section.repo-side', { 'aria-labelledby': id },
     // Title, its button, then what it won't move: the button stays put whatever is held. With no button there, the rows just below say it.
     h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck && action ? h('span.repo-stuck-count', {}, stuck) : null),
-    note ? h('p.repo-side-note', { id: note.id }, icon(note.warns ? 'triangle-alert' : 'info', 12, note.warns ? 'tone-warning' : ''), note.text) : null,
+    note ? h('p.repo-side-note', { id: note.id }, icon(note.warns ? 'triangle-alert' : 'info', 12, note.warns ? 'tone-warning' : ''), h('span', {}, note.text, note.act ? [' ', note.act] : null)) : null,
     // What can't move comes last, so the list reads top-down as what the button does, then what stays.
     changes.length ? h('ul.repo-list', {}, [...changes].sort((first, second) => Number(stuckRow(first, side)) - Number(stuckRow(second, side))).map(change => changeRow(change, side)))
       : h('p.repo-empty-side', {}, empty));
@@ -304,6 +317,8 @@ function checkedText(view: ConnectedRepoView): string {
   return `Checked the repo: ${[stuck, rest].filter(Boolean).join('; ')}.`;
 }
 
+/** The note under "From the repo" when Pull moves none of its rows. */
+const PULL_NOTE_ID = 'repo-incoming-note';
 /** Said of a Pull that moves no row: it only brings this computer to the repo's newer commit. */
 const PULL_MOVES_NONE = 'Pull only moves this computer to the repo’s latest commit; the items listed stay as they are.';
 
@@ -322,7 +337,8 @@ function pullButton(view: ConnectedRepoView, { pull: pullable, retry: retryable 
     variant: !view.problem && (movesRows || !view.incoming.length) ? 'primary' : 'outline', size: 'small', icon: 'arrow-down-to-line', id: 'repo-pull', disabled: moving || !view.latest,
     // Pull also tries again what the last one couldn't finish, so those count too.
     label: pullable ? `Pull ${pullable + retryable}` : retryable ? 'Pull again' : 'Pull',
-    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : { title: movesRows ? 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' : PULL_MOVES_NONE },
+    // When it moves no row, the note under the list says what it does: the button is described by it.
+    attrs: view.problem ? { 'aria-describedby': WAITING_ID } : movesRows ? { title: 'Bring the repo’s changes into your tools. Each one goes into History, with Undo.' } : { title: PULL_MOVES_NONE, 'aria-describedby': PULL_NOTE_ID },
     // A keyboard press (no pointer: detail 0) keeps its place on the page when the button goes away.
     onclick: (event: MouseEvent) => pull(event.detail === 0),
   });
@@ -353,7 +369,10 @@ function connectedPage(view: ConnectedRepoView) {
   const pullMovesNone = !!pullControl && !counts.pull && !counts.retry && view.incoming.length > 0;
   // With sync on first, one Pull would also make the deletions waiting for it: said, to save the second Pull.
   const waitingNames = view.incoming.filter(change => pullState(change) === 'waits').map(change => change.name);
-  const movesNoneText = waitingNames.length ? `${PULL_MOVES_NONE} Turn on Automatic sync first, and Pull deletes ${andList(waitingNames)} too.` : PULL_MOVES_NONE;
+  const movesNoneText = waitingNames.length ? `${PULL_MOVES_NONE} With Automatic sync on first, Pull deletes ${andList(waitingNames)} too.` : PULL_MOVES_NONE;
+  // The step it names, where the eye already is.
+  const turnSyncOn = waitingNames.length && state.home && !state.home.syncOn
+    ? button({ variant: 'link', size: 'micro', label: 'Turn sync on', id: 'repo-sync-on', disabled: locked, onclick: () => void setSync(true) }) : undefined;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
@@ -389,7 +408,7 @@ function connectedPage(view: ConnectedRepoView) {
         : h('div.repo-sides', {},
           // When Pull moves none of the rows, the note under it explains the list, so no count beside it.
           changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullMovesNone ? '' : words.stuckIn,
-            pullMovesNone && !view.problem ? { text: movesNoneText, warns: false } : undefined),
+            pullMovesNone && !view.problem ? { id: PULL_NOTE_ID, text: movesNoneText, warns: false, act: turnSyncOn } : undefined),
           changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushControl, 'Nothing here that the repo doesn’t have.', words.stuckOut,
             counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined)),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));

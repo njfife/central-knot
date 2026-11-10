@@ -325,6 +325,11 @@ if (wanted('repo')) {
   await a.click('#sync-switch'); await a.settle();
   await a.click('#header-refresh'); await waitFor(a, idle, 30000); await a.settle();
   await shot(a, 'repo-sync-off-removal', 'Turned Automatic sync off; the repo deleted the reviewer agent, then "Refresh": the deletion waits for Automatic sync, so nothing is offered to pull but the newer commit.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await shot(a, 'repo-sync-off-removal-860', 'The same at 860×560.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 2560, height: 1440, deviceScaleFactor: 1, mobile: false }); await a.settle();
+  await shot(a, 'repo-sync-off-removal-2560', 'The same at 2560×1440: the note keeps a reading width.');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await a.click('#repo-pull'); await waitFor(a, idle, 30000); await a.settle();
   await shot(a, 'repo-try-again', 'Clicked "Pull": this computer moved to the newer commit, and the band says reviewer still waits for Automatic sync.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();

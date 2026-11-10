@@ -309,7 +309,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
  */
-export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string> } = {}): Promise<McpResult> {
+/** `decideNow`: servers whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), the rest keeping the settle window. */
+export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -402,7 +403,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (options.only && !chosenNow.has(name) && (edited.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); continue; }
     let raced: HarnessId[] | undefined;
     if (missing.length) {
-      if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }
+      if (missing.some(copy => now - missingSince[copy.tool] < (options.decideNow?.has(name) ? 0 : options.settleMs ?? 2000))) { settling = true; continue; }
       if (!edited.length) {
         const removed: HarnessId[] = [];
         const gone: { tool: HarnessId; hash: string; kept?: string }[] = [];

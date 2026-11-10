@@ -816,8 +816,11 @@ export function outcomeBand(withAction = true): HTMLElement | null {
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
   let rest = outcome.text;
+  // Quoted text (a commit's subject, say) is shown as written: a name inside it isn't an item named.
+  const quoted = (at: number) => { const open = rest.lastIndexOf('“', at); return open >= 0 && rest.indexOf('”', open) > at; };
   while (rest) {
-    const hits = names.map(name => ({ name, at: rest.search(new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`)) })).filter(hit => hit.at >= 0).sort((a, b) => a.at - b.at);
+    const firstOutside = (name: string) => [...rest.matchAll(new RegExp(`(?<![\\w-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'g'))].map(match => match.index!).find(at => !quoted(at)) ?? -1;
+    const hits = names.map(name => ({ name, at: firstOutside(name) })).filter(hit => hit.at >= 0).sort((a, b) => a.at - b.at);
     if (!hits.length) { text.push(rest); break; }
     text.push(rest.slice(0, hits[0].at), h('strong.item-name', {}, hits[0].name));
     rest = rest.slice(hits[0].at + hits[0].name.length);
