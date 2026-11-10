@@ -236,8 +236,26 @@ export async function readHistory(context: ShareContext): Promise<HistoryEvent[]
   return events.filter(entry => Date.parse(entry.at) >= cutoff);
 }
 
+/** Skills a plugin's parts installed, or a saved parts run can put back (plugin-parts.json and plugin-parts-runs): their kept copies are in this store. */
+async function partsSkills(home: string): Promise<{ name: string; hash: string }[]> {
+  const texts: string[] = [];
+  const read = (file: string) => readFile(file, 'utf8').then(text => { texts.push(text); }, () => undefined);
+  await read(join(storeDirectory(home), 'plugin-parts.json'));
+  const runs = join(storeDirectory(home), 'plugin-parts-runs');
+  for (const file of await readdir(runs).catch(() => [] as string[])) if (file.endsWith('.json')) await read(join(runs, file));
+  const skills: { name: string; hash: string }[] = [];
+  for (const text of texts) {
+    let parsed: { installs?: unknown[]; before?: unknown; after?: unknown };
+    try { parsed = JSON.parse(text); } catch { continue; }
+    for (const install of [...(Array.isArray(parsed?.installs) ? parsed.installs : []), parsed?.before, parsed?.after] as { items?: unknown }[]) {
+      for (const item of Array.isArray(install?.items) ? install.items : []) if (item?.kind === 'skill' && typeof item.name === 'string' && typeof item.hash === 'string') skills.push(item);
+    }
+  }
+  return skills;
+}
+
 /**
- * Store revisions no record, copy or retained History event points at any more are removed (STO-04). Never a current revision.
+ * Store revisions no record, copy, retained History event or plugin parts point at any more are removed (STO-04). Never a current revision.
  * A deletion older than the window has left History, so its content goes too. The deletion record itself stays in sync.json,
  * so a stale replica still can't bring the item back. A copy still marked 'removing' is that stale replica: removing it needs
  * only its hash, not the stored content.
@@ -257,6 +275,7 @@ async function pruneStore(context: ShareContext, events: HistoryEvent[]) {
     for (const entry of item.displaced ?? []) hold(key, entry.hash);
   }
   for (const entry of events) { hold(entry.key, entry.winner?.hash); hold(entry.key, entry.previous); for (const loser of entry.losers) hold(entry.key, loser.hash); }
+  for (const item of await partsSkills(context.home)) hold(itemKey(item.name), item.hash);
   // History moved aside because it could not be read may still be recovered by hand: nothing it mentions is pruned.
   const mentioned = new Set<string>();
   try {

@@ -4,6 +4,8 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
+import { discover } from '../src/discovery.ts';
+import { applyChanges } from '../src/manage.ts';
 import { installParts, partsDigest, readParts, removeParts, undoParts } from '../src/parts.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
@@ -209,5 +211,21 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
     const linked = await installParts(box.context, { ...target, version: '3.0.0', tool: 'codex-cli' }, await box.files());
     assert.equal(linked.outcome, 'installed', linked.message);
     assert.match(await readFile(config, 'utf8'), /figma-mcp@2/);
+  } finally { await box.cleanup(); }
+});
+
+test('A Disable of a part skill in its tool keeps the kept copy that Undo of Remove parts needs', async () => {
+  const box = await sandbox();
+  box.context.read = async () => [await discover({ home: box.home, mode: 'custom', harness: 'codex-cli' })];
+  box.context.settleMs = 0;
+  try {
+    assert.equal((await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files())).outcome, 'installed');
+    // The Disable makes a sync record entry for the name, and its History write prunes the store.
+    const disabled = await applyChanges(box.context, [{ key: 'figma-design', managed: false, off: [], disable: ['codex-cli'] }]);
+    assert.equal(disabled.results[0]?.outcome, 'switched');
+    const removed = await removeParts(box.context, { ...target, tool: 'codex-cli' });
+    const undone = await undoParts(box.context, removed.partsRun!);
+    assert.equal(undone?.outcome, 'installed', undone?.message ?? '');
+    assert.equal(await readFile(join(box.home, '.codex/skills/figma-design/SKILL.md'), 'utf8'), SKILL);
   } finally { await box.cleanup(); }
 });
