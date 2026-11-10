@@ -4,7 +4,7 @@
 import { itemId } from './profileplan.ts';
 import { brandMark } from './brand.ts';
 import { caughtUpNames, DAY_MS } from './model.ts';
-import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolNames, toolsPhrase } from './words.ts';
+import { andList, byToolOrder, capitalToolsPhrase, kindNouns, orList, problemText, toolName, toolNames, toolsPhrase } from './words.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { whyReadOnly, saidInStatusBar, tell, type Outcome, type Kind, harnessKindShown, convertAgent, flashRequests, showSkillsTable, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
 import { afterLayout, button, closeButton, emptyState, findInput, fitInView, h, icon, middle, pathText, pendingCount, toggle, withToolCount } from './dom.ts';
@@ -1746,14 +1746,13 @@ const age = (key: string) => {
 };
 
 function syncNotice(notice: Told, writeClaude?: () => void) {
-  const who = (tool: string) => names[tool] ?? tool;
-  const list = (tools: string[]) => andList(tools.map(who));
+  const who = toolName, list = (tools: string[]) => andList(tools.map(toolName));
   const order = notice.orderProved ? '' : ' The order could not be proved, so the fixed tool order decided.';
   // The button names the tools it changes: all of them, or only those the event touched.
   const involved = [...new Set([notice.winner, ...notice.losers].filter(Boolean))] as string[];
   const scope = `in ${toolsPhrase(involved, toolList())}`;
   // Undo is the one action here that writes files: a small outlined button, apart from the quieter links.
-  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: writeClaude ? `Undo edit in ${list(notice.losers.length ? [notice.winner, ...notice.losers] : [notice.winner])}` : `Undo ${notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
+  const undo = (title: string) => { const action = button({ variant: 'outline', size: 'small', label: `Undo ${writeClaude || notice.kind === 'edit' ? 'edit ' : ''}${scope}`, id: `notice-undo-${notice.history}`, onclick: () => void restoreEvent(notice.history) }); action.title = title; action.setAttribute('aria-label', `Undo: ${title}`); return action; };
   const offNow = notice.once ?? (!!state.home && !state.home.syncOn);
   const [glyph, tone, text, action] = ({
     edit: ['check', 'tone-success', offNow ? `${notice.item} copied from ${who(notice.winner)} to ${list(notice.losers)}.` : `${notice.item} was edited in ${who(notice.winner)} and copied to ${list(notice.losers)}.`, undo(`Put ${notice.item} back as it was before ${who(notice.winner)}’s edit, in every tool it syncs to (${who(notice.winner)} too)`)],
