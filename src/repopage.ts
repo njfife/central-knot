@@ -108,8 +108,10 @@ const pullNow = () => busy('Pulling from the repo…', async () => {
   const leftRows = result.view.connected ? result.view.incoming.filter(change => change.retry) : [];
   const left = leftRows.length;
   const surprise = leftRows.some(change => change.sync !== 'waits');
-  const moved = result.view.connected && result.view.base ? `Moved to ${result.view.base.id.slice(0, 7)}.` : 'Pulled.';
-  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : left && surprise ? '' : moved;
+  // A Pull that moved no item still moved this computer to the repo's commit: named as Push names its commit.
+  const base = result.view.connected ? result.view.base : undefined;
+  const moved = base ? `Moved to ${base.id.slice(0, 7)} “${base.subject}”` : 'Pulled';
+  const text = count ? `Pulled ${plural(count, 'change')} into your tools.` : left && surprise ? '' : !left ? `${moved}.` : `${moved};`;
   // One left is named, in its row's words; more are counted.
   const leftText = !left ? (count ? '' : 'Nothing in your tools needed to change.')
     : !surprise ? (left === 1 ? `${leftRows[0].name} still waits for Automatic sync.` : `${left} items still wait for Automatic sync.`)
@@ -349,6 +351,9 @@ function connectedPage(view: ConnectedRepoView) {
   const pushControl = pushButton(view, counts.push, moving);
   // Rows to pull but none Pull will move (each waits or can't come in): Pull only moves this computer to the newer commit.
   const pullMovesNone = !!pullControl && !counts.pull && !counts.retry && view.incoming.length > 0;
+  // With sync on first, one Pull would also make the deletions waiting for it: said, to save the second Pull.
+  const waitingNames = view.incoming.filter(change => pullState(change) === 'waits').map(change => change.name);
+  const movesNoneText = waitingNames.length ? `${PULL_MOVES_NONE} Turn on Automatic sync first, and Pull deletes ${andList(waitingNames)} too.` : PULL_MOVES_NONE;
   const latestDiffers = view.latest && view.latest.id !== view.base?.id;
   const inSync = !view.incoming.length && !view.outgoing.length;
   const checked = repo.checking ? 'checking now…' : `checked ${when(view.checkedAt) ?? 'not yet'}${view.problem ? ' (couldn’t reach it)' : ''}`;
@@ -382,8 +387,9 @@ function connectedPage(view: ConnectedRepoView) {
         : inSync && view.pushBlocked ? h('div.repo-in-sync', {}, h('span', {}, 'The repo has a newer commit that changes nothing in your Managed set. Pull to move to it.'), pullControl)
         : inSync ? h('p.repo-in-sync', {}, 'Refresh checks the repo for new commits.')
         : h('div.repo-sides', {},
-          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', words.stuckIn,
-            pullMovesNone && !view.problem ? { text: PULL_MOVES_NONE, warns: false } : undefined),
+          // When Pull moves none of the rows, the note under it explains the list, so no count beside it.
+          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullMovesNone ? '' : words.stuckIn,
+            pullMovesNone && !view.problem ? { text: movesNoneText, warns: false } : undefined),
           changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushControl, 'Nothing here that the repo doesn’t have.', words.stuckOut,
             counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined)),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
