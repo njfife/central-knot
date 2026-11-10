@@ -4,7 +4,7 @@ Central Knot is a desktop app that shows the skills, MCP servers, agents, instru
 
 ## Getting it
 
-Download the signed Mac build (Apple silicon) from the [GitHub releases](https://github.com/njfife/central-knot/releases). It is signed with a Developer ID and notarized. Unzip it, move **Central Knot.app** to Applications and open it.
+Download the Mac disk image (Apple silicon), `Central-Knot-<version>-mac-arm64.dmg`, from the [GitHub releases](https://github.com/njfife/central-knot/releases). Open it, drag **Central Knot** onto the **Applications** folder beside it, then open Central Knot from Applications. It is signed with a Developer ID and notarized. Each release also has the same app as a zip.
 
 A released build opens on **This Mac's home**: your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
@@ -120,7 +120,9 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 
 ### Packaging and release
 
-`npm run package:mac` (`scripts/package-mac.mjs`) builds `release/Central-Knot-<version>-mac-arm64.zip` on an Apple silicon Mac. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. Releases are published on GitHub with their checks in the release notes.
+`npm run package:mac` (`scripts/package-mac.mjs`) builds the app on an Apple silicon Mac and puts it in two downloads under `release/`: `Central-Knot-<version>-mac-arm64.dmg`, a disk image whose window shows the app beside a shortcut to Applications, and `Central-Knot-<version>-mac-arm64.zip`. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. The disk image is signed, notarized and stapled the same way, in its own right. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`.
+
+The disk image is made by `scripts/mac-dmg.mjs`. Its window's picture is `assets/dmg/background.svg`, kept as PNGs at both sizes beside it; the window's size and icon places are in `assets/dmg/DS_Store`, which `scripts/mac-dmg-layout.sh` makes again on a Mac after a layout change. Releases are published on GitHub with their checks in the release notes.
 
 ### Logo
 
