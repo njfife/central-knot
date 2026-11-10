@@ -220,7 +220,7 @@ function inToolsNote(view: PluginsView, entry: MarketplaceView, marketIndex: num
   const said = !has.length ? 'None of your tools lists this marketplace yet.'
     : byApp ? `${entry.bundled.app} added this marketplace to ${listOf(has)}, so these plugins also show in ${where()}.${lacks} Remove it in a tool and it stays out.`
       : `${listOf(has)} ${has.length > 1 ? 'list' : 'lists'} this marketplace, so these plugins also show in ${where()}.${lacks}`;
-  return h('div.market-in-tools', {},
+  return h('div.market-in-tools', { id: 'market-listed' },
     h('p', {}, said),
     could.map(tool => button({ variant: 'outline', size: 'small', label: `List in ${names[tool]}`, name: `List ${marketTitle(entry)} in ${names[tool]}’s own plugin list. Nothing is installed.`, id: `add-carried-${marketIndex}-${tool}`, disabled: !!app.busy, onclick: () => void addCarriedTo(entry, tool) })));
 }

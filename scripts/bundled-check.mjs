@@ -200,7 +200,7 @@ await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
 check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Plugins as of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
-if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex, so these plugins also show in those tools’ own plugin lists. Remove it in a tool and it stays out.')`), await a.run(`document.querySelector('.market-in-tools')?.textContent`));
+if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('#market-listed p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex, so these plugins also show in those tools’ own plugin lists. Remove it in a tool and it stays out.')`), await a.run(`document.querySelector('#market-listed')?.textContent`));
 check('and offers no List in button where it is already listed or can’t go', await a.run(`document.querySelectorAll('[id^="add-carried-"]').length`) === 0);
 check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes(`isn’t included in ${NAME}`) && text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
 check('About shows the marketplace’s README', await a.until(`document.querySelector('.plugin-readme-body')?.textContent.includes('What is inside')`));
@@ -283,16 +283,16 @@ await b.click('#nav-plugins');
 check('a second open lists it again, as the feed left it', await b.until(`document.querySelectorAll('.plugin-row').length === 6 && document.querySelector('[data-plugin="document-tools"] .plugin-row-version')?.textContent === '1.3.0'`));
 if (writes) {
   await b.click('#market-tab-about');
-  check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('About offers to add it to Claude Code again', await b.until(`!!document.querySelector('[id^="add-carried-"][id$="claude-cli"]')`), await b.run(`document.querySelector('#market-listed')?.textContent`));
   check('it was not added again by itself', addedBy('claude').length === 1 && addedBy('codex').length === 1, { claude: addedBy('claude'), codex: addedBy('codex') });
-  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('.market-in-tools p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Claude Code doesn’t list it. Remove it in a tool and it stays out.`, await b.run(`document.querySelector('.market-in-tools p').textContent`));
+  check('and says which tool lists it and which doesn’t', await b.run(`document.querySelector('#market-listed p').textContent`) === `${NAME} added this marketplace to Codex, so these plugins also show in Codex’s own plugin list. Claude Code doesn’t list it. Remove it in a tool and it stays out.`, await b.run(`document.querySelector('#market-listed p').textContent`));
   await b.shot('about-add-1280');
   await b.size(860, 560);
   check('About with its button fits at 860', await b.fits());
   await b.shot('about-add-860');
   await b.size(1280, 800);
   await b.click('[id^="add-carried-"][id$="claude-cli"]');
-  check('List in Claude Code adds it, and the page says so', await b.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('.market-in-tools')?.textContent`));
+  check('List in Claude Code adds it, and the page says so', await b.until(`(document.querySelector('#market-listed p')?.textContent ?? '').startsWith('${NAME} added this marketplace to Claude Code and Codex')`) && addedBy('claude').length === 2, await b.run(`document.querySelector('#market-listed')?.textContent`));
   await b.shot('about-listed-1280');
   check('the status bar says what happened', await b.run(`document.querySelector('#announcement').textContent`).then(text => text.startsWith('Nothing was installed: Acme plugins is now listed in Claude Code.')), await b.run(`document.querySelector('#announcement').textContent`));
 }
