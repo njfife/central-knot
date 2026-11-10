@@ -774,7 +774,9 @@ What was left open after v0.5.0-preview.4, fixed or proven.
 
 **Validation.** 367 unit tests. Mac packaged e2e 534/534. Linux e2e 441/441. UI tour `plugin-versions` (new list shots at 860 and 1728), `plugins`, `harnesses`, `settings` on the Mac; every section run alone, 17 of 18 first time (the 18th was the scratch-folder delete, fixed).
 
-**Not proven.** The icon as a picture of the Dock itself (no tool here can capture the Dock; needs a glance). Where Claude desktop on Linux keeps the Code tab's copy (appears only after sign-in). The Copilot app's `.msi` location (from the package's own tables, not installed).
+**The Dock icon** was seen by Nathan on November 10, 2026: the Dock shows the new icon (no tool here can capture the Dock).
+
+**Not proven, left by Nathan's decision while only macOS is supported.** Where Claude desktop on Linux keeps the Code tab's copy (appears only after sign-in). The Copilot app's `.msi` location (from the package's own tables, not installed).
 
 ## Instructions: a draft of the base written by one of your tools, November 10, 2026
 
