@@ -245,7 +245,7 @@ export async function cachedCatalog(context: PluginContext, source: string): Pro
 function copilotRefusal(name: string, where: unknown): string | undefined {
   const source = record(where);
   if (!source) return undefined;
-  if (['npm', 'pip', 'archive'].includes(text(source.source))) return `Copilot CLI refuses a marketplace with a ${text(source.source)} plugin source (“${name}”).`;
+  if (['npm', 'pip', 'archive'].includes(text(source.source))) return `Copilot CLI refuses a marketplace with ${text(source.source) === 'pip' ? 'a' : 'an'} ${text(source.source)} plugin source (“${name}”).`;
   if (/^[\w.-]+@[\w.-]+:/.test(text(source.url))) return `Copilot CLI refuses a marketplace with an SCP-style plugin URL (“${name}”).`;
   return undefined;
 }

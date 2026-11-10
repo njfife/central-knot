@@ -11,9 +11,9 @@ import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
-import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, BundledView, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, marketTitle, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, marketTitle, notCarried, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -38,6 +38,8 @@ export interface MarketplaceHost {
   share?(): ShareContext;
   /** A plugin was installed, updated or uninstalled in these tools, or its parts were changed there, and it worked. */
   changed?(source: string, plugin: string, tools: HarnessId[]): void;
+  /** A bundled build's own marketplace (bundle.ts): the folder it is unpacked in, and how the page shows it. Always listed, first. */
+  bundled?(): { source: string; view: BundledView } | undefined;
 }
 /** The engine calls that touch Git or a tool, replaceable in tests. */
 export interface MarketplaceEngine {
@@ -87,6 +89,8 @@ const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], m
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine) {
   const listPath = join(host.dataDir, 'marketplaces.json');
+  /** How the page shows this marketplace when it is the one this build carries; undefined for any other. */
+  const carriedAs = (source: string) => { const carried = host.bundled?.(); return carried && engine.sameSource(carried.source, source) ? carried.view : undefined; };
   const added = async (): Promise<string[]> => {
     try { const list = JSON.parse(await readFile(listPath, 'utf8')); return Array.isArray(list) ? list.filter((item): item is string => typeof item === 'string') : []; } catch { return []; }
   };
@@ -255,7 +259,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * `records`: the parts record as read once for the whole view.
    */
   async function entryView(ctx: engine.PluginContext, tools: HarnessId[], source: string, origins: MarketplaceView['origins'], fresh: boolean, records: PartsInstall[]): Promise<MarketplaceView> {
-    const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: sourceLabel(source) };
+    const bundled = carriedAs(source);
+    const base: MarketplaceView = { source, origins, name: '', kind: isFolder(source) ? 'folder' : 'git', plugins: [], states: {}, page: marketplacePage(source), sourceLabel: bundled ? `Comes with ${bundled.app}` : sourceLabel(source), ...(bundled ? { bundled } : {}) };
     try {
       const { catalog: read, stale, problem } = await catalogFor(ctx, source, { fresh });
       // A catalog that couldn't be read (no name) lists nothing; its plugins' parts still show, to be removed together.
@@ -290,6 +295,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const entry = known.find(item => engine.sameSource(item.source, source));
       if (entry) { if (!entry.origins.includes(origin)) entry.origins.push(origin); } else known.push({ source, origins: [origin] });
     };
+    // The marketplace this build carries comes first, whatever else is added.
+    const carried = host.bundled?.();
+    if (carried) note(carried.source, 'bundle');
     for (const source of await added()) note(source, 'central-knot');
     // A source that could read as an option is never passed on to a tool or to Git.
     for (const tool of tools.filter(candidate => takesPlugins(candidate))) for (const entry of await engine.registeredMarketplaces(ctx, tool)) if (!entry.source.startsWith('-')) note(entry.source, tool);
@@ -372,6 +380,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /** Takes a marketplace off Central Knot's own list. Tools that added it keep it, and nothing is uninstalled. */
   async function forget(source: string): Promise<PluginsView> {
+    // The marketplace a build carries is part of the build: it stays listed.
+    if (carriedAs(source)) return view();
     await saveAdded((await added()).filter(item => !engine.sameSource(item, source)));
     for (const known of fetched.keys()) if (engine.sameSource(known, source)) fetched.delete(known);
     const shown = await view();
@@ -398,6 +408,9 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     if (!catalog?.plugins.some(item => item.name === plugin)) return { reports: failedFor(tools, 'It is no longer in the marketplace as last read. Refresh the marketplace.') };
     if (catalog.name !== marketName) return { reports: failedFor(tools, `Its marketplace is now named “${catalog.name}”, not “${marketName}”. Refresh, then choose it again.`) };
+    // A plugin the build's marketplace lists but carries no files for is not installed from it.
+    const carried = carriedAs(source), left = carried?.unpackaged.find(item => item.name === plugin);
+    if (carried && left) return { reports: failedFor(tools, notCarried(carried.app, left.reason)) };
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {

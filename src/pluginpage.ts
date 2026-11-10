@@ -8,7 +8,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, clickPart, partStand, pickOf, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, noLongerOffered, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord, whyNotCarried } from './pluginstatus.ts';
 import { hasCowork, takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsPick, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -106,9 +106,12 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
       : `Uninstall ${batch.length > 1 ? `all ${batch.length}` : `from ${names[batch[0]!.tool]}`}…`,
     onclick: () => { toggleMany(market.draft, batch); clearNotice(); rerender(); },
   }) : null;
+  const notIncluded = whyNotCarried(entry, plugin.name);
   return h('section.plugin-panel', { 'aria-label': 'Your tools' },
     h('div.plugin-panel-head', {}, h('h3', {}, 'Your tools')),
-    view.canWrite ? h('p.plugin-panel-hint', {}, 'A box or button only chooses; nothing changes until Apply all.') : null,
+    // A plugin a bundled build doesn't include says why here, on the page, once for every tool.
+    notIncluded ? h('p.plugin-panel-hint', { id: 'plugin-not-included' }, notIncluded)
+      : view.canWrite ? h('p.plugin-panel-hint', {}, 'A box or button only chooses; nothing changes until Apply all.') : null,
     // The tools from the left under the heading, each in a column of capped width, and the button for all of them at the
     // right end; a box too narrow for that puts them in a row that wraps (settlePluginTools).
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
@@ -514,7 +517,8 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
   const owner = pluginKey(entry.source, plugin.name);
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
-  if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : plugin.gone ? 'The marketplace no longer has its files, and no tool’s copy could be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
+  if (!detail) return section(h('p.plugin-muted', {}, whyNotCarried(entry, plugin.name) ? `Its files aren’t in ${entry.bundled!.app}, so what it holds can’t be shown here.`
+    : plugin.folder ? 'Its files couldn’t be read.' : plugin.gone ? 'The marketplace no longer has its files, and no tool’s copy could be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
   const files = (['skills', 'commands', 'agents'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
   const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   const idFor = partIds(`pfile-${marketIndex}`);

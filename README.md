@@ -107,6 +107,19 @@ The Mac app updates itself from this project's [GitHub releases](https://github.
 
 A build made from a preview is offered newer previews and finals; one made from a final release, finals only. The new app must be signed by the same developer before it replaces the old one (Electron's Squirrel.Mac checks this), and a failed or interrupted update leaves the installed app as it was. Settings › **Updates** shows the version and release tag in use, **Check now** and the last result. An app outside the Applications folder (or `~/Applications`), an unsigned or untagged build and a development build don't update themselves; Settings says why and links the release page. Windows and Linux have no releases yet, so nothing is shown there. **Check for Updates…** is in the app menu.
 
+## Custom builds
+
+A custom build is Central Knot made by someone for their own group, under its own name. It installs beside the standard app and keeps its own settings (`~/Library/Application Support/com.centralknot.custom.<its id>/` on a Mac), so the two never share or overwrite each other's settings, and it never takes the standard app's updates. Settings › **This build** says what it is.
+
+A **bundled build** also carries a marketplace, with every plugin's files inside the app. Whoever opens it needs no access to where the marketplace came from:
+
+- **Plugins** lists that marketplace first, marked **Built in**, under the name and picture the build gave it. Its About tab says which release of the marketplace this is. It can't be removed from the list.
+- At the first open the build unpacks the marketplace into its own data folder (`bundled/marketplace` there). That folder is an ordinary folder marketplace from then on: its plugins are browsed, installed, updated and uninstalled the same way as any other's.
+- A plugin the marketplace lists but the build could not pack (an npm package, say, or a repository that could not be fetched) is still listed, says that it can't be installed from this app and why (About has the reason, and who to ask).
+- A later build that carries a newer release of the marketplace replaces the unpacked one at its first open. An older one never does. A release that can't be unpacked leaves the last working one in place, and the log says why.
+
+Not there yet: registering the marketplace with each tool at the first open, new marketplace content without a new build (a feed), a custom build's own updates, and one build taking over syncing from the other. Until then, when a custom build and the standard app are both used on one home, the one that managed something first keeps syncing there and the other says so.
+
 ## State
 
 Central Knot's state lives in one folder, `.central-knot/` inside the selected home: `sync.json`, kept revisions under `items/`, profiles and base instructions. There is no second copy. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing. App settings (home, appearance, history length) and the log are in the normal Electron app data folder (`~/Library/Application Support/central-knot/` on a Mac).
@@ -137,8 +150,34 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 
 The disk image is made by `scripts/mac-dmg.mjs`. Its window's picture is `assets/dmg/background.svg`, kept as PNGs at both sizes beside it; the window's size and icon places are in `assets/dmg/DS_Store`, which `scripts/mac-dmg-layout.sh` makes again on a Mac after a layout change. Releases are published on GitHub with their checks in the release notes.
 
+### Building a custom build
+
+The same packaging command takes optional inputs. With none it builds the standard app; with any, a custom build, which must be given its name (`--app-name`):
+
+```sh
+npm run package:mac -- --marketplace acme/plugins --app-name "Acme Knot" \
+  --app-icon acme.png --marketplace-name "Acme plugins" --marketplace-logo acme-plugins.svg
+```
+
+| Input | What it sets |
+|---|---|
+| `--marketplace <owner/repo, Git URL or folder>` | The marketplace to carry. A Git source is fetched with this computer's own Git sign-in; a folder is carried as it is on disk, uncommitted changes included. Every plugin's files are packed, including plugins the marketplace keeps in other Git repositories. |
+| `--app-name "<name>"` | The app's name, everywhere the app says it. Required, and never "Central Knot": under its own name the app sits beside the standard one in Applications, where a second "Central Knot" would take the standard app's place. |
+| `--app-id <id>` | Its identity: its bundle id is `com.centralknot.custom.<id>`, which also names its settings folder. Made from the app's name when left out ("Acme Knot" is `acme-knot`). |
+| `--app-icon <file.png or file.icns>` | The app's icon (a 1024 by 1024 .png, or a Mac .icns), also shown in the sidebar. |
+| `--marketplace-name "<name>"` | The marketplace's name in the app. The tools still know it by the name in its `marketplace.json`. |
+| `--marketplace-logo <file.png, .svg or .jpg>` | Its picture in the app. |
+| `--sequence <number>` | The release's place in the order of releases. Left out, it is the time of the build (seconds since 1970, about 1.8 billion now), so a later build is a later release. A number given by hand must be higher than every earlier build's, that default included: an installed copy keeps the content it has when the build it opens carries a lower number, and its log says so. |
+
+The result is `release/<Name>-darwin-arm64/<Name>.app`, its zip `release/<Name>-<version>-mac-arm64.zip`, and `release/<Name>-build-report.txt`. The report lists the identity, the marketplace release (what it was made from, with the commit when there is one), each plugin packed, each plugin that could **not** be packed with the reason, a note when one entry makes Copilot CLI refuse the whole marketplace (an npm, pip or archive plugin does), and that the build has no update location and no content feed. A plugin that can't be packed doesn't stop the build. A missing `--app-name`, marketplace branding without `--marketplace`, or an input that can't be read stops it before anything is fetched. Signing is as for the standard app: your own Developer ID when one is in the keychain, otherwise (or with `CK_SIGN=0`) ad hoc. A custom build has no disk image yet.
+
+What is packed is the marketplace as it is, without the fetch's own `.git` folders. A plugin kept in another repository is copied into `_bundled/<plugin>/` and its entry in `marketplace.json` pointed there; that file is then written again as JSON with every other value as it was, and a marketplace with no such plugin is carried byte for byte. What Central Knot writes outside the app (the markers around base instructions in a tool's file, a Git repo commit's author and message) says "Central Knot" in every build, so a custom build and the standard app read each other's. Inside the app the release is two files, `dist/bundle/release.json` (the manifest: marketplace, sequence, date, source, plugins, the archive's size and SHA-256) and one `.tgz` archive (`src/bundle.ts`, `src/bundlepack.ts`).
+
+- **Try one without packaging:** `node scripts/custom-build.mjs <inputs> --out build/custom` stages the build on any system, then `CK_CUSTOM_BUILD=build/custom npm start` runs it. A plain `npm run build` makes `dist/` the standard app again.
+- **Check:** `node scripts/bundled-check.mjs` builds a bundled build from the fixture marketplace with the documented command, deletes the marketplace, opens the packaged app in a throwaway home and checks its name, its own settings folder, the Plugins page at four window sizes and Settings (`--electron` does the same as a development run). The Mac CI runs it after the end-to-end checks.
+
 ### Logo
 
-The logo files are in `assets/`: `logo.svg` (the sidebar mark, copied into `dist/` by `scripts/build.mjs`), `icon.icns` (the Mac app icon, used by `scripts/package-mac.mjs`), `icon.png` (the window icon on Windows and Linux) and `icon.svg` (the app icon drawing). A branded build replaces these files with its own under the same names. The menu bar icon is the same logo in one colour: its drawing is `assets/tray.svg`, and the 32-pixel PNG made from it is kept as text in `src/trayicon.ts`, so a branded build replaces that too.
+The logo files are in `assets/`: `logo.svg` (the sidebar mark, copied into `dist/` by `scripts/build.mjs`), `icon.icns` (the Mac app icon, used by `scripts/package-mac.mjs`), `icon.png` (the window icon on Windows and Linux) and `icon.svg` (the app icon drawing). A custom build takes its app icon and sidebar mark from `--app-icon` (above). The menu bar icon is the same logo in one colour: its drawing is `assets/tray.svg`, and the 32-pixel PNG made from it is kept as text in `src/trayicon.ts`; a custom build keeps the standard menu bar icon for now.
 
 The product boundary is in `AGENTS.md`. The requirements are in `docs/SPEC.md` and the per-tool evidence in `docs/capability-data.md`. `LEDGER.md` records what was run and every check round.

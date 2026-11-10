@@ -342,6 +342,12 @@ function pluginUpdatesRow(): HTMLElement {
     notice);
 }
 
+/** A custom build's own lines about itself (what it is, and that it doesn't update itself), where the standard app has Updates. */
+function buildRow(): HTMLElement | null {
+  const lines = current?.build;
+  return lines?.length ? settingRow('build', 'This build', lines.join(' '), h('span')) : null;
+}
+
 const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null)[]) =>
   h('section.settings-section', { 'aria-labelledby': `settings-${id}` }, h('h2.eyebrow', { id: `settings-${id}` }, title), ...rows);
 
@@ -365,7 +371,7 @@ export function settingsPage(): HTMLElement {
             type: 'button', role: 'radio', id: `appearance-${choice.value}`, 'aria-checked': String(chosen === choice.value),
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
           }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
-      updatesRow()),
+      updatesRow(), buildRow()),
     settingsSection('plugins', 'Plugins', pluginUpdatesRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',

@@ -28,6 +28,7 @@ import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, 
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
 import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
+import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -43,6 +44,17 @@ function trimLog() {
     writeFileSync(logPath(), text.slice(text.indexOf('\n', Math.floor(text.length / 2)) + 1));
   } catch { /* no log yet, or it can't be read: nothing to trim */ }
 }
+/**
+ * A custom build (bundle.ts): its identity file sits beside this code. It keeps its settings in a folder of its own, so it
+ * runs beside the standard app and never reads or writes that app's settings (ORG-07). A data folder named on the command
+ * line (tests) still wins.
+ */
+const custom = readCustomBuildSync(__dirname);
+if (custom) {
+  app.setName(custom.name);
+  // Named by its bundle id, which no other app's folder is (a build named after a company could otherwise land in that company's own app's folder).
+  if (!app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', join(app.getPath('appData'), custom.bundleId));
+}
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 // Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
 // a test build carries its throwaway home, data folder and debug port in its environment (Info.plist LSEnvironment) instead
@@ -52,7 +64,10 @@ if (process.env.CK_TEST_USER_DATA) app.setPath('userData', process.env.CK_TEST_U
 if (process.env.CK_TEST_DEBUG_PORT) app.commandLine.appendSwitch('remote-debugging-port', process.env.CK_TEST_DEBUG_PORT);
 // Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
 void searchPath();
-const BUILD = 'com.centralknot.firstlook';
+/** This build's name in a home's sync record: the standard app's, or a custom build's own. */
+const BUILD = custom?.bundleId ?? STANDARD_BUILD;
+/** The marketplace a bundled build carries, as unpacked at open (bundle.ts); undefined for any other build, or when it couldn't be unpacked. */
+let bundle: ActiveBundle | undefined;
 let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
 /** Whether the open home can be written; read with each view, so the menus can say "preview only" like the window. */
@@ -211,7 +226,8 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
 }
 /** Whether plugins are updated automatically: as chosen in Settings, else the default. */
 const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? appSettings.pluginUpdates : PLUGIN_UPDATES_DEFAULT);
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn() });
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn(),
+  ...(custom ? { build: aboutBuild(custom, app.getVersion(), bundle && { name: custom.marketplace?.displayName ?? bundle.release.marketplace, date: releaseDate(bundle.release) }) } : {}) });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
  * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
@@ -896,6 +912,15 @@ app.whenReady().then(async () => {
   await loadSyncSetting();
   await loadAppSettings();
   void clearDraftFolders();
+  // A bundled build unpacks the marketplace it carries before the window asks for it. What was in use stays if that fails.
+  if (custom?.marketplace && !smoke) {
+    const began = Date.now();
+    const opened = await openBundle(app.getPath('userData'), join(__dirname, CARRIED_FOLDER));
+    bundle = opened.active;
+    if (opened.kept) log(`bundle: ${opened.kept}`);
+    if (opened.problem) log(`bundle: ${opened.problem}`);
+    else log(`bundle: ${bundle?.release.marketplace} as of ${bundle ? releaseLabel(bundle.release) : 'nothing'} (sequence ${bundle?.release.sequence}), ready in ${Date.now() - began} ms`);
+  }
   applyAppearance();
   await firstSignIn();
   makeTray();
@@ -932,7 +957,8 @@ app.whenReady().then(async () => {
     return preferences();
   });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
-  updater = smoke ? undefined : startUpdater({
+  // A custom build never asks for, or takes, the standard app's releases (ORG-07): it has no updater until it has a location of its own.
+  updater = smoke || custom ? undefined : startUpdater({
     log, send: view => send('updates:changed', view), hasPage: () => !!window && !window.isDestroyed(),
     // The restart also waits for Central Knot's own settings file, which is written outside the queue.
     queued: work => queued(async () => { await settingsWrites; return work(); }),
@@ -968,6 +994,7 @@ app.whenReady().then(async () => {
     share: () => context(),
     // A change to a plugin that worked (an update, an uninstall, its parts) settles what failed there by itself before.
     changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
+    bundled: () => (bundle && custom ? { source: bundle.folder, view: { app: custom.name, displayName: custom.marketplace?.displayName, logo: custom.marketplace?.logo && `${CARRIED_FOLDER}/${custom.marketplace.logo}`, release: releaseDate(bundle.release), from: bundle.release.from || undefined, unpackaged: bundle.release.unpackaged } } : undefined),
   });
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
   // Apply all, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).

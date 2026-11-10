@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { PRODUCT } from './values.ts';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
@@ -352,7 +353,7 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   if (problem) return { state: 'stopped', reason: `${problem} ${NOTHING_CHANGED}` };
   const remembered = (await readSettings(context.settingsPath)).homes?.[context.home]?.generation;
   if (!record) return remembered ? { state: 'stopped', reason: `The sync record this app created is missing. ${NOTHING_CHANGED}` } : { state: 'first-setup' };
-  if (record.owner !== context.build) return { state: 'stopped', reason: `Sharing here belongs to another Central Knot build (${record.owner}). Nothing was written or deleted.` };
+  if (record.owner !== context.build) return { state: 'stopped', reason: `Sharing here belongs to another ${PRODUCT} build (${record.owner}). Nothing was written or deleted.` };
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
