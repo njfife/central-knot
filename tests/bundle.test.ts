@@ -63,7 +63,7 @@ test('build inputs that describe no build are refused in plain words', () => {
   // Left with the standard app's name, the build's file would take the standard app's place.
   assert.throws(() => describeBuild({ marketplace: '/m' }), /needs its own name: add --app-name/);
   assert.throws(() => describeBuild({ appId: 'acme' }), /needs its own name: add --app-name/);
-  for (const name of ['Central Knot', 'central knot']) assert.throws(() => describeBuild({ appName: name, appId: 'acme' }), /--app-name can’t be “Central Knot”/, name);
+  for (const name of ['Central Knot', 'central knot', 'Central-Knot']) assert.throws(() => describeBuild({ appName: name, appId: 'acme' }), /--app-name can’t be “Central Knot”/, name);
   assert.throws(() => describeBuild({ marketplaceName: 'Acme plugins' }), /add --marketplace/);
   assert.throws(() => describeBuild({ marketplaceLogo: '/x/logo.png' }), /add --marketplace/);
   assert.throws(() => describeBuild({ appName: 'Acme', appId: 'central-knot' }), /--app-id/);
@@ -103,8 +103,7 @@ test('packing: every plugin’s files go in as they are, a plugin kept elsewhere
     assert.equal(releaseDate(release), 'November 10, 2026');
     // What Settings says of the build: the date only, since where it was made from means nothing to whoever was handed the app.
     assert.deepEqual(aboutBuild({ id: 'acme-knot', name: 'Acme Knot', bundleId: 'x' }, '0.5.0', { name: 'Acme plugins', date: releaseDate(release) }), [
-      'Acme Knot is a custom build of Central Knot 0.5.0.',
-      'It keeps its own settings, separate from Central Knot’s.',
+      'Acme Knot is a custom build of Central Knot 0.5.0, with its own settings.',
       'It doesn’t update itself: for a newer one, ask whoever gave you Acme Knot.',
       'Its Acme plugins marketplace is as of November 10, 2026 and changes only with a new Acme Knot.']);
 
@@ -280,6 +279,12 @@ test('staging a custom build: its identity file, the carried release, its pictur
     assert.equal(plain.release, undefined);
     assert.deepEqual((await readdir(out)).sort(), ['build-report.txt', 'custom-build.json']);
     assert.match(plain.report, /Marketplace: none/);
+    // A staging that stopped halfway (its icon is there but can't be read) leaves a folder the next staging may clear.
+    await writeFile(join(base, 'locked.png'), 'png');
+    await chmod(join(base, 'locked.png'), 0o000);
+    await assert.rejects(stageCustomBuild({ marketplace: source, appName: 'Acme Knot', appIcon: join(base, 'locked.png') }, { out: join(base, 'half'), work: join(base, 'work') }));
+    assert.equal((await readdir(join(base, 'half'))).includes('bundle'), true, 'it stopped after the marketplace was packed');
+    assert.equal((await stageCustomBuild({ appName: 'Staging Knot' }, { out: join(base, 'half'), work: join(base, 'work') })).build.id, 'staging-knot');
     // Staging clears a folder staged before, never a folder holding someone's other files.
     await mkdir(join(base, 'mine'));
     await writeFile(join(base, 'mine/notes.txt'), 'keep');

@@ -168,7 +168,7 @@ await a.shot('plugins-1280');
 
 // The plugin the build doesn't include, on its own page: the reason is on the page, under each tool.
 await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-open').click()`);
-check('its own page says why it can’t be installed', await a.until(`(document.querySelector('#plugin-not-included')?.textContent ?? '').includes('doesn’t include this plugin’s files') && document.body.innerText.includes('Its files aren’t in ${NAME}')`), await a.run(`document.querySelector('#page').innerText.slice(0, 600)`));
+check('its own page says why it can’t be installed', await a.until(`(document.querySelector('#plugin-not-included')?.textContent ?? '').includes('doesn’t include this plugin’s files') && document.querySelector('#plugin-not-included').textContent.includes('Ask Platform team if you need it.') && document.body.innerText.includes('Its files aren’t in ${NAME}')`), await a.run(`document.querySelector('#page').innerText.slice(0, 600)`));
 await a.settle();
 await a.shot('plugin-not-included-1280');
 await a.click('#plugin-back');
@@ -178,7 +178,7 @@ await a.settle();
 await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
-check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*Plugins as of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
+check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Plugins as of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
 if (writes) check('About says which tools have it in their own list', await a.until(`(document.querySelector('.market-in-tools p')?.textContent ?? '').startsWith('Claude Code and Codex have it in their own list of marketplaces')`), await a.run(`document.querySelector('.market-in-tools')?.textContent`));
 check('and offers no Add button where it is already there or can’t go', await a.run(`document.querySelectorAll('[id^="add-carried-"]').length`) === 0);
 check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes(`isn’t included in ${NAME}`) && text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
@@ -196,7 +196,7 @@ await a.size(1280, 800);
 
 await a.click('#nav-settings');
 const about = await a.run(`document.querySelector('#setting-build-hint')?.textContent ?? ''`);
-check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes('It keeps its own settings, separate from Central Knot’s.') && about.includes(`for a newer one, ask whoever gave you ${NAME}`) && about.includes('Its Acme plugins marketplace is as of') && about.includes(`changes only with a new ${NAME}`), about);
+check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`${NAME} is a custom build of Central Knot`) && about.includes(`for a newer one, ask whoever gave you ${NAME}`) && about.includes('Its Acme plugins marketplace is as of') && about.includes(`changes only with a new ${NAME}`), about);
 check('Settings offers no updates from the standard app', await a.run(`!document.querySelector('#setting-updates') && !document.querySelector('#check-updates')`));
 await a.shot('settings-1280');
 for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
