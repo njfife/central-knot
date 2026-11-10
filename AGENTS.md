@@ -9,6 +9,15 @@ Central Knot is a configuration mover, not a secret manager or security product.
 - Preserve content and values as-is through supported format translation, synchronization, local storage, history and restoration. Embedded credentials are ordinary configuration values for this product.
 - Do not propose secret-management features as requirements, implementation work, acceptance criteria or review findings. Validate configuration syntax and supported formats without inspecting content for secrets.
 
+## Merging and releases
+
+- Merge finished, checked work into `next` without waiting to be asked. Nathan basically always wants changes merged; hold back only for a real reason (unfinished, checks failing, or he said to wait). A subagent working under an orchestrator hands its branch to the orchestrator, which merges.
+- Never tag, build or publish a release unless Nathan asks for one in the current conversation. An earlier request does not carry over to the next release.
+
+## Platform focus
+
+macOS is the only supported platform right now. Linux and Windows are not being supported yet: do not make a Linux or Windows run a required check, and do not spend time on Linux-only or Windows-only failures or features, unless Nathan asks.
+
 ## Mandatory subagent briefing
 
 Every delegated task must include the following paragraph directly in its task brief, whether it concerns research, specification writing, implementation, builds, testing or review. Do not rely on inherited conversation context or the child discovering this file.
