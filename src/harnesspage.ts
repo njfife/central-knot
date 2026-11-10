@@ -171,8 +171,8 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab) {
 function everyHarness(home: HomeView) {
   const done = outcomeBand();
   // What the read's catch-up copied is news here too, not only on the Skills tables.
-  const caught = caughtUpNames(home.manage, new Set(home.manage.notices.map(notice => notice.item)));
-  return h('div.page', {}, done || caught.length ? h('div.bands', {}, done, caught.length ? caughtUpBand(caught) : null) : null,
+  const caught = caughtUpBand(home.manage, caughtUpNames(home.manage, new Set(home.manage.notices.map(notice => notice.item))));
+  return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
     h('div.scroll.harness-scroll', { id: 'harnesses-scroll' },
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
         h('span', {}, 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.',

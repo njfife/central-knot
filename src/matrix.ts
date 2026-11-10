@@ -8,7 +8,7 @@ import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, appl
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, SkillFacts, SyncNotice, HarnessId } from './types.ts';
+import type { Change, ManageView, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
 
@@ -245,7 +245,7 @@ function changeBar(bulk = true) {
   const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
   const word = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   // On a harness's page the count names what it covers: only what that harness has.
-  const manageLabel = focus ? `Manage ${ready.length} ${word(ready.length)}` : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
+  const manageLabel = focus ? (ready.length === 1 ? `Manage ${ready[0].name ?? ready[0].key}` : `Manage ${ready.length} ${word(ready.length)}`) : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
   // On a harness's page Manage steps aside (1) under the Copies differ filter, where every row shown needs a copy choice that
   // Manage leaves out, so it would act only on rows not shown; and (2) while changes are queued, so the toolbar keeps one line
   // for the count, Discard and Apply all and the table does not move. It comes back after Apply all or Discard.
@@ -685,7 +685,9 @@ function legend(list: SampleSkill[]) {
     kind === 'agents' && list.some(skill => skill.managed && (skill.stopped ?? []).some(tool => !skill.off.includes(tool) && keptEdit(skill, tool)) && !view.draft.get(skill.key)?.resolve) ? entry('Keeps its own edit', (() => { const mark = swatch('present', true); mark.replaceChildren(icon('circle-pause', 11)); return mark; })()) : null,
     seen.has('differs') || seen.has('present-differs') ? entry('Copies differ', swatch('differs', true)) : null,
     seen.has('present') || seen.has('off') ? entry('Has its own copy', swatch('present', false)) : null,
-    seen.has('absent') ? entry('No copy', swatch('absent', false)) : null,
+    // A managed item's empty box is a tool left out of syncing (solid); an unmanaged item's is just no copy (dotted).
+    list.some(skill => !skill.managed && toolList().some(tool => cellOf(skill, tool) === 'absent')) ? entry('No copy', swatch('absent', false)) : null,
+    list.some(skill => skill.managed && toolList().some(tool => cellOf(skill, tool) === 'absent')) ? entry('Left out of syncing', h('span.legend-cell.legend-left-out', { 'aria-hidden': 'true' })) : null,
     seen.has('cannot') ? entry('Can’t load it', swatch('cannot', false)) : null,
     // The dashed blue Managed switch is a pending mark too.
     list.some(skill => view.draft.has(skill.key) && skill.managed && !committedOf(skill.key).managed) ? entry('Becomes Managed on Apply all', h('span.legend-switch', { 'aria-hidden': 'true' }, h('span.switch-knob'))) : null);
@@ -982,10 +984,17 @@ function helpBand(): HTMLElement | null {
     closeButton(() => { writeFlag(key); rerender(); }, { id: 'help-dismiss', label: 'Hide this tip' }));
 }
 
-/** What the catch-up after a read copied: shown on the Skills tables, and on the Harnesses list, so it is never news only in one place. */
-export function caughtUpBand(names: string[]): HTMLElement {
+/**
+ * What the catch-up after a read copied, and where: shown on the Skills tables and the Harnesses list, until dismissed (it
+ * comes back only for a different catch-up). Null once dismissed.
+ */
+export function caughtUpBand(manage: ManageView, items: string[]): HTMLElement | null {
+  const key = `caught-up:${items.join(',')}`;
+  if (!items.length || state.dismissed.has(key)) return null;
+  const tools = [...new Set(manage.caughtUp.filter(result => result.outcome === 'written' && items.includes(result.item) && result.harness).map(result => names[result.harness!]))];
   return h('div.band', { role: 'status' }, icon('check', 14, 'tone-success'),
-    h('span.band-text', {}, `Caught up: copied ${names.length > 4 ? `${names.slice(0, 4).join(', ')} and ${names.length - 4} more` : andList(names)} to the tools that were missing them. To stop a tool getting a skill back, turn that tool off for it.`));
+    h('span.band-text', {}, `Caught up: copied ${items.length > 4 ? `${items.slice(0, 4).join(', ')} and ${items.length - 4} more` : andList(items)} to ${tools.length ? andList(tools) : 'the tools that were missing them'}. To stop a tool getting a skill back, turn that tool off for it.`),
+    closeButton(() => { state.dismissed.add(key); rerender(); }, { id: 'caught-up-dismiss' }));
 }
 
 /** Preview-only, stopped and resume states, and what the last Apply all or catch-up did. */
@@ -1082,7 +1091,8 @@ function notices() {
     h('span.band-text', {}, caughtProblems.slice(0, 4).map(result => `${result.item}${result.harness ? ` (${names[result.harness]})` : ''}: ${result.message}`).join(' · ') + (caughtProblems.length > 4 ? ` · and ${caughtProblems.length - 4} more` : ''))));
   // A spread edit or a restore is already told by its notice; catch-up is only copies that were missing.
   const caught = caughtUpNames(manage, new Set(syncNotices.map(notice => notice.item)));
-  if (caught.length && !applied) bands.push(caughtUpBand(caught));
+  const caughtBand = applied ? null : caughtUpBand(manage, caught);
+  if (caughtBand) bands.push(caughtBand);
   const tip = helpBand();
   if (tip) bands.push(tip);
   return bands.length ? h('div.bands', {}, bands) : null;
@@ -1304,7 +1314,8 @@ export function designOverview(which: Kind = 'skills', harness?: Tool) {
   return h('div.page.ov-page', { 'data-variant': variant },
     h('div.toolbar', {}, h('div.find', {}, icon('search', 16, 'find-glyph'), find), filterBar(), h('div.toolbar-end', {}, focus && others(focus).length ? addFromButton(focus, shown) : null, changeBar())),
     notices(),
-    h('div.scroll.matrix', {},
+    // An id, so a redraw (a box ticked further down) keeps the scroll position (renderer.ts restores .scroll[id]).
+    h('div.scroll.matrix', { id: `matrix-${which}` },
       variant === 'c' ? shownStrip(shown) : null,
       withToolCount(h('div.ov', { role: 'table', 'aria-label': `${nouns[kind][1]} and where they sync`, 'data-tools': String(toolList().length) },
         h('div.ov-row.ov-head', { role: 'row' },
