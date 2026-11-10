@@ -6,20 +6,20 @@
 // Writing a destination changes only its name, description and prompt lines; every other byte of that file stays.
 // The safety rules are the skills engine's: unreadable is never absent, every write and removal checks the file first, every
 // replaced or removed file is kept whole for Restore, and deletions follow DEL-01 and DEL-02.
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 import { toolNames as shown } from './words.ts';
 
 type AgentTool = Exclude<HarnessId, 'pi-cli'>;
 export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
-const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
+export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
 export interface NeutralAgent { name: string; description: string; prompt: string; fields: Record<string, unknown> }
@@ -32,19 +32,18 @@ export const losses = (tool: HarnessId, origin: { tool: HarnessId; agent: Neutra
 
 const suffixes: Record<AgentTool, string> = { 'claude-cli': '.md', 'copilot-cli': '.agent.md', 'codex-cli': '.toml' };
 const folder = (context: ShareContext, tool: HarnessId) => join(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), 'agents');
-const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(folder(context, tool), `${name}${suffixes[tool]}`);
-const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
+export const fileFor = (context: ShareContext, tool: AgentTool, name: string) => join(folder(context, tool), `${name}${suffixes[tool]}`);
+export const keyOf = (name: string) => name.normalize('NFC').toLowerCase();
 /** Agent names become file names: no separators, no dot-files. */
-const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
-const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+export const safeName = (name: string) => /^[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/.test(name) && !name.includes('..');
 
 /** Identity across tools: what every tool holds. A tool's own fields never make two copies differ. */
-export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
+export const agentHash = (agent: Pick<NeutralAgent, 'name' | 'description' | 'prompt'>) => sha256(JSON.stringify([agent.name, agent.description, agent.prompt.replace(/\s+$/, '')]));
 
 /** Frontmatter: `---` on its own first line, then up to the next line that is `---` (at a line start, as Claude Code reads it). */
 const FRONT = /^(﻿?---\r?\n)((?:[^\n]*\n)*?)(---[ \t]*(?:\r?\n|$))([\s\S]*)$/;
 
-function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
+export function fromMarkdown(name: string, text: string): NeutralAgent | undefined {
   const match = FRONT.exec(text);
   if (!match) return undefined;
   const document = parseDocument(match[2].replace(/\r?\n$/, ''));
@@ -88,7 +87,7 @@ export async function readAgents(context: ShareContext, tool: AgentTool): Promis
     let agent: NeutralAgent | undefined;
     try { agent = tool === 'codex-cli' ? fromToml(name, text) : fromMarkdown(name, text); } catch { agent = undefined; }
     if (!agent) { problems.push(`${path} could not be read as an agent, so it is left alone.`); unreadable.set(keyOf(name), path); continue; }
-    entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha(text) });
+    entries.push({ name, key: keyOf(name), tool, file: path, text, agent, hash: agentHash(agent), bytes: sha256(text) });
   }
   return { entries, problems, unreadable, folderExists: true };
 }
@@ -172,7 +171,7 @@ async function inspectAgentRecord(home: string): Promise<{ record?: AgentRecord;
     return version === AGENTS_FORMAT_VERSION ? { record: record! } : {};
   } catch { return damaged; }
 }
-async function readAgentRecord(home: string): Promise<AgentRecord> {
+export async function readAgentRecord(home: string): Promise<AgentRecord> {
   return (await inspectAgentRecord(home)).record ?? { formatVersion: AGENTS_FORMAT_VERSION, items: {} };
 }
 const saveAgentRecord = (home: string, record: AgentRecord) => writeDurably(recordPath(home), `${JSON.stringify(record, null, 2)}\n`);
@@ -493,7 +492,7 @@ async function writeCopy(pass: AgentPass, log: PassLog, item: AgentRecordItem, {
   log.writes++;
   firstSeenMissingAt.delete(path);
   log.results.push({ item: item.name, harness: tool, outcome: 'written', replaced: here ? true : undefined, message: `${here ? `Now has ${harnesses[source.tool].name}'s version` : 'Added'}${oneWay ? `, with limits: ${harnesses[tool].name} has no equivalent for ${lost.join(', ')}` : ''}. Start a new session to use it.` });
-  return { copy: { tool, file: path, hash: agentHash(source.agent), bytes: sha(text), oneWay }, wrote: true };
+  return { copy: { tool, file: path, hash: agentHash(source.agent), bytes: sha256(text), oneWay }, wrote: true };
 }
 // A copy that is only behind (a write that failed, caught up now) holds an older version that History already has.
 async function keepOverwrittenForHistory(pass: AgentPass, item: AgentRecordItem, here: AgentEntry, historyWillName: boolean) {
@@ -683,7 +682,7 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
     } catch (error) { results.push({ item: item.name, harness: tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
     writes++;
     if (here) replaced.push({ tool, hash: here.hash });
-    copies.push({ tool, file: path, hash, bytes: sha(text), oneWay: oneWay || undefined });
+    copies.push({ tool, file: path, hash, bytes: sha256(text), oneWay: oneWay || undefined });
     results.push({ item: item.name, harness: tool, outcome: 'written', message: 'Restored.' });
   }
   Object.assign(item, { state: 'shared', hash, origin: version.tool, name: version.name, copies } satisfies Partial<AgentRecordItem>);
@@ -721,7 +720,7 @@ async function restoreReplacedOneWay(context: ShareContext, tools: HarnessId[], 
     } catch (error) { results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: error instanceof Error ? error.message : 'Could not write it.' }); continue; }
     writes++;
     replaced.push({ tool: loser.tool, hash: here.hash });
-    Object.assign(copy, { hash: loser.hash, bytes: sha(text), stopped: true } satisfies Partial<AgentCopy>);
+    Object.assign(copy, { hash: loser.hash, bytes: sha256(text), stopped: true } satisfies Partial<AgentCopy>);
     results.push({ item: item.name, harness: loser.tool, outcome: 'written', message: `Its edited copy is back; it doesn’t receive updates from ${harnesses[item.origin ?? past.winner?.tool ?? 'claude-cli'].name}.` });
   }
   if (!writes) return { stopped: results[0]?.message ?? 'Nothing was put back.', results, writes };

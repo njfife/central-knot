@@ -58,7 +58,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -108,8 +108,14 @@ export interface DesktopApi {
   pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
-  saveInstruction(tool: HarnessId, text: string, expected: string, home: string): Promise<InstructionSave>;
-  instructionVersion(tool: HarnessId, id: string): Promise<string | undefined>;
+  /** `restoring`: an earlier version put back (or a save undone): its base copy is judged again, counting as one Central Knot
+   *  wrote only when it matches a base text Central Knot kept; otherwise it stays protected as an edit. */
+  saveInstruction(tool: HarnessId, text: string, expected: string, home: string, restoring?: boolean): Promise<InstructionSave>;
+  instructionVersion(tool: HarnessId | 'base', id: string): Promise<string | undefined>;
+  /** The base instructions and the tools that get them (INS-03). */
+  instructionBase(): Promise<BaseView | null>;
+  applyBase(request: BaseApply, home: string): Promise<BaseResult>;
+  undoBase(undo: BaseUndo, home: string): Promise<BaseResult>;
   /** Marketplaces and installs; `fresh` fetches every Git marketplace again. */
   /** Marketplaces and installs; `readId` (a view's) reuses the read that view was built from, when it is the latest. */
   plugins(fresh?: boolean, readId?: number): Promise<PluginsView | null>;
@@ -128,6 +134,10 @@ export interface DesktopApi {
   onProfileSwitched(callback: (result: ProfileSwitchResult) => void): void;
   /** Turns one skill of an installed plugin off (`on` false) or back on in one tool, with that tool's own switch (ENB-06). */
   setPluginSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
+  /** What each tool without the plugin would get as its parts, and why each other part wouldn't go in. */
+  partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
+  /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses. */
+  pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string): Promise<PluginActionResult>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -308,6 +318,8 @@ export interface CatalogPlugin {
   remote?: { url: string; path: string; ref?: string; sha?: string };
   /** Its entry in marketplace.json as written, for the paths it lists (main process only; not sent to the page). */
   entry?: Record<string, unknown>;
+  /** No longer in the catalog, listed only because its parts are still in a tool, so they can be removed together. */
+  gone?: boolean;
 }
 
 /** A marketplace as read from its marketplace.json. */
@@ -351,7 +363,21 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean }
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+  /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
+  /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
+
+// ---------- A plugin's parts in a tool without plugins (parts.ts) ----------
+export type PartKind = 'skill' | 'mcp' | 'agent';
+/** One part put in a tool: a skill folder, an MCP entry or an agent file, by name, with the hash it had when it went in. */
+export interface PartItem { kind: PartKind; name: string; hash: string; /** What it was on disk once written (for an MCP entry, with the tool's own settings), to tell a later edit. */ seen?: string;
+  /** The person removed it from the tool: updates leave it out while the plugin still has it. */ removed?: true }
+/** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
+export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
+/** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. */
+export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string }
+/** A plugin's parts in one tool, as the Plugins page shows them. `changed`: the plugin's parts differ now from what went in. */
+export interface PartsState { version?: string; at: string; items: Pick<PartItem, 'kind' | 'name'>[]; changed?: boolean; /** The catalog's version now, when it differs. */ now?: string }
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;
@@ -377,6 +403,8 @@ export interface MarketplaceView {
   sourceLabel: string;
   /** Why Copilot CLI would refuse this whole marketplace (MKT-06), if it would. */
   copilotRefuses?: string;
+  /** Plugins whose parts are in tools that can't take the plugin itself, by plugin and tool. */
+  parts?: Record<string, Partial<Record<HarnessId, PartsState>>>;
 }
 
 /**
@@ -462,10 +490,57 @@ export interface InstructionFile {
   notes: string[];
   nextStep: string;
   /** Earlier versions kept before each save, newest first. */
-  versions: { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the file as it is now. */ differs: number }[];
+  versions: InstructionVersion[];
+  /** Other tools reading this same physical file (linked dotfiles): one destination for the base. */
+  sameFile: HarnessId[];
+  /** Set when this tool gets the base instructions (`chosen`) or its file holds a base block: its own text, its copy of the base,
+   *  and how that copy compares (see BaseHeld.state). */
+  base?: BaseHeld;
 }
+/** How a tool's file holds the base. */
+export interface BaseHeld {
+  /** The tool is on the base list and the base isn't blank (a blank base reaches no tool). */
+  chosen: boolean;
+  /** Its copy: the same as the base, the older base Central Knot last wrote there, edited in the file (anything else), or none. */
+  state: 'same' | 'older' | 'edited' | 'missing';
+  own: string;
+  copy?: string;
+  /** Its whole text is exactly the base text Central Knot left as plain text when the tool was taken off the list. Adding the
+   *  tool again moves that text back into the block instead of repeating it. */
+  leftPlain?: boolean;
+}
+export interface InstructionVersion { id: string; at: string; firstLine: string; lines: number; /** Lines that differ from the text as it is now. */ differs: number }
 
-export interface InstructionSave { stopped?: string; saved?: boolean }
+/** A tool file save: stopped (why), or saved; `problem`: something after the write could not be finished, said with the result. */
+export interface InstructionSave { stopped?: string; saved?: boolean; problem?: string }
+
+/** The base instructions: one text Central Knot keeps in every chosen tool's file, after that tool's own text. */
+export interface BaseView { path: string; text: string; hash: string; tools: HarnessId[]; versions: InstructionVersion[] }
+/** Set the base and its tools. `expected`: the base's hash when opened. `adopt`: the tool whose own text became the base.
+ *  `overwrite`: tools whose edited copy is replaced by the base. */
+export interface BaseApply { text: string; expected: string; tools: HarnessId[];
+  /** The files the review showed, by tool: the path and the hash it held then ('' for no file). Only these are written. */
+  seen: Partial<Record<HarnessId, { path: string; hash: string }>>;
+  adopt?: HarnessId; overwrite?: HarnessId[] }
+/** What an apply or undo did per tool. */
+export interface BaseResult { stopped?: string; /** Stopped because the base or a file changed since the review. */ changed?: boolean;
+  written: BaseWritten[];
+  /** Not written: its copy was edited there (for an undo: the file changed since), or the write failed. */
+  left: { tool: HarnessId; why: 'edited' | 'failed' }[];
+  /** Something after the files were written could not be finished, said with the result. */ problem?: string;
+  undo?: BaseUndo }
+/** One file written: where, the text before (null: the write created it) and the hash of the text after. */
+export interface BaseWritten { tool: HarnessId; path: string; before: string | null; afterHash: string }
+/**
+ * What Central Knot keeps beside base.md: which tools get the base; for each, the hash of the base copy it last wrote into that
+ * tool's file (a copy matching it but not the base is just older; anything else was edited there); and, for each tool taken off
+ * the list whose file then held nothing but the base, the hash of the plain text left there (only that exact text moves back
+ * into the block when the tool is added again).
+ */
+export interface BaseList { tools: HarnessId[]; written: Partial<Record<HarnessId, string>>; leftPlain: Partial<Record<HarnessId, string>> }
+/** Everything an apply changed, to put back: the base and its tools, and each file it wrote, by path. */
+export interface BaseUndo { text: string; list: BaseList;
+  /** The base's hash right after the apply: Undo runs only while it still holds that. */ baseHash: string; files: BaseWritten[] }
 
 /** How Central Knot looks: as macOS (or the system) is set, or always light or dark. */
 export type Appearance = 'system' | 'light' | 'dark';

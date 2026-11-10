@@ -452,6 +452,63 @@ if (wanted('plugin-versions')) {
   await size(1280, 800); await a.theme('dark');
 }
 
+// ---------- A plugin's parts in tools without plugins ----------
+if (wanted('parts')) {
+  begin('parts');
+  // Pi is in the home (it takes no plugins), and no tool's CLI is on this tour's PATH, so Codex and Copilot CLI can't
+  // take plugins here either: each can take a plugin's parts instead.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.run('window.centralKnot.refresh()');
+  const market = join(scratch, 'parts-market');
+  writeMarket(market);
+  await a.click('#nav-skills'); await a.click('#nav-plugins');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
+  await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Pi and Codex as ordinary items.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
+  await a.click('#plugin-back'); await shot(a, 'list-installed', 'Back to the list: Pi and Codex show the parts mark.');
+  await a.click('#nav-skills'); if (await a.has('#open-triage')) await a.click('#open-triage');
+  await shot(a, 'skills-provenance', 'Skills page, triage opened: it says which plugin it came from, with a way to its page.');
+  await a.click('#nav-mcp'); if (await a.has('#open-issues')) await a.click('#open-issues');
+  await shot(a, 'mcp-provenance', 'MCP page, issues opened: the server in Pi’s and Codex’s own formats, from issue-tracker.');
+  // The marketplace publishes a new version: the triage skill changed.
+  edit(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), text => text.replace('Follow the steps.', 'Follow the steps, then label it.'));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => text.replace('"version": "2.0.0"', '"version": "2.1.0"'));
+  await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  await a.click('#header-refresh'); await waitFor(a, `document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state === 'parts-changed'`, 60000);
+  await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and Refresh read it again: the parts show as out of date.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
+  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-updated', 'Clicked Update parts, then Apply all.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await shot(a, 'page-remove-chosen', 'Clicked Pi’s box: its parts are chosen for removal.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-removed', 'Clicked Apply all: Pi’s parts were removed together.');
+  if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'page-undone', 'Clicked Undo: Pi’s parts are back.'); }
+  await a.theme('light'); await shot(a, 'page-light', 'The same page in the light appearance.');
+  await a.click('#plugin-back'); await shot(a, 'list-light', 'The list in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await shot(a, `list-${width}`, `The list at ${width}×${height}.`);
+    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+    await shot(a, `page-${width}`, `issue-tracker’s page at ${width}×${height}.`);
+    await a.click('#plugin-back');
+  }
+  await size(1280, 800);
+}
+
 // ---------- Instructions ----------
 if (wanted('instructions')) {
   begin('instructions');
@@ -866,6 +923,72 @@ if (wanted('settings')) {
   }
   await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
   await size(1280, 800);
+}
+
+// ---------- Base instructions ----------
+if (wanted('base')) {
+  begin('base');
+  await a.click('#nav-instructions');
+  await waitFor(a, `!!document.querySelector('#base-card')`);
+  await a.run(`(() => { document.activeElement?.blur(); document.querySelector('#instructions-scroll').scrollTop = 0; })()`);
+  await shot(a, 'base-start', 'Clicked "Instructions". The Base instructions card is at the top; nothing is set up yet.');
+  await a.click('#base-from-claude-cli'); await shot(a, 'base-from-claude', 'Clicked "Claude Code’s CLAUDE.md" beside "or start from".');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Write tests for every bug fix.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await shot(a, 'base-review', 'Added a line to the draft and clicked "Review changes".');
+  await a.click('#base-plan-codex-cli'); await shot(a, 'base-review-file', 'Clicked "Show the file" on the Codex row.');
+  await a.click('#base-save'); await wait(400); await shot(a, 'base-saved', 'Clicked "Save and update 3 files".');
+  await a.click('#ins-base-codex-cli'); await a.run(`document.querySelector('#ins-base-codex-cli').scrollIntoView({ block: 'center' })`); await shot(a, 'base-strip', 'Scrolled to the Codex card and clicked "Show" on its base instructions strip.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = area.value.replace('Ask before adding a new dependency.', 'Ask before adding any new dependency or service.'); area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await shot(a, 'base-edit-review', 'Clicked "Edit" on the Base instructions card, changed one line, and clicked "Review changes".');
+  await a.click('#base-save'); await wait(400); await shot(a, 'base-edit-saved', 'Clicked "Save and update 3 files".');
+  edit(join(practice, '.codex/AGENTS.md'), text => text.replace('Run the tests', 'Run the full test suite').replace('- Write tests for every bug fix.', '- Write a test for every bug fix, first.'));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#base-restore-codex-cli')`);
+  await shot(a, 'base-edited-there', 'Outside the app, edited both Codex’s own text and its copy of the base in AGENTS.md, then clicked Refresh.');
+  await a.click('#base-diff-codex-cli'); await shot(a, 'base-edited-diff', 'Clicked "See the difference".');
+  await a.click('#base-usecopy-codex-cli'); await shot(a, 'base-usecopy-review', 'Clicked "Use AGENTS.md’s copy as the base…".');
+  await a.click('#base-back');
+  await a.click('#base-restore-codex-cli'); await shot(a, 'base-put-back-review', 'Cancelled, then clicked "Put the base back in AGENTS.md…" instead.');
+  await a.click('#base-save'); await shot(a, 'base-put-back', 'Clicked "Put the base back in AGENTS.md".');
+  await a.click('#outcome-undo-base'); await wait(400); await shot(a, 'base-undo', 'Clicked "Undo" on the result.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-tool-copilot-cli'); await a.click('#base-review');
+  await shot(a, 'base-untick-review', 'Clicked "Edit text or tools", unticked Copilot CLI, and clicked "Review changes".');
+  await a.click('#base-back'); await a.click('#base-cancel'); if (await a.has('#base-discard')) await a.click('#base-discard');
+  // Stop sharing with every tool: Codex's hand-edited copy stays, and its card offers taking the block out.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-stop');
+  await shot(a, 'base-stop-review', 'Clicked "Edit text or tools", then "Stop sharing with every tool…".');
+  await a.click('#base-save'); await shot(a, 'base-stopped', 'Clicked the save button.');
+  await a.run(`document.querySelector('#ins-base-out-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-stray-block', 'Scrolled to Codex: its edited block stays, with "Take the block out…".');
+  await a.click('#ins-base-out-codex-cli'); await shot(a, 'base-take-out-review', 'Clicked "Take the block out…".');
+  await a.click('#ins-back-codex-cli');
+  // Share it with every tool again for the steps below.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#base-tool-${tool}`);
+  await a.click('#base-review'); await a.click('#base-save');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'base-own-edit', 'Clicked "Edit" on Claude Code’s card: the editor holds only Claude Code’s own instructions.');
+  await a.click('#ins-cancel-claude-cli');
+  await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`); await shot(a, 'base-light', 'The same page in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
+    await shot(a, `base-${width}`, `The window at ${width}×${height}.`);
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.run(`document.querySelector('#base-restore-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-conflict', 'At 860×560: the edited copy in AGENTS.md with its difference and both choices.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- One more shared line.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await a.click('#base-review-discard');
+  await a.run(`document.querySelector('#base-review-discard-yes').scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-review-discard', 'At 860×560: Edit text or tools, added a line, Review changes, then Discard changes (the question is open).');
+  await a.click('#base-review-discard-yes');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
 }
 
 // ---------- Scrolled pages: sticky headers and toolbars (last: it adds a lot to the practice copy) ----------

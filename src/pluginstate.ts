@@ -1,12 +1,12 @@
 // Plugins: the page's state and actions. Marketplaces, what is chosen, what the last Apply all did, and where the person
 // is browsing all live here, apart from the other features; app.ts only routes to it and resets it when the home changes.
-import { announce, busy, rerender, state as app, tell } from './app.ts';
+import { announce, busy, rerender, setHome, state as app, tell } from './app.ts';
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
-import { resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, succeeded, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, marketTitle, matches } from './pluginstatus.ts';
+import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
+import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools } from './pluginstatus.ts';
 import { readInto, type Read } from './reads.ts';
-import type { HarnessId, MarketplaceView, PluginDetail, PluginsView } from './types.ts';
+import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
 
 const api = () => window.centralKnot;
 
@@ -45,6 +45,8 @@ export const market = {
   readmes: new Map<string, Read<string | undefined>>(),
   /** Each plugin's contents and README, by plugin key; null when its files couldn't be found. */
   details: new Map<string, Read<PluginDetail | null>>(),
+  /** For each plugin, what each tool without it would get as parts (parts.ts), read when its page opens. */
+  partsPlans: new Map<string, Read<Partial<Record<HarnessId, PartPlan[]>> | null>>(),
   /** The last contents read of each plugin, shown while it is read again after a new view (see markDetailsStale, shownDetail, forgetDetails). */
   previous: new Map<string, PluginDetail>(),
   /** Part descriptions opened with "Show more" and part files opened, by plugin key and part, so a redraw keeps them open (see toggleOpened). */
@@ -64,7 +66,7 @@ export function toggleOpened(key: string): void {
 /** A different home has other tools and other installs: nothing chosen, done or read in the last one carries over. */
 export function resetMarket(): void {
   resetPageData(market.read); market.problem = undefined; market.draft.clear(); market.lastRun = undefined; market.working = undefined; market.addOpen = false;
-  market.readmes.clear(); forgetDetails(); market.opened.clear(); market.nav = startNav();
+  market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); market.opened.clear(); market.nav = startNav();
 }
 
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
@@ -95,6 +97,7 @@ function readShown(): void {
     const last = market.details.get(key);
     if (last && !last.reading && (!last.value || last.value.problem)) market.details.delete(key);
     readPlugin(market.nav.plugin);
+    if (market.view?.tools.some(tool => partsTools.includes(tool))) readInto(market.partsPlans, key, () => api().partsPlan(source, market.nav.plugin!).catch(() => null), rerender);
   }
   else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
   // Plugins kept in other repositories say what they hold once read; the first few rows on screen are read ahead.
@@ -185,7 +188,7 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
   if (result === 'ready') {
     // Refresh all reads every README and every plugin's files again, and tries again those that couldn't be read (see
     // markDetailsStale); a folder marketplace is read from disk every time, so its README may have changed.
-    if (fresh) { market.readmes.clear(); forgetDetails(); }
+    if (fresh) { market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); }
     else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
     settleView();
     markReread();
@@ -221,6 +224,7 @@ export const addMarketplace = (source: string) => act('adding', async () => {
 function dropReads(source: string): void {
   market.readmes.delete(source);
   for (const key of [...market.details.keys()]) if (forSource(key, source)) market.details.delete(key);
+  for (const key of [...market.partsPlans.keys()]) if (forSource(key, source)) market.partsPlans.delete(key);
 }
 
 export const forgetMarketplace = (source: string) => act('removing', async () => {
@@ -243,7 +247,7 @@ export const openLink = (url: string) => void api().openExternal(url);
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
-  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill };
+  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill, parts: api().pluginParts };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
   try {
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });
@@ -252,18 +256,26 @@ export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'und
     market.lastRun = recordRun(market.draft, ops, result.done, undo, home);
     market.problem = result.stopped;
     showView(await api().plugins().catch(() => null));
+    // Parts are ordinary skills, MCP servers and agents: the other pages see them (and where they came from) at once.
+    if (ops.some(op => isParts(op.action))) {
+      setHome(await api().refresh().catch(() => null));
+      // What each tool now holds changed, so every plugin's plan (which names clash) is read again when shown.
+      market.partsPlans.clear();
+      readShown();
+    }
   }
   // A result that offers Undo is said in the toolbar, with its Undo; one that only tells (an Undo done) in the status bar.
   announce(market.problem ?? (resultSentence(resultLines(result.done, undo), undo) || 'Nothing changed.'), !market.problem && undoOps().length > 0);
 });
 
 /**
- * Closes the problem band: the stop reason and the failure lines go, and what succeeded stays, so the toolbar keeps its
- * result line and Undo.
+ * Closes the problem band: the stop reason and the problem lines go, and the run itself stays, so the toolbar keeps its
+ * result line and Undo (including a failed parts run's, for what it did change).
  */
 export function dismissProblems(): void {
   market.problem = undefined;
-  if (market.lastRun) market.lastRun = { ...market.lastRun, done: market.lastRun.done.filter(entry => succeeded(entry.report)) };
+  // Closed, not dropped: a failed run that still changed something (part of a parts run) keeps its Undo.
+  if (market.lastRun) market.lastRun = { ...market.lastRun, problemsClosed: true };
 }
 
 /** The way back from the last run, while it is for the home on screen: its reversal, or what an Undo didn't get to. */

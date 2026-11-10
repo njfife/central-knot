@@ -1,7 +1,7 @@
 // What a marketplace says about itself and about each plugin, read from its own files: READMEs, where each plugin comes
 // from, and what each plugin holds. Read only; nothing here runs a plugin, a hook or a server.
 // Every file read must resolve, links followed, to a path inside the marketplace (or the plugin's own repository).
-import { open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
 import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
@@ -12,6 +12,8 @@ const README_LIMIT = 60_000;
 const READ_LIMIT = 256 * 1024;
 /** A marketplace.json lists every plugin, so it may be far larger than any other file read here. */
 const MANIFEST_LIMIT = 8 * 1024 * 1024;
+/** Values only Claude Code fills in (the plugin's own folder, its data folder, install-time settings): such a server can't run on its own. */
+export const PLUGIN_ONLY = /\$\{(CLAUDE_PLUGIN_ROOT|CLAUDE_PLUGIN_DATA|user_config\.)/;
 /** Where a marketplace describes itself, relative to its root. */
 export const MANIFEST = '.claude-plugin/marketplace.json';
 
@@ -62,6 +64,13 @@ export async function readManifest(root: string): Promise<{ manifest: Record<str
   return manifest ? { manifest } : { problem: 'Its marketplace.json could not be read as JSON.' };
 }
 const listInside = async (root: string, folder: string) => ((await inside(root, folder)) ? readdir(folder).catch(() => [] as string[]) : [] as string[]);
+/** Whether something is at this path, readable or not: a file that is there but can't be read is not absent. */
+const present = (path: string) => lstat(path).then(() => true, error => error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR');
+/** The same listing, noting in `unread` ('*', when given) a folder that is there but can't be listed or is outside. */
+const listOrNote = async (root: string, folder: string, unread?: string[]) => {
+  if (!(await inside(root, folder))) { if (unread && await present(folder)) unread.push('*'); return [] as string[]; }
+  return readdir(folder).catch(error => { if (unread && !['ENOENT', 'ENOTDIR'].includes(String(error?.code))) unread.push('*'); return [] as string[]; });
+};
 
 /** The README in this folder, cut to a readable size. */
 export async function readmeIn(folder: string, root = folder): Promise<string | undefined> {
@@ -79,36 +88,38 @@ export const skillName = (body: string, dir: string) => skillPart(body, dir).nam
 /**
  * Skills from the given paths: each one a skill folder (with SKILL.md) or, with `subfolders`, a folder of skill folders.
  * Each part's `path` is its folder relative to the plugin's `folder` ("." for the folder itself), the same in every copy.
+ * A skill whose SKILL.md is there but can't be read, or a folder that can't be listed ('*'), is named in `unread`, when given.
  */
-async function skillsIn(root: string, folder: string, paths: string[], subfolders = true): Promise<NamedPart[]> {
+async function skillsIn(root: string, folder: string, paths: string[], subfolders = true, unread?: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
     const path = relative(folder, dir) || '.';
     // A folder listed twice (skills/ and skills/pdf) is one skill.
     if (found.some(part => part.path === path)) return true;
     const body = await partFile(root, join(dir, 'SKILL.md'));
-    if (body === undefined) return false;
+    if (body === undefined) { if (unread && await present(join(dir, 'SKILL.md'))) unread.push(basename(dir)); return false; }
     found.push({ ...skillPart(body, dir), text: body, path });
     return true;
   };
-  for (const path of paths) if (!(await add(path)) && subfolders) for (const name of await listInside(root, path)) await add(join(path, name));
+  for (const path of paths) if (!(await add(path)) && subfolders) for (const name of await listOrNote(root, path, unread)) await add(join(path, name));
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
 /**
  * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down.
- * Each part's `path` is its file relative to the plugin's `folder`.
+ * Each part's `path` is its file relative to the plugin's `folder`. A file listed there that can't be read, or a folder
+ * that can't be listed ('*'), is named in `unread`, when given.
  */
-async function markdownIn(root: string, folder: string, paths: string[]): Promise<NamedPart[]> {
+async function markdownIn(root: string, folder: string, paths: string[], unread?: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
-  const filesIn = async (folder: string) => (await listInside(root, folder)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
+  const filesIn = async (folder: string) => (await listOrNote(root, folder, unread)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
   for (const path of paths) {
     const files = path.endsWith('.md') ? [path]
-      : [...(await filesIn(path)), ...(await Promise.all((await listInside(root, path)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
+      : [...(await filesIn(path)), ...(await Promise.all((await listOrNote(root, path, unread)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
     for (const file of files) {
       if (found.some(part => part.path === relative(folder, file))) continue;
       const body = await partFile(root, file);
-      if (body === undefined) continue;
+      if (body === undefined) { if (unread && await present(file)) unread.push(basename(file, '.md')); continue; }
       const meta = nameAndDescription(body);
       found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body, path: relative(folder, file) });
     }
@@ -137,12 +148,20 @@ export const codexManifest = async (folder: string) => (await jsonInside(folder,
  * the section under its own key (`{"mcpServers": {…}}`) or be the section itself (`{"github": {…}}`); plugins in the
  * wild use both, so both are read.
  */
-async function section(root: string, folder: string, named: unknown, key: string, defaultFile: string): Promise<Record<string, unknown>> {
+async function section(root: string, folder: string, named: unknown, key: string, defaultFile: string): Promise<{ values: Record<string, unknown>; unread: boolean }> {
   const unwrap = (value: Record<string, unknown> | undefined) => record(value?.[key]) ?? value ?? {};
-  const fromFile = async (path: string) => unwrap(await jsonInside(root, resolve(folder, path)));
+  let unread = false;
+  const fromFile = async (path: string) => {
+    const value = await jsonInside(root, resolve(folder, path));
+    // There, but not readable as a whole JSON object, or holding the section as something other than an object
+    // (`"mcpServers": null`): some entries may be missing from what is returned.
+    if (!value && await present(resolve(folder, path))) unread = true;
+    if (value && key in value && !record(value[key])) { unread = true; return {}; }
+    return unwrap(value);
+  };
   const paths = typeof named === 'string' ? [named] : Array.isArray(named) ? strings(named) ?? [] : [];
   const parts = [await fromFile(defaultFile), ...(await Promise.all(paths.map(fromFile))), unwrap(record(named))];
-  return Object.assign({}, ...parts);
+  return { values: Object.assign({}, ...parts), unread };
 }
 
 /**
@@ -160,7 +179,7 @@ const listedPaths = (folder: string, ...lists: unknown[]) =>
   [...new Set(lists.flatMap(list => strings(list) ?? Object.values(record(list) ?? {}).map(item => text(record(item)?.source)).filter(Boolean)).map(path => resolve(folder, path)))];
 
 /** A plugin's skills, read by each tool's rule (see pluginContents). */
-async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs): Promise<NamedPart[]> {
+async function skillsOf(folder: string, entry: Record<string, unknown>, root: string, readAs: ReadAs, unread?: string[]): Promise<NamedPart[]> {
   const { own, added } = await manifestOf(folder, entry, root, readAs);
   const skillsFolder = join(folder, 'skills');
   const isListed = own.skills !== undefined || added.skills !== undefined;
@@ -174,9 +193,9 @@ async function skillsOf(folder: string, entry: Record<string, unknown>, root: st
     // Otherwise skills/ is always read, with every listed folder added.
     return listedPaths(folder, skillsFolder, own.skills, added.skills);
   };
-  const listed = await skillsIn(root, folder, skillPaths());
+  const listed = await skillsIn(root, folder, skillPaths(), true, unread);
   // Claude Code: a plugin with no skills/ (an empty one counts as none) and no list may be one skill, SKILL.md at its root.
-  return listed.length || readAs.codex || isListed ? listed : skillsIn(root, folder, [folder], false);
+  return listed.length || readAs.codex || isListed ? listed : skillsIn(root, folder, [folder], false, unread);
 }
 
 /**
@@ -205,9 +224,9 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   const { own, added } = await manifestOf(folder, entry, root, readAs);
   const declared: Record<string, unknown> = { ...own, ...added, version: text(own.version) || added.version };
   const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : listedPaths(folder, own[key], added[key]));
-  const hooks = await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json');
-  const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
-  const lsp = await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json');
+  const hooks = (await section(root, folder, declared.hooks, 'hooks', 'hooks/hooks.json')).values;
+  const servers = (await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json')).values;
+  const lsp = (await section(root, folder, declared.lspServers, 'lspServers', '.lsp.json')).values;
   return {
     skills: await skillsOf(folder, entry, root, readAs),
     commands: await markdownIn(root, folder, listedOr('commands', join(folder, 'commands'))),
@@ -219,6 +238,42 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     bin: (await listInside(root, folder)).includes('bin'),
     version: text(declared.version) || undefined,
   };
+}
+
+/** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
+export interface PluginFiles {
+  /** The plugin's folder: a server's relative paths are checked against it. */
+  folder: string;
+  skills: { name: string; dir: string }[];
+  agents: { name: string; text: string; whole: boolean }[];
+  servers: Record<string, unknown>;
+  /**
+   * What is there but couldn't be read: skills and agents by name, or '*' when a folder of them (or plugin.json, which may
+   * name other folders) couldn't be read; `servers` when a servers file isn't readable JSON. An update keeps those parts
+   * as installed rather than reading their absence as the plugin dropping them.
+   */
+  unread: { skills: string[]; agents: string[]; servers: boolean };
+}
+/** A plugin's parts as Claude Code reads them (the same readers as pluginContents), with the files to copy. */
+export async function pluginFiles(folder: string, entry: Record<string, unknown>, root: string): Promise<PluginFiles> {
+  const { own, added } = await manifestOf(folder, entry, root, {});
+  const declared: Record<string, unknown> = { ...own, ...added };
+  const listedOr = (key: string, fallback: string) => (own[key] === undefined && added[key] === undefined ? [fallback] : listedPaths(folder, own[key], added[key]));
+  // An unreadable plugin.json may declare other folders for any kind: every kind's contents count as unknown then.
+  const manifest = join(folder, '.claude-plugin/plugin.json');
+  const manifestUnread = !(await pluginManifest(folder, root)) && await present(manifest);
+  const servers = await section(root, folder, declared.mcpServers, 'mcpServers', '.mcp.json');
+  const unread = { skills: manifestUnread ? ['*'] : [] as string[], agents: manifestUnread ? ['*'] : [] as string[], servers: servers.unread || manifestUnread };
+  const skills = (await skillsOf(folder, entry, root, {}, unread.skills)).map(part => join(folder, part.path));
+  const agents: PluginFiles['agents'] = [];
+  for (const part of await markdownIn(root, folder, listedOr('agents', join(folder, 'agents')), unread.agents)) {
+    // Read again with its size known: a part copied as an item is never a cut copy.
+    const file = join(folder, part.path);
+    const read = await readInside(root, file, PART_FILE_LIMIT);
+    if (read) agents.push({ name: basename(file, '.md'), text: read.text, whole: read.whole });
+    else unread.agents.push(basename(file, '.md'));
+  }
+  return { folder, skills: skills.map(dir => ({ name: basename(dir), dir })), agents, servers: servers.values, unread };
 }
 
 /**

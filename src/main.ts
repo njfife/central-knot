@@ -13,14 +13,15 @@ import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, 
 import { presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
-import { instructionsView, instructionVersion, saveInstruction } from './instructions.ts';
+import { applyBase, baseView, instructionsView, instructionVersion, saveInstruction, undoBase } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
+import { readParts } from './parts.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 
 const smoke = process.argv.includes('--smoke-test');
@@ -434,7 +435,7 @@ async function syncThenView(explicit = false): Promise<HomeView> {
   const writable = (await writeAccess(shared)).allowed;
   const readId = handoff.id + 1;
   const made: HomeView = {
-    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles,
+    mode: current!.mode, label: current!.label, home: current!.home, snapshots, syncOn, practice: practiceAvailable(), readId, profiles, parts: await readParts(current!.home),
     manage: await manageView(shared, { caughtUp: caughtUp.filter(result => result.outcome === 'written' || result.outcome === 'removed' || result.outcome === 'failed' || result.chooseAgain), notices, snapshots }),
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
@@ -671,6 +672,24 @@ const logFailure = (channel: string, error: unknown) => log(`request ${channel} 
 
 /** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
+const notOpenHome = 'The home on screen is not the one open. Nothing was saved. Read it again.';
+const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && ids(value).length === value.length;
+const isTool = (value: unknown): value is HarnessId => isTools([value]);
+/** An object keyed by tool ids whose every value passes `valid`. */
+const isToolMap = <T>(value: unknown, valid: (entry: T) => boolean) => !!value && typeof value === 'object' && isTools(Object.keys(value)) && Object.values(value as Record<string, T>).every(valid);
+const isBaseApply = (value: unknown): value is BaseApply => {
+  const request = value as BaseApply;
+  return !!request && typeof request.text === 'string' && typeof request.expected === 'string' && isTools(request.tools)
+    && isToolMap(request.seen, (seen: { path?: unknown; hash?: unknown }) => typeof seen?.path === 'string' && typeof seen.hash === 'string')
+    && (request.adopt === undefined || isTool(request.adopt)) && (request.overwrite === undefined || isTools(request.overwrite));
+};
+const isBaseUndo = (value: unknown): value is BaseUndo => {
+  const undo = value as BaseUndo;
+  const hashes = (value: unknown) => isToolMap(value, (hash: unknown) => typeof hash === 'string');
+  return !!undo && typeof undo.text === 'string' && typeof undo.baseHash === 'string' && !!undo.list && isTools(undo.list.tools) && hashes(undo.list.written) && hashes(undo.list.leftPlain)
+    && Array.isArray(undo.files) && undo.files.every(file => isTool(file?.tool) && typeof file.path === 'string' && typeof file.afterHash === 'string' && (file.before === null || typeof file.before === 'string'));
+};
+
 /** Runs `work` after everything queued before it; its failure reaches the caller but never stalls the queue. */
 function queued<T>(work: () => Promise<T>): Promise<T> {
   const next = queue.then(work);
@@ -801,6 +820,7 @@ app.whenReady().then(async () => {
     dataDir: app.getPath('userData'),
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
+    share: () => context(),
   });
   // The window is read in the same turn as the events, so History's caption always describes the events it shows.
   handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
@@ -812,10 +832,14 @@ app.whenReady().then(async () => {
     ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
-  handle('instructions:save', async (tool, text, expected, home) => (home === current?.home && typeof tool === 'string' && typeof text === 'string' && typeof expected === 'string'
-    ? saveInstruction(context(), await read(), tool as HarnessId, text, expected)
-    : { stopped: 'The home on screen is not the one open. Nothing was saved. Read it again.' }));
-  handle('instructions:version', async (tool, id) => (current && typeof tool === 'string' && typeof id === 'string' ? instructionVersion(context(), tool as HarnessId, id) : undefined));
+  handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
+    ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
+    : { stopped: notOpenHome }));
+  handle('instructions:version', async (tool, id) => (current && (tool === 'base' || isTool(tool)) && typeof id === 'string' ? instructionVersion(context(), tool, id) : undefined));
+  handle('instructions:base', async () => (current ? baseView(context()) : null));
+  const otherHome = { stopped: notOpenHome, written: [], left: [] };
+  handle('instructions:apply-base', async (request, home) => (home === current?.home && isBaseApply(request) ? applyBase(context(), await read(), request) : otherHome));
+  handle('instructions:undo-base', async (undo, home) => (home === current?.home && isBaseUndo(undo) ? undoBase(context(), await read(), undo) : otherHome));
   handle('history:restore', async (eventId, resume, home, choice) => (home === current?.home && typeof eventId === 'string'
     ? await (async () => {
       const past = (await readHistory(context())).find(entry => entry.id === eventId);
