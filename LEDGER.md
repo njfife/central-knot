@@ -713,3 +713,9 @@ SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag 
 - **7409a6a:** e2e checks that an Undo from History leaving a hand-changed switch says so where it can be seen.
 
 **Validation on 7409a6a.** 349 unit tests. Linux e2e 374/374; Mac packaged e2e 478/478.
+
+- **a618a4e:** on this computer a tool is here only when its CLI or desktop app is found; a settings folder left behind (after an uninstall) is no longer the tool, so it has no column, box, menu or note anywhere and sync writes nothing to it. Harnesses lists it as "Not found · only its folder is here". A chosen folder still goes by the folder. CLIs are looked for on the PATH the person's terminal has (asked once of the login shell), so one installed through nvm, bun or npm's own prefix is found when the app is opened from Finder.
+- **11b6ce4:** Skills: a tool with no copy of its own that has the skill through an installed plugin shows a "Through a plugin" box (it opens the plugin's page) instead of "No copy", and sync, Add and Restore place no separate copy beside the plugin's. A plugin's parts in Pi and the plugin itself in Claude Code or Copilot CLI now read as one skill.
+- **b148013:** the same for MCP servers and agents a tool has through a plugin (Claude Code and Copilot CLI).
+
+**Validation on b148013.** 352 unit tests. Linux e2e 401/401.
