@@ -42,10 +42,11 @@ export const keepCaret = (id: string, at: number, redraw: () => void) => {
   area?.focus(); area?.setSelectionRange(at, at);
 };
 
-/** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control. */
-export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }) {
+/** "Discard your changes to X?" with Discard and Keep: each drops or keeps the draft, redraws, then focuses the given control.
+ *  `whole`: what is dropped is a whole thing rather than changes to one ("Discard Codex’s draft?"). */
+export function discardConfirm(what: string, ids: { discard: string; keep: string }, keepLabel: string, discard: { run: () => void; focus: string }, keep: { run: () => void; focus: string }, whole = false) {
   const then = (step: { run: () => void; focus: string }) => () => { step.run(); rerender(); document.getElementById(step.focus)?.focus(); };
-  return h('span.ins-confirm', { role: 'group', 'aria-label': 'Discard changes?' }, h('span.ins-confirm-text', {}, `Discard your changes to ${what}?`),
+  return h('span.ins-confirm', { role: 'group', 'aria-label': 'Discard changes?' }, h('span.ins-confirm-text', {}, whole ? `Discard ${what}?` : `Discard your changes to ${what}?`),
     button({ variant: 'outline', size: 'small', label: 'Discard', id: ids.discard, onclick: then(discard) }),
     button({ variant: 'ghost', size: 'small', label: keepLabel, id: ids.keep, onclick: then(keep) }));
 }

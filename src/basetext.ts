@@ -67,17 +67,23 @@ export function withoutBase(text: string): string {
  * What one tool's file becomes when `base` is saved (a plan, not a write): the block added or replaced (`chosen`), or taken out (not chosen). `held`
  * is how the file holds the base now. A copy edited in the file is left as it is (`edited`), chosen or not, unless the action is
  * 'putBack'. 'adopt': this file's own text became the base, so it moves into the block; plain base text Central Knot left in the
- * file (`held.leftPlain`) moves back the same way, so it is never repeated. The renderer previews with this and the main
- * process writes with it, so the review shows what is written. `held` is judged against the base as stored now, not `base`.
+ * file (`held.leftPlain`) moves back the same way, so it is never repeated. `own`: a draft sorted this file's own text into the
+ * base and what stays only here, so its own text becomes that (a chosen file only: one not chosen keeps its own text). The
+ * renderer previews with this and the main process writes with it, so the review shows what is written. `held` is judged
+ * against the base as stored now, not `base`.
  */
-export function fileWithBase(text: string, base: string, { chosen, held, action = 'save' }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack' }): { next: string } | { left: 'edited' } {
+export function fileWithBase(text: string, base: string, { chosen, held, action = 'save', own }: { chosen: boolean; held?: BaseHeld; action?: 'save' | 'adopt' | 'putBack'; own?: string }): { next: string } | { left: 'edited' } {
   const { copy } = splitBase(text);
   if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { left: 'edited' };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
-  // Text that is (or was) the base moves into the block: what the file had outside the block becomes nothing of its own.
-  const intoBlock = action === 'adopt' || held?.leftPlain;
-  return { next: withBase(intoBlock ? withOwn(text, '') : text, base) };
+  // A draft's own text for this file is what it keeps. Otherwise, text that is (or was) the base moves into the block: what
+  // the file had outside the block becomes nothing of its own.
+  const ownAfter = own !== undefined ? own : action === 'adopt' || held?.leftPlain ? '' : undefined;
+  return { next: withBase(ownAfter === undefined ? text : withOwn(text, ownAfter), base) };
 }
+
+/** A draft's own text for the file `readers` read: the one given for any of them. */
+export const draftedOwn = (readers: HarnessId[], own: Partial<Record<HarnessId, string>> | undefined) => readers.map(reader => own?.[reader]).find(text => text !== undefined);
 
 /** Every tool reading one physical file: the tool it is listed under, then the others linked to the same file. */
 export const readersOfFile = (tool: HarnessId, sameFile: HarnessId[]) => [tool, ...sameFile];
@@ -87,4 +93,14 @@ export const readersOfFile = (tool: HarnessId, sameFile: HarnessId[]) => [tool, 
 export function baseAction(readers: HarnessId[], { adopt, overwrite }: { adopt?: HarnessId; overwrite?: HarnessId[] }): 'save' | 'adopt' | 'putBack' {
   if (adopt && readers.includes(adopt)) return 'adopt';
   return overwrite?.some(tool => readers.includes(tool)) ? 'putBack' : 'save';
+}
+
+/**
+ * The lines of a file's own text that a draft carries nowhere word for word: neither in the base nor in what it kept for that
+ * file. The tool that wrote the draft reworded them, merged them or left them out; a review shows them. Blank lines and
+ * headings don't count: a heading says nothing by itself, and sorting moves lines under other headings.
+ */
+export function linesNotCarried(before: string, base: string, own: string): string[] {
+  const carried = new Set(`${base}\n${own}`.split('\n').map(line => line.trim()));
+  return before.split('\n').map(line => line.trim()).filter(line => line && !/^#{1,6}\s/.test(line) && !carried.has(line));
 }

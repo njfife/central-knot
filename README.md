@@ -56,6 +56,8 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 
 **Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
 
+**Draft with a tool**: instead of writing the base yourself, have one of your tools write a first draft from the instruction files you already have. Choose the tool (any with a CLI on this computer); it runs once and sorts your files into a base for every tool and what stays only in each tool's file. You see the draft, including any line it did not carry over as written, and can change it; one **Save** then sets the base and updates every file, with **Undo**. Nothing is saved before that.
+
 ### Plugins
 
 - **Marketplaces**: add one by Git URL, `owner/repo` or folder. A Git address is checked (`git ls-remote`) before it is added. Claude-format and Codex marketplaces (including `.agents/plugins/marketplace.json`) are read.
@@ -120,10 +122,10 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 ```
 
 - **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`.
-- **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron] [--only shell,skills,…]` takes screenshots of each feature on the Practice copy, at 860×560 up to 2560×1440, dark and light.
+- **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron]` is the light tour: the app opens on the Practice copy and each page is opened once, one picture each, in a few seconds. `--only shell,skills,…` takes the pictures of the named features; `--full` takes every feature at 860×560 up to 2560×1440, dark and light (about ten minutes, for a new release).
 - **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped). `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
 - **Smoke:** `npm run smoke:mac` opens a hidden window on fixture data only.
-- **CI:** `.github/workflows/mac.yml`.
+- **CI:** `.github/workflows/mac.yml` runs the unit tests, packages the app, then runs the light tour (its pictures are the run's `light-tour` download) and the end-to-end checks against the packaged app. It runs on every push to `next`, and on any pushed branch with `gh workflow run mac.yml --ref <branch>`.
 
 ### Packaging and release
 
