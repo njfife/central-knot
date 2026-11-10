@@ -326,7 +326,7 @@ if (wanted('repo')) {
   await a.click('#header-refresh'); await waitFor(a, idle, 30000); await a.settle();
   await shot(a, 'repo-sync-off-removal', 'Turned Automatic sync off; the repo deleted the reviewer agent, then "Refresh": the deletion waits for Automatic sync, so nothing is offered to pull but the newer commit.');
   await a.click('#repo-pull'); await waitFor(a, idle, 30000); await a.settle();
-  await shot(a, 'repo-try-again', 'Clicked "Pull" (to the newer commit): the deletion still waits for Automatic sync, and the band says it didn’t come in.');
+  await shot(a, 'repo-try-again', 'Clicked "Pull": this computer moved to the newer commit, and the band says reviewer still waits for Automatic sync.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
   await shot(a, 'repo-try-again-860', 'The same at 860×560.');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();

@@ -101,85 +101,119 @@ test('Push puts the Managed set in the repo’s layout; another computer pulls i
   } finally { await box.cleanup(); }
 });
 
-test('An MCP server edited and an agent deleted on one computer arrive on the other through Pull', async () => {
+/** Two computers on one repo: the first pushed a Managed MCP server and agent, and the second pulled them. */
+async function serverAndAgentOnTwo(box: Awaited<ReturnType<typeof world>>) {
+  const first = await box.home('first');
+  await seedServerAndAgent(first);
+  await connectRepo(first, box.remote, '');
+  await pushRepo(first);
+  const second = await box.home('second');
+  await connectRepo(second, box.remote, '');
+  await pullRepo(second);
+  return { first, second, firstPlanner: join(first.home, '.claude/agents/planner.md'), secondPlanner: join(second.home, '.claude/agents/planner.md') };
+}
+const edit = async (path: string, from: string, to: string) => writeFile(path, (await readFile(path, 'utf8')).replace(from, to));
+
+test('An MCP server’s edit and an agent setting only Claude Code has arrive through Pull; that setting’s Pull has its own Undo and Redo', async () => {
   const box = await world();
   try {
-    const first = await box.home('first');
-    await seedServerAndAgent(first);
-    await connectRepo(first, box.remote, '');
-    await pushRepo(first);
-    const second = await box.home('second');
-    await connectRepo(second, box.remote, '');
-    await pullRepo(second);
-
-    // A setting only Claude Code has (the agent's model) travels too.
-    const firstPlanner = join(first.home, '.claude/agents/planner.md');
-    await writeFile(firstPlanner, (await readFile(firstPlanner, 'utf8')).replace('model: opus', 'model: sonnet'));
-    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['planner:changed']);
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
+    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
+    await applyMcp({ ...first, settleMs: 0 }, tools, []);
+    await edit(firstPlanner, 'model: opus', 'model: sonnet');
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:changed', 'planner:changed']);
     await pushRepo(first);
     await pullRepo(second);
-    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+    assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);
+    assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
     const settings = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.via === 'repo').at(-1)!;
     await applyAgents(second, tools, []);
     assert.equal((await undoSettingsChange(second, settings.id)).stopped, undefined, 'Undo still works after a sync pass');
-    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
+    assert.match(await readFile(secondPlanner, 'utf8'), /model: opus/, 'Undo of a settings-only pull puts the earlier file back');
     const redo = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
     assert.equal((await undoSettingsChange(second, redo.id)).stopped, undefined, 'and Redo puts the pulled one back');
-    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+    assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
     // An edit made since is never undone away.
     const redone = (await readHistory(second.home)).find(event => event.undoneBy === undefined && event.kind === 'restored' && event.key === 'agent:planner')!;
-    const plannerHere = join(second.home, '.claude/agents/planner.md');
-    await writeFile(plannerHere, `${await readFile(plannerHere, 'utf8')}Also check the tests.\n`);
+    await writeFile(secondPlanner, `${await readFile(secondPlanner, 'utf8')}Also check the tests.\n`);
     assert.match((await undoSettingsChange(second, redone.id)).stopped ?? '', /edited since/);
-    await writeFile(plannerHere, (await readFile(plannerHere, 'utf8')).replace('Also check the tests.\n', ''));
+  } finally { await box.cleanup(); }
+});
 
-    // The repo changes an agent this computer can't read just now: Pull leaves it for later rather than losing it, and once the copy
-    // reads again, the repo's version comes in (never overwritten by the next Push).
+test('A repo change to an agent this computer can’t read just now waits, and comes in once its copy reads again', async () => {
+  const box = await world();
+  try {
+    const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
     const secondCopilot = join(second.home, '.copilot/agents/planner.agent.md');
     const readable = await readFile(secondCopilot, 'utf8');
     await writeFile(secondCopilot, 'half saved');
-    await writeFile(firstPlanner, (await readFile(firstPlanner, 'utf8')).replace('Plan carefully.', 'Plan in small steps.'));
+    await edit(firstPlanner, 'Plan carefully.', 'Plan in small steps.');
     await applyAgents(first, tools, []);
     await pushRepo(first);
     assert.equal((await pullRepo(second)).pulled, 0, 'a change left waiting is not counted as pulled');
     assert.deepEqual(live(await repoView(second)).incoming.map(row => [row.name, !!row.held]), [['planner', true]]);
     await writeFile(secondCopilot, readable);
     await pullRepo(second);
-    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /Plan in small steps/);
-
-    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
-    await rm(join(first.home, '.claude/agents/planner.md'));
-    await applyMcp({ ...first, settleMs: 0 }, tools, []);
-    await applyAgents(first, tools, [], { settleMs: 0 });
-    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:changed', 'planner:removed']);
-    await pushRepo(first);
-
-    // With Sync off, the agent's deletion can't spread, so Pull leaves every copy and says why; with Sync on, it comes in.
-    assert.match((await pullRepo(second, { syncOn: false })).results.map(result => result.message).join(' '), /waits for Automatic sync/);
-    assert.equal(Object.keys((await agentsView(second, tools)).servers[0].copies).length, 2, 'no copy removed while the deletion waits');
-    const view = live((await pullRepo(second)).view);
-    assert.deepEqual([view.incoming, view.outgoing], [[], []]);
-    assert.deepEqual(JSON.parse(await readFile(join(second.home, '.copilot/mcp-config.json'), 'utf8')).mcpServers.docs.args, ['--port', '8']);
-    assert.equal((await agentsView(second, tools)).servers.length, 0);
-    // Restore of the pulled deletion puts Claude Code's own file back, settings and all.
-    const deleted = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
-    assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
-    assert.match(await readFile(join(second.home, '.claude/agents/planner.md'), 'utf8'), /model: sonnet/);
+    assert.match(await readFile(secondPlanner, 'utf8'), /Plan in small steps/);
   } finally { await box.cleanup(); }
 });
 
-test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back', async () => {
+test('Deletions of an MCP server and an agent wait while Automatic sync is off, come in once it is on, and Restore brings Claude Code’s own file back', async () => {
   const box = await world();
   try {
-    const first = await box.home('first');
-    await skill(first, '.claude/skills', 'solo', skillText('solo', 'Before.'));
-    await applyChanges(first, [{ key: 'solo', managed: true, off: ['copilot-cli'] }]);
-    await connectRepo(first, box.remote, '');
+    const { first, second, secondPlanner } = await serverAndAgentOnTwo(box);
+    await edit(join(first.home, '.claude/agents/planner.md'), 'model: opus', 'model: sonnet');
     await pushRepo(first);
-    const author = join(box.base, 'author');
-    execFileSync('git', ['clone', '--quiet', box.remote, author]);
+    await pullRepo(second);
+    // Removed from both tools that have it (Claude Code's settings got it through Write now, or by hand).
+    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }));
+    const claudeSettings = join(first.home, '.claude.json');
+    const settings = JSON.parse(await readFile(claudeSettings, 'utf8').catch(() => '{}'));
+    delete settings.mcpServers?.docs;
+    await writeFile(claudeSettings, JSON.stringify(settings));
+    await rm(join(first.home, '.claude/agents/planner.md'));
+    // A server's last copy gone counts as deleted once it has stayed gone a while (it may only be unreadable for a moment).
+    await applyMcp(first, tools, [], { settleMs: 0, now: Date.now() + 86_400_000 });
+    await applyAgents(first, tools, [], { settleMs: 0 });
+    assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:removed', 'planner:removed']);
+    await pushRepo(first);
+
+    const syncState = async (syncOn: boolean) => live(await repoView(second, { check: true, syncOn })).incoming.map(row => [row.name, row.sync, !!row.retry]);
+    assert.deepEqual(await syncState(false), [['planner', 'waits', false], ['docs', 'waits', false]], 'said before Pull, not discovered by it');
+    const waited = await pullRepo(second, { syncOn: false });
+    assert.equal(waited.pulled, 0);
+    assert.equal(Object.keys((await agentsView(second, tools)).servers[0].copies).length, 2, 'no copy removed while the deletion waits');
+    assert.ok((await mcpView(second, tools)).servers.some(server => server.key === 'docs'));
+    assert.deepEqual(await syncState(false), [['planner', 'waits', true], ['docs', 'waits', true]]);
+    assert.deepEqual(await syncState(true), [['planner', 'ready', true], ['docs', 'ready', true]]);
+    const view = live((await pullRepo(second, { syncOn: true })).view);
+    assert.deepEqual([view.incoming, view.outgoing], [[], []]);
+    assert.deepEqual([(await mcpView(second, tools)).servers.length, (await agentsView(second, tools)).servers.length], [0, 0]);
+    const deleted = (await readHistory(second.home)).filter(event => event.key === 'agent:planner' && event.kind === 'deleted').at(-1)!;
+    assert.equal((await restoreAgent(second, tools, deleted.id)).stopped, undefined);
+    assert.match(await readFile(secondPlanner, 'utf8'), /model: sonnet/);
+  } finally { await box.cleanup(); }
+});
+
+/** A computer with one Managed skill in the repo, and a second clone of the repo to commit to it as someone else would. */
+async function oneSkillAndAnAuthor(box: Awaited<ReturnType<typeof world>>, options: { off?: HarnessId[] } = {}) {
+  const first = await box.home('first');
+  await skill(first, '.claude/skills', 'solo', skillText('solo', 'Before.'));
+  await applyChanges(first, [{ key: 'solo', managed: true, off: options.off ?? [] }]);
+  await connectRepo(first, box.remote, '');
+  await pushRepo(first);
+  const author = join(box.base, 'author');
+  execFileSync('git', ['clone', '--quiet', box.remote, author]);
+  const commit = (message: string) => { git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', message); git(author, 'push', '--quiet', 'origin', 'HEAD:main'); };
+  return { first, author, commit };
+}
+
+test('A skill only one tool has: Pull replaces that copy, and Undo in History puts it back; a SKILL.md that stops parsing is held, never a removal', async () => {
+  const box = await world();
+  try {
+    const { first, author, commit } = await oneSkillAndAnAuthor(box, { off: ['copilot-cli'] });
     await writeFile(join(author, 'skills/solo/SKILL.md'), skillText('solo', 'After.'));
-    git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-am', 'edit'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+    commit('edit');
     await pullRepo(first);
     assert.match(await readFile(join(first.home, '.claude/skills/solo/SKILL.md'), 'utf8'), /After/);
     const pulled = (await readHistory(first.home)).find(event => event.key === 'solo' && event.via === 'repo')!;
@@ -188,21 +222,40 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
     // A SKILL.md that stops parsing hides the skill from every tool's listing: that is never offered as a removal.
     await writeFile(join(first.home, '.claude/skills/solo/SKILL.md'), '---\nname: solo\ndescription: Has: a colon\n---\n');
     assert.deepEqual(live(await repoView(first)).outgoing.map(row => [row.name, !!row.held]), [['solo', true]]);
-    await writeFile(join(first.home, '.claude/skills/solo/SKILL.md'), skillText('solo', 'Before.'));
-    // A commit that touches nothing in the layout still has to be pulled before a push; Pull then just moves to it.
+  } finally { await box.cleanup(); }
+});
+
+test('A commit outside the layout still has to be pulled before a push; the branch deleted in the repo reads as nothing deleted, and Push puts it back', async () => {
+  const box = await world();
+  try {
+    const { first, author, commit } = await oneSkillAndAnAuthor(box);
     await writeFile(join(author, 'README.md'), 'Notes.\n');
-    git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'readme'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+    commit('readme');
     let view = live(await repoView(first, { check: true }));
     assert.ok(view.pushBlocked);
     view = live((await pullRepo(first)).view);
     assert.equal(view.pushBlocked, undefined);
-    // The branch deleted in the repo, with nothing else to send: nothing reads as deleted, and Push puts the branch back.
-    await pushRepo(first);
     git(box.remote, 'update-ref', '-d', 'refs/heads/main');
     view = live(await repoView(first, { check: true }));
     assert.deepEqual([view.branchGone, view.incoming, view.outgoing], [true, [], []]);
     assert.equal((await pushRepo(first)).stopped, undefined);
     assert.ok(git(box.remote, 'rev-parse', 'main'));
+  } finally { await box.cleanup(); }
+});
+
+test('Pull counts and says only its own items: another Managed skill held for its own reason doesn’t make a pulled one look stuck', async () => {
+  const box = await world();
+  try {
+    const { first, author, commit } = await oneSkillAndAnAuthor(box);
+    await skill(first, '.claude/skills', 'linked');
+    await applyChanges(first, [{ key: 'linked', managed: true, off: [] }]);
+    await symlink('SKILL.md', join(first.home, '.claude/skills/linked/alias.md'));
+    await mkdir(join(author, 'skills/fresh'), { recursive: true });
+    await writeFile(join(author, 'skills/fresh/SKILL.md'), skillText('fresh'));
+    commit('fresh');
+    const pulled = await pullRepo(first);
+    assert.equal(pulled.pulled, 1);
+    assert.ok(!pulled.results.some(result => result.item === 'linked'), 'the held bystander is not in Pull’s results');
   } finally { await box.cleanup(); }
 });
 
@@ -310,7 +363,12 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     // Written by hand, with a key Central Knot doesn't use: Push leaves it byte for byte while it doesn't change here.
     await mkdir(join(author, 'mcp'));
     await writeFile(join(author, 'mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }\n');
-    git(author, 'add', '-A'); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'start'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
+    // Finder's file is no part of a skill (no tool's copy keeps one), and a skill vendored as a submodule can't go in a tool.
+    await mkdir(join(author, 'skills/tidy'));
+    await writeFile(join(author, 'skills/tidy/SKILL.md'), skillText('tidy'));
+    await writeFile(join(author, 'skills/tidy/.DS_Store'), 'finder\n');
+    git(author, 'add', '-A');
+    git(author, 'update-index', '--add', '--cacheinfo', `160000,${'a'.repeat(40)},skills/vendored`); git(author, '-c', 'user.name=a', '-c', 'user.email=a@b', 'commit', '--quiet', '-m', 'start'); git(author, 'push', '--quiet', 'origin', 'HEAD:main');
 
     const here = await box.home('here');
     await skill(here, '.claude/skills', 'mine');
@@ -320,11 +378,12 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     await writeFile(join(here.home, '.claude/skills/linked/extra.md'), 'only here\n');
     await applyChanges(here, [{ key: 'mine', managed: true, off: [] }, { key: 'linked', managed: true, off: [] }]);
     let view = live((await connectRepo(here, box.remote, 'main')).view);
-    assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true]]);
+    assert.deepEqual(view.incoming.map(row => [row.name, !!row.held]), [['notes', false], ['linked', true], ['tidy', false], ['vendored', true]]);
     await pullRepo(here);
+    assert.deepEqual(rows(live(await repoView(here)).outgoing), ['mine:added'], 'tidy reads as pulled, not as changed here');
     assert.equal(await readFile(join(here.home, '.claude/skills/linked/alias.md'), 'utf8').then(() => true, () => false), false, 'a link is never put in a tool');
     view = live((await pushRepo(here)).view);
-    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'mcp/notes.json', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log']);
+    assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'mcp/notes.json', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log', 'skills/tidy/.DS_Store', 'skills/tidy/SKILL.md', 'skills/vendored']);
     assert.deepEqual(view.outgoing, []);
     assert.equal(git(box.remote, 'show', 'main:mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }');
   } finally { await box.cleanup(); }
@@ -392,4 +451,11 @@ test('Removed here but edited in the repo: the edit comes back on Pull', () => {
   // An item the last Pull couldn't finish, edited here since, then deleted in the repo: the edit still beats the deletion.
   const left = { base: new Map([['skill:review', item('new')]]), latest: new Map(), here: new Map([['skill:review', item('edited')]]), unsent: new Map() };
   assert.deepEqual(classify(left, { 'skill:review': { reason: 'busy', here: 'old' } }).outgoing.map(row => [row.change, row.keptHere]), [['added', true]]);
+  // An agent's deletion waits while Automatic sync is off; one the last Pull left for that reason says so once sync is on.
+  const agent = (id: string): SideItem => ({ key: 'agent:planner', kind: 'agent', name: 'planner', id, paths: [] });
+  const removed = { base: new Map([['agent:planner', agent('a')]]), latest: new Map(), here: new Map([['agent:planner', agent('a')]]), unsent: new Map() };
+  assert.equal(classify(removed, {}, false).incoming[0].sync, 'waits');
+  assert.equal(classify(removed, {}, true).incoming[0].sync, undefined);
+  const leftWaiting = { ...removed, base: new Map() };
+  assert.equal(classify(leftWaiting, { 'agent:planner': { reason: 'waits', here: 'a', waitedForSync: true } }, true).incoming[0].sync, 'ready');
 });

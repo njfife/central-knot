@@ -569,12 +569,13 @@ app.whenReady().then(async () => {
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], harnessWrites: 0 } satisfies ApplyResult));
   // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
   // Connect, Pull, Push and Disconnect take their turn with every other change.
-  const otherHome = async () => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], view: await repoView(context()) });
-  handleRead('repo:view', async check => (current ? repoView(context(), { check: check === true }) : null));
-  handle('repo:connect', async (url, branch, home) => (home === current?.home && typeof url === 'string' && typeof branch === 'string' ? connectRepo(context(), url, branch) : otherHome()));
+  // Every repo call knows whether Automatic sync is on: while it is off, an MCP server's or agent's deletion waits for it.
+  const otherHome = async () => ({ stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], view: await repoView(context(), { syncOn }) });
+  handleRead('repo:view', async check => (current ? repoView(context(), { check: check === true, syncOn }) : null));
+  handle('repo:connect', async (url, branch, home) => (home === current?.home && typeof url === 'string' && typeof branch === 'string' ? connectRepo(context(), url, branch, { syncOn }) : otherHome()));
   handle('repo:pull', async home => (home === current?.home ? pullRepo(context(), { syncOn }) : otherHome()));
-  handle('repo:push', async home => (home === current?.home ? pushRepo(context(), { from: current!.mode === 'actual' ? hostname() : current!.label }) : otherHome()));
-  handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context()) : otherHome()));
+  handle('repo:push', async home => (home === current?.home ? pushRepo(context(), { syncOn, from: current!.mode === 'actual' ? hostname() : current!.label }) : otherHome()));
+  handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context(), { syncOn }) : otherHome()));
   await loading;
   if (smoke) {
     try {

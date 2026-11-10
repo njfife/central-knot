@@ -71,6 +71,9 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
+/** Files no tool's copy keeps (Finder's .DS_Store, editor swap and backup files): left out of every copy and every identity. */
+export const notCopied = (name: string, isFile: boolean) => (NOISE.has(name) && isFile) || editorNoise(name);
+
 /** Whole-directory identity. Only the executable bit counts, so umask differences are no collision. */
 export async function readTree(directory: string, options: { includeGit?: boolean } = {}): Promise<Tree> {
   const files: Tree['files'] = new Map();
@@ -78,7 +81,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
   let held: string | undefined;
   async function visit(current: string) {
     for (const entry of await readdir(current, { withFileTypes: true })) {
-      if ((entry.name === '.git' && !options.includeGit) || (NOISE.has(entry.name) && entry.isFile()) || editorNoise(entry.name)) continue;
+      if ((entry.name === '.git' && !options.includeGit) || notCopied(entry.name, entry.isFile())) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }

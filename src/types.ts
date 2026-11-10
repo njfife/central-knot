@@ -409,8 +409,8 @@ export interface RepoChange {
   change: 'added' | 'changed' | 'removed';
   /** Incoming: it changed here too since the last pull (or was removed here, or is no longer Managed), or the repo adds one by the name of an item here that isn't Managed. The repo's version wins on Pull; History keeps yours. */
   alsoHere?: 'changed' | 'removed' | 'unmanaged';
-  /** Incoming, left by the last Pull: an MCP server's or agent's deletion that waits for Automatic sync to be on. */
-  waitsForSync?: boolean;
+  /** Incoming, an MCP server's or agent's deletion: 'waits' while Automatic sync is off (Pull can't spread it); 'ready' once sync is on after a Pull left it waiting. */
+  sync?: 'waits' | 'ready';
   /** Outgoing: removed in the repo but changed here, so your change stays and goes back with the next Push. */
   keptHere?: boolean;
   /** Why it can't be brought across, if it can't. */

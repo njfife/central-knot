@@ -823,7 +823,8 @@ export function outcomeBand(withAction = true): HTMLElement | null {
     rest = rest.slice(hits[0].at + hits[0].name.length);
   }
   return h('div.band.band-done', { role: 'status' }, outcome.warn ? icon('triangle-alert', 14, 'tone-warning') : icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
-    outcome.note ? h('span.tone-faint', {}, ' ', outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.') : null),
+    // The space before the note sits outside it, so a note kept whole on its line never carries the last word with it.
+    outcome.note ? [' ', h('span.tone-faint', {}, outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.')] : null),
     !withAction ? null : outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
       : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,

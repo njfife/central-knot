@@ -9,7 +9,7 @@ import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './page
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
-import { loadRepo, repo, repoPage, waitingCounts } from './repopage.ts';
+import { loadRepo, repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import type { HomeMode, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
@@ -66,13 +66,16 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
 /** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
 function repoRow() {
   const view = repo.view;
-  const { pull, push, retry } = view?.connected ? waitingCounts(view) : { pull: 0, push: 0, retry: 0 };
+  if (!view?.connected) return navRow('repo', 'Git repo', 'git-branch');
+  const counts = waitingCounts(view);
+  const { pull, push, retry } = counts;
   // A newer commit that changes nothing here still waits to be pulled: a bare arrow.
-  const newer = view?.connected && !pull && !retry && !!view.pushBlocked;
-  // Directions, not an item count: ↓ to pull (or try again), ↑ to push.
+  const newer = !pull && !retry && !!view.pushBlocked;
+  // Directions, not an item count: ↓ to pull (or pull again), ↑ to push.
   const shown = [pull + retry ? `↓${pull + retry}` : newer ? '↓' : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
-  const unreachable = view?.connected && !!view.problem;
-  const said = [unreachable ? 'Couldn’t reach the repo' : '', pull ? `${pull} to pull` : '', retry ? `${retry} to pull again` : '', newer ? 'A newer commit to pull' : '', push ? `${push} to push` : ''].filter(Boolean).join(' · ');
+  const unreachable = !!view.problem;
+  const words = waitingWords(counts);
+  const said = [unreachable ? 'Couldn’t reach the repo' : '', words.pull, words.retry, newer ? 'A newer commit to pull' : '', words.push].filter(Boolean).join(' · ');
   // While the repo can't be reached, the counts are last seen: quiet, as on the page.
   return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined, unreachable);
 }

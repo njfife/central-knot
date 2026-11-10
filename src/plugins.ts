@@ -97,7 +97,7 @@ export function whyGitFailed(code: number | 'timeout' | 'missing', output: strin
   if (/host key verification failed/.test(text)) return 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.';
   if (/passphrase/.test(text)) return 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.';
   if (/authentication failed|could not read username|terminal prompts disabled|\b40[13]\b|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';
-  if (/repository not found|not found|404|does not appear to be a git repository|does not exist|access denied/.test(text)) return NO_REPO_THERE;
+  if (/repository not found|repository '[^']*' not found|\b404\b|does not appear to be a git repository|does not exist|access denied/.test(text)) return NO_REPO_THERE;
   return output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.';
 }
 
