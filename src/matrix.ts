@@ -8,6 +8,7 @@ import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, appl
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
+import type { Kind } from './app.ts';
 import type { Change, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
@@ -35,13 +36,12 @@ const fromFacts = (facts: SkillFacts): SampleSkill => ({
 /** One item as a table row. `waiting`: MCP servers whose Claude Code entry waits for Write to Claude Code, which their cell says. */
 const rowOf = (fact: SkillFacts, waiting: Set<string>): SampleSkill => ({ ...fromFacts(fact), waits: waiting.has(fact.key) ? ['claude-cli'] : undefined });
 
-/** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
-import type { Kind } from './app.ts';
 /** The MCP or agents view behind this table; skills have their own. */
 const listView = () => (kind === 'mcp' ? state.home?.mcp : kind === 'agents' ? state.home?.agents : undefined);
 const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp: ['Server', 'MCP servers'], agents: ['Agent', 'Agents'] };
 /** Each kind's noun in a sentence, one and many: "1 skill", "2 MCP servers". */
 export const kindNoun: Record<Kind, [string, string]> = { skills: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agents: ['agent', 'agents'] };
+/** What this table shows: skills, MCP servers or agents. Each keeps its own pending changes; the same marks mean the same things. */
 let kind: Kind = 'skills';
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
 /**
@@ -113,7 +113,11 @@ const views: Record<Kind, ReturnType<typeof newView>> = { skills: newView(), mcp
  * Opens a page already narrowed, for links that point at a problem (the Overview's or a harness card's "different copies").
  * `harness`: the harness page it opens on (none: the kind's own page), so the first draw there keeps this filter.
  */
-export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { views[which].filter = filter; views[which].find = ''; views[which].shownFor = harness; };
+export const showFiltered = (which: Kind, filter: Filter, harness?: Tool) => { startFresh(views[which], harness); views[which].filter = filter; };
+/** A table drawn for another page (a harness's, or the kind's own) starts with no filter, Find text, open row or menu from the last one. */
+function startFresh(table: ReturnType<typeof newView>, harness: Tool | undefined) {
+  Object.assign(table, { filter: 'all', find: '', comparing: undefined, toolMenu: undefined, toolMenuFromToolbar: false, shownFor: harness });
+}
 let view = views.skills;
 let draftHomes: Partial<Record<Kind, string>> = {};
 
@@ -231,11 +235,10 @@ const smallAction = (label: string, id: string, onclick: () => void, extra = '')
 function filterBar() {
   const list = committedList();
   const attention = list.filter(skill => needsChoice(effective(skill))).length;
-  const hadAttention = list.some(needsChoice);
   const chip = (id: Filter, label: string, warn?: number) => h(`button.chip${view.filter === id ? '.chip-on' : ''}${warn ? '.chip-warn' : ''}`, { type: 'button', 'aria-pressed': String(view.filter === id), onclick: () => { view.filter = id; rerender(); } },
     label, warn !== undefined ? h('span.chip-count', {}, String(warn)) : null);
   return h('div.chips', { role: 'group', 'aria-label': 'Show' },
-    chip('all', 'All'), chip('managed', 'Managed'), chip('unmanaged', 'Unmanaged'), attention || (hadAttention && view.filter === 'attention') ? chip('attention', 'Copies differ', attention) : null);
+    chip('all', 'All'), chip('managed', 'Managed'), chip('unmanaged', 'Unmanaged'), copiesDifferChipShown() ? chip('attention', 'Copies differ', attention) : null);
 }
 
 // Edits waiting for Sync are not Apply all's to write: the Sync-off banner offers Sync now for them.
@@ -262,9 +265,7 @@ function changeBar(bulk = true) {
   // for the count, Discard and Apply all and the table does not move. It comes back after Apply all or Discard.
   const offerManage = bulk && variant !== 'c' && ready.length > 0 && !(focus && (view.filter === 'attention' || count > 0));
   const manageAll = offerManage ? button({ variant: 'outline', size: 'small', label: manageLabel, attrs: needChoice ? { title: `${needChoice === 1 ? `One ${word(1)} needs` : `${needChoice} need`} a copy choice first` } : undefined, name: `Manage ${ready.length} unmanaged ${word(ready.length)}${needChoice ? `; ${needChoice} more ${needChoice === 1 ? 'needs' : 'need'} a copy choice first` : ''}`, id: 'manage-all', onclick: () => setManaged(ready.map(skill => skill.key), true) }) : null;
-  const firstChoice = committedList().find(skill => !skill.held && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention');
-  // The Unmanaged section's note names the item that needs a copy choice; the toolbar no longer repeats it.
-  const choiceNote: HTMLElement | null = null;
+  // The Unmanaged section's note names the item that needs a copy choice; the toolbar doesn't repeat it.
   const label = resumeNeeded() ? 'Resume and apply all' : 'Apply all';
   if (count) return h('div.apply', {}, manageAll,
     h('span.apply-count.apply-quiet', { title: 'Nothing is written until Apply all' }, (() => {
@@ -299,7 +300,7 @@ function changeBar(bulk = true) {
           : stoppedAll.length ? h('span.apply-state.apply-waiting', {}, icon('circle-pause', 14, 'tone-warning'), `${stoppedAll.length} ${stoppedAll.length === 1 ? 'copy' : 'copies'} stopped updating`)
         : state.home && !state.home.syncOn ? h('span.apply-state.apply-quiet', {}, icon('circle-minus', 14, 'tone-muted'), 'Nothing waiting · sync off')
           : bulk ? h('span.apply-state', {}, icon('check', 14, 'tone-success'), keptCopies ? `Synced · ${keptCopies} kept ${keptCopies === 1 ? 'edit' : 'edits'}` : 'All synced') : null;
-  if (manageAll || choiceNote) return h('div.apply', {}, choiceNote, manageAll, edits || writes ? status : null);
+  if (manageAll) return h('div.apply', {}, manageAll, edits || writes ? status : null);
   return status;
 }
 
@@ -940,15 +941,16 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
 }
 
 
-/** What the last action did, where it was done, with History when there is something to undo. */
 export { brandMark };
 
+/**
+ * What the last action did, where it was done, with History when there is something to undo. A result stands until something
+ * new is queued, the page changes, or it is dismissed. `table`: a table is on screen, so its pending changes or open copy choice
+ * hide an older result (guessed from the page; a harness tab without a table passes false).
+ */
 export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown()): HTMLElement | null {
   const outcome = state.outcome;
-  // A result stands until something new is queued, the page changes, or it is dismissed.
-  // With a table on screen (the default guess; a harness tab without one says so), its pending changes or open choice hide an older result.
-  const matrixPage = table;
-  if (!outcome || outcome.page !== state.page || (matrixPage && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && [outcome.item, ...(outcome.items ?? [])].some(name => name && (name === skill.name || name.toLowerCase() === skill.key)))))) || (state.skillsView === 'files' && state.item && ![outcome.item, ...(outcome.items ?? [])].some(name => name && name.toLowerCase() === state.item))) return null;
+  if (!outcome || outcome.page !== state.page || (table && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && [outcome.item, ...(outcome.items ?? [])].some(name => name && (name === skill.name || name.toLowerCase() === skill.key)))))) || (state.skillsView === 'files' && state.item && ![outcome.item, ...(outcome.items ?? [])].some(name => name && name.toLowerCase() === state.item))) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
   const text: (string | Node)[] = [];
@@ -1288,13 +1290,18 @@ function useTable(which: Kind, harness?: Tool) {
   view = views[which];
   focus = harness;
   forgetOtherHomes();
-  // This view was last drawn for another harness's page (or for the kind page): it starts with no filter or Find text from there.
-  if (view.shownFor !== harness) { view.filter = 'all'; view.find = ''; view.shownFor = harness; }
+  if (view.shownFor !== harness) startFresh(view, harness);
   if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
 }
 
-/** Whether anything differs now, or will once pending changes apply: a Copies differ filter with nothing of the kind falls back to All. */
-const copiesDifferChipShown = () => committedList().some(skill => needsChoice(skill) || needsChoice(effective(skill)));
+/**
+ * Whether the Copies differ chip is drawn: something differs once pending changes apply, or differed before them while the
+ * filter is on (so it stays to turn off). A Copies differ filter whose chip is gone falls back to All.
+ */
+const copiesDifferChipShown = () => {
+  const list = committedList();
+  return list.some(skill => needsChoice(effective(skill))) || (view.filter === 'attention' && list.some(needsChoice));
+};
 
 /** A skill's files and contents: the Skills page's files view, from wherever its details were opened. */
 function openFiles(key: string) {

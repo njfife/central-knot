@@ -1,10 +1,9 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow, realHomeName } from './app.ts';
+import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow, realHomeName, type Kind } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { plural, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
 import { designMode } from './design.ts';
-import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
-import type { Kind } from './app.ts';
+import { brandMark, designOverview, kindNoun, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 
 // ---------- Overview ----------
 
@@ -25,10 +24,10 @@ const nothingHere = (glyph: Parameters<typeof emptyState>[0], title: string, bod
     button({ variant: 'outline', label: 'See which folders were read', id: `${id}-tools`, onclick: () => showPage('harnesses') }),
     state.home?.practice && state.home.mode !== 'fixture' ? button({ variant: 'link', label: 'Try the practice copy', id: `${id}-practice`, onclick: () => void loadHome('fixture') }) : null)));
 /** What each kind's page says when no tool in this home has one: also used on a harness's page for that kind. */
+const emptyOf = (glyph: Parameters<typeof emptyState>[0], [one, many]: [string, string], article = 'a') => ({ glyph, title: `No ${many} here yet`,
+  body: `None of your tools has ${article} ${one} in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.` });
 export const kindEmpty: Record<Kind, { glyph: Parameters<typeof emptyState>[0]; title: string; body: string }> = {
-  skills: { glyph: 'wand-sparkles', title: 'No skills here yet', body: 'None of your tools has a skill in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
-  mcp: { glyph: 'plug', title: 'No MCP servers here yet', body: 'None of your tools has an MCP server in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
-  agents: { glyph: 'bot', title: 'No agents here yet', body: 'None of your tools has an agent in this home. Add one in Claude Code, Copilot CLI or Codex, then Refresh, or choose another home at the bottom left.' },
+  skills: emptyOf('wand-sparkles', kindNoun.skills), mcp: emptyOf('plug', kindNoun.mcp, 'an'), agents: emptyOf('bot', kindNoun.agents),
 };
 const emptyKindPage = (which: Kind, id: string) => nothingHere(kindEmpty[which].glyph, kindEmpty[which].title, kindEmpty[which].body, id);
 const noSkills = (id: string) => emptyKindPage('skills', id);

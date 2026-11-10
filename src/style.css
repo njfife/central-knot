@@ -706,7 +706,7 @@ ul { list-style: none; }
 .overview-more { display: flex; flex-direction: column; gap: 8px; }
 .overview-line { display: block; margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-soft); padding-left: 22px; text-indent: -22px; }
 .overview-line > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
-.tools-note { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 12.5px; color: var(--ink-soft); }
+.page-note { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 12.5px; color: var(--ink-soft); }
 .empty-actions { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
 .history-day { list-style: none; padding: 14px 16px 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
 .overview-line .btn { padding: 0 2px; height: auto; margin: 0 -2px; }
@@ -884,8 +884,8 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-versions[open] summary svg { transform: rotate(90deg); }
 .ins-version { display: flex; gap: 10px; align-items: center; padding: 2px 0 2px 16px; }
 /* Round 8 */
-.tools-note { display: block; padding-left: 22px; text-indent: -22px; }
-.tools-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
+.page-note { display: block; padding-left: 22px; text-indent: -22px; }
+.page-note > svg.icon:first-child { display: inline-block; vertical-align: -2px; margin-right: 8px; }
 .page:not(.ov-page) > .bands > .band { padding-right: max(16px, calc(100% - 996px)); }
 .overview-lead, .overview-line { max-width: 760px; }
 .compare-title > span { flex: 1 1 auto; }
@@ -910,7 +910,7 @@ button.apply-state.text-action { text-decoration: underline dotted; text-underli
 .ins-versions summary { font-size: 12.5px; color: var(--ink-soft); }
 
 /* Round 9: shell */
-.tools-note .btn { padding: 0 2px; height: auto; margin: 0 -2px; text-indent: 0; }
+.page-note .btn { padding: 0 2px; height: auto; margin: 0 -2px; text-indent: 0; }
 .page-title .title-tag { vertical-align: top; margin-top: 1px; height: 22px; line-height: 16px; }
 /* Round 9: bands end where their page's content ends (later and more specific than the generic cap). */
 .page:not(.ov-page) > .history-bands > .band { padding-right: max(16px, calc(100% - 884px)); }
@@ -1342,7 +1342,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* ---------- Harnesses ---------- */
 .harness-scroll { container-type: inline-size; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .harness-scroll > * { flex: none; }
-.harness-scroll > .tools-note { margin: 0; max-width: 80ch; }
+.harness-scroll > .page-note { margin: 0; max-width: 80ch; }
 .harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }

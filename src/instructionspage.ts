@@ -167,6 +167,7 @@ export function instructionCard(file: InstructionFile, { titled = true } = {}) {
 /** Shown while the files are not here yet: reading, or a failed read with Try again. Starts the read if none is running. */
 export function instructionsNotRead(): HTMLElement {
   readInstructionsQuietly();
+  // No read under way while idle means the read had nothing to start from (no home read) or answered for a home since left.
   return instructionReadState() === 'failed' || (!state.busy && !instructionReadState())
     ? emptyState('circle-alert', 'Instruction files could not be read', 'Nothing changed.', button({ label: 'Try again', id: 'ins-retry', onclick: () => readInstructionsQuietly(true) }))
     : h('p.empty', {}, 'Reading instruction files…');
@@ -185,6 +186,6 @@ export function instructionsPage() {
   if (!files) return h('div.page', {}, h('div.scroll', {}, instructionsNotRead()));
   return h('div.page', {}, instructionBands(),
     h('div.scroll.cards-scroll', { id: 'instructions-scroll' },
-      h('p.tools-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
+      h('p.page-note', {}, icon('info', 14, 'tone-muted'), 'Each tool reads its own file when a session starts. Changes are reviewed before saving, and earlier versions are kept on each card. Automatic sync leaves these files alone.'),
       files.length ? files.map(file => instructionCard(file)) : emptyState('pencil-line', 'No tools found', 'No tool folders were found in this home.')));
 }

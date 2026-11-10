@@ -19,8 +19,10 @@ export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
 export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
+/** Found: Central Knot reads and writes this harness in this home, so it has a page. */
+export const harnessFound = (home: HomeView, tool: HarnessId) => home.manage.tools.includes(tool);
 /** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
-export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home?.manage.tools.includes(state.harness) ? state.harnessTab : undefined);
+export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
 export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 
