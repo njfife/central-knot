@@ -713,3 +713,14 @@ SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag 
 - **7409a6a:** e2e checks that an Undo from History leaving a hand-changed switch says so where it can be seen.
 
 **Validation on 7409a6a.** 349 unit tests. Linux e2e 374/374; Mac packaged e2e 478/478.
+
+## Mac disk image: drag to Applications, November 10, 2026
+
+- `npm run package:mac` now also builds `release/Central-Knot-<version>-mac-arm64.dmg` (`scripts/mac-dmg.mjs`): a window with the app on the left, a shortcut to the Applications folder on the right, an arrow between them and "Drag Central Knot to Applications" underneath. The disk carries the app's icon. The zip is still built beside it.
+- With the Developer ID present, the disk image is signed, notarized and stapled in its own right, after the app. A release build took 3 min 37 s in all.
+- The window's layout is a file Finder reads, `assets/dmg/DS_Store`, made by `scripts/mac-dmg-layout.sh` (dmgbuild, no Finder needed). The picture is `assets/dmg/background.svg`, kept as PNGs at both sizes.
+- Every build mounts its own disk image and checks the app's signature inside it and where the shortcut leads.
+
+**Validation (macOS 26.6.2, signed build of 9a807b0).** `codesign`, `stapler validate` and `spctl` (`accepted`, `source=Notarized Developer ID`) pass for the disk image and for the app inside it. In real Finder windows, through Computer Use: the image marked as a download opened on a double-click with no warning; its window came up by itself at 660 by 432 with no sidebar or toolbar, the picture filling it, both icons and the arrow in place, the caption 58 points above the bottom, labels readable; the disk shows the app's icon; the shortcut opens the real Applications folder. The app copied out of that image opened in a throwaway home.
+
+**Not proven.** The drag itself: the tester's synthetic drag did not register in Finder, so no automated run dropped the app onto the shortcut. Light appearance (the Mac was in Dark; labels were black on the slate blue). Macs older than macOS 26, where the title bar is 4 points shorter and the window shows 4 more points of the picture.
