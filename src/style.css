@@ -718,8 +718,10 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .facts { display: grid; grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 .facts dt { color: var(--ink-soft); min-width: 0; }
 .facts dd { min-width: 0; }
-.content { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
-.content-owner { margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
+/* A file as written; its lines keep a reading measure, as prose does */
+.content { max-width: 120ch; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.content-owner { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; color: var(--ink-soft); font-size: 12px; line-height: 16px; }
+.content-owner.tone-warning { color: var(--warning); }
 .content-block + .content-block { margin-top: 8px; }
 
 /* ---------- Empty states ---------- */
@@ -1030,7 +1032,7 @@ span.ins-confirm { margin-top: 0; }
 .plugin-tool { display: flex; align-items: center; gap: 10px; min-width: 170px; }
 .plugin-tool-text { display: flex; flex-direction: column; gap: 1px; }
 .plugin-tool-name { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.plugin-tool-state { font-size: 11.5px; color: var(--ink-soft); }
+.plugin-tool-state { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-soft); }
 .plugin-section { margin: 22px 0 0; }
 .plugin-section .plugin-outcome-list { margin-top: 8px; }
 .plugin-outcome-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
@@ -1082,6 +1084,27 @@ span.ins-confirm { margin-top: 0; }
 .plugin-skills-note .brand-mark { display: inline-block; vertical-align: -2px; margin-right: 6px; }
 .plugin-skills-note code, .plugin-part-note code { font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; }
 .plugin-part-note { font-size: 12px; color: var(--ink-soft); }
+/* A skill, command or agent: the whole row opens its file, shown as the Skills page shows a skill's SKILL.md */
+.plugin-parts li.open { margin-bottom: 6px; }
+.plugin-file-toggle { all: unset; grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; padding: 3px 0; border-radius: 6px; cursor: pointer; }
+.plugin-file-toggle:hover { background: var(--hover); }
+.plugin-file-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.plugin-file-name { display: inline-flex; align-items: center; gap: 4px; min-width: 0; color: var(--ink); }
+.plugin-file-name .icon { flex: none; color: var(--ink-soft); }
+.plugin-file { grid-column: 1 / -1; margin: 6px 0 4px 17px; min-width: 0; }
+/* With a skill's switches at the row's end, the toggle covers name and description only */
+.plugin-parts li.with-end > .plugin-file-toggle { grid-column: 1 / 3; }
+/* A row that opens nothing starts its name where an opening row's name starts, after the chevron */
+.plugin-parts > li > .plugin-name:first-child { margin-left: 17px; }
+/* Versions: the marketplace's beside a plugin's name; a tool with another version, in the warning tone */
+.plugin-row-version, .plugin-meta-version { font-size: 12px; font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* The icon keeps its own column, so a wrapped second line stays under the first line's text */
+.plugin-version-differs { display: inline-flex; align-items: baseline; gap: 4px; color: var(--warning); }
+.plugin-version-differs > .icon { flex: none; align-self: center; }
+.plugin-version-differs > span { min-width: 0; }
+/* The list row's version warning: its own line under the plugin's description, wrapping between words */
+.plugin-row-warning { font-size: 11.5px; }
+.plugin-row-warning > .icon { align-self: flex-start; margin-top: 2px; }
 .plugin-muted { margin: 6px 0 0; font-size: 12.5px; color: var(--ink-soft); }
 .plugin-readme h3 { margin-bottom: 8px; }
 /* Narrow content: the marketplaces become a strip above the page they open. */

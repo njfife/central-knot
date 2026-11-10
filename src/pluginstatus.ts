@@ -1,9 +1,9 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
-import { plural } from './model.ts';
-import { SAFE_NAME, compareVersions } from './values.ts';
-import { toolNames as names } from './words.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginDetail, PluginView, PluginsView } from './types.ts';
+import { groupBy, plural } from './model.ts';
+import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
+import { andList, toolNames as names } from './words.ts';
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
@@ -148,3 +148,51 @@ export const categoriesOf = (entry: MarketplaceView) => [...new Set(entry.plugin
 
 /** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
 export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));
+
+/**
+ * A version as compared for showing a difference: no leading "v", no build suffix after "+", no commit hash after "-"
+ * (Codex names a copy 0.1.13-77c10e110b37). A hash has a letter in it, so a dated pre-release such as 1.2.0-20250101
+ * stays as it is. Choosing which cached copy Codex loads is stricter: see compareVersions in plugins.ts.
+ */
+const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-([0-9a-f]+)$/i, (suffix, hash: string) => (isCommitHash(hash) ? '' : suffix));
+
+/**
+ * The version the marketplace offers, as Claude Code reads it (plugin.json's, else the entry's). For a plugin in the
+ * marketplace's own folder the catalog already read it so, fresh on every view. A plugin kept in another repository has
+ * only the entry's until its own files are read. (A plugin shipping a Codex manifest with another version isn't covered.)
+ */
+export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => (plugin.folder ? plugin.version : detail?.version ?? plugin.version);
+
+/**
+ * The offered version to compare tools' versions with: offeredVersion, but for a plugin kept in another repository only
+ * once the marketplace's copy of its files was read (until then its version is the entry's, which plugin.json may
+ * overrule). Undefined means nothing is compared.
+ */
+export const versionToCompare = (plugin: PluginView, detail: PluginDetail | null | undefined) =>
+  (plugin.folder || detail?.offered ? offeredVersion(plugin, detail) : undefined);
+
+/** The version a tool has installed, when it is installed there and its version is known. */
+export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  const status = stateOf(entry, plugin, tool);
+  return status.state === 'installed' ? status.version : undefined;
+}
+
+/** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
+export const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && releaseOf(installed) !== releaseOf(offered);
+
+/** The note "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
+export const marketplaceVersionNote = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);
+
+/** Tools whose installed copy is another version than `offered`, with that version. */
+export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined) =>
+  view.tools.flatMap(tool => { const version = installedVersion(entry, plugin, tool); return versionDiffers(version, offered) ? [{ tool, version: version! }] : []; });
+
+/**
+ * The list row's line for tools on another version (see otherVersions), grouped by version: "Claude Code and Codex
+ * have 1.9.0, Copilot CLI has 1.8.0". A version never parts from the word before it when the line wraps.
+ */
+export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]) =>
+  [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', ');
+
+/** A file's text to compare copies by: line endings as LF, since a Windows Git checkout writes CRLF and that is no difference. */
+export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');

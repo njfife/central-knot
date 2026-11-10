@@ -54,3 +54,6 @@ export function compareVersions(first: string, second: string): number {
   }
   return left.length - right.length;
 }
+
+/** Whether a name is a Git commit hash or a prefix of one (7 to 40 hex digits, at least one a letter, so 20250101 is not). */
+export const isCommitHash = (name: string) => /^(?=\d*[a-f])[0-9a-f]{7,40}$/i.test(name);

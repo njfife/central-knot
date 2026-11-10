@@ -7,13 +7,13 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
 import { configRoot, harnesses } from './harnesses.ts';
-import { MANIFEST, inside, parseObject, pluginContents, readManifest, remoteOf, skillName, skillNamesIn, sourceOf } from './catalogdetail.ts';
+import { MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlTable, type TomlValue } from './textedit.ts';
 import { INLINE_SKILLS_CONFIG, heldReason, noCli, offByBareName, noSwitchReason } from './pluginstatus.ts';
 import type { PluginTool } from './presence.ts';
 import { errorCode, writeFileChecked } from './share.ts';
-import { SAFE_NAME, compareVersions, githubRepo, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
+import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps, record, strings, text, withoutBom } from './values.ts';
 
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
 export { SAFE_NAME };
@@ -252,7 +252,15 @@ async function catalogEntry(item: Record<string, unknown>, root: string, pluginR
     // where it starts ("./plugins/formatter", "../shared") is taken from the marketplace's root as written.
     const folder = resolve(root, pluginRoot && !where.startsWith('./') && !where.startsWith('../') ? join(pluginRoot, where) : where);
     // A path outside the marketplace, through a link or not, is not read.
-    if (await inside(root, folder)) { plugin.folder = folder; if (counts) plugin.components = await componentsOf(folder, item, root); }
+    if (await inside(root, folder)) {
+      plugin.folder = folder;
+      plugin.isMarketplaceRoot = resolve(folder) === resolve(root) || undefined;
+      const contents = counts ? await pluginContents(folder, item, root, { atMarketplaceRoot: !!plugin.isMarketplaceRoot }) : undefined;
+      if (contents) plugin.components = componentsFrom(contents);
+      // Its plugin.json's version wins over the entry's, as Claude Code reads them (the counts' read already applied that).
+      const fromFiles = contents ? contents.version : text((await pluginManifest(folder, root))?.version);
+      if (fromFiles) plugin.version = fromFiles;
+    }
   }
   return plugin;
 }
@@ -290,11 +298,6 @@ export async function parseCatalog(root: string, source: string, kind: Catalog['
   const copilotRefuses = entries.map(item => copilotRefusal(text(item.name), item.source)).find(Boolean);
   return { name, source, kind, fetchedAt, root, owner: text(record(manifest.owner)?.name) || undefined, description: text(manifest.description) || text(metadata?.description) || undefined,
     copilotRefuses, plugins: plugins.sort((first, second) => first.name.localeCompare(second.name)) };
-}
-
-/** The counts a row shows, from the same read the plugin page uses, so the two always agree. */
-async function componentsOf(folder: string, entry: Record<string, unknown>, root: string): Promise<Components> {
-  return componentsFrom(await pluginContents(folder, entry, root));
 }
 
 // ---------- What each tool has ----------
@@ -390,6 +393,18 @@ export async function heldBy(context: PluginContext, tool: PluginTool, marketpla
 }
 
 /**
+ * The version of a tool's installed copy: what the tool recorded, else what the copy's own manifest says (for a Codex
+ * copy, `codex`, the one manifest Codex reads). Claude Code records "unknown" or a commit hash for a plugin without a
+ * version, and Codex names such a copy's folder "local" or for a commit, so a commit hash is taken as no version (a real
+ * version that looks like one, such as "deadbeef", is then read from the manifest instead).
+ */
+async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
+  const said = text(recorded);
+  if (said && said !== 'unknown' && !isCommitHash(said)) return said;
+  return text((codex ? await codexManifest(path) : await pluginManifest(path))?.version) || undefined;
+}
+
+/**
  * Installed only with files at the path the tool records; a record with no files is Not known yet (PLG-03). Never scans.
  * `entry` (the plugin's marketplace.json entry) says where its skills are, for the skills an installed copy holds.
  */
@@ -404,14 +419,14 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
       const path = text(user?.installPath);
       if (!path) return { state: 'not-installed' };
-      return (await hasFiles(path)) ? { state: 'installed', path } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
+      return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
     }
     case 'copilot-cli': {
       const settingsOf = () => recordJson(context, join(root, 'settings.json'));
       const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
       const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
       const cache = text(listing?.cache_path);
-      if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
+      if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
       // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
       const settings = await settingsOf();
       const enabled = record(settings?.enabledPlugins)?.[id] === true;
@@ -421,7 +436,7 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
         const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
         const item = catalog.plugins.find(candidate => candidate.name === plugin);
         const folder = item?.folder;
-        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
       }
       return { state: 'not-installed' };
     }
@@ -432,7 +447,9 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const version = activeCodexVersion(await readdir(cache).catch(() => [] as string[]));
       const folder = version && join(cache, version);
       if (folder && (await hasFiles(folder))) {
-        const copy = await installedCopy(folder, entry, { live: false }, skills => codexSkillsOff(tables.skills, plugin, folder, skills));
+        // Codex names each copy's folder for its version; "local" (no version) and a commit prefix (its curated plugins)
+        // name none, so the copy's manifest gives it (see copyVersion).
+        const copy = await installedCopy(folder, entry, { live: false, version: await copyVersion(version === 'local' ? undefined : version, folder, true), readAs: { codex: await codexManifest(folder) } }, skills => codexSkillsOff(tables.skills, plugin, folder, skills));
         return tables.skillsInline ? { ...copy, switchesHeld: INLINE_SKILLS_CONFIG } : copy;
       }
       return { state: 'not-known', reason: 'Codex lists it, but its files are not in its plugin cache.' };
@@ -458,10 +475,10 @@ const qualified = (plugin: string, skill: string) => `${plugin}:${skill}`;
 /** The skill a `plugin:skill` name picks, if it names one of this plugin's. */
 const skillOf = (plugin: string, name: string) => (name.startsWith(`${plugin}:`) ? name.slice(plugin.length + 1) : undefined);
 
-/** An installed copy in `folder`, with the skills it holds (read with its marketplace `entry`) and, of those, the ones `offs` says the tool has turned off. */
-async function installedCopy(folder: string, entry: Record<string, unknown> | undefined, { live }: { live: boolean }, offs: (skills: string[]) => Promise<SkillOff[]>): Promise<Extract<InstallState, { state: 'installed' }>> {
-  const skills = await skillNamesIn(folder, entry);
-  return { state: 'installed', path: folder, ...(live ? { live } : {}), skills, skillsOff: await offs(skills) };
+/** An installed copy in `folder` at `version`, with the skills it holds (read with its marketplace `entry`, as `readAs` says the tool reads it) and, of those, the ones `offs` says the tool has turned off. */
+async function installedCopy(folder: string, entry: Record<string, unknown> | undefined, { live, version, readAs }: { live: boolean; version?: string; readAs: ReadAs }, offs: (skills: string[]) => Promise<SkillOff[]>): Promise<Extract<InstallState, { state: 'installed' }>> {
+  const skills = await skillNamesIn(folder, entry, readAs);
+  return { state: 'installed', path: folder, ...(live ? { live } : {}), ...(version ? { version } : {}), skills, skillsOff: await offs(skills) };
 }
 
 /** Of `skills`, those Copilot CLI's `disabledSkills` (settings.json) turns off. A bare name turns off every skill so named: held. */

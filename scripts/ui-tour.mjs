@@ -9,7 +9,7 @@ import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
@@ -326,6 +326,59 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
   await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
+}
+
+// ---------- Plugin versions and skill text ----------
+if (wanted('plugin-versions')) {
+  begin('plugin-versions');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // Claude Code has document-tools 1.1.0, whose pdf-reader skill was worded differently; Codex has the marketplace's 1.2.0.
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.1.0', {
+    'skills/pdf-reader/SKILL.md': '---\nname: pdf-reader\ndescription: "Reads PDF files and pulls out text."\n---\n\nOpen the PDF and copy out its text.\n',
+    'skills/spreadsheet/SKILL.md': readFileSync(join(market, 'plugins/document-tools/skills/spreadsheet/SKILL.md'), 'utf8'),
+  });
+  cpSync(join(market, 'plugins/document-tools'), join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'), { recursive: true });
+  // Both Claude Code and Codex have issue-tracker 1.9.0 (the marketplace offers 2.0.0): two tools named on one list row.
+  writeClaudeInstall(practice, 'team-tools', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8') });
+  cpSync(join(market, 'plugins/issue-tracker'), join(practice, '.codex/plugins/cache/team-tools/issue-tracker/1.9.0'), { recursive: true });
+  edit(join(practice, '.codex/config.toml'), text => `${text.replace(/\n*$/, '\n')}\n[plugins."document-tools@team-tools"]\nenabled = true\n\n[plugins."issue-tracker@team-tools"]\nenabled = true\n`);
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  // Added already by the plugins feature: read again, so the installs written above show.
+  if (await a.has('[data-plugin="document-tools"]')) { await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+  else {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await shot(a, 'list-versions', 'The team-tools marketplace (a local folder). Claude Code has document-tools 1.1.0; Codex has 1.2.0, the version the marketplace offers. Both have issue-tracker 1.9.0 where the marketplace offers 2.0.0. Copilot CLI isn\'t installed on this machine.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pfile-0-skills-pdf-reader')`);
+  await shot(a, 'plugin-versions', 'Clicked the "document-tools" row.');
+  await a.click('#pfile-0-skills-pdf-reader');
+  await shot(a, 'skill-open', 'Clicked "pdf-reader" under Skills: its SKILL.md. Claude Code\'s copy (1.1.0) differs from the marketplace\'s and Codex\'s (1.2.0), so each text shows, named.');
+  await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-open-scrolled', 'Scrolled down to the opened SKILL.md.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-same-everywhere', 'Also opened "spreadsheet", whose text is the same in every copy: one block, named as such.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').focus()`);
+  await shot(a, 'keyboard-focus', 'Closed "spreadsheet" again; the keyboard focus is on its name.');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`);
+    await a.theme('dark'); await shot(a, `plugin-${width}-dark`, `document-tools with pdf-reader open, at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `plugin-${width}-light`, `The same, light.`);
+    if (width === 860 || width === 2560) { await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle(); await shot(a, `plugin-${width}-file-light`, `At ${width}×${height}, scrolled to the opened SKILL.md.`); await a.theme('dark'); }
+  }
+  await a.theme('dark');
+  await a.click('#plugin-back');
+  await size(860, 560); await a.run(`document.querySelector('[data-plugin="issue-tracker"]').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'list-860', 'Back to the marketplace list at 860×560, scrolled to issue-tracker, which two tools have at another version.');
+  await a.theme('light'); await shot(a, 'list-860-light', 'The same, light.'); await a.theme('dark');
+  await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
+  await size(1280, 800); await a.theme('dark');
 }
 
 // ---------- Instructions ----------

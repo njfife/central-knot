@@ -1,6 +1,6 @@
 // A realistic marketplace folder for the e2e run and the UI tour: a README, plugins with skills, commands, agents, hooks
 // and an MCP server, a root-level entry that lists its own skills ("strict": false), and one whose files live on GitHub.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const file = (root, path, text) => { mkdirSync(dirname(join(root, path)), { recursive: true }); writeFileSync(join(root, path), text); };
@@ -42,7 +42,21 @@ export function writeMarket(root, name = 'team-tools', owner = 'Platform team') 
     '',
     'Questions go to [the team page](https://example.com/team).',
   ].join('\n'));
-  skill(root, 'plugins/document-tools/skills', 'pdf-reader', 'Reads PDF files and pulls out their text and tables, keeping headings and lists, so a long report can be searched or quoted.');
+  // A skill as long as real ones run: headings, long paragraphs, a list and a command.
+  file(root, 'plugins/document-tools/skills/pdf-reader/SKILL.md', [
+    '---', 'name: pdf-reader', 'description: "Reads PDF files and pulls out their text and tables, keeping headings and lists, so a long report can be searched or quoted."', '---', '',
+    '# Reading PDFs', '',
+    'Use this skill whenever someone hands you a PDF and wants what is in it: the running text, the tables, or both. Read the whole file before answering, because the first page of a report often only holds a cover and a contents list, and the numbers people ask about are usually several pages in.', '',
+    '## Steps', '',
+    '1. Extract the text page by page with `pdftotext -layout input.pdf -`, keeping the layout so columns stay apart.',
+    '2. Find tables by their ruled lines or aligned columns. Keep each one as a Markdown table with its header row.',
+    '3. When a page is a scanned image with no text layer, say so and offer to run OCR rather than guessing at its contents.',
+    '4. Quote numbers exactly as printed, with their units and the page they came from.', '',
+    '## What not to do', '',
+    'Do not summarise a table into prose when the person asked for the table. Do not merge tables that only look alike: two quarters with the same columns are still two tables, and the person may want to compare them side by side.', '',
+    '## Example', '',
+    '```', 'pdftotext -layout -f 3 -l 5 report.pdf - | less', '```', '',
+  ].join('\n'));
   skill(root, 'plugins/document-tools/skills', 'spreadsheet', 'Cleans up spreadsheets: headers, types and totals.');
   file(root, 'plugins/document-tools/README.md', '# document-tools\n\nTwo skills for everyday documents.\n\n- **pdf-reader** pulls text and tables out of PDFs.\n- **spreadsheet** fixes headers and totals.\n');
   file(root, 'plugins/release-helper/commands/release-notes.md', '---\ndescription: Drafts release notes from the merged pull requests.\n---\n\nDraft the notes.\n');
@@ -52,4 +66,16 @@ export function writeMarket(root, name = 'team-tools', owner = 'Platform team') 
   file(root, 'plugins/issue-tracker/.mcp.json', JSON.stringify({ mcpServers: { issues: { command: 'npx', args: ['-y', '@example/issues-mcp'] } } }));
   skill(root, 'skills', 'hello', 'Says hello, as a first example.');
   skill(root, 'skills', 'unlisted', 'Not part of any plugin entry.');
+}
+
+/**
+ * A plugin as Claude Code records it once installed, in `home`: its entry in plugins/installed_plugins.json and its copy
+ * in the plugin cache, holding `files` (path → text). Used to show an installed copy that is another version.
+ */
+export function writeClaudeInstall(home, marketName, plugin, version, files) {
+  const installPath = join(home, '.claude/plugins/cache', marketName, plugin, version);
+  for (const [path, text] of Object.entries(files)) file(installPath, path, text);
+  const record = join(home, '.claude/plugins/installed_plugins.json');
+  const plugins = existsSync(record) ? JSON.parse(readFileSync(record, 'utf8')).plugins : {};
+  file(home, '.claude/plugins/installed_plugins.json', JSON.stringify({ version: 2, plugins: { ...plugins, [`${plugin}@${marketName}`]: [{ scope: 'user', installPath, version }] } }, null, 2));
 }

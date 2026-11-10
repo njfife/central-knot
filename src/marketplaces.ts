@@ -3,15 +3,15 @@
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
 import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { marketplacePage, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
+import { join } from 'node:path';
+import { codexManifest, marketplacePage, pluginContents, pluginDetail, readmeIn, sourceLabel } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
 import { executableCandidates, isBundledCli } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import { probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { pluginTools, type PluginTool } from './presence.ts';
-import type { ActionReport, Catalog, HarnessId, InstallState, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PluginActionResult, PluginDetail, PluginsView, Snapshot } from './types.ts';
 import { writeDurably } from './share.ts';
 import { SKILL_SWITCH_TESTED_FROM, heldReason, untestedBuild } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed } from './values.ts';
@@ -67,7 +67,7 @@ const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.ma
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
 const RETRY_MS = 60_000;
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
-const empty: Omit<PluginDetail, 'problem'> = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false };
+const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
 export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine = realEngine) {
   const listPath = join(host.dataDir, 'marketplaces.json');
@@ -132,19 +132,40 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { catalog: older, problem: read.problem, stale: !!older };
   }
 
-  /** The tools' states for one marketplace's plugins. A tool holding another marketplace under this name is left alone. */
-  async function statesFor(ctx: engine.PluginContext, tools: PluginTool[], catalog: Catalog, source: string): Promise<MarketplaceView['states']> {
+  /** The tools' states for the given plugins of one marketplace. A tool holding another marketplace under this name is left alone. */
+  async function statesFor(ctx: engine.PluginContext, tools: PluginTool[], catalog: Catalog, source: string, plugins = catalog.plugins): Promise<MarketplaceView['states']> {
     const held = new Map<HarnessId, InstallState>();
     for (const tool of tools) {
       const other = await engine.heldBy(ctx, tool, catalog.name, source);
       if (other) held.set(tool, { state: 'held', reason: heldReason(tool, catalog.name, other) });
     }
     const states: MarketplaceView['states'] = {};
-    for (const plugin of catalog.plugins) {
+    for (const plugin of plugins) {
       const pairs = await Promise.all(tools.map(async tool => [tool, held.get(tool) ?? await engine.installState(ctx, tool, catalog.name, plugin.name, plugin.entry)] as const));
       states[plugin.name] = Object.fromEntries(pairs);
     }
     return states;
+  }
+
+  /**
+   * Each tool's installed copy of one plugin, read from the folder that tool keeps it in, as that tool reads it (see
+   * pluginContents): Claude Code and Copilot CLI by the copy's own plugin.json with the marketplace entry's part lists
+   * added (paths a copy of another release doesn't have are simply not found; for Copilot CLI a listed skills folder
+   * replaces skills/); Codex by the one manifest it picks, its
+   * .codex-plugin one when the copy has it, without the entry. A copy's commands and agents are listed as it holds them;
+   * "In each tool" says what each tool does with them. The detail request names just a source and a plugin, so the tools
+   * and their install states are read here again.
+   */
+  async function installedCopies(ctx: engine.PluginContext, catalog: Catalog, source: string, item: CatalogPlugin): Promise<Partial<Record<HarnessId, InstalledCopy>>> {
+    const tools = toolIds((await host.read()).tools);
+    const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
+    const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
+      if (state?.state !== 'installed') return undefined;
+      const codex = tool === 'codex-cli' ? await codexManifest(state.path) : undefined;
+      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path, { codex, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot: !!item.isMarketplaceRoot });
+      return [tool, { skills, commands, agents, version: state.version }] as const;
+    }));
+    return Object.fromEntries(copies.filter(copy => !!copy));
   }
 
   /** One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page. */
@@ -182,13 +203,24 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { home: ctx.home, tools, clis: Object.fromEntries(tools.map(tool => [tool, !!ctx.binaries[tool]])), canWrite: writing.allowed, reason: writing.allowed ? undefined : writing.reason, marketplaces, desktopOnly, versions };
   }
 
-  /** A plugin's contents and README: from the marketplace's files, or from its own repository when it lives elsewhere. */
+  /**
+   * A plugin's contents and README, from the marketplace's files or, when it lives elsewhere, its own repository; with
+   * each tool's installed copy, which may be another version.
+   */
   async function detail(source: string, plugin: string): Promise<PluginDetail | null> {
     const ctx = await context();
     const { catalog } = await catalogFor(ctx, source, { counts: false });
     const item = catalog?.plugins.find(entry => entry.name === plugin);
     if (!catalog?.root || !item) return null;
-    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, catalog.root, resolve(item.folder) !== resolve(catalog.root));
+    const [offered, installed] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item)]);
+    if (offered) return { ...offered, installed };
+    // Files the marketplace can't give (an npm or pip package) may still be read from a tool that installed it.
+    return Object.keys(installed).length ? { ...empty, installed } : null;
+  }
+
+  /** What the marketplace offers of one plugin: from its own folder, or read from the repository it is kept in. */
+  async function offeredDetail(ctx: engine.PluginContext, root: string, item: CatalogPlugin): Promise<PluginDetail | null> {
+    if (item.folder) return pluginDetail(item.folder, item.entry ?? {}, root, !!item.isMarketplaceRoot);
     if (!item.remote) return null;
     const copy = await use.readRemotePlugin(ctx, item.remote);
     if ('problem' in copy) return { ...empty, problem: `Its files couldn’t be read from ${item.from?.label ?? item.remote.url}: ${copy.problem}` };
