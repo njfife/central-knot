@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, realpath, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { DAY_MS, defaultHistoryDays } from './model.ts';
-import { harnesses, writeRoot } from './harnesses.ts';
+import { configRoot, harnesses, writeRoot } from './harnesses.ts';
 import { presentTools } from './presence.ts';
 import {
   FORMAT_VERSION, changedWhileSyncing, clearStaleStages, storedRevision, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
@@ -141,6 +141,15 @@ export async function recordConverted(home: string, key: string, from: Converted
   all[key] = from;
   await mkdir(storeDirectory(home), { recursive: true });
   await writeDurably(convertedPath(home), `${JSON.stringify(all, null, 2)}\n`);
+}
+
+/** A tool's own copy: not one it only reads in another tool's folder. */
+const ownCopy = (entry: Gathered | undefined, tool: HarnessId) => (entry?.facts.copies[tool]?.readsFrom ? undefined : entry?.facts.copies[tool]);
+
+/** The tool among `tools` whose own skills folder this tool reads too (OpenCode reads Claude Code's), if there is one. */
+function readsFolderOf(context: ShareContext, tool: HarnessId, tools: HarnessId[]): HarnessId | undefined {
+  const read = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).slice(1).map(root => root.path);
+  return tools.find(other => other !== tool && read.includes(rootOf(context, other)));
 }
 
 /** The skill as found at a tool's main copy. */
@@ -600,6 +609,29 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     const name = entry.facts.name;
     if (entry.facts.held) { skip(); results.push({ item: name, outcome: 'held', message: entry.facts.held }); continue; }
     const syncing = tools.filter(tool => !item.off?.includes(tool));
+    // No tool it syncs to holds it, but one reads the copy of a tool that is left out (OpenCode reads Claude Code's): that
+    // copy becomes the reader's own, to start from. The owner's is no longer kept in sync, and this pass may remove it.
+    if (!options.observeOnly && !entry.locations.some(location => syncing.includes(location.tool))) {
+      for (const tool of syncing) {
+        const read = entry.facts.copies[tool];
+        if (!read?.readsFrom || entry.facts.cannot[tool] || await rootProblem(context, tool)) continue;
+        const directory = ownCopyDir(context, tool, read.folder);
+        try {
+          await mkdir(dirname(directory), { recursive: true });
+          await placeCopy(context, read.directory, { harness: tool, directory, limits: [] }, await readTree(read.directory));
+        } catch (error) {
+          if (error instanceof Error && error.message.startsWith('fault:')) throw error;
+          results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not copy to ${harnesses[tool].name}. ${plainError(error)}` });
+          continue;
+        }
+        const { readsFrom, ...copy } = { ...read, directory, writable: true };
+        entry.facts.copies[tool] = copy;
+        entry.locations.push({ tool, copy });
+        writes++;
+        results.push({ item: name, harness: tool, outcome: 'written', message: `${harnesses[tool].name} read ${harnesses[readsFrom!].name}’s copy, which is left out here, so it has a copy of its own now. ${harnesses[tool].nextStep}` });
+        break;
+      }
+    }
     const locations = entry.locations.filter(location => syncing.includes(location.tool) && !entry.facts.cannot[location.tool]);
     const chosen = item.use?.tool;
     if (item.use) {
@@ -879,10 +911,11 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const sourceSkill = entry.skills[sourceTool]?.find(skill => skill.directory === source.directory);
       for (const tool of syncing.filter(entryTool => !entry.locations.some(location => location.tool === entryTool))) {
         if (entry.facts.cannot[tool]) continue;
-        // It reads another tool's copy, which this pass keeps in sync: a copy of its own would only be a second one. Where
-        // that tool is left out of this skill, its copy goes stale, so the reader gets its own.
-        const readsFrom = entry.facts.copies[tool]?.readsFrom;
-        if (readsFrom && syncing.includes(readsFrom)) continue;
+        // It reads the folder of a tool this pass keeps in sync (OpenCode reads Claude Code's): the copy there is the one it
+        // reads, and one of its own would only be a second. Where that tool is left out of this skill or can't hold it,
+        // the reader gets its own.
+        const owner = readsFolderOf(context, tool, tools);
+        if (owner && syncing.includes(owner) && !entry.facts.cannot[owner]) continue;
         const directory = ownCopyDir(context, tool, entry.facts.name);
         const refused = (sourceSkill && targetFor(tool, directory, sourceSkill).skipped) || await rootProblem(context, tool);
         if (refused) { results.push({ item: name, harness: tool, outcome: 'held', message: refused }); continue; }
@@ -952,7 +985,9 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       removed.push({ tool, hash: copy.hash, folder: copy.folder, ...(synced ? { synced } : {}) });
       // Its own copy is gone; a copy it reads in another tool's folder still loads there, and only Disable stops that.
       const still = entry.reads[tool];
-      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}` });
+      // And the other way: a tool that read this copy, with none of its own, no longer has the skill.
+      const lost = tools.filter(other => entry.facts.copies[other]?.readsFrom === tool);
+      results.push({ item: name, harness: tool, outcome: 'removed', message: `Removed from ${toolName(tool)}. Restore it from History.${still ? ` ${toolName(tool)} still reads ${toolName(still)}’s copy; Disable it in ${toolName(tool)} to stop it loading there.` : ''}${lost.length ? ` ${lost.map(toolName).join(' and ')} read this copy, so ${lost.length > 1 ? 'they no longer have' : 'it no longer has'} the skill.` : ''}` });
     }
     if (removed.length) event({ key: change.key, item: name, kind: 'removed', losers: removed, orderProved: true, stoppedSync: stoppedSync.filter(tool => removed.some(gone => gone.tool === tool)), ...(lastCopies && item.state !== 'shared' ? { unmanaged: true } : {}) });
   };
@@ -1171,7 +1206,10 @@ export async function restoreFromHistory(context: ShareContext, eventId: string,
       if (entry?.facts.cannot[tool]) continue;
       const late = await rootProblem(context, tool);
       if (late) { results.push({ item: item.name, harness: tool, outcome: 'held', message: late }); continue; }
-      const here = entry?.facts.copies[tool];
+      // A tool that reads the folder of one restored here (OpenCode reads Claude Code's) reads the restored copy: none of its own is made.
+      const owner = readsFolderOf(context, tool, tools);
+      const here = ownCopy(entry, tool);
+      if (!here && owner && !item.off?.includes(owner) && !entry?.facts.cannot[owner]) continue;
       if (here) {
         if (!here.writable) { results.push({ item: item.name, harness: tool, outcome: 'held', message: `${harnesses[tool].name} reads a copy at ${here.directory}, which Central Knot does not change.` }); continue; }
         if (here.hash !== tree.hash) {
@@ -1291,7 +1329,8 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
   const back = new Set(past.restoredTools ?? []);
   let writes = 0;
   for (const loser of past.losers.filter(gone => !back.has(gone.tool))) {
-    const here = entry?.facts.copies[loser.tool];
+    // Its own copy: one it reads in another tool's folder is not the copy that was removed.
+    const here = ownCopy(entry, loser.tool);
     if (here) {
       if (here.hash === loser.hash) { back.add(loser.tool); results.push({ item: item.name, harness: loser.tool, outcome: 'stayed', message: `${toolName(loser.tool)} has it back already.` }); }
       else results.push({ item: item.name, harness: loser.tool, outcome: 'held', message: `${toolName(loser.tool)} has a different “${item.name}” now. It stays.` });

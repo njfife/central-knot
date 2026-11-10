@@ -518,6 +518,11 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .cell-oneway-mark svg { width: 11px; height: 11px; }
 .legend-cell .cell-oneway-mark { top: -4px; right: -4px; width: 10px; height: 10px; }
 .legend-cell .cell-source-mark { top: -3px; left: -3px; width: 7px; height: 7px; }
+/* A copy that is another tool's, read in that tool's folder: a link at the lower left, clear of the other corner marks. */
+.cell-reads-mark { position: absolute; bottom: -5px; left: -5px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); color: var(--ink-soft); box-shadow: 0 0 0 1px var(--line); }
+.cell-reads-mark svg { width: 10px; height: 10px; }
+.legend-cell .cell-reads-mark { bottom: -4px; left: -4px; width: 11px; height: 11px; }
+.legend-cell .cell-reads-mark svg { width: 8px; height: 8px; }
 .cell-source-mark { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--switch-on); box-shadow: 0 0 0 2px var(--surface); }
 
 .legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding: 14px 16px 18px; font-size: 11.5px; color: var(--ink-soft); }

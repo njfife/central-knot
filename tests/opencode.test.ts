@@ -9,7 +9,7 @@ import { agentsView, applyAgents } from '../src/agents.ts';
 import { discover } from '../src/discovery.ts';
 import { envOverride, harnesses } from '../src/harnesses.ts';
 import { instructionsView } from '../src/instructions.ts';
-import { applyChanges, manageView } from '../src/manage.ts';
+import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, readTool } from '../src/mcp.ts';
 import { mcpDisabled, withMcpSwitch } from '../src/mcpswitch.ts';
 import { executableCandidates } from '../src/platform.ts';
@@ -129,6 +129,64 @@ test('The copy OpenCode reads in Claude Code’s folder is Claude Code’s: it b
   } finally { await box.cleanup(); }
 });
 
+test('Restore, Remove and leaving Claude Code out keep OpenCode’s own copy apart from the one it reads', async () => {
+  const said = (result: { results: { message: string }[] }) => result.results.map(entry => entry.message).join(' | ');
+  const last = async (context: ShareContext, kind: string) => (await readHistory(context)).filter(event => event.kind === kind).at(-1)!.id;
+  const box = await sandbox();
+  try {
+    // OpenCode's own copy, removed and restored, while Claude Code's folder holds a different one of that name.
+    await skill(box.home, `${OPENCODE}/skills`, 'x', text('x', 'OpenCode’s own.'));
+    await skill(box.home, '.claude/skills', 'x', text('x', 'Claude Code’s.'));
+    await applyChanges(box.context, [{ key: 'x', managed: false, off: [], remove: ['opencode-cli'] }]);
+    assert.equal(await exists(join(box.home, OPENCODE, 'skills/x')), false);
+    const restored = await restoreFromHistory(box.context, await last(box.context, 'removed'));
+    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/x/SKILL.md'), 'utf8'), text('x', 'OpenCode’s own.'), said(restored));
+
+    // Managed in both, held only in Claude Code's folder; then Claude Code is left out: OpenCode gets that copy as its own.
+    await skill(box.home, '.claude/skills', 'delta');
+    assert.equal((await applyChanges(box.context, [{ key: 'delta', managed: true, off: [] }])).harnessWrites, 0);
+    const left = await applyChanges(box.context, [{ key: 'delta', managed: true, off: ['claude-cli'] }]);
+    assert.equal(await readFile(join(box.home, OPENCODE, 'skills/delta/SKILL.md'), 'utf8'), text('delta'), said(left));
+    assert.match(said(left), /OpenCode read Claude Code’s copy, which is left out here, so it has a copy of its own now/);
+    assert.doesNotMatch(said(await applyChanges(box.context, [])), /No tool it syncs to/);
+    // Managed with Claude Code left out from the start: the same.
+    await skill(box.home, '.claude/skills', 'epsilon');
+    await applyChanges(box.context, [{ key: 'epsilon', managed: true, off: ['claude-cli'] }]);
+    assert.equal(await exists(join(box.home, OPENCODE, 'skills/epsilon/SKILL.md')), true);
+
+    // Remove from Claude Code of a managed skill OpenCode only reads: OpenCode keeps the skill, as a copy of its own.
+    await skill(box.home, '.claude/skills', 'alpha');
+    await applyChanges(box.context, [{ key: 'alpha', managed: true, off: [] }]);
+    const taken = await applyChanges(box.context, [{ key: 'alpha', managed: true, off: ['claude-cli'], remove: ['claude-cli'] }]);
+    assert.deepEqual([await exists(join(box.home, '.claude/skills/alpha')), await exists(join(box.home, OPENCODE, 'skills/alpha/SKILL.md'))], [false, true], said(taken));
+    // Unmanaged: the copy goes, and the result says OpenCode read it and has the skill no longer.
+    await skill(box.home, '.claude/skills', 'beta');
+    const gone = await applyChanges(box.context, [{ key: 'beta', managed: false, off: [], remove: ['claude-cli'] }]);
+    assert.match(said(gone), /Removed from Claude Code\. Restore it from History\. OpenCode read this copy, so it no longer has the skill\./);
+
+    // A deletion restored: Claude Code's copy comes back, and OpenCode reads it again, with no second copy of its own.
+    await skill(box.home, '.claude/skills', 'zeta');
+    await applyChanges(box.context, [{ key: 'zeta', managed: true, off: [] }]);
+    await rm(join(box.home, '.claude/skills/zeta'), { recursive: true });
+    await applyChanges(box.context, []); await applyChanges(box.context, []);
+    const back = await restoreFromHistory(box.context, await last(box.context, 'deleted'));
+    assert.deepEqual([await exists(join(box.home, '.claude/skills/zeta/SKILL.md')), await exists(join(box.home, OPENCODE, 'skills/zeta'))], [true, false], said(back));
+    assert.doesNotMatch(said(back), /does not change/);
+  } finally { await box.cleanup(); }
+});
+
+test('A skill new to both Claude Code and OpenCode goes to Claude Code’s folder only, where OpenCode reads it', async () => {
+  const box = await sandbox(['claude-cli', 'copilot-cli', 'opencode-cli']);
+  try {
+    await skill(box.home, '.copilot/skills', 'fresh');
+    const result = await applyChanges(box.context, [{ key: 'fresh', managed: true, off: [] }]);
+    assert.equal(result.harnessWrites, 1, JSON.stringify(result.results));
+    assert.deepEqual([await exists(join(box.home, '.claude/skills/fresh/SKILL.md')), await exists(join(box.home, OPENCODE, 'skills/fresh'))], [true, false]);
+    assert.equal((await manageView(box.context)).skills.find(item => item.key === 'fresh')!.copies['opencode-cli']!.readsFrom, 'claude-cli');
+    assert.equal((await applyChanges(box.context, [])).harnessWrites, 0, 'settled');
+  } finally { await box.cleanup(); }
+});
+
 test('OpenCode’s skill switch is a deny rule by name, written last so it decides; Enable takes out only that', async () => {
   const box = await sandbox();
   try {
@@ -154,11 +212,10 @@ test('OpenCode’s skill switch is a deny rule by name, written last so it decid
     const other = '{ "permission": { "bash": "ask" } }';
     assert.equal(flip(other, false), other);
     assert.equal(flip(off, true), off);
-    // A "*" written after `skill` decides for every skill (measured on both lines), so `skill` moves after it to count.
-    const late = '{ "permission": { "skill": { "alpha": "deny" }, "*": "allow" } }';
-    assert.equal(state(late), false, 'the later "*" allows it');
-    assert.deepEqual(Object.entries((readJsonc(flip(late, true)) as { permission: Record<string, unknown> }).permission), [['*', 'allow'], ['skill', { alpha: 'deny' }]]);
-    assert.equal(state(flip(late, true)), true);
+    // A "*" written after `skill` decides for every skill (measured on both lines). A rule for one skill would count only if
+    // `skill` moved after it, which would make the rules it overrules count again: reported, never edited.
+    await writeFile(settings(box.home), '{ "permission": { "skill": { "beta": "deny" }, "*": "allow" } }\n');
+    assert.match((await readSwitchFile(box.context, 'opencode-cli')).problem?.reason ?? '', /a rule after skill in permission that decides for every skill/);
     assert.equal(state('{ "permission": { "*": "deny" } }'), true, 'every permission denied, skills too');
     // A rule's comment stays with it when another rule goes, and a rule already last changes its word in place.
     const noted = '{\n  "permission": {\n    "skill": {\n      // mine\n      "beta": "deny",\n      // about alpha\n      "alpha": "deny"\n    }\n  }\n}\n';

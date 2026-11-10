@@ -55,8 +55,7 @@ export async function readSwitchFile(context: ShareContext, tool: HarnessId): Pr
   }
   try { return { tool, path, text, exists: true, parsed: parse(tool, text) }; }
   catch (error) {
-    const reason = errorCode(error) !== 'CK_FORM' ? `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`
-      : tool === 'opencode-cli' ? 'sets permission as one word, a form Central Knot doesn’t edit.' : 'writes skills.config as a value, a form Central Knot doesn’t edit.';
+    const reason = errorCode(error) === 'CK_FORM' ? (error as { reason: string }).reason : `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.`;
     return { tool, path, text, exists: true, problem: { file: path, reason } };
   }
 }
@@ -128,7 +127,7 @@ const isPathOf = (rule: CodexRule, skillFile: string) => {
 /** A switch file parsed: JSON settings, or Codex's skill rules. */
 export type ParsedSwitches = { json: Record<string, unknown> } | { rules: CodexRule[] };
 
-const formError = () => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM' });
+const formError = (reason = 'writes skills.config as a value, a form Central Knot doesn’t edit.') => Object.assign(new Error('Skill rules in a form not edited here.'), { code: 'CK_FORM', reason });
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /** A tool's settings, parsed. Throws when the text isn't the tool's format. */
@@ -137,8 +136,13 @@ function parse(tool: HarnessId, text: string): ParsedSwitches {
   if (!text.trim()) return { json: {} };
   const json = record(tool === 'opencode-cli' ? readJsonc(text) : JSON.parse(withoutBom(text)));
   if (!json) throw new Error('Not a JSON object.');
-  // OpenCode's `permission` as one word ("allow") has no place for one skill's rule: a form not edited here.
-  if (tool === 'opencode-cli' && 'permission' in json && !record(json.permission)) throw formError();
+  // OpenCode's `permission` as one word ("allow") has no place for one skill's rule; and a rule after `skill` that covers
+  // skills ("*") decides for every skill, so a rule for one would count only once `skill` moved after it, which would make
+  // the rules it overrules count again. Both are forms not edited here.
+  const permission = tool === 'opencode-cli' && 'permission' in json ? record(json.permission) : {};
+  if (!permission) throw formError('sets permission as one word, a form Central Knot doesn’t edit.');
+  const keys = Object.keys(permission);
+  if ('skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'))) throw formError('has a rule after skill in permission that decides for every skill, a form Central Knot doesn’t edit. Move it above skill to switch one skill.');
   return { json };
 }
 
@@ -246,16 +250,14 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
     if ((openCodeAction(openCodeRules(json), target.name) === 'deny') === disabled) return file.text;
     const path = ['permission', 'skill'];
     const permission = record(json.permission) ?? {};
-    const keys = Object.keys(permission);
     const map: Record<string, unknown> = typeof permission.skill === 'string' ? { '*': permission.skill } : record(permission.skill) ?? {};
     const { [target.name]: own, ...others } = map;
     const { skill: _skill, ...rest } = permission;
-    // A wider rule written after `skill` decides instead of it: `skill` then has to go last, after that rule.
-    const overruled = 'skill' in permission && keys.slice(keys.indexOf('skill') + 1).some(key => typeof permission[key] === 'string' && openCodeMatches(key, 'skill'));
     // What the other rules say once this skill's own is out: an Enable they would still deny gets an `allow` of its own.
-    const decides = openCodeAction(openCodeRules({ permission: overruled ? { ...rest, skill: others } : { ...permission, skill: others } }), target.name);
+    const decides = openCodeAction(openCodeRules({ permission: { ...permission, skill: others } }), target.name);
     const next = disabled ? { ...others, [target.name]: 'deny' } : decides === 'deny' ? { ...others, [target.name]: 'allow' } : others;
-    if (overruled || typeof permission.skill === 'string') return bom + setJsonMember(overruled ? setJsonMember(text, path, undefined) : text, path, next);
+    // `skill` as one word becomes a map that says the same, so one skill's rule has a place.
+    if (typeof permission.skill === 'string') return bom + setJsonMember(text, path, next);
     // A map the Enable leaves empty goes with its last entry, and so does a `permission` that held nothing else.
     if (!Object.keys(next).length) return bom + setJsonMember(text, Object.keys(rest).length ? path : ['permission'], undefined);
     // Its own rule, when it is the last that matches, changes its word where it is; otherwise it goes to the end, where it decides.

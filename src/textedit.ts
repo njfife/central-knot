@@ -102,8 +102,8 @@ function indentOf(text: string, objectStart: number, list: Member[]): { inner: s
 
 /**
  * The text without one member and one neighbouring comma, keeping the surrounding layout. A member on a line of its own goes
- * with that line, the comment lines directly above it and a comment after it on its line, so every other member keeps its
- * own comments (OpenCode's settings may have them). One written beside others on a line goes up to the next member, or
+ * with that line, the comment lines directly above it (unless it is the first member) and a comment after it on its line, so
+ * every other member keeps its own comments (OpenCode's settings may have them). One written beside others on a line goes up to the next member, or
  * back to the one before.
  */
 function withoutMember(text: string, list: Member[], index: number, objectStart: number, close: number): string {
@@ -122,9 +122,9 @@ function withoutMember(text: string, list: Member[], index: number, objectStart:
     return index < list.length - 1 ? text.slice(0, found.whole.start) + text.slice(list[index + 1].whole.start) : text.slice(0, list[index - 1].whole.end) + text.slice(found.whole.end);
   }
   const end = rest + 1;
-  // The comment lines directly above it are about it.
+  // The comment lines directly above it are about it; above the first member they may be about the whole object, and stay.
   let start = lineStart;
-  for (;;) {
+  for (; index > 0;) {
     const above = text.lastIndexOf('\n', start - 2) + 1;
     if (above <= objectStart || above >= start || !/^[ \t]*(\/\/.*|\/\*.*\*\/[ \t]*)\r?\n$/.test(text.slice(above, start))) break;
     start = above;
