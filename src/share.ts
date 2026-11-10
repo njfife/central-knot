@@ -8,6 +8,8 @@ import { mcpFile } from './mcp.ts';
 import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
+/** A text's SHA-256, hex: what Central Knot names content by. */
+export const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const STAGE_PREFIX = '.ck-stage-';
 const STAGE_NAME = /^\.ck-stage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Finder drops these into any folder it opens; they are no change to a skill. */
@@ -41,7 +43,7 @@ export interface ShareContext {
 export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; /** `removing`: a deletion could not remove this copy yet; it is retried while it still holds `hash`. */ status: 'pending' | 'written' | 'removing' }
 export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
   /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
-  displaced?: { tool: HarnessId; hash: string }[] }
+  displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
@@ -386,8 +388,11 @@ export function storeFolder(key: string): string {
   return `${readable || 'skill'}-${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
 }
 
+/** Where a skill revision is kept in Central Knot's store, by the skill's key and its content hash. */
+export const storedRevision = (context: ShareContext, key: string, hash: string) => join(storeDirectory(context.home), 'items', storeFolder(key), hash);
+
 export async function importRevision(context: ShareContext, key: string, source: string, tree: Tree) {
-  const target = join(storeDirectory(context.home), 'items', storeFolder(key), tree.hash);
+  const target = storedRevision(context, key, tree.hash);
   try { if ((await readTree(target)).hash === tree.hash) return; await removeTree(target); }
   catch (error) { if (errorCode(error) !== 'ENOENT') throw error; }
   await mkdir(dirname(target), { recursive: true });

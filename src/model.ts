@@ -18,3 +18,16 @@ export const historyDayChoices: readonly HistoryDays[] = [7, 30, 90];
 export const defaultHistoryDays: HistoryDays = 30;
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 
+/** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */
+export const skillCount = (snapshot: Snapshot) => new Set(snapshot.skills.map(skill => skill.folder.normalize('NFC').toLowerCase())).size;
+
+/** Items grouped by a key, groups and items in the order first seen (Map.groupBy, which ES2023 lacks). */
+export function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
+  const groups = new Map<K, T[]>();
+  for (const item of items) {
+    const at = key(item);
+    const group = groups.get(at);
+    if (group) group.push(item); else groups.set(at, [item]);
+  }
+  return groups;
+}

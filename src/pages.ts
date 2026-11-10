@@ -1,6 +1,6 @@
 import { absentKinds, announce, noTools, homeToolNames, practiceNoteOpen, setPracticeNote, homeTools, loadHome, realHomeName, type Kind, thisMachine, rerender, selectItem, shownPath, showFile, showPage, startHome, state, syncNow, type Page } from './app.ts';
-import { afterLayout, button, cardGrid, emptyState, h, icon, pathText, section } from './dom.ts';
-import { fullToolName, plural, toolName } from './model.ts';
+import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathText, section } from './dom.ts';
+import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
 import { absentTools, heldKinds, isPresent, kindNames, kindNouns } from './presence.ts';
@@ -239,16 +239,8 @@ function copyEntry(key: string, { tool, skill }: Found, index: number) {
 }
 
 /** One block per distinct content, named by the copies that hold it. */
-function contents(key: string, copies: Found[]) {
-  const distinct = new Map<string, Found[]>();
-  for (const copy of copies) distinct.set(copy.skill.content, [...(distinct.get(copy.skill.content) ?? []), copy]);
-  return [...distinct].map(([content, holders], index) => {
-    const who = holders.map(holder => `${toolName(holder.tool)} (${holder.skill.rootLabel})`).join(', ');
-    return h('div.content-block', {},
-      distinct.size > 1 && h('p.content-owner', {}, who),
-      h('pre.content.mono', { tabindex: '0', id: `content-${key}-${index}`, 'aria-label': `Skill contents, ${who}` }, content));
-  });
-}
+const contents = (key: string, copies: Found[]) =>
+  fileBlocks(`content-${key}`, 'Skill contents', copies.map(copy => ({ ...copy, text: copy.skill.content })), holders => holders.map(({ tool, skill }) => `${toolName(tool)} (${skill.rootLabel})`).join(', '));
 
 export function skillsPage() {
   const home = state.home;

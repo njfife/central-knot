@@ -13,6 +13,7 @@ import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, empty
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
 import { kindNouns } from './presence.ts';
+import { NO_PROFILE, profilesInUse } from './profileplan.ts';
 import { copyButton, fact, kindEmpty, noToolsState, notRead } from './pages.ts';
 
 const TABS: HarnessTab[] = ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about'];
@@ -176,7 +177,9 @@ function everyHarness(home: HomeView) {
         h('span', {}, home.manage.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
           : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
-            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'])),
+            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'],
+          // Profiles switch items in every tool at once, so the one in use is said once here, as Profiles names it.
+          profilesInUse(home.profiles) ? [' Profile in use: ', button({ variant: 'link', size: 'micro', label: home.profiles.profiles.find(profile => profile.id === home.profiles.active)?.name ?? NO_PROFILE, id: 'harnesses-profile', onclick: () => showPage('profiles') }), '.'] : null)),
       h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home)))));
 }
 

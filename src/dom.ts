@@ -1,4 +1,5 @@
 import { icons, type IconName } from './icons.ts';
+import { groupBy } from './model.ts';
 
 type Child = Node | string | null | undefined | false;
 type Props = Record<string, unknown>;
@@ -23,6 +24,11 @@ export function icon(name: IconName, size = 16, extraClass = ''): SVGElement {
   holder.innerHTML = `<svg class="icon ${extraClass}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name]}</svg>`;
   return holder.content.firstElementChild as SVGElement;
 }
+
+/** A Find field: each keystroke hands the text to `onInput` (which redraws), and the redrawn field keeps the focus. */
+export const findInput = (field: { id: string; label: string; value: string; onInput: (text: string) => void; onKeydown?: (event: KeyboardEvent) => void }) =>
+  h('input.find-input', { id: field.id, type: 'text', placeholder: 'Find', 'aria-label': field.label, value: field.value, spellcheck: 'false', onkeydown: field.onKeydown,
+    oninput: (event: Event) => { field.onInput((event.target as HTMLInputElement).value); document.getElementById(field.id)?.focus(); } });
 
 export const hiddenText = (text: string) => h('span.hidden-text', {}, text);
 
@@ -75,20 +81,27 @@ export const pathText = (text: string, full = text): HTMLElement => {
     h('span.middle-head', {}, cut > 0 ? text.slice(0, cut) : text), cut > 0 ? h('span.middle-tail', {}, text.slice(cut)) : null);
 };
 
+/** A disabled control's reason, as its tooltip and its accessible description. */
+export const lockAttrs = (why: string | undefined) => (why ? { title: why, 'aria-description': why } : undefined);
+
 /** An on/off switch; its label is also its tooltip. `attrs` adds to or replaces its attributes (Settings ties it to its row's hint). */
 export function toggle({ on, label, onchange, disabled = false, id, attrs = {} }: { on: boolean; label: string; onchange: (on: boolean) => void; disabled?: boolean; id?: string; attrs?: Props }) {
   return h('button.switch', { type: 'button', id, role: 'switch', 'aria-checked': String(on), 'aria-label': label, title: label, disabled, ...attrs, onclick: (event: Event) => { event.stopPropagation(); onchange(!on); } },
     h('span.switch-knob'));
 }
 
-export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void }, ...label: Child[]): HTMLElement {
-  return h('label.tick', {},
+/**
+ * A tick box drawn with the app's icons over a hidden native checkbox. `mixed` draws a box for a group with only some ticked;
+ * `name` and `help` are read with it (`help` also shows on hover) when it has no visible `label`; `look` is the label's class.
+ */
+export function checkbox(options: { id: string; checked: boolean; disabled?: boolean; onchange: (checked: boolean) => void; mixed?: boolean; name?: string; help?: string; look?: string }, ...label: Child[]): HTMLElement {
+  return h(`label.${options.look ?? 'tick'}`, { title: options.help },
     h('input.hidden-input', {
-      type: 'checkbox', id: options.id, checked: options.checked, disabled: options.disabled,
+      type: 'checkbox', id: options.id, checked: options.checked, disabled: options.disabled, 'aria-label': options.name, 'aria-description': options.help,
       onchange: (event: Event) => options.onchange((event.target as HTMLInputElement).checked),
     }),
-    icon(options.checked ? 'square-check' : 'square', 14, 'tick-box'),
-    h('span.tick-label', {}, ...label));
+    icon(options.checked ? 'square-check' : options.mixed ? 'square-minus' : 'square', 14, 'tick-box'),
+    label.length ? h('span.tick-label', {}, ...label) : null);
 }
 
 export function emptyState(glyph: IconName, title: string, body: string | undefined, action?: Node): HTMLElement {
@@ -221,3 +234,22 @@ export const runAfterLayout = (): void => { for (const step of layoutSteps) step
 /** The small × that closes a band, notice or result. `label` is read out and, unless `title` differs, shown on hover. */
 export const closeButton = (onclick: (event: Event) => void, { id, label = 'Dismiss', title = label, look = '' }: { id?: string; label?: string; title?: string; look?: string } = {}) =>
   h(`button.band-dismiss${look}`, { type: 'button', id, 'aria-label': label, title, onclick }, icon('x', 12));
+
+/**
+ * Blocks showing a file's text as written, one per distinct text, for any kind of copy (a skill in each tool, a plugin's
+ * copy in the marketplace and in each tool). Texts are the same when `same` gives the same key (by default, exactly the
+ * same). `name` says who holds a block (given how many distinct texts there are); it shows above each block when the
+ * copies differ, or always with `named`. `warn` marks a block whose holders are the odd ones out. Ids are `${id}-0`, `-1`….
+ */
+export function fileBlocks<Copy extends { text: string }>(id: string, label: string, copies: Copy[], name: (holders: Copy[], distinct: number) => string,
+  { named = false, warn, same = text => text }: { named?: boolean; warn?: (holders: Copy[]) => boolean; same?: (text: string) => string } = {}): HTMLElement[] {
+  const distinct = groupBy(copies, copy => same(copy.text));
+  return [...distinct].map(([, holders], index) => {
+    const text = holders[0]!.text;
+    const who = name(holders, distinct.size);
+    const odd = warn?.(holders) ?? false;
+    return h('div.content-block', {},
+      (named || distinct.size > 1) && h(`p.content-owner${odd ? '.tone-warning' : ''}`, {}, odd ? icon('circle-alert', 12) : null, who),
+      h('pre.content.mono', { tabindex: '0', id: `${id}-${index}`, 'aria-label': `${label}, ${who}` }, text));
+  });
+}

@@ -1,20 +1,29 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PluginView, PluginsView } from './types.ts';
-import { plural } from './model.ts';
-import { toolNames as names } from './words.ts';
+import type { Components, HarnessId, InstallState, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
+import { groupBy, plural } from './model.ts';
+import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
+import { andList, toolNames as names } from './words.ts';
+import { takesPlugins } from './presence.ts';
+
+/**
+ * Tools that can take a plugin's parts as separate items (parts.ts) where the plugin itself can't go: Pi always, Codex and
+ * Copilot CLI when their plugin route is blocked here. Claude Code always takes the plugin itself.
+ */
+export const partsTools: HarnessId[] = ['copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** The one way of saying a tool's CLI is missing. */
 export const cliMissing = (tool: HarnessId) => `${names[tool]}’s command-line tool wasn’t found`;
 /** The same, as the reason nothing can run there. */
 export const noCli = (tool: HarnessId) => `${cliMissing(tool)}, so its plugin commands can’t run.`;
 /** Why nothing can change in a home that is only previewed. */
-export const PREVIEW_ONLY = 'Preview only: nothing can be installed or uninstalled in this home.';
+export const PREVIEW_ONLY = 'Preview only: nothing can be changed in this home.';
 /** Why Central Knot leaves a tool's same-named marketplace alone: it comes from `other`, not from the one on screen. */
 export const heldReason = (tool: HarnessId, marketName: string, other: string) => `${names[tool]} has a different marketplace named “${marketName}” (${other}). Central Knot leaves it alone.`;
 
 /** Why a tool can't take this marketplace's plugins, if it can't: no CLI, only a desktop app's copy, or Copilot refusing the marketplace. */
 export function blocked(view: PluginsView, entry: MarketplaceView, tool: HarnessId): string | undefined {
+  if (!takesPlugins(tool)) return `${names[tool]} doesn’t take Claude plugins.`;
   if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? 'Only ChatGPT desktop was found. Installing there without the Codex CLI is not known yet.' : noCli(tool);
   return tool === 'copilot-cli' ? entry.copilotRefuses : undefined;
 }
@@ -45,6 +54,7 @@ export function installsIn(view: PluginsView, tool: HarnessId): { installed: Mar
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.
  */
 export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
   return state.state === 'installed' ? undefined : blocked(view, entry, tool);
@@ -61,6 +71,144 @@ export function cantUninstall(view: PluginsView, entry: MarketplaceView, plugin:
   return view.clis[tool] ? undefined : `${cliMissing(tool)}.`;
 }
 
+/** This plugin's parts in a tool, when they were installed there as separate items (parts.ts). */
+export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId): PartsState | undefined => entry.parts?.[plugin]?.[tool];
+
+/**
+ * Whether a tool is one that would take this plugin's parts, whatever they are: it takes parts, has none of this plugin's
+ * yet, and the plugin itself is not installed and can't be installed there (Pi always; Codex or Copilot CLI with their
+ * plugin route blocked), the plugin is still listed, and the tool holds no other marketplace of this name.
+ */
+export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
+  if (!partsTools.includes(tool) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
+}
+
+/** Whether a plugin holding these components has a part this tool can take (Pi takes no agents). Unknown counts as yes. */
+export const partsFit = (tool: HarnessId, components?: Components) => !components || !!(components.skills || components.mcp || (components.agents && tool !== 'pi-cli'));
+
+/**
+ * Whether this plugin's parts can go into this tool as separate items, or are there already (then they can always be
+ * updated or removed, even once the plugin could go there itself).
+ */
+export function partsOffer(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): boolean {
+  return (partsTools.includes(tool) && !!partsOf(entry, plugin, tool)) || (partsEligible(view, entry, plugin, tool) && partsFit(tool, components));
+}
+
+/**
+ * Why a tool takes this plugin's parts rather than the plugin, short, for one sentence about several tools: [one tool,
+ * several tools]. "Pi takes no plugins", "Copilot CLI and Codex have no command-line tool here".
+ */
+export function partsWhy(view: PluginsView, entry: MarketplaceView, tool: HarnessId): [string, string] {
+  if (!takesPlugins(tool)) return ['takes no plugins', 'take no plugins'];
+  if (!view.clis[tool]) return view.desktopOnly?.includes(tool) ? ['is only the desktop app here', 'are only desktop apps here'] : ['command-line tool not found', 'command-line tools not found'];
+  // Parts kept in a tool that can take the plugin again (its CLI is back): nothing to explain.
+  return tool === 'copilot-cli' && entry.copilotRefuses ? ['refuses this marketplace', 'refuse this marketplace'] : ['', ''];
+}
+
+/**
+ * The same part, by each kind's own rule: skill folders ignore case (as macOS and Windows do), agents match as the Agents
+ * page keys them (NFC, ignoring case), MCP servers are keys in a settings file and match exactly.
+ */
+export function samePart(first: Pick<PartItem, 'kind' | 'name'>, second: Pick<PartItem, 'kind' | 'name'>): boolean {
+  if (first.kind !== second.kind) return false;
+  if (first.kind === 'mcp') return first.name === second.name;
+  return first.name.normalize('NFC').toLowerCase() === second.name.normalize('NFC').toLowerCase();
+}
+
+/** Which page lists each kind of part, and the kind each page lists. */
+export const pageOfPart = { skill: 'skills', mcp: 'mcp', agent: 'agents' } as const;
+export const partOfPage = { skills: 'skill', mcp: 'mcp', agents: 'agent' } as const;
+
+/** Each kind of part in words: [one, several]. */
+export const partWords: Record<PartKind, [string, string]> = { skill: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agent: ['agent', 'agents'] };
+
+/**
+ * Where a tool stands with this plugin's parts, for the box, the key and the status line alike: they can go in
+ * (`offer`), they are there (`installed`), or they are there and the plugin has changed since (`changed`). Undefined
+ * when parts aren't a matter for this tool.
+ */
+export function partsMark(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, components?: Components): 'offer' | 'installed' | 'changed' | undefined {
+  if (!partsOffer(view, entry, plugin, tool, components)) return undefined;
+  const parts = partsOf(entry, plugin, tool);
+  return parts?.changed ? 'changed' : parts ? 'installed' : 'offer';
+}
+
+/** "2 skills · 1 MCP server", from parts as recorded. */
+export function partsSummary(items: PartsState['items'], separator = ' · '): string {
+  return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
+}
+
+/** "version 1.2", or nothing when the catalog gave none. */
+export const versionWord = (version?: string) => (version ? `version ${version}` : '');
+
+/**
+ * Tools with no switch for one skill of a plugin, and why (ENB-06). Claude Code's skillOverrides leave plugin skills alone,
+ * so only the whole plugin turns off there; a deny rule only fails the call and is not Disable. Codex keeps the switch in
+ * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
+ */
+export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
+  'claude-cli': 'Claude Code has no switch for a single skill of a plugin; to stop one there, uninstall the plugin there.',
+};
+
+/** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */
+export const offByBareName = (skill: string) => `Can’t be turned on here: Copilot CLI has every skill named “${skill}” turned off, not only this plugin’s. To turn them all on: \`copilot skill enable ${skill}\``;
+/** Why Codex's skill switches aren't edited: its config.toml writes the list as a value, which a `[[skills.config]]` block can't extend. */
+export const INLINE_SKILLS_CONFIG = 'Codex’s config.toml writes skills.config as a value, a form Central Knot doesn’t edit, so its plugin skills can’t be switched here.';
+/** Why a skill the marketplace lists can't be switched where the installed copy (an older or newer version) lacks it. */
+export const notInCopy = (tool: HarnessId, skill: string) => `The copy ${names[tool]} has installed has no skill named “${skill}”.`;
+/** Why Copilot CLI's switch isn't offered for a skill whose name could not go safely on its command line. */
+export const UNSAFE_SKILL_NAME = 'Its name has characters Central Knot doesn’t pass to Copilot CLI’s command.';
+
+/**
+ * Why one skill of this plugin can't be switched in this tool here, if it can't: the tool has no such switch, the plugin
+ * isn't installed there or its installed copy lacks the skill, its name can't go on Copilot CLI's command line, it is held
+ * off by a switch that isn't the plugin's own, Copilot CLI's command is missing, or writing isn't allowed in this home.
+ */
+export function cantSwitchSkill(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string): string | undefined {
+  const state = stateOf(entry, plugin, tool);
+  if (state.state !== 'installed') return NO_SKILL_SWITCH[tool] ?? `It isn’t installed in ${names[tool]}.`;
+  const off = skillOff(entry, plugin, tool, skill);
+  // Only turning one off waits for a tested build; turning one back on is always offered.
+  const blocked = noSwitchReason(tool, state.skills, skill) ?? state.switchesHeld ?? off?.held ?? (off ? undefined : untestedBuild(tool, view.versions?.[tool], !!view.clis[tool]));
+  if (blocked) return blocked;
+  if (!view.canWrite) return PREVIEW_ONLY;
+  return tool === 'copilot-cli' && !view.clis[tool] ? `${cliMissing(tool)}.` : undefined;
+}
+
+/** The oldest build of each tool its switch for one plugin skill was exercised on (capability data, Appendix B). */
+export const SKILL_SWITCH_TESTED_FROM: Partial<Record<HarnessId, string>> = { 'codex-cli': '0.142.3', 'copilot-cli': '1.0.107' };
+
+/**
+ * Why turning off one plugin skill isn't offered on this build of a tool (ENB-01: native Disable only where it was
+ * verified): its `version` is older than the switch was tested on, or isn't known: not read from its CLI, or no CLI
+ * found to ask (`hasCli` false; Codex's switch needs no command, only a known build). Undefined when it may be offered.
+ */
+export function untestedBuild(tool: HarnessId, version: string | undefined, hasCli: boolean): string | undefined {
+  const from = SKILL_SWITCH_TESTED_FROM[tool];
+  if (!from) return undefined;
+  if (!version && !hasCli) return `${cliMissing(tool)}, so its build can’t be checked and turning off one of its plugin skills isn’t offered.`;
+  if (!version) return `${names[tool]}’s version couldn’t be read, so turning off one of its plugin skills isn’t offered (verified from ${from}).`;
+  return compareVersions(version, from) < 0 ? `Not verified on this build of ${names[tool]} (${version}): turning off one plugin skill is verified from ${from}.` : undefined;
+}
+
+/**
+ * Why a tool can't switch this skill of its installed copy (whose skills are `skills`, when read), in any home: it has no
+ * such switch, the copy lacks the skill, or the name can't go on Copilot CLI's command line. The page (cantSwitchSkill)
+ * and the engine (plugins.setSkill) both ask this.
+ */
+export function noSwitchReason(tool: HarnessId, skills: string[] | undefined, skill: string): string | undefined {
+  if (NO_SKILL_SWITCH[tool]) return NO_SKILL_SWITCH[tool];
+  if (skills && !skills.includes(skill)) return notInCopy(tool, skill);
+  return tool === 'copilot-cli' && !SAFE_NAME.test(skill) ? UNSAFE_SKILL_NAME : undefined;
+}
+
+/** Whether a tool has this skill of an installed plugin turned off, and the switch's own record of it. */
+export const skillOff = (entry: MarketplaceView, plugin: string, tool: HarnessId, skill: string) => {
+  const state = stateOf(entry, plugin, tool);
+  return state.state === 'installed' ? state.skillsOff?.find(off => off.skill === skill) : undefined;
+};
+
 /** Tools this plugin can be uninstalled from here: installed there, nothing in the way. */
 export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => installed(entry, plugin, tool) && !cantUninstall(view, entry, plugin, tool));
@@ -70,7 +218,7 @@ export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourc
 
 /** Tools that can still take this plugin: available there and not installed yet. */
 export const toolsWithoutPlugin = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
-  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
+  view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool) && !partsOf(entry, plugin, tool));
 
 /**
  * The parts that won't fully work in a tool, short, in the words "In each tool" uses up to its colon: "MCP servers may
@@ -97,3 +245,51 @@ export const categoriesOf = (entry: MarketplaceView) => [...new Set(entry.plugin
 
 /** Whether a plugin matches what was typed in the find box: its name, display name, description, category or keywords. */
 export const matches = (plugin: PluginView, find: string) => !find || [plugin.name, plugin.displayName, plugin.description, plugin.category, ...(plugin.keywords ?? [])].some(text => text?.toLowerCase().includes(find.toLowerCase()));
+
+/**
+ * A version as compared for showing a difference: no leading "v", no build suffix after "+", no commit hash after "-"
+ * (Codex names a copy 0.1.13-77c10e110b37). A hash has a letter in it, so a dated pre-release such as 1.2.0-20250101
+ * stays as it is. Choosing which cached copy Codex loads is stricter: see compareVersions in plugins.ts.
+ */
+const releaseOf = (version: string) => version.trim().replace(/^v(?=\d)/i, '').replace(/\+.*$/, '').replace(/-([0-9a-f]+)$/i, (suffix, hash: string) => (isCommitHash(hash) ? '' : suffix));
+
+/**
+ * The version the marketplace offers, as Claude Code reads it (plugin.json's, else the entry's). For a plugin in the
+ * marketplace's own folder the catalog already read it so, fresh on every view. A plugin kept in another repository has
+ * only the entry's until its own files are read. (A plugin shipping a Codex manifest with another version isn't covered.)
+ */
+export const offeredVersion = (plugin: PluginView, detail: PluginDetail | null | undefined) => (plugin.folder ? plugin.version : detail?.version ?? plugin.version);
+
+/**
+ * The offered version to compare tools' versions with: offeredVersion, but for a plugin kept in another repository only
+ * once the marketplace's copy of its files was read (until then its version is the entry's, which plugin.json may
+ * overrule). Undefined means nothing is compared.
+ */
+export const versionToCompare = (plugin: PluginView, detail: PluginDetail | null | undefined) =>
+  (plugin.folder || detail?.offered ? offeredVersion(plugin, detail) : undefined);
+
+/** The version a tool has installed, when it is installed there and its version is known. */
+export function installedVersion(entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
+  const status = stateOf(entry, plugin, tool);
+  return status.state === 'installed' ? status.version : undefined;
+}
+
+/** Whether a tool's installed copy is another version than the marketplace offers. Unknown on either side is not a difference. */
+export const versionDiffers = (installed: string | undefined, offered: string | undefined) => !!installed && !!offered && releaseOf(installed) !== releaseOf(offered);
+
+/** The note "Marketplace has 1.2.0" when a tool's installed `version` is another than the one `offered`; else undefined. */
+export const marketplaceVersionNote = (version: string | undefined, offered: string | undefined) => (versionDiffers(version, offered) ? `Marketplace has ${offered}` : undefined);
+
+/** Tools whose installed copy is another version than `offered`, with that version. */
+export const otherVersions = (view: PluginsView, entry: MarketplaceView, plugin: string, offered: string | undefined) =>
+  view.tools.flatMap(tool => { const version = installedVersion(entry, plugin, tool); return versionDiffers(version, offered) ? [{ tool, version: version! }] : []; });
+
+/**
+ * The list row's line for tools on another version (see otherVersions), grouped by version: "Claude Code and Codex
+ * have 1.9.0, Copilot CLI has 1.8.0". A version never parts from the word before it when the line wraps.
+ */
+export const otherVersionsLine = (others: { tool: HarnessId; version: string }[]) =>
+  [...groupBy(others, other => other.version)].map(([version, group]) => `${andList(group.map(({ tool }) => names[tool]))} ${group.length > 1 ? 'have' : 'has'}\u00a0${version}`).join(', ');
+
+/** A file's text to compare copies by: line endings as LF, since a Windows Git checkout writes CRLF and that is no difference. */
+export const comparableText = (text: string) => text.replace(/\r\n/g, '\n');
