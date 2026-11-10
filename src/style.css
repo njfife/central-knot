@@ -1688,4 +1688,4 @@ button.harness-card-main:focus-visible { outline: 0; }
 .cell-plugin { color: var(--accent-ink); }
 .cell-plugin.cell-on, .cell-button.cell-static.cell-plugin.cell-on:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); border-color: transparent; }
 .cell-plugin.cell-disabled.cell-on, .cell-button.cell-static.cell-plugin.cell-disabled:hover { background: transparent; border-color: var(--control-line); color: var(--ink-soft); }
-.ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--line); }
+.ov-row.unmanaged .cell-static.cell-absent { border-style: dotted; border-color: var(--cell-line); }

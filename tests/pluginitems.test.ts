@@ -120,6 +120,7 @@ test('each tool’s cell says whether it is on: the skill’s own switch, the wh
   assert.deepEqual((['claude-cli', 'copilot-cli', 'codex-cli'] as const).map(tool => offIn(row!, tool)), ['plugin', 'skill', undefined]);
   assert.match(cellWords(row!, 'codex-cli'), /has issue-tracker installed, but its copy doesn’t have this skill/);
   assert.match(cellWords(row!, 'pi-cli'), /Pi takes no plugins/);
+  assert.equal(cellWords(row!, 'claude-cli'), 'Claude Code: in the plugin issue-tracker 2.0.0; the whole plugin is turned off in Claude Code');
   const [server] = pageRows(home, 'mcp').rows;
   assert.equal(server!.description, 'Command · npx -y issues');
   assert.deepEqual([offIn(server!, 'copilot-cli'), offIn(server!, 'claude-cli')], [undefined, 'plugin']);

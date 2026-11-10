@@ -94,25 +94,29 @@ export function inWhere(row: PluginRow): string {
 /** A row's tag's hover text: it is inside the installed plugin. */
 export const insideTitle = (row: PluginRow) => `Inside the plugin ${inWhere(row)}. Handled on the plugin’s page, not managed here`;
 
-/** One tool's cell, in words: there through the plugin (on or off), or why not. */
-export function cellWords(row: PluginRow, tool: HarnessId): string {
+/** Why a tool has no copy of this item, as a sentence naming that tool: the plugin's files unread there, a kind it doesn't load, or not installed there. */
+function missingWhy(row: PluginRow, tool: HarnessId): string {
   const name = names[tool];
   const install = row.installs[tool];
-  if (row.copies[tool]) {
-    const off = offIn(row, tool);
-    const version = install?.version ? ` ${install.version}` : '';
-    return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'skill' ? `; turned off in ${name}` : ''}. Its page on Plugins turns it on or off`;
-  }
-  if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read`;
-  if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents`;
-  if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}`;
-  if (tool === 'pi-cli') return `Not in Pi: Pi takes no plugins. The plugin’s page can put its parts in Pi as separate items`;
-  return `Not in ${name}: ${row.plugin} is installed there from its page on Plugins`;
+  if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read.`;
+  if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
+  if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
+  if (tool === 'pi-cli') return 'Pi takes no plugins. The plugin’s page can put its parts in Pi as separate items.';
+  return `Not installed in ${name}.${handledWhere(row).listed ? ' The plugin’s page on Plugins installs it there.' : ''}`;
+}
+
+/** One tool's cell, in words: there through the plugin (on or off), or why not. */
+export function cellWords(row: PluginRow, tool: HarnessId): string {
+  if (!row.copies[tool]) return missingWhy(row, tool).replace(/\.$/, '');
+  const name = names[tool];
+  const off = offIn(row, tool);
+  const version = row.installs[tool]?.version ? ` ${row.installs[tool]!.version}` : '';
+  return `${name}: in the plugin ${row.plugin}${version}${off === 'plugin' ? `; the whole plugin is turned off in ${name}` : off === 'skill' ? `; turned off in ${name}` : ''}`;
 }
 
 /** One tool's line in the item's details: its copy in the plugin and whether it is on, or why that tool has none. */
 export function toolWords(row: PluginRow, tool: HarnessId): string {
-  if (!row.copies[tool]) return `${cellWords(row, tool).replace(/^[^:]+: /, '').replace(/^./, first => first.toUpperCase())}.`;
+  if (!row.copies[tool]) return missingWhy(row, tool);
   const version = row.installs[tool]?.version;
   const off = offIn(row, tool);
   return `Inside ${row.plugin}${version ? ` ${version}` : ''}. ${off === 'plugin' ? 'The whole plugin is turned off here.' : off === 'skill' ? 'Turned off here with its own switch.' : 'On.'}`;
