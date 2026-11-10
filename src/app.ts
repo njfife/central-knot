@@ -199,9 +199,12 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
 /** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
 export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
 
-/** Lets go of what the last action showed (its result band, Apply results, the spoken line): for moving to another place. */
-export function dropActionResults() {
-  state.outcome = undefined;
+/**
+ * Lets go of what the last action showed (its result band, Apply results, the spoken line): for moving to another place.
+ * A home switch's result survives one move, since switching is often followed by a click elsewhere; `page` is where it lands.
+ */
+export function leaveResults(page = state.page) {
+  state.outcome = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
   state.undoMoved = undefined;
   state.applied = undefined;
   state.mcpResult = undefined;
@@ -211,17 +214,17 @@ export function dropActionResults() {
 
 export function showPage(page: Page) {
   if (page === 'plugins' && state.page !== 'plugins') void loadPlugins();
+  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
+  // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
+  const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
-  // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
-  const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  if (page !== state.page || leavingHarness) leaveResults(page);
+  if (page !== state.page) state.skillsView = 'table';
+  if (leavingHarness) state.harness = undefined;
   if (page === 'history') void loadHistory();
   if (page === 'settings') void loadSettings();
   // An unsaved draft survives a page switch: the save is still checked against the file it was opened from.
   if (page === 'instructions') readInstructionsQuietly(true);
-  // The sidebar's Harnesses opens the list of every harness, except while an action runs: its result belongs to the harness it
-  // started on. Leaving a harness's page this way drops that page's result, as its own back arrow does.
-  if (page === 'harnesses' && !state.busy && state.harness) { state.harness = undefined; dropActionResults(); }
   state.page = page;
   state.find = '';
   state.item = undefined;

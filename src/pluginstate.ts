@@ -130,6 +130,7 @@ export function browse(patch: Partial<typeof market.nav>): void {
 }
 
 /** The quiet read below: reading, then the view, or null when it failed. A home switch (resetMarket) clears it, so an old answer is dropped. */
+// One read per home, kept in a one-key Map so it can use readInto like the instruction reads.
 const peeks = new Map<'view', Read<PluginsView | null>>();
 export const peekState = () => readState(peeks.get('view'));
 /**

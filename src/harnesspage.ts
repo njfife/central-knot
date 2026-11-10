@@ -1,14 +1,14 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
 // tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, dropActionResults, realHomeName, titles, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
+import { KINDS, leaveResults, realHomeName, titles, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
 import { toolNames as names } from './words.ts';
-import type { HarnessId, HomeView, InstructionFile, SkillFacts, Snapshot } from './types.ts';
-import { brandMark, caughtUpBand, closeOpenRows, designOverview, differingIn, emptyKind, kindNoun, outcomeBand, showFiltered } from './matrix.ts';
+import type { HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
+import { brandMark, caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, kindNoun, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
 import { copyButton, fact, kindEmpty, notRead } from './pages.ts';
@@ -28,22 +28,18 @@ const listed = (home: HomeView) => home.snapshots.filter(snapshot => home.mode =
 /** Found: Central Knot reads and writes it, so it has a page. */
 function found(home: HomeView, tool: HarnessId) { return home.manage.tools.includes(tool); }
 
-/** One kind's facts across tools, and which tools can hold that kind at all (Pi has no agents). */
-function kindView(home: HomeView, kind: Kind): { tools: HarnessId[]; facts: SkillFacts[]; waiting: string[] } {
-  if (kind === 'skills') return { tools: home.manage.tools, facts: home.manage.skills, waiting: [] };
-  const view = kind === 'mcp' ? home.mcp : home.agents;
-  return { tools: view.tools, facts: view.servers, waiting: view.claudePending };
-}
-const supports = (home: HomeView, kind: Kind, tool: HarnessId) => kindView(home, kind).tools.includes(tool);
+const supports = (home: HomeView, kind: Kind, tool: HarnessId) => kindSource(home, kind).tools.includes(tool);
+/** Said on the card, the tab's tooltip and the empty tab when a tool can't hold a kind. */
+const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t use ${kindNoun[kind][1]}`;
 
 /**
  * What one tool has of one kind: every item with a copy there, how many of those are managed, and how many have copies that
  * differ and need a choice (the same count as that tool's "Copies differ" chip). `supported`: the tool can hold this kind.
  */
 function tally(home: HomeView, kind: Kind, tool: HarnessId) {
-  const { tools, facts, waiting } = kindView(home, kind);
-  const here = facts.filter(item => item.copies[tool] !== undefined);
-  return { kind, supported: tools.includes(tool), total: here.length, managed: here.filter(item => item.managed).length, differing: differingIn(facts, tools, tool, waiting) };
+  const source = kindSource(home, kind);
+  const here = source.facts.filter(item => item.copies[tool] !== undefined);
+  return { kind, supported: source.tools.includes(tool), total: here.length, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
 }
 
 const instructionOf = (tool: HarnessId): InstructionFile | undefined => state.instructions?.find(file => file.tool === tool);
@@ -83,7 +79,7 @@ function countRow(label: string, { value, note, faint = false }: Count) {
 }
 
 function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
-  if (!supported) return { value: '—', note: `${names[tool]} doesn’t use ${kindNoun[kind][1]}`, faint: true };
+  if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
   if (!total) return { value: '0', note: 'none yet', faint: true };
   return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
 }
@@ -155,14 +151,12 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  */
 export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: Kind } = {}) {
   const from = state.harness;
-  if (tool !== from) closeOpenRows();
+  if (tool !== from) resetTablesForHarness();
   state.harness = tool;
   if (tab) state.harnessTab = tab;
   if (showOnly) showFiltered(showOnly, 'attention', tool);
   // A home switch's result (and its Go back) survives one move, as it does across pages.
-  const carried = state.outcome?.carry ? { ...state.outcome, carry: false } : undefined;
-  dropActionResults();
-  state.outcome = carried;
+  leaveResults();
   rerender();
   if (tool) document.getElementById('harness-body')?.scrollTo(0, 0);
   else if (from) document.getElementById(`harness-${from}`)?.focus({ focusVisible: fromKeyboard } as FocusOptions);
@@ -192,7 +186,7 @@ function tabs(home: HomeView, tool: HarnessId) {
     if (tab === 'plugins') { const plugins = pluginsIn(tool); return plugins.state === 'read' ? { shown: plugins.installed.length, elsewhere: 0 } : plugins.state === 'unsupported' ? { shown: '—', elsewhere: 0 } : undefined; }
     if (!isKind(tab)) return undefined;
     if (!supports(home, tab, tool)) return { shown: '—', elsewhere: 0 };
-    const facts = kindView(home, tab).facts;
+    const facts = kindSource(home, tab).facts;
     const here = facts.filter(item => item.copies[tool] !== undefined).length;
     return { shown: here, elsewhere: facts.length - here };
   };
@@ -202,7 +196,7 @@ function tabs(home: HomeView, tool: HarnessId) {
       // A kind this tool cannot hold shows no count and a quieter tab; its tooltip and its page say why.
       return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}${counted?.shown === '—' ? '.harness-tab-none' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
-        title: !counted ? undefined : counted.shown === '—' ? (isKind(tab) ? `${names[tool]} doesn’t use ${kindNoun[tab][1]}` : pluginsNotHandled(tool)) : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
+        title: !counted ? undefined : counted.shown === '—' ? (isKind(tab) ? kindNotUsed(tool, tab) : pluginsNotHandled(tool)) : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
         onclick: () => goHarness(tool, tab),
       }, tabLabel(tab), counted && counted.shown !== '—' ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
@@ -222,13 +216,13 @@ function switcher(home: HomeView, tool: HarnessId) {
 function unsupported(kind: Kind, tool: HarnessId) {
   const body = kind === 'agents' ? `On the Agents page, Convert to skill turns an agent into a skill that ${names[tool]} can use.`
     : `Central Knot can’t read or write ${kindNoun[kind][1]} for ${names[tool]}.`;
-  return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', `${names[tool]} doesn’t use ${kindNoun[kind][1]}`, body,
+  return h('div.page', {}, emptyState(kind === 'agents' ? 'bot' : 'plug', kindNotUsed(tool, kind), body,
     kind === 'agents' ? button({ variant: 'outline', label: 'Open Agents', id: 'harness-open-agents', onclick: () => showPage('agents') }) : undefined));
 }
 
 function kindTab(home: HomeView, kind: Kind, tool: HarnessId) {
   if (!supports(home, kind, tool)) return unsupported(kind, tool);
-  if (kindView(home, kind).facts.length) return designOverview(kind, tool);
+  if (kindSource(home, kind).facts.length) return designOverview(kind, tool);
   // Nothing of this kind anywhere: the kind's own empty state, under the table's bands, so a file that could not be read still says why.
   return emptyKind(kind, tool, emptyState(kindEmpty[kind].glyph, kindEmpty[kind].title, kindEmpty[kind].body));
 }
@@ -245,10 +239,11 @@ function instructionsTab(tool: HarnessId) {
 
 /** One installed plugin: its name, version and marketplace, and Open, which shows it on the Plugins page. */
 function pluginRow({ entry, plugin }: MarketPlugin) {
+  const note = [entry.name, plugin.description].filter(Boolean).join(' · ');
   return h('div.harness-plugin', { role: 'listitem' },
     h('div.harness-plugin-text', {},
       h('strong', {}, pluginTitle(plugin), plugin.version ? h('span.harness-plugin-version', {}, ` ${plugin.version}`) : null),
-      h('span.harness-plugin-note', { title: [entry.name, plugin.description].filter(Boolean).join(' · ') }, [entry.name, plugin.description].filter(Boolean).join(' · '))),
+      h('span.harness-plugin-note', { title: note }, note)),
     button({ variant: 'ghost', size: 'small', label: 'Open', name: `Open ${pluginTitle(plugin)} in Plugins`, id: `harness-plugin-${entry.name}-${plugin.name}`,
       onclick: () => { showPage('plugins'); browse({ source: entry.source, plugin: plugin.name, tab: 'plugins', find: '', category: undefined }); } }));
 }
@@ -278,7 +273,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
   // Every path can be copied.
   let copies = 0;
   const path = (value: string) => h('span.harness-path', {}, pathText(shownPath(value), value), copyButton(value, 'path', `copy-path-${tool}-${copies++}`));
-  const fileFor = (kind: 'mcp' | 'agents') => kindView(home, kind).facts.map(item => item.copies[tool]?.directory).find(Boolean);
+  const fileFor = (kind: 'mcp' | 'agents') => kindSource(home, kind).facts.map(item => item.copies[tool]?.directory).find(Boolean);
   const mcpFile = fileFor('mcp'), agentFile = fileFor('agents');
   const ins = instructionOf(tool);
   return h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, h('div.card.harness-about', {},

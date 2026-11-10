@@ -191,6 +191,12 @@ async function harnessFlow() {
   check('and is its usual self: Claude Code first, no "Not in" section', (await a.text('.ov-head .ov-tool-head') ?? '').includes('Claude Code') && !(await a.all('.ov-section-label strong')).some(label => label.startsWith('Not in')), await a.text('.ov-head'));
   await a.click('#nav-harnesses');
   await a.click('#harness-copilot-cli');
+  await a.click('#harness-tab-skills');
+  await a.click('#nav-overview');
+  await a.click('#overview-skills-differ');
+  check('after a harness’s Skills tab, the Overview’s “different copies” link still opens Skills narrowed to them', (await a.text('.chip-on') ?? '').startsWith('Copies differ'), await a.text('.chips'));
+  await a.click('#nav-harnesses');
+  await a.click('#harness-copilot-cli');
   await a.click('#harness-tab-instructions');
   check('its instruction file is there to edit', await a.exists('#ins-edit-copilot-cli'), await a.text('.harness-page'));
   await a.click('#harness-switch-claude-cli');

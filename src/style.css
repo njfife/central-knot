@@ -1404,7 +1404,6 @@ button.harness-card-main:disabled { cursor: default; }
    free space (with the description), and the tool columns keep a steady width. */
 .page-harnesses #header { padding-right: 16px; }
 .harness-page .ov, .harness-page .legend, .harness-page .details { max-width: none; }
-.harness-page .ov { --ov-columns: minmax(170px, 300px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr); }
 /* Rows grow to hold the whole description, which sits beside the tool columns so a row's name, state and boxes stay together. */
 .harness-page .ov-row:not(.ov-head) { height: auto; min-height: 40px; }
 .ov-desc { display: block; padding: 8px 16px 8px 12px; font-size: 12px; line-height: 16px; color: var(--ink-faint); overflow-wrap: anywhere; }
@@ -1412,8 +1411,11 @@ button.harness-card-main:disabled { cursor: default; }
 /* The description shows only when its column has room; otherwise it goes under the name and the name column takes the free
    width instead, with the tool columns at their narrow size so the name and description get the room. Measured on the table's
    own width, per number of tool columns n (one to four): name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep
-   in step with --ov-columns above). */
-.harness-page .ov { --narrow-columns: minmax(170px, 1fr) 76px repeat(var(--tool-count, 3), minmax(92px, 124px)) 16px; }
+   in step with --ov-columns below). */
+.harness-page .ov {
+  --ov-columns: minmax(170px, 300px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr);
+  --narrow-columns: minmax(170px, 1fr) 76px repeat(var(--tool-count, 3), minmax(92px, 124px)) 16px;
+}
 @container (max-width: 768px) { .harness-page .ov[data-tools="1"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
 @container (max-width: 900px) { .harness-page .ov[data-tools="2"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
 @container (max-width: 1032px) { .harness-page .ov[data-tools="3"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
@@ -1443,8 +1445,6 @@ button.harness-card-main:focus-visible { outline: 0; }
   .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 }
-/* A file's text keeps a reading measure. */
-.harness-page .ins-card pre, .harness-page .ins-card textarea { max-width: 110ch; }
 .harness-page .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 120px; }
 .tool-menu-empty { margin: 4px 0 8px; color: var(--ink-soft); }
 /* Three harnesses fit across from the minimum window; four sit 2 × 2, or four across once each card can be 310px wide; never
@@ -1460,7 +1460,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* "Not in <harness>" is an offer, not this harness's count: its heading is quieter than Managed and Unmanaged. */
 .ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
 /* Add from… becomes "Add…" when the toolbar is narrow (the full name stays in its tooltip). */
-@container (max-width: 700px) { .add-from-more { display: none; } .harness-page .ov-page .toolbar > .find { flex-basis: 140px; } }
+@container (max-width: 700px) { .add-from-more { display: none; } }
 /* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
 @container (min-width: 1300px) {
   .harness-page .ins-card { display: grid; grid-template-columns: minmax(0, max-content) minmax(260px, 1fr); grid-auto-flow: row dense; column-gap: 32px; row-gap: 0; align-content: start; }
@@ -1489,6 +1489,7 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-section-dot { margin: 0 8px 0 0; color: var(--ink-faint); }
 /* In view and while editing, the file sits at one reading measure, so the card is the same width either way and Edit swaps in place. */
 .harness-page .ins-card .ins-text, .harness-page .ins-card .ins-preview { width: calc(110ch + 26px); max-width: 100%; box-sizing: border-box; }
+.harness-page .ins-card .ins-diff { max-width: 110ch; }
 /* The list's note keeps a reading measure. */
 .legend-left-out { display: inline-grid; place-items: center; border: 1px solid var(--ink-faint); border-radius: 5px; }
 /* The Harnesses list's bands reach the window edge, like its cards and every band on a harness page. */

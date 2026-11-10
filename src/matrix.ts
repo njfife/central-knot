@@ -8,7 +8,7 @@ import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, appl
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Change, ManageView, SkillFacts, SyncNotice, HarnessId } from './types.ts';
+import type { Change, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
 
@@ -44,24 +44,30 @@ const nouns: Record<Kind, [string, string]> = { skills: ['Skill', 'Skills'], mcp
 export const kindNoun: Record<Kind, [string, string]> = { skills: ['skill', 'skills'], mcp: ['MCP server', 'MCP servers'], agents: ['agent', 'agents'] };
 let kind: Kind = 'skills';
 const factsCache: Partial<Record<Kind, { from: unknown; list: SampleSkill[] }>> = {};
+/**
+ * One kind in a home: its facts, the tools that can hold it (Pi has no agents), and the MCP servers whose Claude Code entries
+ * wait for Write now (their cells say so instead of reading as differing copies). The tables and Harnesses both read it.
+ */
+export function kindSource(home: HomeView, which: Kind): { tools: Tool[]; facts: SkillFacts[]; waiting: string[] } {
+  if (which === 'skills') return { tools: home.manage.tools, facts: home.manage.skills, waiting: [] };
+  const list = which === 'mcp' ? home.mcp : home.agents;
+  return { tools: list.tools, facts: list.servers, waiting: which === 'mcp' ? list.claudePending : [] };
+}
 function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
-  const source = kind === 'skills' ? state.home?.manage : listView();
-  const facts = kind === 'skills' ? state.home?.manage.skills : listView()?.servers;
-  if (!source || !facts) return [];
-  // MCP: Claude Code's entries wait for Write now; their cells say so instead of reading as differing copies.
-  const waiting = kind === 'mcp' ? new Set(listView()?.claudePending ?? []) : new Set<string>();
-  if (factsCache[kind]?.from !== source) factsCache[kind] = { from: source, list: facts.map(fact => rowOf(fact, waiting)) };
+  if (!state.home) return [];
+  const { facts, waiting } = kindSource(state.home, kind);
+  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => rowOf(fact, new Set(waiting))) };
   return factsCache[kind]!.list;
 }
 /** The harness a Harnesses page shows: its column comes first, and bulk actions keep to what it has. */
 let focus: Tool | undefined;
 const toolList = (): Tool[] => {
-  const list = (designMode ? sampleTools : (kind === 'skills' ? state.home?.manage.tools : listView()?.tools) ?? []);
+  const list = designMode ? sampleTools : state.home ? kindSource(state.home, kind).tools : [];
   return focus && list.includes(focus) ? [focus, ...list.filter(tool => tool !== focus)] : list;
 };
-/** Whether the focused harness has its own copy (as last read); with no focus, every item counts. */
-const inFocus = (skill: SampleSkill) => !focus || committedOf(skill.key)?.copies[focus] !== undefined;
+/** Whether the focused harness has its own copy; with no focus, every item counts. */
+const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefined;
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, toolList()) === 'attention';
 
@@ -69,7 +75,7 @@ const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, tool
  * How many items one tool has whose copies differ and need a choice: what the "Copies differ" chip counts on that tool's
  * Harnesses page, read from the facts the same way the table reads them. `waiting`: MCP servers waiting for Claude Code.
  */
-export function differingIn(facts: SkillFacts[], tools: Tool[], tool: Tool, waiting: string[] = []) {
+export function differingIn({ facts, tools, waiting }: ReturnType<typeof kindSource>, tool: Tool) {
   const waits = new Set(waiting);
   return facts.filter(fact => fact.copies[tool as HarnessId] !== undefined && syncOf(rowOf(fact, waits), tools) === 'attention').length;
 }
@@ -865,8 +871,8 @@ export function fitOpenMenu() {
   menu.style.setProperty('--menu-room', `${Math.max(160, window.innerHeight - box.top - 36)}px`);
 }
 
-/** Moving to another harness starts its tables closed: no row details, menu or Copies differ filter carried over from the last one. */
-export function closeOpenRows() {
+/** Moving to another harness starts every table closed (the kind pages' too, which share them): no row details, menu or Copies differ filter carried over. */
+export function resetTablesForHarness() {
   for (const each of Object.values(views)) { each.comparing = undefined; each.toolMenu = undefined; if (each.filter === 'attention') each.filter = 'all'; }
 }
 
@@ -1287,7 +1293,7 @@ function useTable(which: Kind, harness?: Tool) {
   if (view.filter === 'attention' && !copiesDifferChipShown()) view.filter = 'all';
 }
 
-/** Whether the Copies differ chip is drawn: something differs now, or will once pending changes apply. filterBar draws by this too. */
+/** Whether anything differs now, or will once pending changes apply: a Copies differ filter with nothing of the kind falls back to All. */
 const copiesDifferChipShown = () => committedList().some(skill => needsChoice(skill) || needsChoice(effective(skill)));
 
 /** A skill's files and contents: the Skills page's files view, from wherever its details were opened. */
