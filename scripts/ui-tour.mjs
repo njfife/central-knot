@@ -544,15 +544,17 @@ if (wanted('parts')) {
   const atParts = async (name, caption) => { await a.run(`document.querySelector('.plugin-switched')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, name, caption); };
   await waitFor(a, `!!document.querySelector('#ppart-0-issue-tracker-skill-triage-pi-cli')`);
   await atParts('pick-switches', 'Scrolled to "What it holds": each skill and MCP server has a switch under each tool that can take it as a separate item.');
-  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli');
-  await atParts('pick-chosen', 'Clicked triage’s switch under Pi and the issues server’s under Codex: both wait for Apply all.');
+  // Codex takes single parts only where it can't take the plugin itself (no command-line tool and no desktop app found).
+  const codexToo = await a.has('#ppart-0-issue-tracker-mcp-issues-codex-cli');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); if (codexToo) await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli');
+  await atParts('pick-chosen', `Clicked triage’s switch under Pi${codexToo ? ' and the issues server’s under Codex: both wait' : ': it waits'} for Apply all.`);
   await a.theme('light'); await atParts('pick-chosen-light', 'The same, in the light appearance.'); await a.theme('dark');
   await size(860, 560); await atParts('pick-chosen-860', 'The same at 860×560.');
-  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-chosen-860-top', 'The top of the page at 860×560: the Pi and Codex boxes say what will change.');
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-chosen-860-top', 'The top of the page at 860×560: each chosen tool’s box says what will change.');
   await size(1728, 1117); await atParts('pick-chosen-1728', 'The same at 1728×1117.');
   await size(1280, 800);
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
-  await shot(a, 'pick-applied', 'Clicked Apply all: Pi has the triage skill alone, Codex the issues server alone; each tool’s row says what was left out.');
+  await shot(a, 'pick-applied', `Clicked Apply all: Pi has the triage skill alone${codexToo ? ', Codex the issues server alone' : ''}; each tool’s row says what was left out.`);
   await atParts('pick-applied-switches', 'The switches after Apply all.');
   await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   // What is in a part's place when it can't go in: a file there is named, with what to do; a link that leads nowhere is replaced.
@@ -569,7 +571,7 @@ if (wanted('parts')) {
   await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, in place of the broken link (the log file says it was replaced).');
+  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, in place of the broken link, and the result says so.');
   await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
   // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
