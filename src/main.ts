@@ -952,10 +952,12 @@ app.whenReady().then(async () => {
     const recordPath = join(app.getPath('userData'), 'plugin-updates.json');
     const step = (channel: string, args: unknown[], work: () => Promise<PluginActionResult>): Promise<PluginActionResult> =>
       quitting ? Promise.resolve({ stopped: 'Central Knot is quitting.', reports: [] }) : queued(work).then(result => { logOutcome(`${channel} (by itself)`, args, result); return result; });
+    // Test-only, read only when set: the time between checks in milliseconds, or `never` for no checks but those asked for
+    // (the end-to-end run's other flows, which a check a minute after start would walk into).
+    const paced = process.env.CK_PLUGIN_UPDATES_EVERY_MS;
+    const every = Number(paced) || CHECK_EVERY_MS;
     pluginUpdates = autoUpdates({
-      home: () => current?.home, on: pluginUpdatesOn, log, now: Date.now,
-      // Test-only, read only when set: a shorter time between checks.
-      every: Number(process.env.CK_PLUGIN_UPDATES_EVERY_MS) || CHECK_EVERY_MS,
+      home: () => current?.home, on: pluginUpdatesOn, log, now: Date.now, every,
       pending: home => queued(() => markets.pendingUpdates(home)),
       api: {
         update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
@@ -971,16 +973,18 @@ app.whenReady().then(async () => {
         if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = true; refreshTray(); }
       },
     });
-    const updates = pluginUpdates;
-    const turn = () => void updates.tick().catch(error => logFailure('plugin updates', error));
-    const pace = Math.min(5 * 60_000, Math.max(1_000, (Number(process.env.CK_PLUGIN_UPDATES_EVERY_MS) || CHECK_EVERY_MS) / 4));
-    // The first look comes a minute after start, so opening the app is never slowed by it; then every few minutes it asks whether a check is due.
-    setTimeout(turn, Math.min(60_000, pace)).unref();
-    setInterval(turn, pace).unref();
+    if (paced !== 'never') {
+      const updates = pluginUpdates;
+      const turn = () => void updates.tick().catch(error => logFailure('plugin updates', error));
+      const pace = Math.min(5 * 60_000, Math.max(1_000, every / 4));
+      // The first look comes a minute after start, so opening the app is never slowed by it; then every few minutes it asks whether a check is due.
+      setTimeout(turn, Math.min(60_000, pace)).unref();
+      setInterval(turn, pace).unref();
+    }
   }
   handleNow('plugin-updates:view', async () => pluginUpdates?.view() ?? noPluginUpdates);
   handleNow('plugin-updates:check', async () => pluginUpdates?.check(true) ?? noPluginUpdates);
-  handleNow('plugin-updates:close', async () => pluginUpdates?.close() ?? noPluginUpdates);
+  handleNow('plugin-updates:close', async what => (pluginUpdates && (what === 'updated' || what === 'failed') ? pluginUpdates.close(what) : noPluginUpdates));
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
   handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
     ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));

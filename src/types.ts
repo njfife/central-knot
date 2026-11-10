@@ -107,8 +107,8 @@ export interface DesktopApi {
   pluginUpdates(): Promise<PluginUpdatesView>;
   /** Checks the marketplaces now and updates what is behind, failed updates included; answers once it is done. */
   checkPluginUpdates(): Promise<PluginUpdatesView>;
-  /** Closes the note of what automatic updates did. */
-  closePluginUpdates(): Promise<PluginUpdatesView>;
+  /** Closes one half of the note of what automatic updates did: what was updated, or what couldn't be. */
+  closePluginUpdates(what: 'updated' | 'failed'): Promise<PluginUpdatesView>;
   /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or an update failed. */
   onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news: boolean) => void): void;
   /** The main process asks for a page (the Settings… menu item). */

@@ -13,6 +13,7 @@ import { FIND_FROM, blocked, categoriesOf, copyStale, installed, marketTitle, of
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
+import { pluginUpdateNotes } from './pluginupdateview.ts';
 import type { MarketplaceView, PluginView, PluginsView } from './types.ts';
 import { andList, orList, toolName, toolNames as names } from './words.ts';
 
@@ -77,6 +78,7 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
       h('button.plugin-row-open', { type: 'button', id: `popen-${marketIndex}-${plugin.name}`, 'aria-label': `Open ${pluginTitle(plugin)}`, onclick: (event: Event) => { event.stopPropagation(); open(); } },
         // The category pill is left out while that category is the filter: every row would say the same.
         h('span.plugin-row-title', {}, pluginTitle(plugin)), offered ? h('span.plugin-row-version', { title: 'The version the marketplace offers' }, offered) : null,
+        plugin.gone ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null,
         plugin.category && !market.nav.category ? h('span.plugin-chip', {}, plugin.category) : null),
       // The description first, then what it holds: when room runs out the description shortens or steps aside (style.css).
       plugin.description || holds ? h('span.plugin-row-line', {},
@@ -352,7 +354,7 @@ export function pluginsPage() {
       market.activity ? h('div.band', { role: 'status' }, icon('refresh-cw', 14, 'spin tone-muted'), h('span.band-text', {}, ACTIVITIES[market.activity].band))
         // Reading the marketplaces again (Git can take seconds) while the last read stays on screen, or that it failed.
         : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.'),
-      problemBand(lines)),
+      problemBand(lines), pluginUpdateNotes()),
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),
         h('div.market-pane', {}, toolbar(shown, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, marketPage(view, shown.entry, shown.index))))

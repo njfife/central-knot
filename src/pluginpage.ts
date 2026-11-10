@@ -512,14 +512,14 @@ function contentsBlock(view: PluginsView, entry: MarketplaceView, marketIndex: n
   const owner = pluginKey(entry.source, plugin.name);
   const section = (...children: (HTMLElement | null)[]) => h('section.plugin-section', {}, h('h3', {}, 'What it holds'), ...children);
   if (reading) return section(h('p.plugin-muted', {}, plugin.folder ? 'Reading…' : `Reading its files from ${plugin.from?.label ?? 'its repository'}…`));
-  if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
+  if (!detail) return section(h('p.plugin-muted', {}, plugin.folder ? 'Its files couldn’t be read.' : plugin.gone ? 'The marketplace no longer has its files, and no tool’s copy could be read.' : 'Its files live outside this marketplace and couldn’t be read, so what it holds shows once a tool installs it.'));
   const files = (['skills', 'commands', 'agents'] as const).map(kind => ({ kind, parts: filePartsOf(kind, detail, offered) }));
   const empty = files.every(({ parts }) => !parts.length) && !detail.hooks.length && !detail.mcpServers.length && !detail.lspServers.length && !detail.bin;
   const idFor = partIds(`pfile-${marketIndex}`);
   const said = { parts: false };
   return section(
     detail.problem ? h('p.plugin-muted', {}, detail.problem)
-      : !detail.offered ? h('p.plugin-muted', {}, 'Its files live outside this marketplace, so its skills, commands and agents are read from the tools that installed it.') : null,
+      : !detail.offered ? h('p.plugin-muted', {}, plugin.gone ? 'The marketplace no longer has its files, so its skills, commands and agents are read from the tools that still have it.' : 'Its files live outside this marketplace, so its skills, commands and agents are read from the tools that installed it.') : null,
     empty && !detail.problem ? h('p.plugin-muted', {}, 'Nothing Central Knot recognizes: no skills, commands, agents, hooks or servers.') : null,
     ...files.map(({ kind, parts }) => fileGroup(owner, idFor, kind, parts, detail.offered, kind === 'commands' ? undefined
       : switchColumns(view, entry, plugin, marketIndex, kind === 'skills' ? 'skill' : 'agent', parts.map(part => ({ name: part.name, part: partRef(kind === 'skills' ? 'skill' : 'agent', part.key) })), said))),
@@ -553,7 +553,7 @@ export function pluginPage(view: PluginsView, entry: MarketplaceView, marketInde
   const descriptions = [plugin.description, ...parts.map(part => part.description)];
   return h('article.plugin-page', { 'aria-label': title },
     h('header.plugin-head', {},
-      h('h2', {}, title),
+      h('h2', {}, title, plugin.gone ? h('span.plugin-chip.plugin-chip-gone', {}, 'No longer offered') : null),
       plugin.displayName ? h('code.plugin-id', {}, plugin.name) : null,
       plugin.description ? h('p.plugin-about', {}, plugin.description) : null,
       facts.length ? h('p.plugin-meta', {}, dotted(facts)) : null),

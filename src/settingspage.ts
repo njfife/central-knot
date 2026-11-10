@@ -1,12 +1,14 @@
 // Settings: Central Knot's own preferences, kept apart from the tools' settings. The main process stores them
 // (app-settings.json) and applies them; this page shows them, one full-width row each, and changes one at a time.
-import { announce, machine, rerender } from './app.ts';
+import { announce, machine, rerender, showPage } from './app.ts';
 import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
 import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
 import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
+import { checkPluginsNow, checkedWords, everyWords, pluginUpdates } from './pluginupdateview.ts';
+import { CHECK_EVERY_MS } from './pluginupdates.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -21,7 +23,7 @@ interface RowMessage { text: string; detail?: string; tone: 'note' | 'info' | 'f
 /** What each row's last action said, by row id. */
 const messages = new Map<string, RowMessage>();
 /** What each row shows of the settings, so a message can say which value it is about. */
-const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays };
+const shownBy: Record<string, (settings: AppPreferences) => unknown> = { 'sign-in': settings => settings.signIn, appearance: settings => settings.appearance, history: settings => settings.historyDays, 'plugin-updates': settings => settings.pluginUpdates };
 const shownIn = (row: string, settings: AppPreferences | undefined) => settings && shownBy[row] ? JSON.stringify(shownBy[row](settings)) : undefined;
 /** A message about a value its row no longer shows was settled by a newer read (put right in the system, changed from a menu). */
 const settled = (row: string, message: RowMessage | undefined) => message?.about !== undefined && message.about !== shownIn(row, current);
@@ -316,6 +318,31 @@ function updatesRow(): HTMLElement | null {
     notice, why || undefined);
 }
 
+/** Turns automatic plugin updates on or off. Turned on, main checks at once if the last check is long enough ago. */
+async function choosePluginUpdates(on: boolean): Promise<void> {
+  const kept = current ? `Plugins are still ${current.pluginUpdates ? 'updated automatically' : 'updated only when you choose Update'}.` : '';
+  if (await save('plugin-updates', () => window.centralKnot.setPluginUpdates(on), kept)) announce(on ? 'Plugins are updated automatically from now on.' : 'Plugins are updated only when you choose Update.', true);
+}
+
+/**
+ * Plugins: whether they are updated automatically, what that does, Check now, and what the last check came to (the note
+ * on the Plugins page says which plugins).
+ */
+function pluginUpdatesRow(): HTMLElement {
+  const on = !!current?.pluginUpdates;
+  const view = pluginUpdates.view;
+  const hint = `Central Knot checks your marketplaces ${everyWords(view?.every ?? CHECK_EVERY_MS)}, with its window closed too, and updates the plugins your tools have, through each tool’s own command. A plugin you turned off stays off. An update can’t be undone.`;
+  const checked = on ? checkedWords(pluginUpdates.asked && view ? { ...view, checking: true } : view) : undefined;
+  const notice: RowMessage | undefined = checked && { text: checked.text, tone: checked.tone, action: checked.note ? { label: 'See Plugins', run: () => showPage('plugins') } : undefined };
+  return settingRow('plugin-updates', 'Update plugins automatically', hint,
+    h('div.setting-actions', {},
+      on ? button({ variant: 'outline', label: 'Check now', id: 'check-plugin-updates', disabled: !view || view.checking || pluginUpdates.asked, onclick: () => void checkPluginsNow(), attrs: { 'aria-describedby': 'setting-plugin-updates-hint' } }) : null,
+      // Unchangeable until main has said, so a click never acts on a guess.
+      toggle({ on, label: 'Update plugins automatically', onchange: chosen => void choosePluginUpdates(chosen), disabled: !current, id: 'plugin-updates-on',
+        attrs: { 'aria-describedby': notice ? 'setting-plugin-updates-hint setting-plugin-updates-notice' : 'setting-plugin-updates-hint', title: null } })),
+    notice);
+}
+
 const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null)[]) =>
   h('section.settings-section', { 'aria-labelledby': `settings-${id}` }, h('h2.eyebrow', { id: `settings-${id}` }, title), ...rows);
 
@@ -340,6 +367,7 @@ export function settingsPage(): HTMLElement {
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
           }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
       updatesRow()),
+    settingsSection('plugins', 'Plugins', pluginUpdatesRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
         // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.

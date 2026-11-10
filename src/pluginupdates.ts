@@ -163,13 +163,13 @@ export function autoUpdates(host: AutoUpdateHost) {
     await check();
   }
 
-  /** Closes the note: what was updated is no longer listed, and the failures shown now are not shown again while they stay the same. */
-  async function close(): Promise<PluginUpdatesView> {
+  /** Closes one half of the note: what was updated is no longer listed, or the failures shown now are not shown again while they stay the same. */
+  async function close(what: 'updated' | 'failed'): Promise<PluginUpdatesView> {
     const home = host.home();
     if (!home) return shown();
     const mine = await recordFor(home);
-    mine.updated = [];
-    for (const failure of mine.failures) failure.closed = true;
+    if (what === 'updated') mine.updated = [];
+    else for (const failure of mine.failures) failure.closed = true;
     await save();
     return shown();
   }

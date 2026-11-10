@@ -57,10 +57,11 @@ export function installsIn(view: PluginsView, tool: HarnessId): { installed: Mar
  * marketplace is blocked there (see blocked). An installed plugin is never unavailable. Every box, panel and key uses this.
  */
 export function unavailable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): string | undefined {
-  if (entry.plugins.find(candidate => candidate.name === plugin)?.gone) return 'It is no longer offered in this marketplace.';
   const state = stateOf(entry, plugin, tool);
   if (state.state === 'held') return state.reason;
-  return state.state === 'installed' ? undefined : blocked(view, entry, tool);
+  if (state.state === 'installed') return undefined;
+  // A plugin its marketplace dropped can't go anywhere new; where a tool still has it, it shows as installed and can be uninstalled.
+  return entry.plugins.find(candidate => candidate.name === plugin)?.gone ? 'It is no longer offered in this marketplace.' : blocked(view, entry, tool);
 }
 
 /**

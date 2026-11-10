@@ -118,7 +118,9 @@ test('Closing the note empties it; a failure that stays the same stays closed, a
   box.due = [due('document-tools', 'claude-cli'), due('issue-tracker', 'codex-cli')];
   box.answers.set('issue-tracker codex-cli', { outcome: 'failed', changed: undefined, message: 'Codex said no.' });
   await updates.check();
-  let view = await updates.close();
+  let view = await updates.close('updated');
+  assert.deepEqual([view.updated, view.failed.length], [[], 1], 'each half of the note closes on its own');
+  view = await updates.close('failed');
   assert.deepEqual([view.updated, view.failed], [[], []]);
   box.due = [due('issue-tracker', 'codex-cli')];
   box.said.length = 0;
