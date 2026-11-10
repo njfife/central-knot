@@ -1116,6 +1116,19 @@ async function practiceFlow() {
   check('Cancel with changes asks first', await a.exists('#ins-discard-claude-cli') && await a.exists('#ins-text-claude-cli'));
   await a.click('#ins-discard-claude-cli');
   check('Discard closes the editor without writing', !(await a.exists('#ins-text-claude-cli')) && !readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('draft'));
+  // An untouched draft follows its file when it changes outside, rather than offering to put the old text back.
+  await a.click('#ins-edit-claude-cli');
+  const claudeMd = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8');
+  writeFileSync(join(practice, '.claude/CLAUDE.md'), claudeMd + '- Edited outside.\n');
+  await a.click('#nav-skills');
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 40 && !(await a.run(`document.querySelector('#ins-text-claude-cli')?.value.includes('Edited outside') ?? false`)); tries++) await wait(100);
+  same('an untouched draft takes the outside edit and has nothing to review', [await a.run(`document.querySelector('#ins-text-claude-cli')?.value.includes('Edited outside') ?? false`), await a.run(`document.querySelector('#ins-review-claude-cli')?.disabled`)], [true, true]);
+  await a.click('#ins-cancel-claude-cli');
+  writeFileSync(join(practice, '.claude/CLAUDE.md'), claudeMd);
+  await a.click('#nav-skills');
+  await a.click('#nav-instructions');
+  for (let tries = 0; tries < 40 && (await a.text('#instructions-scroll') ?? '').includes('Edited outside'); tries++) await wait(100);
   // Base instructions (INS-03, INS-04): written once, kept after each chosen tool's own text, an edit there kept for a choice, undone.
   const baseClaude0 = readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8'), baseCodex0 = readFileSync(join(practice, '.codex/AGENTS.md'), 'utf8');
   await a.click('#base-write');

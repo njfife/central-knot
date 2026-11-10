@@ -596,8 +596,19 @@ function openDraft(file: InstructionFile, text: string, stage: InstructionDraft[
   return !next.refused;
 }
 
-/** A draft whose file is gone (its tool left the home) is dropped once the files are read, unless it holds something unsaved. */
-const settleDraft = () => { if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined; };
+/**
+ * Once the files are read, a draft with nothing unsaved follows them: dropped when its file is gone (its tool left the home),
+ * and moved on to the file as it is now when it changed outside, so it never offers to put the old text back.
+ */
+const settleDraft = () => {
+  const edit = state.instructionEdit;
+  if (!edit || draftUnsaved()) return;
+  const file = draftFile();
+  if (!file) { state.instructionEdit = undefined; return; }
+  if (file.hash === edit.hash) return;
+  const text = edit.restoring ? file.text : ownText(file);
+  Object.assign(edit, { from: { ...edit.from, path: file.path, text }, text, hash: file.hash });
+};
 
 /** Reads each tool's instruction file into its slot; the page redraws once the answer is the newest. */
 export const loadInstructions = async (): Promise<void> => {

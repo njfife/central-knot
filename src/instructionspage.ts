@@ -75,7 +75,7 @@ function editor(file: InstructionFile) {
       edit.text = target.value;
       if (edit.confirmDiscard) { edit.confirmDiscard = false; keepCaret(`ins-text-${file.tool}`, target.selectionStart, rerender); return; }
       // Said as you type, without redrawing the editor: the pill and Review follow whether the text differs.
-      const changed = edit.text !== original;
+      const changed = draftUnsaved();
       const review = document.getElementById(`ins-review-${file.tool}`) as HTMLButtonElement | null;
       if (review) review.disabled = !changed;
       document.getElementById(`ins-draft-${file.tool}`)?.toggleAttribute('hidden', !changed);
@@ -83,19 +83,18 @@ function editor(file: InstructionFile) {
       if (hint) hint.textContent = changed ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.';
     },
     onkeydown: (event: KeyboardEvent) => {
-      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && edit.text !== original) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); }
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && draftUnsaved()) { event.preventDefault(); edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); }
     } }) as HTMLTextAreaElement;
   area.value = edit.text;
   area.rows = edit.text ? Math.min(30, Math.max(8, lineCount(edit.text) + 3)) : 6;
   if (!original) area.classList.add('ins-text-new');
-  const dirty = () => edit.text !== original;
   const actions = edit.confirmDiscard
     ? h('div.ins-actions', { id: `ins-actions-${file.tool}` }, discardConfirm(name, { discard: `ins-discard-${file.tool}`, keep: `ins-keep-${file.tool}` }, 'Keep editing',
       { run: () => { state.instructionEdit = undefined; }, focus: `ins-edit-${file.tool}` }, { run: () => { edit.confirmDiscard = false; }, focus: `ins-text-${file.tool}` }))
     : h('div.ins-actions', { id: `ins-actions-${file.tool}` },
-      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !dirty(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
-      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = dirty(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
-      h('span.ins-locked', { id: `ins-hint-${file.tool}` }, dirty() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
+      button({ variant: 'primary', size: 'small', label: file.exists ? 'Review changes' : 'Review new file', id: `ins-review-${file.tool}`, disabled: !draftUnsaved(), onclick: () => { edit.stage = 'review'; rerender(); document.getElementById(`ins-save-${file.tool}`)?.focus(); } }),
+      button({ variant: 'ghost', size: 'small', label: 'Cancel', id: `ins-cancel-${file.tool}`, onclick: () => { const ask = draftUnsaved(); if (ask) edit.confirmDiscard = true; else state.instructionEdit = undefined; rerender(); document.getElementById(ask ? `ins-keep-${file.tool}` : `ins-edit-${file.tool}`)?.focus(); } }),
+      h('span.ins-locked', { id: `ins-hint-${file.tool}` }, draftUnsaved() ? keys : file.exists ? 'Make a change to review it.' : 'Write something to review it.'));
   return h('div.ins-editor', { onkeydown: escapeTo(`ins-cancel-${file.tool}`, `ins-keep-${file.tool}`) },
     file.exists ? null : h('p.ins-empty', {}, `New file: saving creates ${name} here.`),
     file.base ? h('p.base-explain', {}, `${toolNames[file.tool]}’s own instructions. The base instructions stay after them, as they are.`) : null,
@@ -124,7 +123,7 @@ export function instructionCard(file: InstructionFile, { titled = true, goToOthe
       file.exists || editing ? null : h('span.ins-missing', {}, 'No file yet'),
       savedHere(file) ? h('span.ins-saved-group', {}, h('span.ins-missing.ins-saved', {}, 'Saved'),
         state.outcome!.act ? button({ variant: 'link', size: 'micro', label: 'Undo save', id: state.outcome!.act.id, attrs: { title: 'Put back the text this save replaced' }, onclick: () => state.outcome!.act!.run() }) : null) : null,
-      editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: state.instructionEdit!.text === own }, 'Unsaved changes') : null),
+      editing ? h('span.ins-missing.ins-draft', { id: `ins-draft-${file.tool}`, hidden: !draftUnsaved() }, 'Unsaved changes') : null),
     h('p.ins-readers', {}, file.readers),
     file.notes.map(note => h('p.ins-note', {}, icon('info', 13, 'tone-muted'), h('span', {}, note))),
     editing ? [editor(file), baseStrip(file, 'Finish or cancel this edit first.')]
