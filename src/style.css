@@ -921,6 +921,8 @@ span.ins-confirm { margin-top: 0; }
 /* A bundled build's marketplace: its picture before its name, and under About the plugins the build doesn't carry. */
 /* On a light tile in both themes, as an app icon is: a dark drawing with no background of its own still shows on the dark theme. */
 .market-logo { box-sizing: border-box; width: 18px; height: 18px; margin-right: 6px; padding: 2px; border-radius: 4px; background: #fff; object-fit: contain; vertical-align: -4px; }
+/* The dot between "can't be installed" and its link stays where the rows drop their other dots (narrow). */
+.plugin-row-left .plugin-row-sep { display: inline; margin: 0 6px; }
 .market-not-carried { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 12.5px; line-height: 18px; color: var(--ink-soft); }
 .market-not-carried p { display: flex; align-items: flex-start; gap: 6px; margin: 0; color: var(--ink); }
 .market-not-carried p > svg { flex: none; margin-top: 2px; }

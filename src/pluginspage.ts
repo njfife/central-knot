@@ -88,7 +88,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && (holds || left) ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null,
-        left ? h('span.plugin-row-holds.plugin-row-left', {}, 'Not in this build · ', h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see About')) : null) : null,
+        left ? h('span.plugin-row-holds.plugin-row-left', {}, `Can’t be installed from ${entry.bundled!.app}`, h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·'),
+          h('button.text-action', { type: 'button', id: `pleft-${marketIndex}-${plugin.name}`, onclick: (event: Event) => { event.stopPropagation(); browse({ tab: 'about' }); } }, 'see why')) : null) : null,
       // A tool on another version or with another copy, on its own line under that, with Update for every tool that is behind.
       behind || updates.length ? h('span.plugin-row-update', {},
         behind ? versionNote(h('span', {}, behind.charAt(0).toUpperCase() + behind.slice(1)), '.plugin-row-warning') : null,
@@ -166,7 +167,7 @@ function aboutTab(entry: MarketplaceView, marketIndex: number) {
     // In narrow content the description is said here only (style.css), so the plugins get the height on their tab.
     entry.description ? h('p.market-page-about.about-only-narrow', {}, entry.description) : null,
     // A build's own marketplace says which release of it this is; where it "comes from" is the build, already among its facts.
-    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted(entry.bundled ? [...marketFacts(entry), ...(entry.bundled.release ? [h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `As of ${entry.bundled.release}`)] : [])] : [...marketFacts(entry), source])), remove),
+    h('div.market-about-head', {}, h('p.market-page-meta', {}, dotted(entry.bundled ? [...marketFacts(entry), ...(entry.bundled.release ? [h('span', { title: entry.bundled.from ? `Made from ${entry.bundled.from}` : undefined }, `Plugins as of ${entry.bundled.release}`)] : [])] : [...marketFacts(entry), source])), remove),
     notCarriedNote(entry),
     !read || read.reading ? h('p.plugin-muted', {}, 'Reading…')
       : read.value ? h('div.plugin-readme-body', {}, readme(read.value, entry.name, [entry.description ?? ''])) : h('p.plugin-muted', {}, 'This marketplace has no README.'),
@@ -185,7 +186,7 @@ function notCarriedNote(entry: MarketplaceView): HTMLElement | null {
   const left = entry.bundled?.unpackaged ?? [];
   if (!left.length) return null;
   return h('div.market-not-carried', { role: 'note' },
-    h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} carried by this build, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from it.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),
+    h('p', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${left.length === 1 ? 'One plugin listed here isn’t' : `${left.length} plugins listed here aren’t`} included in ${entry.bundled!.app}, so ${left.length === 1 ? 'it' : 'they'} can’t be installed from here.${entry.owner ? ` Ask ${entry.owner} if you need ${left.length === 1 ? 'it' : 'one'}.` : ''}`)),
     h('ul', {}, left.map(item => h('li', {}, h('strong', {}, item.name), `: ${item.reason}`))));
 }
 

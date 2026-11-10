@@ -76,7 +76,8 @@ check('the app’s own words carry the build’s name', mainCode.includes(`Quit 
 check('the markers written into instruction files keep the product’s name', mainCode.includes('base instructions: start') && !mainCode.includes(`${NAME} base instructions`) && !mainCode.includes(`${NAME}: update`));
 check('report: identity', report.includes(`Identity: ${ID} (com.centralknot.custom.${ID})`), report);
 check('report: the plugins kept in the marketplace are packed', ['document-tools 1.2.0', 'issue-tracker 2.0.0', 'release-helper 0.4.1', 'starter-skills'].every(name => /Plugins packed \(\d\): (.*)/.exec(report)?.[1].includes(name)), report);
-check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are an npm package \(@example\/npm-thing\), which a build can’t carry\./.test(report), report);
+check('report: the npm plugin is named as not packed', /NOT PACKED \(\d\)[\s\S]*- npm-thing: Its files are an npm package \(@example\/npm-thing\), which can’t be packed into the app\./.test(report), report);
+check('report: the maker is told what the npm plugin does to Copilot CLI', /Note: Copilot CLI refuses a marketplace with an npm plugin source \(“npm-thing”\)/.test(report), report);
 check('report: no update location and no feed are said', report.includes('App updates: not met.') && report.includes('Content feed: not met.'), report);
 // Whether the plugin kept on GitHub was fetched depends on the network: either way it must be accounted for.
 const sparkPacked = /Plugins packed \(\d\): .*spark/.test(report);
@@ -135,20 +136,26 @@ check('the title says it comes with the app', await a.run(`document.querySelecto
 const rows = await a.run(`[...document.querySelectorAll('.plugin-row')].map(row => row.dataset.plugin)`);
 check('every listed plugin has a row', JSON.stringify(rows) === JSON.stringify(['document-tools', 'issue-tracker', 'npm-thing', 'release-helper', 'spark', 'starter-skills']), rows);
 check('a packed plugin says what it holds, read with the source gone', await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-holds')?.textContent`) === '2 skills');
-check('the plugin that couldn’t be packed can’t be chosen, and says why', await a.run(`(() => { const box = document.querySelector('[data-plugin="npm-thing"] .ov-cell button, [data-plugin="npm-thing"] .ov-cell [title]'); return (box?.getAttribute('title') ?? '') + '|' + (box?.getAttribute('aria-label') ?? ''); })()`).then(text => text.includes('This build doesn’t carry its files')), await a.run(`document.querySelector('[data-plugin="npm-thing"]').outerHTML.slice(0, 900)`));
-check('its row says it is not in this build, and leads to About', await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-left')?.textContent`) === 'Not in this build · see About');
+check('the plugin that couldn’t be packed can’t be chosen, and says why', await a.run(`(() => { const box = document.querySelector('[data-plugin="npm-thing"] .ov-cell button, [data-plugin="npm-thing"] .ov-cell [title]'); return (box?.getAttribute('title') ?? '') + '|' + (box?.getAttribute('aria-label') ?? ''); })()`).then(text => text.includes(`${NAME} doesn’t include this plugin’s files`)), await a.run(`document.querySelector('[data-plugin="npm-thing"]').outerHTML.slice(0, 900)`));
+check('its row says it is not in this build, and leads to About', await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-left')?.textContent`) === `Can’t be installed from ${NAME}·see why`);
 check('nor are its parts offered in any tool', await a.run(`document.querySelectorAll('[data-plugin="npm-thing"] .cell-parts-offer').length`) === 0);
 check('the Plugins page fits at 1280', await a.fits());
 await a.shot('plugins-1280');
 
+// The plugin the build doesn't include, on its own page: the reason is on the page, under each tool.
+await a.run(`document.querySelector('[data-plugin="npm-thing"] .plugin-row-open').click()`);
+check('its own page says why it can’t be installed', await a.until(`(document.querySelector('#plugin-not-included')?.textContent ?? '').includes('doesn’t include this plugin’s files') && document.body.innerText.includes('Its files aren’t in ${NAME}')`), await a.run(`document.querySelector('#page').innerText.slice(0, 600)`));
+await a.settle();
+await a.shot('plugin-not-included-1280');
+await a.click('#plugin-back');
 await a.run(`document.querySelector('[data-plugin="document-tools"] .plugin-row-open').click()`);
 check('a plugin’s page opens with its skills', await a.until(`document.body.innerText.includes('pdf-reader') && document.body.innerText.includes('spreadsheet')`));
 await a.settle();
 await a.shot('plugin-1280');
 await a.click('#plugin-back');
 await a.click('#market-tab-about');
-check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*As of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
-check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
+check('About: the release it carries, and no way to remove it', await a.run(`document.querySelector('.market-page-meta').textContent + '|' + !!document.querySelector('[id^="forget-"]')`).then(text => /Comes with Acme Knot\s*·\s*Plugins as of \w+ \d+, \d{4}\|false$/.test(text)), await a.run(`document.querySelector('.market-page-meta').textContent`));
+check('About names the plugin the build doesn’t carry', await a.run(`document.querySelector('.market-not-carried')?.textContent ?? ''`).then(text => text.includes(`isn’t included in ${NAME}`) && text.includes('npm-thing') && text.includes('an npm package (@example/npm-thing)') && text.includes('Ask Platform team if you need it.')));
 check('About shows the marketplace’s README', await a.until(`document.querySelector('.plugin-readme-body')?.textContent.includes('What is inside')`));
 await a.shot('about-1280');
 for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
@@ -163,7 +170,7 @@ await a.size(1280, 800);
 
 await a.click('#nav-settings');
 const about = await a.run(`document.querySelector('#setting-build-hint')?.textContent ?? ''`);
-check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes('It doesn’t update itself.') && about.includes('It comes with the Acme plugins marketplace as of') && about.includes('changes only with a new build of Acme Knot'), about);
+check('Settings says what this build is', about.includes(`${NAME} is a custom build of Central Knot`) && about.includes('It keeps its own settings, separate from Central Knot’s.') && about.includes(`for a newer one, ask whoever gave you ${NAME}`) && about.includes('Its Acme plugins marketplace is as of') && about.includes(`changes only with a new ${NAME}`), about);
 check('Settings offers no updates from the standard app', await a.run(`!document.querySelector('#setting-updates') && !document.querySelector('#check-updates')`));
 await a.shot('settings-1280');
 for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {

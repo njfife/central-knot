@@ -3,7 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { buildInputs, downloadName, isCustom } from '../src/bundlepack.ts';
+import { STANDARD_BUILD } from '../src/bundle.ts';
+import { STANDARD_NAME, buildInputs, downloadName, isCustom } from '../src/bundlepack.ts';
 import { stage } from './custom-build.mjs';
 import { buildDmg } from './mac-dmg.mjs';
 import { releaseTagHere } from './release-tag.mjs';
@@ -40,7 +41,7 @@ const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
 // A custom build is staged first (its identity file, the marketplace it carries, its pictures and its report), then the
 // app's code is built again around it: it calls itself by its own name and carries the staged files (scripts/build.mjs).
 const custom = isCustom(inputs) ? await stage(inputs).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); }) : undefined;
-const appName = custom?.build.name ?? 'Central Knot';
+const appName = custom?.build.name ?? STANDARD_NAME;
 let icon = 'assets/icon.icns';
 if (custom) {
   const given = custom.icon && join(custom.out, custom.icon);
@@ -76,7 +77,7 @@ await mkdir('release', { recursive: true });
 const packages = await packager({
   dir: '.', out: 'release', name: appName, executableName: appName,
   // A custom build's own bundle id is what lets it sit beside the standard app, with its own settings and login item.
-  appBundleId: custom?.build.bundleId ?? 'com.centralknot.firstlook', appVersion: version, platform: 'darwin', arch: 'arm64',
+  appBundleId: custom?.build.bundleId ?? STANDARD_BUILD, appVersion: version, platform: 'darwin', arch: 'arm64',
   asar: true, overwrite: true, prune: true,
   // The default app icon, or the one a custom build was given (--app-icon).
   icon,

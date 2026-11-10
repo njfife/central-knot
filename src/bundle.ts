@@ -41,11 +41,12 @@ const LOGO_FILE = /^[\w-]+\.(png|svg|jpg|jpeg|webp)$/;
 /** custom-build.json as an object, or undefined for anything that isn't one (then the build is the standard app). */
 export function customBuild(value: unknown): CustomBuild | undefined {
   const read = record(value);
-  if (!read || !BUILD_ID.test(text(read.id)) || !text(read.name).trim() || !/^[A-Za-z0-9][A-Za-z0-9.-]{0,150}$/.test(text(read.bundleId))) return undefined;
-  const market = record(read.marketplace);
-  const logo = text(market?.logo);
-  return { id: text(read.id), name: text(read.name).trim(), bundleId: text(read.bundleId),
-    ...(market ? { marketplace: { ...(text(market.displayName).trim() ? { displayName: text(market.displayName).trim() } : {}), ...(LOGO_FILE.test(logo) ? { logo } : {}) } } : {}) };
+  const id = text(read?.id), name = text(read?.name).trim(), bundleId = text(read?.bundleId);
+  if (!BUILD_ID.test(id) || !name || !/^[A-Za-z0-9][A-Za-z0-9.-]{0,150}$/.test(bundleId)) return undefined;
+  const market = record(read?.marketplace);
+  if (!market) return { id, name, bundleId };
+  const displayName = text(market.displayName).trim(), logo = text(market.logo);
+  return { id, name, bundleId, marketplace: { ...(displayName ? { displayName } : {}), ...(LOGO_FILE.test(logo) ? { logo } : {}) } };
 }
 
 const readJson = async (path: string): Promise<unknown> => { try { return JSON.parse(await readFile(path, 'utf8')); } catch { return undefined; } };
@@ -64,9 +65,10 @@ export function readCustomBuildSync(folder: string): CustomBuild | undefined {
  */
 export function aboutBuild(build: CustomBuild, version: string, market?: { name: string; date: string }): string[] {
   return [
-    `${build.name === PRODUCT ? `This (${build.id})` : build.name} is a custom build of ${PRODUCT} ${version}, with its own settings apart from the standard app’s.`,
-    'It doesn’t update itself.',
-    ...(market ? [`It comes with the ${market.name} marketplace${market.date ? ` as of ${market.date}` : ''}, which changes only with a new build${build.name === PRODUCT ? '' : ` of ${build.name}`}.`] : []),
+    `${build.name} is a custom build of ${PRODUCT} ${version}.`,
+    `It keeps its own settings, separate from ${PRODUCT}’s.`,
+    `It doesn’t update itself: for a newer one, ask whoever gave you ${build.name}.`,
+    ...(market ? [`Its ${market.name} marketplace ${market.date ? `is as of ${market.date} and ` : ''}changes only with a new ${build.name}.`] : []),
   ];
 }
 
@@ -198,14 +200,14 @@ export async function activateRelease(dataDir: string, release: BundleRelease, a
 /**
  * The bundle a bundled build opens with. The release it carries (`carried`: the folder holding its release.json and archive)
  * is put in use when nothing is yet, or when it is newer than what is, or names another marketplace. Content already in use
- * that is as new or newer stays: an app update never takes a bundle's content back (ORG-05). `problem` says why the carried
+ * that is as new or newer stays (`kept` says so when it is newer): an app update never takes a bundle's content back (ORG-05). `problem` says why the carried
  * release could not be used; whatever was in use before is still returned.
  */
-export async function openBundle(dataDir: string, carried: string): Promise<{ active?: ActiveBundle; problem?: string }> {
+export async function openBundle(dataDir: string, carried: string): Promise<{ active?: ActiveBundle; problem?: string; /** The carried release was not put in use, and why. */ kept?: string }> {
   const active = await activeBundle(dataDir);
   const release = await readRelease(join(carried, RELEASE_FILE));
   if (!release) return { active, problem: 'The marketplace this build carries has no manifest that can be read.' };
-  if (active && active.release.marketplace === release.marketplace && active.release.sequence >= release.sequence) return { active };
+  if (active && active.release.marketplace === release.marketplace && active.release.sequence >= release.sequence) return { active, ...(active.release.sequence > release.sequence ? { kept: `the content in use (sequence ${active.release.sequence}) is newer than the release this app carries (sequence ${release.sequence}), so it stays` } : {}) };
   const { problem } = await activateRelease(dataDir, release, join(carried, release.archive));
   return problem ? { active, problem: `The marketplace this build carries could not be unpacked. ${problem}` } : { active: await activeBundle(dataDir) };
 }

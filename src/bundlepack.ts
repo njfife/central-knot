@@ -76,6 +76,7 @@ export function describeBuild(inputs: BuildInputs): CustomBuild {
   const name = inputs.appName.trim();
   // The name is also the app's file name, so nothing a file name can't hold as written.
   if (!name || name.length > 60 || /[\\/:?*"<>|\n\r\t]/.test(name) || name.startsWith('.') || name.endsWith('.')) throw new Error('--app-name is the app’s name as people see it, and its file’s name: up to 60 characters, without / \\ : ? * " < > | or line breaks, and not starting or ending with a period.');
+  if (name.toLowerCase() === STANDARD_NAME.toLowerCase()) throw new Error(`--app-name can’t be “${STANDARD_NAME}”: under that name the build’s file would take the standard app’s place in Applications.`);
   const id = inputs.appId ?? slug(name);
   if (!BUILD_ID.test(id) || id === 'central-knot') throw new Error(inputs.appId ? '--app-id is lower-case letters, digits, dots and dashes (not “central-knot”, the standard app’s).' : 'Give the build an identity with --app-id: lower-case letters, digits, dots and dashes.');
   for (const [option, file, kinds] of [['--app-icon', inputs.appIcon, ['.png', '.icns']], ['--marketplace-logo', inputs.marketplaceLogo, ['.png', '.svg', '.jpg', '.jpeg', '.webp']]] as const) {
@@ -121,8 +122,8 @@ function whyNotFetched(plugin: CatalogPlugin): string {
   const source = record(plugin.entry?.source);
   const kind = text(source?.source);
   if (typeof plugin.entry?.source === 'string') return `Its folder (${plugin.entry.source}) is not in the marketplace.`;
-  if ((kind === 'npm' || kind === 'pip') && text(source?.package)) return `Its files are ${kind === 'npm' ? 'an npm' : 'a pip'} package (${text(source?.package)}), which a build can’t carry.`;
-  return plugin.from ? `Its files are kept at ${plugin.from.label}, where a build can’t fetch them.` : 'Its entry doesn’t say where its files are.';
+  if ((kind === 'npm' || kind === 'pip') && text(source?.package)) return `Its files are ${kind === 'npm' ? 'an npm' : 'a pip'} package (${text(source?.package)}), which can’t be packed into the app.`;
+  return plugin.from ? `Its files are kept at ${plugin.from.label}, which can’t be packed into the app.` : 'Its entry doesn’t say where its files are.';
 }
 
 /**
@@ -132,7 +133,7 @@ function whyNotFetched(plugin: CatalogPlugin): string {
  * is then written again as JSON: every value as it was, its layout not). A plugin that
  * can't be fetched is named in `unpackaged` with the reason; its entry stays as written, and the release is still made.
  */
-export async function packRelease({ source, out, work, sequence, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease } | { problem: string }> {
+export async function packRelease({ source, out, work, sequence, now = new Date(), fetchPlugin = readRemotePlugin }: { source: string; out: string; work: string; sequence?: number; now?: Date; /** Fetches a plugin kept in another repository; replaceable in tests. */ fetchPlugin?: typeof readRemotePlugin }): Promise<{ release: BundleRelease; /** What whoever makes the release should know about it, beyond what is packed. */ notes: string[] } | { problem: string }> {
   const context: PluginContext = { home: work, dataDir: join(work, 'fetched'), binaries: {} };
   const where = (await folderGiven(source)) ?? source.trim();
   const catalog = await readCatalog(context, where);
@@ -186,13 +187,13 @@ export async function packRelease({ source, out, work, sequence, now = new Date(
     plugins: packed.plugins.filter(plugin => !left.has(plugin.name)).map(plugin => ({ name: plugin.name, ...(plugin.version ? { version: plugin.version } : {}) })), unpackaged };
   await writeFile(join(out, RELEASE_FILE), `${JSON.stringify(release, null, 2)}\n`);
   await rm(stage, { recursive: true, force: true });
-  return { release };
+  return { release, notes: packed.copilotRefuses ? [`${packed.copilotRefuses} It then installs none of this marketplace’s plugins whole, for anyone, until that entry is taken out of the marketplace.`] : [] };
 }
 
 // ---------- Staging a custom build ----------
 
 /** A staged custom build: what the app's build takes in (scripts/build.mjs), and the report of what was made. */
-export interface StagedBuild { build: CustomBuild; release?: BundleRelease; /** The app icon as given, copied beside the rest. */ icon?: string; report: string }
+export interface StagedBuild { build: CustomBuild; release?: BundleRelease; /** Notes from packing (packRelease). */ notes?: string[]; /** The app icon as given, copied beside the rest. */ icon?: string; report: string }
 
 /**
  * Stages a custom build in `out` from the inputs: custom-build.json, the carried release under bundle/ with the marketplace's
@@ -210,28 +211,28 @@ export async function stageCustomBuild(inputs: BuildInputs, { out, work, now }: 
   if (there.length && !there.includes(CUSTOM_FILE)) throw new Error(`${out} holds other files. Stage into an empty folder, or one staged before.`);
   await rm(out, { recursive: true, force: true });
   await mkdir(out, { recursive: true });
-  let release: BundleRelease | undefined;
+  let release: BundleRelease | undefined, notes: string[] = [];
   if (inputs.marketplace) {
     const packed = await packRelease({ source: inputs.marketplace, out: join(out, CARRIED_FOLDER), work, sequence: inputs.sequence, now });
     if ('problem' in packed) throw new Error(packed.problem);
-    release = packed.release;
+    ({ release, notes } = packed);
   }
   if (inputs.marketplaceLogo && build.marketplace?.logo) await copyFile(inputs.marketplaceLogo, join(out, CARRIED_FOLDER, build.marketplace.logo));
   const icon = inputs.appIcon ? `app-icon${extname(inputs.appIcon).toLowerCase()}` : undefined;
   if (icon) await copyFile(inputs.appIcon!, join(out, icon));
   await writeFile(join(out, CUSTOM_FILE), `${JSON.stringify(build, null, 2)}\n`);
-  const report = buildReport(build, release, inputs);
+  const report = buildReport(build, release, inputs, notes);
   await writeFile(join(out, 'build-report.txt'), report);
-  return { build, release, icon, report };
+  return { build, release, notes, icon, report };
 }
 
 /** The build report: what was built, in plain lines. */
-export function buildReport(build: CustomBuild, release: BundleRelease | undefined, inputs: BuildInputs): string {
+export function buildReport(build: CustomBuild, release: BundleRelease | undefined, inputs: BuildInputs, notes: string[] = []): string {
   const lines = [
-    `${build.name}: a custom build of Central Knot`,
+    `${build.name}: a custom build of ${STANDARD_NAME}`,
     '',
     `Identity: ${build.id} (${build.bundleId}). Its settings are its own: it installs beside the standard app and never shares its settings.`,
-    `App name: ${build.name}${build.name === STANDARD_NAME ? ' (the standard app’s name: the two can’t be in one folder)' : ''}`,
+    `App name: ${build.name}`,
     `App icon: ${inputs.appIcon ? basename(inputs.appIcon) : 'the standard icon'}`,
   ];
   if (release) {
@@ -241,6 +242,7 @@ export function buildReport(build: CustomBuild, release: BundleRelease | undefin
       `Archive: ${release.archive}, ${release.size} bytes, SHA-256 ${release.sha256}`,
       `Plugins packed (${release.plugins.length}): ${release.plugins.map(plugin => `${plugin.name}${plugin.version ? ` ${plugin.version}` : ''}`).join(', ') || 'none'}`);
     if (release.unpackaged.length) lines.push(`NOT PACKED (${release.unpackaged.length}): the build carries no files for these, and it offers no install of them.`, ...release.unpackaged.map(item => `  - ${item.name}: ${item.reason}`));
+    lines.push(...notes.map(note => `Note: ${note}`));
   } else lines.push('', 'Marketplace: none. This build carries no marketplace.');
   lines.push('',
     'App updates: not met. No update location is configured, so this build does not update itself. It never uses the standard app’s updates.',
