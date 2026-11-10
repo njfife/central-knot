@@ -427,3 +427,26 @@ test('A part that is out never fails a run or comes back: not with something unr
     assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), true);
   } finally { await box.cleanup(); }
 });
+
+test('A part turned off stays off when the plugin drops it and brings it back; a first run that fails partway records what it did put in', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    // The plugin drops grill-me (which is out), is updated, then brings it back.
+    const kept = await readFile(join(box.plugin, 'skills/grill-me/SKILL.md'), 'utf8');
+    await rm(join(box.plugin, 'skills/grill-me'), { recursive: true });
+    await installParts(box.context, box.to, await box.files());
+    await mkdir(join(box.plugin, 'skills/grill-me'));
+    await writeFile(join(box.plugin, 'skills/grill-me/SKILL.md'), kept);
+    await installParts(box.context, box.to, await box.files());
+    assert.deepEqual(await box.inPi(), ['tdd']);
+    await removeParts(box.context, box.to);
+
+    // A first install where one part's place can't be read: the others go in at this version, and that one is not on record.
+    await writeFile(box.pi('grill-me'), 'not a folder');
+    const first = await installParts(box.context, box.to, await box.files());
+    assert.equal(first.outcome, 'failed', first.message);
+    const record = (await readParts(box.home))[0]!;
+    assert.deepEqual([record.version, record.items.map(item => item.name).sort()], ['1.0.0', ['figma-design', 'tdd']]);
+  } finally { await box.cleanup(); }
+});

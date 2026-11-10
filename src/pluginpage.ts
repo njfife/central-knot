@@ -361,7 +361,7 @@ function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: Plugin
       // With both kinds in one list, each column's label says which it is, and one line says what each does.
       mixed ? line('A switch “in the plugin” turns that skill off or back on there, without uninstalling the plugin. A “separate item” switch puts that one skill in, or takes it out.')
         : switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin.') : null,
-      explain && !mixed ? line(`${andList(picking.map(tool => names[tool]))} ${picking.length > 1 ? 'don’t' : 'doesn’t'} have the plugin itself: a switch there puts that one skill, MCP server or agent in as a separate item, or takes it out again.`) : null,
+      explain && !mixed ? line('A switch puts that one part in as a separate item, or takes it out again.') : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
       ...pickable.flatMap(tool => { const reason = noneGoIn(tool); return reason ? [line(reason, tool)] : []; }),
       ...[...columnWide].map(reason => line(reason)),

@@ -259,7 +259,7 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
  */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
   .filter(entry => entry.report.changed && entry.action !== 'update' && (!isParts(entry.action) || entry.report.partsRun))
-  .map(({ report, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
+  .map(({ report, pick: _picked, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
   .reverse();
 
 /** A tool did what was asked (installed, updated, uninstalled, turned a skill off or on), whether this run changed it or it already was. */
@@ -282,17 +282,23 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     // result is one group whatever kind of run it was: only a change tells an update from an install.
     // A pick of single parts is said as such; with the rest of the tool's parts it is that install or update.
     const picked = (entry: PluginDone) => entry.action === 'pick-parts' && !entry.pick?.rest;
-    const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false, single = false } = {}) => mine
-      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!parts || !changed || (picked(entry) === single && (single || !!entry.report.partsUpdated === updated))))
+    // A tool where a part was left alone (its note says which) got only some of them.
+    const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false, single = false, some = false } = {}) => mine
+      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts
+        && (!parts || !changed || (picked(entry) === single && (single || (!!entry.report.partsUpdated === updated && (undo || !!entry.report.notes?.length === some))))))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const partsGroups: Group[] = [
       [tools('installed', true, { parts: true }), undo ? 'parts back as they were in' : 'parts installed in'],
       [tools('installed', true, { parts: true, updated: true }), 'parts updated in'],
+      [tools('installed', true, { parts: true, some: true }), 'only some parts installed in'],
+      [tools('installed', true, { parts: true, updated: true, some: true }), 'only some parts updated in'],
       ...singleGroups(mine.filter(entry => picked(entry) && entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool))),
       [tools('uninstalled', true, { parts: true }), 'parts removed from'],
       ...(undo
         ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]
         : [[tools('installed', false, { parts: true }), 'parts already up to date in'], [tools('uninstalled', false, { parts: true }), 'had no parts in']] as [string[], string][]),
+      // A skill that went in where a link led nowhere: said, since something in the person's folder was replaced.
+      [mine.filter(entry => isParts(entry.action) && entry.report.replacedLinks?.length).map(entry => names[entry.tool]), 'a broken link replaced in'],
     ];
     const groups: Group[] = skill
       ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],

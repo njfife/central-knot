@@ -3,7 +3,7 @@
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
 import { KINDS, harnessFound as found, leaveResults, realHomeName, thisMachine, isKind, loadHome, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
-import { pluginItemCount } from './pluginrows.ts';
+import { inTool, pluginItemCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
@@ -40,7 +40,7 @@ const kindNotUsed = (tool: HarnessId, kind: Kind) => `${names[tool]} doesn’t u
  */
 function tally(home: HomeView, kind: Kind, tool: HarnessId) {
   const source = kindSource(home, kind);
-  const here = source.facts.filter(item => item.copies[tool] !== undefined);
+  const here = source.facts.filter(item => inTool(item, tool));
   const plugins = pluginItemCount(home, kind, tool);
   return { kind, supported: source.tools.includes(tool), total: here.length + plugins, plugins, managed: here.filter(item => item.managed).length, differing: differingIn(source, tool) };
 }
@@ -215,7 +215,7 @@ function tabs(home: HomeView, tool: HarnessId) {
     if (!isKind(tab)) return undefined;
     if (!supports(home, tab, tool)) return { shown: '—', elsewhere: 0 };
     const facts = kindSource(home, tab).facts;
-    const here = facts.filter(item => item.copies[tool] !== undefined).length;
+    const here = facts.filter(item => inTool(item, tool)).length;
     return { shown: here + pluginItemCount(home, tab, tool), elsewhere: facts.length - here };
   };
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },

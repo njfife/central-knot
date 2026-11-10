@@ -409,7 +409,8 @@ export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninsta
   /** An update: the version the tool records now. */ version?: string;
   /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
-  /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
+  /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[];
+  /** Skills this run wrote in place of a link that led nowhere, by name. */ replacedLinks?: string[] }
 
 // ---------- A plugin's parts in a tool without plugins (parts.ts) ----------
 export type PartKind = 'skill' | 'mcp' | 'agent';

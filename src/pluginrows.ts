@@ -35,6 +35,9 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'skill' | und
   return row.kind === 'skill' && install.skillsOff?.some(name => samePart({ kind: 'skill', name }, row)) ? 'skill' : undefined;
 }
 
+/** Whether a tool has an item of the person's: a copy of its own there, or through a plugin installed there (its box says so). The tables and every count ask this. */
+export const inTool = (fact: Pick<SkillFacts, 'copies' | 'plugin'>, tool: HarnessId) => fact.copies[tool] !== undefined || !!fact.plugin?.[tool];
+
 /** Whether a person's own row already shows this plugin's item: some tool has that row's item through this plugin (its box says so). */
 const onOwnRow = (fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
   && Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName);

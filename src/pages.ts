@@ -6,7 +6,7 @@ import { designMode } from './design.ts';
 import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
 import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
-import { pluginItemCount } from './pluginrows.ts';
+import { inTool, pluginItemCount } from './pluginrows.ts';
 
 // ---------- Overview ----------
 
@@ -98,7 +98,7 @@ function practiceBanner() {
 }
 
 /** What a kind card needs from one item: whether it is managed, has edits waiting or differs, and which tools hold a copy. */
-interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown> }
+interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; copies: Record<string, unknown>; plugin?: Record<string, unknown> }
 
 /**
  * One kind on the Overview: how many there are and how many are managed, then what needs attention in short words
@@ -123,7 +123,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
     : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
-  const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length + (home ? pluginItemCount(home, page, tool) : 0);
+  const countFor = (tool: HarnessId) => facts.filter(fact => inTool(fact, tool)).length + (home ? pluginItemCount(home, page, tool) : 0);
   const tools = holders.map(tool => {
     const count = countFor(tool);
     return h('span.kind-tool', {}, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));

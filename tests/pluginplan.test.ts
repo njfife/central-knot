@@ -266,4 +266,11 @@ test('Clicks on part switches: a second click takes the choice back, an install�
   // The result names the parts: "skill tdd put into Pi".
   const done: PluginDone[] = [{ ...at, action: 'pick-parts', pick: { on: [part('tdd')], off: [part('qa')] }, report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'r' } }];
   assert.equal(resultSentence(resultLines(done), false), 'pdf: skill tdd put into Pi; skill qa taken out of Pi.');
+  // Its Undo is the run's own record: it carries no pick (the log would name parts the Undo never chose).
+  assert.deepEqual(reverse(done).map(back => [back.action, back.pick]), [['undo-parts', undefined]]);
+  // A tool where a part was left alone got only some of its parts, and a skill written over a broken link says so.
+  const some: PluginDone[] = [
+    { ...at, action: 'install-parts', report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'r', notes: ['Didn’t put in the skill “tdd”: Pi already has one of that name.'], replacedLinks: ['qa'] } },
+    { ...op('pdf', 'codex-cli'), action: 'install-parts', report: { tool: 'codex-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 's' } }];
+  assert.equal(resultLines(some).find(line => line.ok)?.text, 'parts installed in Codex; only some parts installed in Pi; a broken link replaced in Pi');
 });

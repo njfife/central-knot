@@ -355,7 +355,7 @@ const plainReason = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? 'it
  * What a move has done so far: the parts held, notes on what was left alone, what else it did, writes made and changes that failed, and the
  * parts already gone from the tool when it looked (`goneBefore`), so its Undo never puts back what the person had removed.
  */
-interface Moved { held: PartItem[]; notes: string[]; /** What the run did that is worth telling but needs no attention (a broken link replaced). */ said: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
+interface Moved { held: PartItem[]; notes: string[]; /** What the run did that is worth telling but needs no attention (a broken link replaced), in a sentence each. */ said: string[]; /** Skills written in place of a broken link, by name. */ replaced: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
 
 /**
  * Moves one tool from the parts it holds (`from`) to the parts wanted (`to`), part by part (see `settle`). `restoring`: an
@@ -364,7 +364,7 @@ interface Moved { held: PartItem[]; notes: string[]; /** What the run did that i
  */
 async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[], { restoring = false, on = [] as PartRef[] } = {}): Promise<Moved> {
   const holds = await namesInUse(context, tool);
-  const moved: Moved = { held: [], notes: [], said: [], wrote: 0, failed: 0, goneBefore: [] };
+  const moved: Moved = { held: [], notes: [], said: [], replaced: [], wrote: 0, failed: 0, goneBefore: [] };
   for (const each of [...from, ...to.filter(item => !from.some(old => samePart(old, item)))]) {
     const old = from.find(item => samePart(item, each));
     try { await settle(context, tool, holds, old, to.find(item => samePart(item, each)), moved, { restoring, asked: on.some(ref => samePart(ref, each)) }); }
@@ -384,7 +384,8 @@ const labelOf = (part: Pick<PartItem, 'kind' | 'name'>) => `the ${partWords[part
 
 /**
  * One part's move from what was put there (`old`) to what is wanted (`want`), the first rule that applies deciding:
- *  1. its place can't be read right now, and the run would write or take out there: a failure, nothing changes, it stays on record;
+ *  1. it is in, or is to go in, and its place can't be read right now: a failure, nothing changes, it stays on record (nothing
+ *     can be said of what is there, not even that it is unchanged);
  *  2. it is wanted out (`want.removed`: turned off, or removed by the person before): a copy these parts put there and
  *     still theirs is taken out, and it stays on record as out;
  *  3. it is out (`old.removed`): it stays out, and on record, while the plugin still has it, whatever is in its place
@@ -403,7 +404,8 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
   const ours = old && !old.removed ? old : undefined;
   // Rules 2 and 3 where nothing of these parts is in the tool: its place is not even read, so what sits there (the
   // person's own item, something unreadable) never fails the run or lets the part back in.
-  if (!ours && (!want || want.removed || (old?.removed && !restoring && !asked))) { if (want) moved.held.push(outOf(want)); return; }
+  // (One the plugin has dropped stays on record as out too: should the plugin bring it back, it doesn't come back unasked.)
+  if (!ours && (!want || want.removed || (old?.removed && !restoring && !asked))) { const out = want ?? (restoring ? undefined : old); if (out) moved.held.push(outOf(out)); return; }
   const now = await onDisk(context, tool, part);
   const writeIn = async (replacing: There | undefined) => {
     // A part read from the plugin brings its content to the store first; one from the record (an Undo) is there already.
@@ -435,8 +437,8 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
     // An Undo putting a part back through a skills folder that became a link fails (retryable), never quietly skips it.
     if (restoring) throughSkillsFolder();
     const why = blocker(now, holds, part, tool);
-    if (why) { moved.notes.push(`Didn’t put in ${label}: ${why}. Once that is sorted out, its switch on the plugin’s page, or Update parts there, adds it.`); return; }
-    if (now.state === 'absent' && now.brokenLink !== undefined) moved.said.push(await clearBrokenLink(context, tool, part.name, now.brokenLink));
+    if (why) { moved.notes.push(`Didn’t put in ${label}: ${why}. Once that is sorted out, turn its switch on under “What it holds” on the plugin’s page, or use Update parts.`); return; }
+    if (now.state === 'absent' && now.brokenLink !== undefined) { moved.said.push(await clearBrokenLink(context, tool, part.name, now.brokenLink)); moved.replaced.push(part.name); }
     await writeIn(undefined);
     return;
   }
@@ -489,8 +491,8 @@ async function saveRun(context: ShareContext, run: PartsRun): Promise<string> {
 const asFound = (before: PartsInstall | null, moved: Moved): PartsInstall | null =>
   (before ? { ...before, items: before.items.map(item => (moved.goneBefore.some(gone => samePart(gone, item)) ? { ...item, removed: true as const } : item)) } : null);
 
-const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: string, more: { run?: string; changed?: boolean; notes?: string[]; updated?: boolean } = {}): ActionReport =>
-  ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}) });
+const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: string, more: { run?: string; changed?: boolean; notes?: string[]; updated?: boolean; replaced?: string[] } = {}): ActionReport =>
+  ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}), ...(more.replaced?.length ? { replacedLinks: more.replaced } : {}) });
 
 /**
  * Installs a plugin's parts in a tool, or brings them up to date: unchanged parts are replaced, new ones added, ones the
@@ -537,7 +539,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const notes = outcome === 'failed' ? [] : moved.notes;
   // A run that failed partway says what it did change too: what the tool has now.
   const has = outcome === 'failed' && moved.wrote && items.some(item => !item.removed) ? ` ${toolNames[tool]} now has ${partsSummary(items.filter(item => !item.removed), ', ')}.` : '';
-  return report(tool, outcome, [`${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${has}`, ...moved.said].join(' ') + left, { run, changed, notes, updated: outcome === 'installed' && !!before });
+  return report(tool, outcome, [`${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${has}`, ...moved.said].join(' ') + left, { run, changed, notes, updated: outcome === 'installed' && !!before, replaced: moved.replaced });
 }
 
 /**
@@ -547,8 +549,9 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
  */
 function settledAs(before: PartsInstall | null, version: string | undefined, digest: string | undefined, run: { failed: boolean; only: boolean; current: boolean }): { version: string | undefined; digest: string } {
   const previous = { version: before?.version, digest: before?.digest ?? '' };
-  // A run with failures keeps the old ones, so the plugin still shows as changed.
-  if (run.failed) return previous;
+  // A run with failures keeps the old ones, so the plugin still shows as changed. A first run has none: what it did put
+  // in is at this version, and what failed is not on record, so the page still offers it.
+  if (run.failed) return before ? previous : { version, digest: digest ?? '' };
   // A pick of single parts brings no other part up to date: unless what the tool holds is what the plugin has now
   // (`current`), the parts stay at the version they have, still out of date.
   if (run.only && before && !run.current) return previous;

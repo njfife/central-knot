@@ -15,7 +15,7 @@ import type { Change, DestinationResult, HomeView, ManageView, SkillFacts, SyncN
 import { market } from './pluginstate.ts';
 import { pluginKey } from './pluginplan.ts';
 import { partOfPage, samePart, versionWord } from './pluginstatus.ts';
-import { cellWords, handledWhere, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
+import { cellWords, handledWhere, inTool, insideTitle, offIn, pageRows, pluginTools, toolWords, type PluginRow } from './pluginrows.ts';
 import { folded, lineDiff } from './diff.ts';
 import { plural } from './model.ts';
 import { planAdd as planAddPure, syncingTools, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
@@ -227,7 +227,7 @@ const toolList = (): Tool[] => {
   return focus && list.includes(focus) ? [focus, ...list.filter(tool => tool !== focus)] : list;
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
-const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefined || !!skill.plugin?.[focus];
+const inFocus = (skill: SampleSkill) => !focus || inTool(skill, focus as HarnessId);
 /**
  * A row's place as things stand before pending changes, so it stays put until Apply all: 0 managed, 1 unmanaged, 2 no tool
  * uses it (roworder.ts). The bulk actions (Manage all, Add all) leave the last kind alone; each row's own controls still work.
@@ -893,7 +893,7 @@ function deleteAction(skill: SampleSkill) {
   if (!base.managed && !removable(base).length) return null;
   // Every copy already queued for removal: Apply all does it, and a second, immediate route would only confuse.
   if (removable(base).length && removable(base).every(tool => skill.removing?.includes(tool))) return null;
-  if (view.confirmDelete !== skill.key) return smallAction('Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger');
+  if (view.confirmDelete !== skill.key) return smallAction(fromPlugins(skill, kind).length ? 'Delete this separate item…' : 'Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger');
   // Armed: it runs at once (not on Apply all), so it says "now", with a plain way back beside it.
   return h('span.delete-armed', {},
     smallAction('Cancel', `delete-cancel-${skill.key}`, () => { view.confirmDelete = undefined; rerender(); }),

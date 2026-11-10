@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promi
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
-import { cellWords, handledWhere, offIn, pageRows, pluginItemCount } from '../src/pluginrows.ts';
+import { inTool, cellWords, handledWhere, offIn, pageRows, pluginItemCount } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
 
@@ -110,6 +110,9 @@ test('a plugin’s skill the person also has (its part in Pi, shown there as thr
   const through = { plugin: 'issue-tracker', marketplace: 'm' };
   const home = homeOf([fact('triage', { 'pi-cli': true }, { plugin: { 'claude-cli': through, 'copilot-cli': through } })], [install('claude-cli'), install('copilot-cli')], [piPart]);
   assert.deepEqual([pageRows(home, 'skills').rows.length, pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli')], [0, 0, 0]);
+  // That row is the tools' too: each one's page draws it and each one's count has it (one rule, inTool).
+  const [triage] = home.manage.skills;
+  assert.deepEqual((['claude-cli', 'copilot-cli', 'pi-cli', 'codex-cli'] as const).map(tool => inTool(triage!, tool)), [true, true, true, false]);
 });
 
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
