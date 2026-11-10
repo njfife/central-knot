@@ -24,30 +24,18 @@ export function noteTools(last: NotedTools, home: string, snapshots: Snapshot[])
   return { noted, changed: home === last.home && noted.tools !== last.tools };
 }
 
-/** The tools that install plugins: every tool but Pi, which has none. */
+/** The tools that hold each kind besides skills: plugins and agents in every tool but Pi, which has neither; MCP servers in every tool. */
 export type PluginTool = Exclude<HarnessId, 'pi-cli'>;
 export const pluginTools: PluginTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+export type AgentTool = Exclude<HarnessId, 'pi-cli'>;
+export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
+export const mcpTools: HarnessId[] = ['claude-cli', 'copilot-cli', 'codex-cli', 'pi-cli'];
 
 /** Whether a tool (or a value from the page) is one that installs plugins. */
 export const takesPlugins = (tool: unknown): tool is PluginTool => pluginTools.some(entry => entry === tool);
 
 /** A kind of item a home's tools hold, each with its own page. Every tool holds skills and an instruction file. */
 export type HomeKind = 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins';
-
-/**
- * Each kind's words, the one place they are spelled: one of it and many as a sentence names them, the page's title, the
- * short noun a count uses ("2 servers"), and one of it with its article ("an MCP server").
- */
-export const kindNouns: Record<HomeKind, { one: string; many: string; title: string; short: [string, string]; a: string }> = {
-  skills: { one: 'skill', many: 'skills', title: 'Skills', short: ['skill', 'skills'], a: 'a skill' },
-  mcp: { one: 'MCP server', many: 'MCP servers', title: 'MCP servers', short: ['server', 'servers'], a: 'an MCP server' },
-  agents: { one: 'agent', many: 'agents', title: 'Agents', short: ['agent', 'agents'], a: 'an agent' },
-  instructions: { one: 'instruction file', many: 'instruction files', title: 'Instructions', short: ['file', 'files'], a: 'an instruction file' },
-  plugins: { one: 'plugin', many: 'plugins', title: 'Plugins', short: ['plugin', 'plugins'], a: 'a plugin' },
-};
-
-/** Each kind as a sentence names it, many of it: "MCP servers". */
-export const kindNames = Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.many])) as Record<HomeKind, string>;
 
 /** What a home's view says about its tools: all of them, and those that hold MCP servers and agents. */
 interface ToolsHeld { manage: { tools: HarnessId[] }; mcp: { tools: HarnessId[] }; agents: { tools: HarnessId[] } }

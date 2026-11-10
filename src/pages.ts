@@ -3,9 +3,9 @@ import { afterLayout, button, cardGrid, emptyState, fileBlocks, h, icon, pathTex
 import { fullToolName, plural, skillCount, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill, Snapshot } from './types.ts';
 import { designMode } from './design.ts';
-import { absentTools, heldKinds, isPresent, kindNames, kindNouns } from './presence.ts';
+import { absentTools, heldKinds, isPresent } from './presence.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser, wrappingPath } from './matrix.ts';
-import { andList, noToolsSentence, orList } from './words.ts';
+import { andList, kindNames, kindNouns, noToolsSentence, orList } from './words.ts';
 
 // ---------- Overview ----------
 

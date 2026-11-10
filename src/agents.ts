@@ -15,10 +15,9 @@ import { appendHistory, readConverted, readHistory, recordConverted, replaceHist
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
+import { agentTools, type AgentTool } from './presence.ts';
 import { toolNames as shown } from './words.ts';
 
-type AgentTool = Exclude<HarnessId, 'pi-cli'>;
-export const agentTools: AgentTool[] = ['claude-cli', 'copilot-cli', 'codex-cli'];
 export const isAgentTool = (tool: HarnessId): tool is AgentTool => agentTools.some(agentTool => agentTool === tool);
 
 /** One agent in a shape every tool can be written from. `fields` are its own tool's extras. */
