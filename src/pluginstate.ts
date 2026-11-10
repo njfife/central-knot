@@ -24,7 +24,8 @@ export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }>
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
 };
 
-const startNav = () => ({ source: undefined as string | undefined, tab: 'plugins' as MarketTab, plugin: undefined as string | undefined, find: '', category: undefined as string | undefined });
+/** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link). */
+const startNav = (): { source?: string; tab: MarketTab; plugin?: string; find: string; category?: string; marketName?: string } => ({ source: undefined, tab: 'plugins', plugin: undefined, find: '', category: undefined });
 
 export const market = {
   /** Marketplaces and what each tool has installed: read when the page opens or the home changes (pagedata.ts). */
@@ -72,7 +73,8 @@ export function resetMarket(): void {
 /** The marketplace on screen: the one chosen, or the first listed. The page and the reads both use this. */
 export function current(): { entry: MarketplaceView; index: number } | undefined {
   const list = market.view?.marketplaces ?? [];
-  const index = Math.max(0, list.findIndex(entry => entry.source === market.nav.source));
+  const bySource = list.findIndex(entry => entry.source === market.nav.source);
+  const index = Math.max(0, bySource >= 0 ? bySource : list.findIndex(entry => !!market.nav.marketName && entry.name === market.nav.marketName));
   return list[index] ? { entry: list[index]!, index } : undefined;
 }
 
@@ -227,12 +229,14 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
     if (fresh) { market.readmes.clear(); forgetDetails(); market.partsPlans.clear(); }
     else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') market.readmes.delete(entry.source);
     settleView();
-    markReread();
+    // Only a Refresh the person clicked: the app's own reads after a change (the home read again, a background pass that
+    // saw the files it wrote) leave the result's sentence standing.
+    if (fresh) markReread();
   }
   rerender();
 }
 
-/** The tools were read again: the last run's result is only named from now on (its Undo stays), never restated over a page that may differ. */
+/** The person had the tools read again (Refresh): the last run's result is only named from now on (its Undo stays), never restated over a page that may differ. */
 const markReread = () => { if (market.lastRun) market.lastRun = { ...market.lastRun, reread: true }; };
 
 /** Runs an action with the page saying what it is doing. */

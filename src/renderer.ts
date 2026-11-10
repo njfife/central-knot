@@ -6,6 +6,7 @@ import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
 import { kindNouns } from './words.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { agentsPage, mcpPage, overviewPage, skillsPage } from './pages.ts';
 import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
@@ -95,9 +96,10 @@ function renderSidebar() {
   region('nav').replaceChildren(...[
     navRow('overview', titles.overview, 'layout-grid'),
     navRow('harnesses', titles.harnesses, 'boxes'),
-    row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
-    row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
-    row('agents', 'bot', designMode ? undefined : home?.agents.servers.length),
+    // Each page's rows, a plugin's items included.
+    row('skills', 'wand-sparkles', designMode ? sample.length : home && home.manage.skills.length + pluginItemCount(home, 'skills')),
+    row('mcp', 'plug', designMode ? undefined : home && home.mcp.servers.length + pluginItemCount(home, 'mcp')),
+    row('agents', 'bot', designMode ? undefined : home && home.agents.servers.length + pluginItemCount(home, 'agents')),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.
@@ -150,7 +152,8 @@ function writeFact(manage: ManageView): { glyph: IconName; text: string; short?:
  * sync starts once something is.
  */
 function syncSwitch(home: HomeView) {
-  const label = h('span.sync-label', {}, 'Automatic sync');
+  // A narrow status bar calls it "Sync" (style.css): the switch and its state keep their words, and the tooltip names it whole.
+  const label = h('span.sync-label', {}, h('span.fact-long', {}, 'Automatic sync'), h('span.fact-short', {}, 'Sync'));
   // With no tools there is nothing to sync: the switch is shown, not offered.
   if (!home.manage.tools.length) {
     return h('span.status-item.sync-switch.sync-paused', { id: 'sync-switch', role: 'switch', 'aria-checked': 'false', 'aria-disabled': 'true', title: 'No tools were found in this home, so there is nothing to sync.' },

@@ -1,9 +1,11 @@
 import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
+import { checkNow } from './updateview.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
+import { pluginItemCount } from './pluginrows.ts';
 import { andList, fileName, kindNames, kindNouns, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
 import { withOwn, withoutBase } from './basetext.ts';
 import { machineNames, pagePlatform } from './machine.ts';
@@ -319,7 +321,8 @@ export const applyManage = (changes: Change[], onDone: () => void) => busy('Appl
  */
 function readFound(view: HomeView, from?: string): string {
   if (!view.manage.tools.length) return noToolsSentence;
-  const found = { skills: view.manage.skills.length, mcp: view.mcp.servers.length, agents: view.agents.servers.length };
+  // A plugin's items count as the pages list them.
+  const found = { skills: view.manage.skills.length + pluginItemCount(view, 'skills'), mcp: view.mcp.servers.length + pluginItemCount(view, 'mcp'), agents: view.agents.servers.length + pluginItemCount(view, 'agents') };
   const counts = heldKinds(view).map(kind => plural(found[kind], kindNouns[kind].one, kindNouns[kind].many));
   const stopped = view.agents.servers.some(server => server.managed && server.stopped?.length);
   // A catch-up that copied something has its own Caught up band (tables and the Harnesses list), so it is not "Nothing changed".
@@ -1052,8 +1055,8 @@ let setAside: HomeView | undefined;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => {
-  // "Check for Updates…" opens Settings on its Updates row.
-  if (page === 'settings/updates') { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); }
+  // "Check for Updates…" opens Settings on its Updates row and checks from there, so the result is announced and Check now has the focus.
+  if (page === 'settings/updates') { showPage('settings'); document.getElementById('setting-updates')?.scrollIntoView({ block: 'nearest' }); void checkNow(true); }
   else if (isPage(page)) showPage(page);
 });
 // Settings changed by a menu, a dialog or the system: main says so after every save and whenever the window comes back, and an

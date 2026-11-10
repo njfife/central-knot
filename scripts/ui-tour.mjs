@@ -5,12 +5,12 @@
 //   in well under a minute. It fails if a page doesn't open or throws. This is the run for every change.
 // - `--only a,b` runs the named feature sections: the ones a change touched.
 // - `--full` runs every feature section, hundreds of pictures over about ten minutes. For a new release only.
-// Features: shell, skills, sync, mcp, agents, plugins, instructions, updates, sizes (four tools; every page at 860×560 with the
+// Features: shell, skills, sync, mcp, agents, plugins, plugin-items, instructions, updates, sizes (four tools; every page at 860×560 with the
 // sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -450,6 +450,17 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
   await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
+  // Pi joins the home: it takes no plugins, so its column's switches put single skills in as separate items, beside the
+  // installed plugin's own switches under Copilot CLI and Codex.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-pi-cli')`, 15000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#ppart-0-document-tools-skill-pdf-reader-pi-cli')`, 15000);
+  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
+  await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'mixed-switches', 'Pi was added to the home. One list now has both kinds of switch, each column saying which: the installed plugin’s skill switches under Copilot CLI and Codex, and under Pi a switch that puts one skill in as a separate item (pdf-reader chosen).');
+  await at860('mixed-switches-860', 'The same at 860×560.');
+  await a.theme('light'); await shot(a, 'mixed-switches-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
 }
 
 // ---------- Plugin versions and skill text ----------
@@ -550,10 +561,44 @@ if (wanted('parts')) {
   await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
   await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  // Single parts: under "What it holds", a switch per part for each tool that takes them.
+  const atParts = async (name, caption) => { await a.run(`document.querySelector('.plugin-switched')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, name, caption); };
+  await waitFor(a, `!!document.querySelector('#ppart-0-issue-tracker-skill-triage-pi-cli')`);
+  await atParts('pick-switches', 'Scrolled to "What it holds": each skill and MCP server has a switch under each tool that can take it as a separate item.');
+  // Codex takes single parts only where it can't take the plugin itself (no command-line tool and no desktop app found).
+  const codexToo = await a.has('#ppart-0-issue-tracker-mcp-issues-codex-cli');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli'); if (codexToo) await a.click('#ppart-0-issue-tracker-mcp-issues-codex-cli');
+  await atParts('pick-chosen', `Clicked triage’s switch under Pi${codexToo ? ' and the issues server’s under Codex: both wait' : ': it waits'} for Apply all.`);
+  await a.theme('light'); await atParts('pick-chosen-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await size(860, 560); await atParts('pick-chosen-860', 'The same at 860×560.');
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150); await shot(a, 'pick-chosen-860-top', 'The top of the page at 860×560: each chosen tool’s box says what will change.');
+  await size(1728, 1117); await atParts('pick-chosen-1728', 'The same at 1728×1117.');
+  await size(1280, 800);
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'pick-applied', `Clicked Apply all: Pi has the triage skill alone${codexToo ? ', Codex the issues server alone' : ''}; each tool’s row says what was left out.`);
+  await atParts('pick-applied-switches', 'The switches after Apply all.');
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  // What is in a part's place when it can't go in: a file there is named, with what to do; a link that leads nowhere is replaced.
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/triage'), 'not a folder');
+  await a.click('#header-refresh'); await waitFor(a, `/A file is in its place/.test(document.querySelector('.plugin-switched')?.textContent ?? '')`, 30000);
+  await atParts('place-file', 'A file named triage sits in Pi’s skills folder where the skill’s folder would go: its switch under Pi is locked, and its row says what is there and what to do.');
+  await a.run(`document.querySelector('.plugin-parts-section')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'place-file-parts', 'The same reason in "Its parts", Pi’s row.');
+  rmSync(join(practice, '.pi/agent/skills/triage'), { force: true });
+  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
+  await a.click('#header-refresh'); await waitFor(a, `/would replace a broken link/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
+  await shot(a, 'broken-link', 'Replaced the file with a link that leads nowhere (what an uninstalled skills manager leaves behind): the skill can go in, and Pi’s row says it replaces the broken link.');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, in place of the broken link, and the result says so.');
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
   // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: My own triage.\n---\nMine.\n');
-  await a.click('#header-refresh'); await waitFor(a, `/Not the skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await a.click('#header-refresh'); await waitFor(a, `/Can’t go in: skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
   await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
@@ -594,6 +639,66 @@ if (wanted('parts')) {
     await a.click('#plugin-back');
   }
   await size(1280, 800);
+}
+
+// ---------- What plugins installed whole bring, on Skills, MCP servers and Agents ----------
+if (wanted('plugin-items')) {
+  await fresh();
+  begin('plugin-items');
+  const market = join(scratch, 'items-market');
+  writeMarket(market);
+  const copyOf = (plugin, folder) => { cpSync(join(market, 'plugins', plugin), folder, { recursive: true }); return folder; };
+  // As each tool records them: document-tools and release-helper in Claude Code (its marketplace added there), document-tools
+  // in Copilot CLI with pdf-reader switched off, issue-tracker in Codex turned off (its marketplace added nowhere), and
+  // issue-tracker's triage also in Pi as a separate part.
+  const installs = Object.fromEntries(['document-tools', 'release-helper'].map(plugin => [`${plugin}@team-tools`, [{ scope: 'user', installPath: copyOf(plugin, join(practice, `.claude/plugins/cache/team-tools/${plugin}/1.0.0`)), version: plugin === 'document-tools' ? '1.2.0' : '0.4.1' }]]));
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: installs }));
+  writeFileSync(join(practice, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'team-tools': { source: { source: 'github', repo: 'example/team-tools' }, installLocation: market } }));
+  const copilotCopy = copyOf('document-tools', join(practice, '.copilot/installed-plugins/team-tools/document-tools'));
+  writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy, enabled: true }] }));
+  writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['document-tools:pdf-reader'] }));
+  copyOf('issue-tracker', join(practice, '.codex/plugins/cache/team-tools/issue-tracker/2.0.0'));
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[plugins."issue-tracker@team-tools"]\nenabled = false\n`);
+  mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
+  cpSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), join(practice, '.pi/agent/skills/triage/SKILL.md'));
+  mkdirSync(join(practice, '.central-knot'), { recursive: true });
+  writeFileSync(join(practice, '.central-knot/plugin-parts.json'), JSON.stringify({ installs: [{ source: market, marketName: 'team-tools', plugin: 'issue-tracker', version: '2.0.0', tool: 'pi-cli', at: new Date().toISOString(), digest: 'tour', items: [{ kind: 'skill', name: 'triage', hash: 'tour' }] }] }));
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const toPlugins = async () => { await a.run(`document.querySelector('.ov-section-plugins')?.scrollIntoView({ block: 'center' })`); await wait(150); };
+  await a.click('#nav-skills'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('.ov-section-plugins')`, 15000);
+  await shot(a, 'skills', 'Skills: the plugins’ skills are rows under “From plugins”, each marked “from <plugin>”, with a filled plugin box in each tool that has it (pdf-reader off in Copilot CLI, issue-tracker’s whole plugin off in Codex); triage is one row with its Pi part.');
+  await a.theme('light'); await shot(a, 'skills-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await toPlugins();
+    await shot(a, `skills-${width}`, `Skills at ${width}×${height}, scrolled to the plugin rows.`);
+    await a.theme('light'); await shot(a, `skills-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await size(1280, 800);
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy.');
+  await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
+  await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”.');
+  await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
+  await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560.');
+  await a.theme('light'); await shot(a, 'skill-open-860-light', 'The same at 860×560, light.'); await a.theme('dark');
+  await size(1728, 1117); await shot(a, 'skill-open-1728', 'The open row at 1728×1117.'); await size(1280, 800);
+  await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
+  if (await a.has('#open-triage')) { await a.click('#open-triage'); await shot(a, 'part-and-plugin', 'Opened triage: its Pi part and the plugin installed in Codex share the row; both say where they come from.'); }
+  await a.click('#nav-mcp'); await waitFor(a, `!!document.querySelector('.ov-section-plugins, [data-key^="issue-tracker@"]')`);
+  await shot(a, 'mcp', 'MCP servers: issue-tracker’s issues server, installed in Codex with the plugin turned off.');
+  await a.theme('light'); await shot(a, 'mcp-light', 'The same, light.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await toPlugins();
+    await shot(a, `mcp-${width}`, `MCP servers at ${width}×${height}.`);
+    await a.theme('light'); await shot(a, `mcp-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await size(1280, 800);
+  if (await a.has('[id="open-issue-tracker@team-tools/issues"]')) { await a.click('[id="open-issue-tracker@team-tools/issues"]'); await shot(a, 'mcp-open', 'Opened issues: its marketplace is added nowhere, so it says how Codex itself handles it.'); }
+  await a.click('#nav-agents'); await toPlugins(); await shot(a, 'agents', 'Agents: release-helper’s release-reviewer in Claude Code.');
+  await a.click('#nav-overview'); await shot(a, 'overview', 'Overview: each card counts the plugins’ items apart (“from plugins”).');
+  await a.click('#nav-harnesses'); await shot(a, 'harnesses', 'Harnesses: each card’s counts say how many come from plugins.');
+  await a.click('#harness-copilot-cli'); await a.click('#harness-tab-skills'); await toPlugins();
+  await shot(a, 'harness-skills', 'Copilot CLI’s page, Skills tab: its plugin rows, those it has.');
 }
 
 // ---------- Instructions ----------
@@ -927,6 +1032,40 @@ if (wanted('updates')) {
   await shot(a, 'settings-cannot', 'A build not made from a release (a development or local build): the row says why it doesn’t update itself and offers the releases page.');
   for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-cannot-${width}`, `The same at ${width}×${height}.`); }
   await size(1280, 800);
+  // The narrowest window with the status bar at its fullest: a profile in use, and sync on with nothing managed yet. In a
+  // folder home, which keeps its profile across the restart (the practice copy is made anew at each launch).
+  const again = await serveReleases([{ tag: 'v0.5.0-preview.5', zip, bytesPerSecond: 400_000 }]);
+  const narrowAs = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: again.releasesUrl });
+  const narrowSettings = join(scratch, 'data', 'app-settings.json');
+  const reopen = async (tag, change) => {
+    a.quit(); await wait(500);
+    writeFileSync(narrowSettings, JSON.stringify({ ...JSON.parse(readFileSync(narrowSettings, 'utf8')), ...change }));
+    a = await launch(narrowAs(tag));
+    await size(860, 560);
+  };
+  await fresh({ CK_UPDATE_RELEASES: again.releasesUrl });
+  const folder = join(scratch, 'update-home');
+  cpSync(join(root, 'fixtures/home'), folder, { recursive: true });
+  await reopen('v0.5.0-preview.4', { home: { mode: 'custom', path: folder } });
+  await a.click('#nav-profiles'); await a.click('#profile-new');
+  await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle();
+  await a.click('#pf-skill\\:notes'); await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
+  await shot(a, 'narrow-update', 'At 860×560 in a folder home with a profile in use ("Incident") and sync on with nothing managed yet, a newer release is found: the button says "Update", and the "Central Knot" name makes room.');
+  await a.click('#nav-skills'); await a.click('#manage-all');
+  await a.click('#update-button');
+  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
+  await shot(a, 'narrow-downloading', 'Managed every skill (not applied yet), then clicked "Update": the button shows the download.');
+  await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
+  await shot(a, 'narrow-held', 'Downloaded and prepared; changes wait for Apply all, so the button says "Restart to update", with the warning mark. The message is only its mark at this width (its words are the mark’s tooltip, and the button’s).');
+  await reopen('v0.5.0-preview.5', { update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } });
+  await waitFor(a, `/now on/.test(document.getElementById('announcement').textContent)`, 10000);
+  await shot(a, 'narrow-updated', 'Opened again as 0.5.0 preview 5 at 860×560, the profile still in use: the version alone at the end, and the note that it is on the new version as its mark.');
+  await a.click('#nav-settings');
+  await shot(a, 'narrow-settings-updated', 'Settings at 860×560 on that launch: the Updates row says it was updated, with the release notes.');
+  await size(1280, 800);
+  await shot(a, 'settings-updated', 'The same at 1280×800.');
+  await again.close();
 }
 
 // ---------- Settings ----------

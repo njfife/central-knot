@@ -1,6 +1,6 @@
 // What the plugin pages say about a plugin and a tool, worked out from the view alone (no DOM): whether a tool can take
 // it, whether it is installed there, and a short summary of what it holds.
-import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
+import type { Components, HarnessId, HomeView, InstallState, InstalledCopy, MarketplaceView, Outcome, PartItem, PartKind, PartsPick, PartsState, PluginContents, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { groupBy, plural } from './model.ts';
 import { SAFE_NAME, compareVersions, isCommitHash } from './values.ts';
 import { andList, toolNames as names } from './words.ts';
@@ -43,7 +43,7 @@ export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
  * Null when the tool takes no marketplace plugins (Pi).
  */
 export function installsIn(view: PluginsView, tool: HarnessId): { installed: MarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
-  if (!view.tools.includes(tool)) return null;
+  if (!view.tools.includes(tool) || !takesPlugins(tool)) return null;
   const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
   return {
     installed: each.filter(({ install }) => install.state === 'installed').map(({ entry, plugin }) => ({ entry, plugin })),
@@ -95,6 +95,19 @@ export const partsOf = (entry: MarketplaceView, plugin: string, tool: HarnessId)
 export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
   if (!partsTools.includes(tool) || (tool === 'claude-cli' && view.clis[tool]) || partsOf(entry, plugin, tool) || installed(entry, plugin, tool) || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
   return !!unavailable(view, entry, plugin, tool) && stateOf(entry, plugin, tool).state === 'not-installed';
+}
+
+/**
+ * Whether single parts of this plugin can be chosen for this tool: it takes parts, and has some of this plugin's already,
+ * or can't take the plugin itself, or (Claude Code) could but has no switch for one skill of a plugin, so a few of its
+ * skills as separate items is the only way to have some there and not others. Where the plugin itself is installed, only
+ * while parts of it are on record there too (they can still come out).
+ */
+export function partsPickable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
+  if (!partsTools.includes(tool) || !view.tools.includes(tool)) return false;
+  if (partsOf(entry, plugin, tool)) return true;
+  if (stateOf(entry, plugin, tool).state !== 'not-installed' || entry.plugins.find(candidate => candidate.name === plugin)?.gone) return false;
+  return !!unavailable(view, entry, plugin, tool) || !!NO_SKILL_SWITCH[tool];
 }
 
 /** Whether a plugin holding these components has a part this tool can take (Pi takes no agents, Claude Code no MCP servers as parts). Unknown counts as yes. */
@@ -159,6 +172,13 @@ export function partsSummary(items: PartsState['items'], separator = ' · '): st
   return (['skill', 'mcp', 'agent'] as const).map(kind => { const n = items.filter(item => item.kind === kind).length; return n ? `${n} ${partWords[kind][n > 1 ? 1 : 0]}` : ''; }).filter(Boolean).join(separator);
 }
 
+/** "Will add 2 parts", "Will take out 1 part", "Will add 2 parts, take out 1": what a pick does on Apply all. */
+export function pickWords(pick: PartsPick): string {
+  const add = pick.on.length ? `add ${plural(pick.on.length, 'part')}` : '';
+  const out = pick.off.length ? `take out ${pick.on.length ? pick.off.length : plural(pick.off.length, 'part')}` : '';
+  return `Will ${[add, out].filter(Boolean).join(', ')}`;
+}
+
 /** "version 1.2", or nothing when the catalog gave none. */
 export const versionWord = (version?: string) => (version ? `version ${version}` : '');
 
@@ -168,7 +188,7 @@ export const versionWord = (version?: string) => (version ? `version ${version}`
  * config.toml (`[[skills.config]]` by name, which outlives an update) and Copilot CLI behind its own `skill disable`.
  */
 export const NO_SKILL_SWITCH: Partial<Record<HarnessId, string>> = {
-  'claude-cli': 'Claude Code has no switch for a single skill of a plugin; to stop one there, uninstall the plugin there.',
+  'claude-cli': 'Claude Code has no switch for a single skill of a plugin. To have only some of its skills there, uninstall the plugin there, then turn on the ones you want: they go in as separate items.',
 };
 
 /** Why a skill is off that Copilot CLI turned off by its bare name, for every skill so named: not this plugin's own switch. */

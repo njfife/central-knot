@@ -90,12 +90,15 @@ export function whyNoUpdate({ packaged, tag, bundle, home, team, writable }: Upd
   return undefined;
 }
 
+/** Said while an update downloads with something unsaved open: it won't restart by itself, as it otherwise would. */
+export const restartWaits = 'Something here isn’t saved yet, so Central Knot will wait for you to restart.';
+
 /** A build's name where its version shows: "0.5.0 preview 4" for a release, the package version otherwise. */
 export const buildWords = (view: Pick<UpdateView, 'tag' | 'version'>) => (view.tag && tagVersion(view.tag) ? tagWords(view.tag) : view.version);
 
 /**
  * The status bar's update button, or nothing while there is no update this copy can install (the version shows as text).
- * `held`: why the page didn't restart by itself once the update was ready (something typed and not saved); `restarting`: the
+ * `held`: why the page won't restart by itself once the update is ready (something typed and not saved); `restarting`: the
  * page has asked main to restart.
  */
 export function updateButton(view: UpdateView, { held, restarting = false }: { held?: string; restarting?: boolean } = {}): { label: string; title: string; busy: boolean; short?: string; held?: boolean } | undefined {
@@ -104,7 +107,7 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
   const words = tagWords(next.tag);
   if (view.step === 'downloading') {
     const percent = Math.floor((view.progress ?? 0) * 100);
-    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. Central Knot restarts into it when it’s ready.`, busy: true };
+    return { label: `Downloading… ${percent}%`, title: `Downloading ${words}. ${held ? restartWaits : 'Central Knot restarts into it when it’s ready.'}`, busy: true };
   }
   if (view.step === 'installing') return { label: 'Preparing update…', title: `Checking and unpacking ${words}.`, busy: true };
   if (view.step === 'ready') {
@@ -114,19 +117,25 @@ export function updateButton(view: UpdateView, { held, restarting = false }: { h
   return { label: `Update to ${words}`, short: 'Update', title: `Downloads ${words}, then restarts Central Knot. Your settings and data stay as they are.`, busy: false };
 }
 
-/** The Settings row's line about the last check or update, or nothing before the first check. */
-export function updateStatus(view: UpdateView): { text: string; tone: 'done' | 'info' | 'failure' | 'progress' } | undefined {
-  if (view.failed) return { text: view.failed, tone: 'failure' };
-  if (view.checking) return { text: 'Checking for updates…', tone: 'progress' };
+/**
+ * The Settings row's line about the last check or update, or nothing before the first check. `page`: the release the line is
+ * about, for its link. For the whole launch that follows an update the line says so, with that release's notes: the status
+ * bar says it only until the first page switch.
+ */
+export function updateStatus(view: UpdateView): { text: string; tone: 'done' | 'info' | 'failure' | 'progress'; page?: string } | undefined {
+  const page = view.available?.page;
+  if (view.failed) return { text: view.failed, tone: 'failure', page };
+  if (view.checking) return { text: 'Checking for updates…', tone: 'progress', page };
   // The newest check failing is said even when an earlier one found a release: its Update button stays.
-  if (view.checked?.failed && !view.step) return { text: view.checked.failed, tone: 'failure' };
+  if (view.checked?.failed && !view.step) return { text: view.checked.failed, tone: 'failure', page };
   if (view.available) {
     const words = tagWords(view.available.tag);
-    if (view.step === 'downloading') return { text: `Downloading ${words}… ${Math.floor((view.progress ?? 0) * 100)}%`, tone: 'progress' };
-    if (view.step === 'installing') return { text: `Preparing ${words}…`, tone: 'progress' };
-    if (view.step === 'ready') return { text: `${words} is ready. It’s installed when Central Knot restarts.`, tone: 'info' };
-    return { text: view.reason ? `${words} is available.` : `${words} is available. Updating downloads it and restarts Central Knot.`, tone: 'info' };
+    if (view.step === 'downloading') return { text: `Downloading ${words}… ${Math.floor((view.progress ?? 0) * 100)}%`, tone: 'progress', page };
+    if (view.step === 'installing') return { text: `Preparing ${words}…`, tone: 'progress', page };
+    if (view.step === 'ready') return { text: `${words} is ready. It’s installed when Central Knot restarts.`, tone: 'info', page };
+    return { text: view.reason ? `${words} is available.` : `${words} is available. Updating downloads it and restarts Central Knot.`, tone: 'info', page };
   }
+  if (view.updated) return { text: `Updated to ${tagWords(view.updated.tag)}${view.checked ? ', the newest release' : ''}.`, tone: 'done', page: view.updated.page };
   if (view.checked) return { text: 'Up to date.', tone: 'done' };
   return undefined;
 }
@@ -145,3 +154,9 @@ export function updateFailure(stage: 'download' | 'install', error: string): str
   if (/code ?sign|signature|requirement/i.test(error)) return `The download isn’t signed by Central Knot’s developer, so it wasn’t installed. ${kept}`;
   return `The update couldn’t be prepared. ${kept} Try again, or download it from the release page.`;
 }
+
+/**
+ * The wait for the update to be prepared ran out. Nothing has changed, but the preparing can't be called off: if it still
+ * finishes, the update is offered as ready then, and whichever way it went, the next launch says.
+ */
+export const prepareUnfinished = 'Preparing the update is taking too long. Central Knot hasn’t changed. If it still finishes, Central Knot offers the restart then; otherwise try again later.';

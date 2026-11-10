@@ -7,7 +7,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathBeside } from './platform.ts';
 import { configRoot, harnesses } from './harnesses.ts';
-import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
+import { CODEX_MANIFEST, MANIFEST, codexManifest, inside, installedContents, parseObject, pluginContents, pluginManifest, readManifest, remoteOf, skillName, skillNamesIn, sourceOf, type ReadAs } from './catalogdetail.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { editTomlArray, readTomlTables, type TomlValue } from './textedit.ts';
 import { codexSkillSwitches, type CodexSkillSwitch } from './skillswitch.ts';
@@ -19,7 +19,7 @@ import { SAFE_NAME, compareVersions, githubRepo, isCommitHash, isFolder, isHttps
 /** Names the tools accept (values.ts holds it, so the page can check a skill's name too). */
 export { SAFE_NAME };
 import { toolNames } from './words.ts';
-import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, PartKind, SkillOff, ThroughPlugin } from './types.ts';
+import type { ActionReport, Catalog, CatalogPlugin, DesktopApp, Components, HarnessId, InstallState, NativeRun, PartKind, PluginContents, SkillOff, ThroughPlugin } from './types.ts';
 
 // ---------- Shapes ----------
 
@@ -434,7 +434,9 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
       const cache = text(listing?.cache_path);
       if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
-      // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
+      // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied. Its only record is
+      // enabledPlugins, true when installed. Copilot CLI's own uninstall of one only sets that to false ("disabled. It is
+      // still on disk", exercised 1.0.108), the same as its disable, so false is not installed: installing again turns it on.
       const settings = await settingsOf();
       const enabled = record(settings?.enabledPlugins)?.[id] === true;
       const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
@@ -442,7 +444,7 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       if (enabled && source?.source === 'directory' && folderPath) {
         const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
-        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
       }
       return { state: 'not-installed' };
     }
@@ -464,40 +466,74 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
 }
 
 
-/** One plugin a tool has installed for its person, as the tool records it; `off`: turned off there, so nothing of it loads. */
-export interface InstalledPlugin { plugin: string; marketplace: string; off?: true }
+/** One plugin a tool has installed, as its own records say: its copy (installState), whether the whole plugin is off there, and its marketplace entry where the tool's copy of the marketplace is readable. */
+export interface ToolPlugin { plugin: string; marketplace: string; state: InstallState; off: boolean; entry?: Record<string, unknown>; atMarketplaceRoot?: boolean }
+
+/** plugin@marketplace as its two names, when both are names the tools accept (they become folder names below). */
+function idParts(id: string): { plugin: string; marketplace: string } | undefined {
+  const at = id.lastIndexOf('@');
+  const plugin = id.slice(0, at), marketplace = id.slice(at + 1);
+  return at > 0 && SAFE_NAME.test(plugin) && SAFE_NAME.test(marketplace) ? { plugin, marketplace } : undefined;
+}
 
 /**
- * Every plugin a tool has installed for its person, from the same records `installState` reads: Claude Code's
- * installed_plugins.json (user scope), Copilot CLI's config.json and the plugins it has turned on from a folder
- * marketplace, and Codex's `[plugins."ID"]` tables. A record alone: `installState` says whether its files are there.
+ * Every plugin a tool has installed, whatever marketplace it came from (one added with the tool's own /plugin command counts
+ * the same), read from files only. Claude Code: user-scope entries of installed_plugins.json, off when settings.json
+ * enabledPlugins says false; its entry from the marketplace copy known_marketplaces.json names. Copilot CLI: config.json
+ * installedPlugins (off: `enabled: false`), and plugins from a folder marketplace, which only settings.json enabledPlugins
+ * records, true while installed (capability-data section 7). Codex: [plugins."ID"] tables, off with `enabled = false`.
  */
-export async function installedPlugins(context: PluginContext, tool: PluginTool): Promise<InstalledPlugin[]> {
+export async function installedPlugins(context: PluginContext, tool: PluginTool): Promise<ToolPlugin[]> {
   const root = configRootOf(context, tool);
-  const found = new Map<string, boolean>();
+  const settings = () => recordJson(context, join(root, 'settings.json'));
+  const each = async (ids: string[], read: (names: { plugin: string; marketplace: string }, id: string) => Promise<ToolPlugin | undefined>) =>
+    (await Promise.all([...new Set(ids)].map(id => { const names = idParts(id); return names ? read(names, id) : undefined; }))).filter((found): found is ToolPlugin => !!found);
   switch (tool) {
     case 'claude-cli': {
-      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
-      for (const [id, listed] of Object.entries(record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {})) {
-        if ((Array.isArray(listed) ? listed : []).some(entry => record(entry)?.scope === 'user')) found.set(id, switches?.[id] === false);
-      }
-      break;
+      const listed = record((await recordJson(context, join(root, 'plugins/installed_plugins.json')))?.plugins) ?? {};
+      const known = await recordJson(context, join(root, 'plugins/known_marketplaces.json'));
+      const enabled = record((await settings())?.enabledPlugins);
+      const users = Object.keys(listed).filter(id => (Array.isArray(listed[id]) ? listed[id] as unknown[] : []).some(entry => record(entry)?.scope === 'user'));
+      return each(users, async ({ plugin, marketplace }, id) => {
+        const where = text(record(known?.[marketplace])?.installLocation) || text(record(record(known?.[marketplace])?.source)?.path);
+        const item = where ? await folderItem(context, where, plugin) : undefined;
+        return { plugin, marketplace, state: await installState(context, tool, marketplace, plugin, item?.entry), off: enabled?.[id] === false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
+      });
     }
     case 'copilot-cli': {
-      const switches = record((await recordJson(context, join(root, 'settings.json')))?.enabledPlugins);
       const listed = (await recordJson(context, join(root, 'config.json')))?.installedPlugins;
-      for (const item of (Array.isArray(listed) ? listed : []).map(record)) if (text(item?.name) && text(item?.marketplace)) found.set(`${text(item?.name)}@${text(item?.marketplace)}`, item?.enabled === false);
-      for (const [id, on] of Object.entries(switches ?? {})) if (on === true && !found.has(id)) found.set(id, false);
-      break;
+      const cached = (Array.isArray(listed) ? listed : []).map(record).filter((item): item is Record<string, unknown> => !!item && !!text(item.name) && !!text(item.marketplace));
+      const found = await each(cached.map(item => `${text(item.name)}@${text(item.marketplace)}`), async ({ plugin, marketplace }) =>
+        ({ plugin, marketplace, state: await installState(context, tool, marketplace, plugin), off: cached.some(item => item.name === plugin && item.marketplace === marketplace && item.enabled === false) }));
+      // A folder marketplace's plugin is loaded live from that folder and recorded only in enabledPlugins: true while it is
+      // installed (false is how Copilot CLI leaves one it uninstalled, see installState).
+      const own = await settings();
+      const turned = record(own?.enabledPlugins) ?? {};
+      const live = Object.keys(turned).filter(id => turned[id] === true && !found.some(entry => `${entry.plugin}@${entry.marketplace}` === id));
+      return [...found, ...await each(live, async ({ plugin, marketplace }, id) => {
+        const source = record(record(record(own?.extraKnownMarketplaces)?.[marketplace])?.source);
+        if (source?.source !== 'directory' || !text(source.path)) return undefined;
+        const item = await folderItem(context, text(source.path), plugin);
+        return { plugin, marketplace, state: await installState(context, tool, marketplace, plugin, item?.entry), off: false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
+      })];
     }
-    case 'codex-cli':
-      for (const [id, table] of Object.entries((await codexTables(context, root)).plugins)) found.set(id, table.enabled === false);
+    case 'codex-cli': {
+      const tables = await codexTables(context, root);
+      return each(Object.keys(tables.plugins), async ({ plugin, marketplace }, id) => ({ plugin, marketplace, state: await installState(context, tool, marketplace, plugin), off: tables.plugins[id]?.enabled === false }));
+    }
   }
-  return [...found].flatMap(([id, off]) => {
-    const at = id.lastIndexOf('@');
-    return at > 0 && at < id.length - 1 ? [{ plugin: id.slice(0, at), marketplace: id.slice(at + 1), ...(off ? { off: true as const } : {}) }] : [];
-  });
 }
+
+/** One installed plugin with what its copy holds, as that tool reads it; `contents` is missing where the copy isn't there or can't be read. */
+export type InstalledCopyOf = ToolPlugin & { contents?: PluginContents };
+
+/**
+ * Each plugin a tool has installed with what its copy holds, read once per pass or view (`context.reads`): the Skills,
+ * MCP servers and Agents pages' "Through a plugin" boxes and their "From plugins" rows both ask.
+ */
+export const installedCopies = (context: PluginContext, tool: PluginTool): Promise<InstalledCopyOf[]> => once(context, `installed-copies:${tool}`, async () =>
+  Promise.all((await installedPlugins(context, tool)).map(async found => ({ ...found,
+    contents: found.state.state === 'installed' ? await installedContents(tool, found.state.path, found.entry, found.atMarketplaceRoot).catch(() => undefined) : undefined }))));
 
 /** One item a tool has through an installed plugin: a skill, an agent or an MCP server, with the plugin it comes through. */
 export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string; /** A skill's SKILL.md, to tell it from another skill of the same name. */ text?: string }
@@ -510,21 +546,9 @@ export interface PluginPart extends ThroughPlugin { kind: PartKind; name: string
  * Code keeps it. `off`: the plugin, or that one skill, is turned off there.
  */
 export async function pluginParts(context: PluginContext, tool: PluginTool): Promise<PluginPart[]> {
-  const root = configRootOf(context, tool);
   const given: PluginPart[] = [];
-  for (const { plugin, marketplace, off } of await installedPlugins(context, tool)) {
-    let entry: Record<string, unknown> | undefined, atMarketplaceRoot = false;
-    if (tool === 'claude-cli') {
-      const known = record((await recordJson(context, join(root, 'plugins/known_marketplaces.json')))?.[marketplace]);
-      const kept = text(known?.installLocation) || text(record(known?.source)?.path);
-      const listed = kept ? (await recordJson(context, join(kept, MANIFEST)))?.plugins : undefined;
-      entry = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin);
-      atMarketplaceRoot = !!kept && typeof entry?.source === 'string' && resolve(kept, entry.source) === resolve(kept);
-    }
-    const state = await installState(context, tool, marketplace, plugin, entry);
-    if (state.state !== 'installed') continue;
-    // Read as that tool reads its copy (see pluginContents).
-    const contents = await pluginContents(state.path, entry ?? {}, state.path, tool === 'codex-cli' ? { codex: await codexManifest(state.path) } : tool === 'copilot-cli' ? { skillsListReplaces: true } : { atMarketplaceRoot });
+  for (const { plugin, marketplace, off, state, contents } of await installedCopies(context, tool)) {
+    if (state.state !== 'installed' || !contents) continue;
     const source = await registeredSource(context, tool, marketplace);
     const from = { plugin, marketplace, ...(source ? { source } : {}), ...(state.version ? { version: state.version } : {}) };
     const add = (kind: PartKind, name: string, more: { off?: boolean; text?: string } = {}) => given.push({ kind, name, ...from, ...(off || more.off ? { off: true as const } : {}), ...(more.text === undefined ? {} : { text: more.text }) });

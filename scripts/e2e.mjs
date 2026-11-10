@@ -910,6 +910,28 @@ async function practiceFlow() {
   check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
+  // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
+  // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
+  writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
+    'skills/outside-skill/SKILL.md': '---\nname: outside-skill\ndescription: Comes with a plugin.\n---\n\nSteps.\n',
+    '.mcp.json': JSON.stringify({ mcpServers: { 'outside-server': { command: 'npx', args: ['-y', 'outside'] } } }),
+  });
+  await a.click('#header-refresh');
+  const outside = 'outside-tools@ck-outside/outside-skill', outsideRow = `.ov-row[data-key="${outside}"]`;
+  for (let tries = 0; tries < 40 && !(await a.exists(outsideRow)); tries++) await wait(100);
+  same('a plugin’s skill is a row with its mark, filled under Claude Code, empty elsewhere, with no Managed switch',
+    [/from outside-tools/.test(await a.text(outsideRow) ?? ''), await cellState(a, outside, 'claude-cli'), await cellState(a, outside, 'copilot-cli'), await a.exists(`${outsideRow} .switch`), await a.exists('.ov-section-plugins')],
+    [true, 'plugin', 'plugin-none', false, true]);
+  await a.click(`[id="open-${outside}"]`);
+  check('its details say which plugin it is from and where it is handled', /From the plugin[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
+  await a.click('#nav-mcp');
+  same('its MCP server too, on the MCP servers page', await cellState(a, 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
+  rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && await a.exists('[data-key="outside-tools@ck-outside/outside-server"]'); tries++) await wait(100);
+  check('and gone once the plugin is', !(await a.exists('[data-key="outside-tools@ck-outside/outside-server"]')));
+  await a.click('#nav-skills');
+
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
@@ -1214,7 +1236,7 @@ async function practiceFlow() {
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/Not the skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !/Can’t go in: skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   await a.click('#pcell-0-issue-tracker-pi-cli');
   await a.click('#plugins-apply');
   check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
@@ -1227,6 +1249,30 @@ async function practiceFlow() {
   check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
   await a.click('#punparts-issue-tracker');
   await a.click('#plugins-apply');
+  // Single parts: a switch under Pi puts in that one skill alone, over a link there that leads nowhere; the rest stays out.
+  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !/would replace a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: it would replace a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
+  const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
+  same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
+  await a.click(partSwitch('skill-triage'));
+  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('skill-triage') === 'part-on true' && /Will add 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to add/.test(await a.text('.toolbar') ?? '')
+    && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
+  await a.click('#plugins-apply');
+  check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
+    && /skill triage put into Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
+  check('the log file says what that change came to: the plugin, the parts picked, the tool, and the broken link replaced',
+    /plugins:parts issue-tracker@[\w-]+ \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
+  for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
+  await a.click(partSwitch('skill-triage'));
+  await a.click('#plugins-apply');
+  check('turning its switch off takes it out again', !existsSync(join(practice, '.pi/agent/skills/triage')), await a.text('.bands'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
@@ -1241,12 +1287,18 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.run(`(document.querySelector('[data-plugin="document-tools"]')?.textContent ?? '').includes('Installed') || !!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`)); tries++) await wait(100);
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
-  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
+  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch[id^="pskill-"]', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
   await a.click('#plugins-apply');
   check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
   check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  // The Skills page shows the same switch in Codex's box for the plugin's skill.
+  const pdfRow = 'document-tools@ck-test-market/pdf-reader';
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && await cellState(a, pdfRow, 'codex-cli') !== 'plugin-off'; tries++) await wait(100);
+  same('on the Skills page its Codex box shows it off, the plugin’s other skill on', [await cellState(a, pdfRow, 'codex-cli'), await cellState(a, 'document-tools@ck-test-market/spreadsheet', 'codex-cli')], ['plugin-off', 'plugin']);
+  await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));
@@ -1753,15 +1805,25 @@ async function updateFlow() {
     await a.click('#nav-settings');
     const row = await a.text('#setting-updates') ?? '';
     check('Settings › Updates names the build and what is available', row.includes('This is Central Knot 0.5.0 preview 4.') && row.includes('0.5.0 preview 5 is available.') && await a.exists('#check-updates') && await a.exists('#setting-update'), row);
+    // Check now from the keyboard: the button is disabled under the focus while it checks, and takes the focus back.
+    const focused = () => a.run(`document.activeElement?.id ?? ''`);
+    const press = id => a.run(`(document.getElementById('${id}').focus(), document.getElementById('${id}').click(), true)`);
+    await press('check-updates');
+    for (let i = 0; i < 40 && await focused() !== 'check-updates'; i++) await wait(250);
+    same('Check now takes the focus back when the check ends', await focused(), 'check-updates');
+    same('and a screen reader is told what it found, which the row already shows', [await a.run(`document.getElementById('announcement').dataset.text`), await a.run(`document.getElementById('announcement').classList.contains('visually-hidden')`)], ['0.5.0 preview 5 is available. Updating downloads it and restarts Central Knot.', true]);
+    same('the row’s buttons are the size of the page’s other row buttons', await a.run(`['setting-update', 'check-updates', 'show-log'].map(id => document.getElementById(id).getBoundingClientRect().height)`), [32, 32, 32]);
     // Something chosen and not applied holds the restart.
     await a.click('#nav-skills');
     await a.click('#manage-all');
     await a.run(`window.ckLabels = []; new MutationObserver(() => { const b = document.querySelector('#update-button'); if (b && window.ckLabels.at(-1) !== b.textContent.trim()) window.ckLabels.push(b.textContent.trim()); }).observe(document.getElementById('status-end'), { subtree: true, childList: true, characterData: true }); true`);
-    await a.click('#update-button');
+    await press('update-button');
+    same('the click says it won’t restart by itself, with changes waiting', await a.run(`document.getElementById('announcement').dataset.text`), 'Downloading 0.5.0 preview 5. Something here isn’t saved yet, so Central Knot will wait for you to restart.');
     for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
     const labels = await a.run('window.ckLabels');
     check('one click downloads, with progress on the button', labels.filter(label => /^Downloading… \d+%$/.test(label)).length >= 2, labels);
     same('changes waiting for Apply all hold the restart', (await a.text('#update-button'))?.trim(), 'Restart to update');
+    same('the button, disabled while it worked, takes the focus back', await focused(), 'update-button');
     await wait(1500);
     check('and the app is still running', a.child.exitCode === null);
     check('the status bar says what restarting loses, first', /^Restarting now loses \d+ changes? waiting for Apply all\./.test(await a.text('#announcement') ?? ''), await a.text('#announcement'));
@@ -1781,10 +1843,15 @@ async function updateFlow() {
     same('with a link to the release notes', [await a.run(`document.getElementById('said-link').hidden`), await a.text('#said-link')], [false, 'Release notes']);
     same('the status bar names the new build', await a.text('#status-end'), 'Central Knot 0.5.0 preview 5');
     check('the record is cleared once said', !JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')).update);
+    // The status bar's note goes at the first page switch; Settings keeps saying it for the whole launch, with the release notes.
+    await a.click('#nav-skills');
+    same('the note leaves the status bar with the page', await a.run(`document.getElementById('announcement').dataset.text`), '');
     await a.click('#nav-settings');
+    const updatedLine = async () => [await a.text('#setting-updates-notice .setting-message-text'), await a.text('#setting-updates-notice-action')];
+    check('Settings says the launch came from an update, with the release notes', /^Updated to 0\.5\.0 preview 5(, the newest release)?\.$/.test((await updatedLine())[0] ?? '') && (await updatedLine())[1] === 'Release notes', await updatedLine());
     await a.click('#check-updates');
-    for (let i = 0; i < 40 && !/Up to date/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('Check now: up to date', (await a.text('#setting-updates') ?? '').includes('Up to date.'), await a.text('#setting-updates'));
+    for (let i = 0; i < 40 && !/newest release/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
+    same('Check now: nothing newer, and the note stays', await updatedLine(), ['Updated to 0.5.0 preview 5, the newest release.', 'Release notes']);
     await a.quit();
     // An update that didn't take (the old build opens again) says so, in Settings.
     writeFileSync(join(data, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(data, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
@@ -1795,11 +1862,64 @@ async function updateFlow() {
     // An interrupted download says so and offers the update again.
     await a.click('#check-updates');
     for (let i = 0; i < 40 && !(await a.exists('#update-button')); i++) await wait(250);
-    await a.click('#update-button');
-    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#setting-updates') ?? ''); i++) await wait(250);
-    check('an interrupted download is said, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.'), await a.text('#setting-updates'));
+    // Started from the status bar on another page: said there, and still said in Settings afterwards.
+    await a.click('#nav-skills');
+    await a.run(`(document.getElementById('update-button').focus(), document.getElementById('update-button').click(), true)`);
+    for (let i = 0; i < 80 && !/download didn’t finish/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('an interrupted download is said in the status bar', await a.run(`document.getElementById('announcement').dataset.text`), 'The download didn’t finish. Central Knot wasn’t changed. Try again.');
+    same('and the button takes the focus back', await a.run(`document.activeElement?.id ?? ''`), 'update-button');
+    await a.click('#nav-settings');
+    check('an interrupted download is still said in Settings, and nothing changed', (await a.text('#setting-updates') ?? '').includes('The download didn’t finish. Central Knot wasn’t changed.') && await a.text('#setting-updates-notice-action') === 'Open the release page', await a.text('#setting-updates'));
     same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
+    await a.quit();
+    // The narrowest window with the status bar at its fullest: a folder home named as long as "This Mac’s home", a profile in
+    // use with a long name, and sync on with nothing managed yet. Nothing may run into its neighbour in any state of the button.
+    const narrowHome = join(scratch, 'this-macs-home'), narrowData = join(scratch, 'update-narrow-data');
+    cpSync(join(root, 'fixtures/home'), narrowHome, { recursive: true });
+    mkdirSync(narrowData, { recursive: true });
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: narrowHome } }));
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, bytesPerSecond: 1_000_000 });
+    // What in the status bar runs into what follows it, or past the window's edge; empty when everything fits.
+    const crowding = () => a.run(`(() => {
+      const named = node => node.id || String(node.className);
+      const parts = [...document.querySelectorAll('#status-facts > *'), ...['announcement', 'said-link', 'message-mark'].map(id => document.getElementById(id)), document.getElementById('status-end')]
+        .filter(node => node && !node.hidden && !node.classList.contains('visually-hidden') && node.getBoundingClientRect().width > 0);
+      const found = [];
+      parts.forEach((node, at) => {
+        const box = node.getBoundingClientRect(), next = parts[at + 1]?.getBoundingClientRect();
+        if (next && box.right > next.left + 0.5) found.push(named(node) + ' runs ' + Math.round(box.right - next.left) + 'px into ' + named(parts[at + 1]));
+        if (box.right > innerWidth + 0.5) found.push(named(node) + ' runs past the window');
+      });
+      const facts = document.getElementById('status-facts');
+      if (facts.scrollWidth > facts.clientWidth) found.push('the facts need ' + (facts.scrollWidth - facts.clientWidth) + 'px more than they have');
+      return found;
+    })()`);
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.5'));
+    await a.click('#nav-profiles');
+    await a.click('#profile-new');
+    await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await a.settle();
+    await a.click('#pf-skill\\:notes');
+    await a.click('#profile-switch');
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
+    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing managed', true]);
+    same('at 860 wide nothing in the status bar runs into its neighbour: Update', await crowding(), []);
+    await a.click('#nav-skills');
+    await a.click('#manage-all');
+    await a.click('#update-button');
+    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await a.text('#update-button'))?.trim() ?? ''); i++) await wait(100);
+    same('nor while downloading', await crowding(), []);
+    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
+    same('nor with the restart held and its reason as a mark', [await a.run(`getComputedStyle(document.getElementById('message-mark')).display !== 'none'`), await crowding()], [true, []]);
+    await a.quit();
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(narrowData, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.6'));
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 40 && !/now on/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
+    same('no page errors in the narrow window', a.pageErrors, []);
     await a.quit();
     // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });

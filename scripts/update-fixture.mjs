@@ -5,7 +5,8 @@ import { readFileSync, statSync } from 'node:fs';
 
 /**
  * Serves `releases`: each `{ tag, zip }`, `zip` a file path, newest first. Options per release: `cut` (send only that share of
- * the zip, then drop the connection: an interrupted download), `bytesPerSecond` (a slow download, for watching progress).
+ * the zip, then drop the connection: an interrupted download), `stall` (send only that share, then say nothing more with the
+ * connection left open: a download that goes quiet), `bytesPerSecond` (a slow download, for watching progress).
  * `port`: a fixed port, for builds that have the fixture's address built in. Returns `{ url, releasesUrl, served, close }`;
  * `served` lists the zip requests.
  */
@@ -27,12 +28,13 @@ export async function serveReleases(releases, port = 0) {
     served.push(release.tag);
     const bytes = readFileSync(release.zip);
     response.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': bytes.length });
-    const end = release.cut ? Math.floor(bytes.length * release.cut) : bytes.length;
+    const part = release.cut ?? release.stall;
+    const end = part ? Math.floor(bytes.length * part) : bytes.length;
     const step = release.bytesPerSecond ? Math.ceil(release.bytesPerSecond / 10) : end;
     let at = 0;
     const next = () => {
       if (response.destroyed) return;
-      if (at >= end) { if (release.cut) response.destroy(); else response.end(); return; }
+      if (at >= end) { if (release.cut) response.destroy(); else if (!release.stall) response.end(); return; }
       response.write(bytes.subarray(at, Math.min(end, at + step)));
       at += step;
       if (release.bytesPerSecond) setTimeout(next, 100); else setImmediate(next);

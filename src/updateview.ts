@@ -5,7 +5,7 @@ import { announce, baseDraftTyped, rerender, showPage, toolDraftTyped } from './
 import { h, icon } from './dom.ts';
 import { changesWaiting } from './matrix.ts';
 import { market } from './pluginstate.ts';
-import { buildWords, tagWords, updateButton } from './updates.ts';
+import { buildWords, restartWaits, tagWords, updateButton, updateStatus } from './updates.ts';
 import { plural } from './model.ts';
 import type { UpdateView } from './types.ts';
 
@@ -13,6 +13,23 @@ import type { UpdateView } from './types.ts';
 export const updates = { view: undefined as UpdateView | undefined, checking: false, restarting: false };
 /** The update this launch came from has been said once in the status bar. */
 let saidUpdated = false;
+/**
+ * The update button that had the focus when it was pressed. It is disabled while it works, which drops the focus; it takes
+ * the focus back when it can be pressed again (a held restart, a failure), unless the person has moved on meanwhile.
+ */
+let focusBack: string | undefined;
+const updateButtons = ['update-button', 'setting-update'];
+function keepFocus() {
+  const id = document.activeElement?.id;
+  focusBack = id && updateButtons.includes(id) ? id : undefined;
+}
+function returnFocus() {
+  if (!focusBack || buttonNow()?.busy) return;
+  const id = focusBack;
+  focusBack = undefined;
+  // In Settings, Check now stands in for an Update button that is gone (the release was withdrawn).
+  if (document.activeElement === document.body) (document.getElementById(id) ?? (id === 'setting-update' ? document.getElementById('check-updates') : null))?.focus();
+}
 
 /** Why restarting now would lose something typed or chosen, or nothing. Read when it matters: typing doesn't redraw the page. */
 export function unsavedWork(): string | undefined {
@@ -24,9 +41,10 @@ export function unsavedWork(): string | undefined {
 }
 
 function restart() {
+  keepFocus();
   updates.restarting = true;
   rerender();
-  void window.centralKnot.restartToUpdate().catch(() => { updates.restarting = false; announce('Couldn’t restart. Quit Central Knot and open it again to finish the update.'); rerender(); });
+  void window.centralKnot.restartToUpdate().catch(() => { updates.restarting = false; announce('Couldn’t restart. Quit Central Knot and open it again to finish the update.'); rerender(); returnFocus(); });
 }
 const openPage = (url: string) => void window.centralKnot.openExternal(url).catch(() => announce('Couldn’t open the release page.'));
 
@@ -50,34 +68,53 @@ export function takeUpdates(view: UpdateView) {
   }
   if (before?.step === 'downloading' && view.step === 'downloading') { paintProgress(); return; }
   rerender();
+  returnFocus();
 }
 
 export const loadUpdates = async () => takeUpdates(await window.centralKnot.updates());
 
-/** Asks main to check now (Settings and the app menu). */
-export async function checkNow() {
+/**
+ * Asks main to check now (Settings, and "Check for Updates…" in the app menu: `fromMenu`). The row shows what the check
+ * found, so a screen reader is told it without the status bar repeating it. Check now is disabled under the focus while the
+ * check runs; it takes the focus back unless the person has moved on, and from the menu it takes it in any case.
+ */
+export async function checkNow(fromMenu = false) {
   updates.checking = true;
   rerender();
-  try { takeUpdates(await window.centralKnot.checkForUpdates()); } finally { updates.checking = false; rerender(); }
+  announce('Checking for updates…', true);
+  let found: UpdateView | undefined;
+  try {
+    found = await window.centralKnot.checkForUpdates();
+    takeUpdates(found);
+  } catch { announce('Couldn’t check for updates. Try again.'); }
+  finally {
+    updates.checking = false;
+    rerender();
+    if (fromMenu || document.activeElement === document.body) document.getElementById('check-updates')?.focus();
+  }
+  // A build that never checks says why instead.
+  const said = found && (updateStatus(found)?.text ?? found.reason?.text);
+  if (said) announce(said, true);
 }
 
 /** Starts the update: main downloads and prepares it and reports each step. */
 export function startUpdate() {
+  keepFocus();
   const next = updates.view?.available;
-  // Said at the click, for anyone who can't see the button's tooltip: the app is going to restart.
-  if (next) announce(`Downloading ${tagWords(next.tag)}. Central Knot restarts when it’s ready.`);
-  void window.centralKnot.installUpdate().then(takeUpdates, () => announce('Couldn’t start the update. Try again.'));
+  // Said at the click, for anyone who can't see the button's tooltip: the app is going to restart, or to wait for something unsaved.
+  if (next) announce(`Downloading ${tagWords(next.tag)}. ${unsavedWork() ? restartWaits : 'Central Knot restarts when it’s ready.'}`);
+  void window.centralKnot.installUpdate().then(takeUpdates, () => { announce('Couldn’t start the update. Try again.'); returnFocus(); });
 }
 
 /** What the Update button says now, with the reason restarting is held, if it is. */
-export const buttonNow = (view = updates.view) => (view ? updateButton(view, { held: view.step === 'ready' ? unsavedWork() : undefined, restarting: updates.restarting }) : undefined);
+export const buttonNow = (view = updates.view) => (view ? updateButton(view, { held: view.step ? unsavedWork() : undefined, restarting: updates.restarting }) : undefined);
 
 /** The Update button, in the status bar or the Settings row. A held restart restarts on click: the person has chosen. */
 export function updateControl(id: string, variant: 'status' | 'setting') {
   const shown = buttonNow();
   if (!shown) return null;
   const run = updates.view?.step === 'ready' ? restart : startUpdate;
-  return h(`button${variant === 'status' ? '.status-update' : '.btn.primary.small'}`, { type: 'button', id, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: run },
+  return h(`button${variant === 'status' ? '.status-update' : '.btn.primary.default'}`, { type: 'button', id, title: shown.title, disabled: shown.busy, 'aria-busy': String(shown.busy), onclick: run },
     variant === 'status' ? icon(shown.busy ? 'clock' : shown.held ? 'triangle-alert' : 'circle-arrow-down', 14, shown.held ? 'tone-warning' : '') : null,
     // A narrow status bar shows the short label (style.css); the tooltip has it all.
     h('span.btn-label', {}, variant === 'status' && shown.short ? [h('span.update-long', {}, shown.label), h('span.update-short', {}, shown.short)] : shown.label));
