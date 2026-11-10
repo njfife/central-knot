@@ -7,7 +7,7 @@
 //   skills/<folder>/…        a skill, byte for byte
 //   mcp/<name>.json          one MCP server, in Claude Code's shape
 //   agents/<name>.md         one agent, in Claude Code's format
-//   instructions/base.md     the base instructions, once this build has them
+//   instructions/base.md     the base instructions (~/.central-knot/instructions/base.md)
 //
 // Three states decide what differs: the commit last pulled or pushed (the base), the repo's latest commit, and the Managed set
 // here. A side that changed since the base is the one to bring across. When both changed, the repo's edit wins on Pull (yours is
@@ -22,13 +22,13 @@ import { agentHash, agentText, agentTools, agentsView, applyAgents, fileFor, fro
 import { parseSkill } from './discovery.ts';
 import { harnesses } from './harnesses.ts';
 import { appendHistory, applyChanges, deleteEverywhere, displace, manageView, readHistory, replaceCopy, replaceHistory } from './manage.ts';
-import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keepServerVersion, mcpTools, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
+import { applyMcp, cannotHold, editEntry, fromJson, jsonEntry, keep, mcpTools, mcpView, readMcpRecord, readTool, serverHash, type McpEntry, type NeutralServer } from './mcp.ts';
 import { gitEnv, gitFailure, runGit, whyGitFailed, whyPushFailed } from './plugins.ts';
 import { presentTools } from './presence.ts';
 import { copyTree, errorCode, exists, gateRefusal, itemKey, notCopied, sha256 as sha, syncGate, placeCopy, plainError, readRecord, readTree, removeFileChecked, removeTree, saveRecord, storeDirectory, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, RepoChange, RepoCommit, RepoKind, RepoResult, RepoView, SkillFacts } from './types.ts';
 
-/** The base instruction set (feedback/base-instructions): read for Push, applied on Pull. Without it, instructions/ is left alone. */
+/** The base instructions (instructions.ts repoBase): read for Push, applied on Pull. Without it, instructions/ is left alone. */
 export interface BaseInstructions { read(): Promise<string | undefined>; apply(text: string | undefined): Promise<string | undefined> }
 /** What every repo call may be given: the base-instructions seam, and whether Automatic sync is on (off: MCP and agent deletions wait for it). */
 export interface RepoOptions { base?: BaseInstructions; syncOn?: boolean }
@@ -576,7 +576,7 @@ const PULL_FIRST = 'The repo has changes this computer doesn’t have yet. Pull 
 async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): Promise<RepoView> {
   const access = await writeAccess(context);
   const found = await openClone(context);
-  if (!found) return { connected: false, access, withBase: !!base };
+  if (!found) return { connected: false, access };
   const { state, dir } = found;
   const sides = await stageSides(context, dir, state, base);
   // An unfinished item that is now the same here and in the repo (put right by hand, say) is finished.
@@ -587,7 +587,7 @@ async function buildView(context: ShareContext, { base, syncOn }: RepoOptions): 
   }
   const { incoming, outgoing } = classify(sides, state.unfinished, syncOn);
   return {
-    connected: true, access, withBase: !!base, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
+    connected: true, access, url: state.url, branch: state.branch, base: await describeCommit(dir, state.base), latest: await describeCommit(dir, sides.latestId),
     pulledAt: state.pulledAt, pushedAt: state.pushedAt, checkedAt: state.checkedAt, problem: state.problem, incoming, outgoing,
     pushBlocked: sides.latestId !== state.base ? PULL_FIRST : undefined, branchGone: sides.branchGone,
   };
@@ -762,7 +762,7 @@ async function pullServer(context: ShareContext, dir: string, change: RepoChange
   const here = (await readTool(context, writer)).entries.find(entry => entry.name === change.name);
   if (here?.hash !== (server ? serverHash(server) : undefined)) {
     // What this tool had is kept first, so Undo can put it back.
-    if (here) await keepServerVersion(context, change.name, here.server, here);
+    if (here) await keep(context, change.name, here.server, here);
     const problem = await editEntry(context, writer, change.name, here?.hash, server);
     if (problem) return [notIn(change.name, problem)];
     // History accounts for this write when sync can't: a server no tool had (no facts), or this tool's own entry replaced (here).

@@ -435,7 +435,7 @@ function connectedPage(view: ConnectedRepoView) {
           changeList({ id: 'repo-outgoing', title: 'From this computer', changes: view.outgoing, side: 'out', action: pushControl,
             empty: 'Nothing here that the repo doesn’t have.', stuck: words.stuckOut,
             note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined })),
-      h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
+      h('p.repo-aside', {}, `Only Managed ${carried} go to the repo; other files there stay as they are.`)));
 }
 
 /** Turns Automatic sync on, beside the words that ask for it (none while it is already on). */
@@ -463,15 +463,15 @@ function problemBand(unreachable: string | undefined) {
       : button({ variant: 'outline', size: 'small', icon: 'refresh-cw', label: 'Try again', id: 'repo-try-again', disabled: !!state.busy, onclick: () => void loadRepo(true) }));
 }
 
-/** What goes to the repo, as words: base instructions only in a build that has them. */
-const carried = (withBase: boolean) => (withBase ? 'skills, MCP servers, agents and base instructions' : 'skills, MCP servers and agents');
+/** What goes to the repo, as words. */
+const carried = 'skills, MCP servers, agents and base instructions';
 
 /** The repo's layout, shown before connecting so people can set one up by hand or know what Push will make. */
-const layout = (withBase: boolean) => h('dl.repo-layout', { 'aria-label': 'What goes where in the repo' },
+const layout = () => h('dl.repo-layout', { 'aria-label': 'What goes where in the repo' },
   h('dt.mono', {}, 'skills/<folder>/'), h('dd', {}, 'one folder per skill, byte for byte'),
   h('dt.mono', {}, 'mcp/<name>.json'), h('dd', {}, 'one MCP server, in Claude Code’s shape'),
   h('dt.mono', {}, 'agents/<name>.md'), h('dd', {}, 'one agent, in Claude Code’s format'),
-  withBase ? [h('dt.mono', {}, 'instructions/base.md'), h('dd', {}, 'the base instructions')] : null);
+  h('dt.mono', {}, 'instructions/base.md'), h('dd', {}, 'the base instructions'));
 
 function connectForm(allowed: boolean) {
   const ready = () => !state.busy && allowed && !!repo.draftUrl.trim();
@@ -504,9 +504,9 @@ export function repoPage(): HTMLElement {
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),
     h('div.scroll', { id: 'repo-scroll' }, emptyState('git-branch', 'Keep your Managed set in a git repo',
-      `Your Managed ${carried(view.withBase)} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
+      `Your Managed ${carried} can live in any git repo: GitHub, GitLab or a server of your own. Pull brings the repo’s changes into your tools; Push sends yours.`,
       h('div.repo-start', {}, connectForm(view.access.allowed),
-        h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(view.withBase),
+        h('div.repo-start-side', {}, h('h2.eyebrow', {}, 'What goes where'), layout(),
           h('p.empty-aside', {}, 'Central Knot uses this computer’s git and the sign-in it already has (HTTPS or SSH). It never asks for or keeps a password or token.'),
           h('p.empty-aside', {}, 'Only what’s Managed goes to the repo. ', h('button.inline-link', { type: 'button', id: 'repo-see-skills', onclick: () => showPage('skills') }, 'See what’s Managed'), '.'))))));
 }

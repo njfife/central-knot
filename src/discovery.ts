@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
-import { isBundledCli } from './platform.ts';
+import { isBundledCli, pathBeside } from './platform.ts';
 import type { HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
 
@@ -21,7 +21,7 @@ export async function probeVersion(binary: string, timeoutMs = 1500): Promise<Pr
   }
   return new Promise(resolveResult => {
     execFile(binary, ['--version'], {
-      cwd: tmpdir(), timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
+      cwd: tmpdir(), env: { ...process.env, PATH: pathBeside(binary) }, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024,
       windowsHide: true, encoding: 'utf8',
     }, (error, stdout) => {
       if (error) {
@@ -77,6 +77,9 @@ export function parseSkill(content: string, folder: string): Pick<Skill, 'name' 
     ],
   };
 }
+
+/** Why each tool would refuse a skill with this SKILL.md in a folder of this name, as the Skill record holds them. */
+export const loadProblems = (content: string, folder: string) => ({ copilotProblem: copilotProblem(content, folder), codexProblem: codexProblem(content, folder), piProblem: piProblem(content) });
 
 /** What Copilot CLI 1.0.107 refused when offered each case directly; its rules read the metadata name, or the folder without one. */
 export function copilotProblem(content: string, folder: string): string | undefined {
@@ -189,7 +192,7 @@ export async function discover(options: {
         seen.add(entry.name);
         snapshot.skills.push({
           folder: entry.name, ...metadata, path: await realpath(skillPath), directory, realDirectory: await realpath(directory),
-          rootLabel: skillRoot.label, content, status: 'Not shared', copilotProblem: copilotProblem(content, entry.name), codexProblem: codexProblem(content, entry.name), piProblem: piProblem(content),
+          rootLabel: skillRoot.label, content, status: 'Not shared', ...loadProblems(content, entry.name),
         });
       } catch (error) {
         if (errorCode(error) === 'ENOENT') continue;

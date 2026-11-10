@@ -4,13 +4,14 @@
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
 import { withoutBom } from './values.ts';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { configRoot, harnessIds, harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
+import { mcpSwitchFacts, readMcpSwitches } from './mcpswitch.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
 export type { McpResult, McpView } from './types.ts';
 
@@ -55,8 +56,9 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
   }
 }
 
-const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
-export const serverHash = (server: NeutralServer) => createHash('sha256').update(JSON.stringify(canonical(server))).digest('hex');
+/** A value with object keys sorted (and undefined left out), so the same settings hash the same however they were written. */
+export const canonical = (value: unknown): unknown => (Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([first], [second]) => first.localeCompare(second)).map(([key, item]) => [key, canonical(item)])) : value);
+export const serverHash = (server: NeutralServer) => sha256(JSON.stringify(canonical(server)));
 
 const strings = (value: unknown): Record<string, string> | undefined => (value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, String(item)])) : undefined);
 const list = (value: unknown): string[] | undefined => (Array.isArray(value) ? value.map(String) : undefined);
@@ -90,7 +92,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
   try { text = await readFile(file, 'utf8'); } catch (error) { return { entries: [], exists: false, problem: errorCode(error) === 'ENOENT' ? undefined : `${file} could not be read.` }; }
   try {
     if (tool === 'codex-cli') {
-      const tables = readTomlTables(text);
+      // `[[…]]` blocks (Codex's `[[skills.config]]`) are never servers.
+      const tables = readTomlTables(text).filter(table => !table.array);
       const entries: McpEntry[] = [];
       // Servers written inline (`[mcp_servers]` then `docs = { … }`) or as dotted keys (`mcp_servers.docs.command = …`): Central Knot
       // only edits `[mcp_servers.<name>]` tables, so these are held, and never get a second definition that Codex would refuse.
@@ -213,14 +216,14 @@ async function recoverSettings(context: ShareContext, tool: HarnessId) {
  * settings (a Codex `enabled = false`, a timeout), so Restore puts each tool's entry back as it was. Never pruned.
  */
 const keptBase = (context: ShareContext, name: string) => join(storeDirectory(context.home), 'items', 'mcp', encodeURIComponent(name));
-export async function keepServerVersion(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
+export async function keep(context: ShareContext, name: string, server: NeutralServer, entry?: McpEntry): Promise<string | undefined> {
   const hash = serverHash(server);
   const path = join(keptBase(context, name), `${hash}.json`);
   try { await stat(path); } catch { await writeDurably(path, `${JSON.stringify(server, null, 2)}\n`); }
   if (!entry) return undefined;
   const text = `${JSON.stringify({ extras: entry.extras }, null, 2)}\n`;
   // The latest settings for this version, and an unchanging copy History can name, so a later version never overwrites an older one.
-  const ref = `${entry.tool}-${createHash('sha256').update(text).digest('hex').slice(0, 16)}`;
+  const ref = `${entry.tool}-${sha256(text).slice(0, 16)}`;
   const latest = join(keptBase(context, name), hash, `${entry.tool}.json`);
   if ((await readFile(latest, 'utf8').catch(() => undefined)) !== text) await writeDurably(latest, text);
   try { await stat(join(keptBase(context, name), hash, `${ref}.json`)); } catch { await writeDurably(join(keptBase(context, name), hash, `${ref}.json`), text); }
@@ -229,7 +232,7 @@ export async function keepServerVersion(context: ShareContext, name: string, ser
 async function keptExtras(context: ShareContext, name: string, hash: string, ref: string): Promise<Record<string, unknown> | undefined> {
   try { return JSON.parse(await readFile(join(keptBase(context, name), hash, `${ref}.json`), 'utf8')).extras; } catch { return undefined; }
 }
-async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
+export async function kept(context: ShareContext, name: string, hash: string): Promise<{ server: NeutralServer; extras: Partial<Record<HarnessId, Record<string, unknown>>> } | undefined> {
   try {
     const server = JSON.parse(await readFile(join(keptBase(context, name), `${hash}.json`), 'utf8'));
     const extras: Partial<Record<HarnessId, Record<string, unknown>>> = {};
@@ -304,6 +307,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
   if (problem) problems.unshift(problem);
   const servers: SkillFacts[] = [];
   const claudePending: string[] = [];
+  // Each tool's own switch (profiles turn servers off with it): read once, then asked about every server there.
+  const switches = await readMcpSwitches(context, present);
   for (const [name, slot] of [...byName].sort(([first], [second]) => first.localeCompare(second))) {
     const item = record.items[name];
     const entries = Object.values(slot) as McpEntry[];
@@ -317,7 +322,8 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     if (claudeWaits(item, slot, present)) claudePending.push(name);
     // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
     const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
-    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {}, edited: edited.length ? edited : undefined });
+    servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
+      edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
@@ -414,7 +420,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     const recorded = new Map(recordedCopies.map(copy => [copy.tool, copy.hash]));
     // Each synced copy's own settings are kept as they are now (written only when they changed), so if that copy is deleted
     // there, Restore puts it back with its settings: a server that was off comes back off (DEL-03).
-    for (const entry of entries) if (recorded.get(entry.tool) === entry.hash) await keepServerVersion(context, name, entry.server, entry);
+    for (const entry of entries) if (recorded.get(entry.tool) === entry.hash) await keep(context, name, entry.server, entry);
     const edited = entries.filter(entry => recorded.has(entry.tool) && recorded.get(entry.tool) !== entry.hash);
     // Deletion: a recorded entry gone from a file that is there and can be read (DEL-01, settled), spread to the others (DEL-02).
     const missing = recordedCopies.filter(copy => live.includes(copy.tool) && !slot[copy.tool]);
@@ -436,7 +442,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
           const entry = slot[copy.tool];
           if (away(copy.tool) || !live.includes(copy.tool)) { if (!item.off.includes(copy.tool)) leftover.push({ ...copy, status: 'removing' }); continue; }
           if (!entry) continue;
-          const ref = await keepServerVersion(context, name, entry.server, entry);
+          const ref = await keep(context, name, entry.server, entry);
           gone.push({ tool: copy.tool, hash: entry.hash, kept: ref });
           if (copy.tool === 'claude-cli' && !claudeNow(name)) {
             leftover.push({ ...copy, status: 'removing' });
@@ -478,7 +484,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     // What each tool holds after this pass, as decided: never a later read, so an edit saved meanwhile is still an edit next time.
     const holds = new Map<HarnessId, string>();
     const addedHere: { tool: HarnessId; hash: string }[] = [];
-    await keepServerVersion(context, name, source.server, source);
+    await keep(context, name, source.server, source);
     const claudeBefore = slot['claude-cli']?.hash ?? null;
     for (const tool of live) {
       const here = slot[tool];
@@ -486,7 +492,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       const reason = cannotHold(tool, source.server);
       if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
       if (tool === 'claude-cli' && !claudeNow(name)) { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now: Claude Code rewrites this file while it runs (MCP-02).' }); continue; }
-      const ref = here ? await keepServerVersion(context, name, here.server, here) : undefined;
+      const ref = here ? await keep(context, name, here.server, here) : undefined;
       // Only content an event of this pass will name is put on record as displaced; a copy that is only behind (Claude Code
       // catching up through Write now) holds an older version that History already has.
       const named = edited.length > 0 || chosenNow.has(name) || !!raced;
@@ -542,7 +548,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       if (missingFiles.has(copy.tool)) continue;
       if (!entry || entry.hash !== copy.hash) { item.copies = item.copies.filter(other => other !== copy); continue; }
       if (copy.tool === 'claude-cli' && !claudeNow(name)) continue;
-      await keepServerVersion(context, name, entry.server, entry);
+      await keep(context, name, entry.server, entry);
       const problem = await editEntry(context, copy.tool, name, entry.hash, undefined);
       if (problem) { results.push({ item: name, harness: copy.tool, outcome: 'held', message: problem }); continue; }
       writes++;
@@ -632,7 +638,7 @@ async function undoAddedMcp(context: ShareContext, history: HistoryEvent[], past
     const entry = (await readTool(context, loser.tool)).entries.find(candidate => candidate.name === name);
     if (!entry) { results.push({ item: name, harness: loser.tool, outcome: 'stayed', message: `${harnesses[loser.tool].name}'s entry is already gone.` }); continue; }
     if (entry.hash !== loser.hash) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: `${harnesses[loser.tool].name}'s entry was edited since, so it stays.` }); continue; }
-    await keepServerVersion(context, name, entry.server, entry);
+    await keep(context, name, entry.server, entry);
     const problem = await editEntry(context, loser.tool, name, entry.hash, undefined);
     if (problem) { stayed.push(loser.tool); results.push({ item: name, harness: loser.tool, outcome: 'held', message: problem }); continue; }
     item.copies = item.copies.filter(copy => copy.tool !== loser.tool);
@@ -696,7 +702,7 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
     const reason = cannotHold(tool, version.server);
     if (reason) { results.push({ item: name, harness: tool, outcome: 'held', message: reason }); continue; }
     if (tool === 'claude-cli') { results.push({ item: name, harness: tool, outcome: 'held', message: 'Close Claude, then use Write now to restore it there.' }); continue; }
-    if (here) await keepServerVersion(context, name, here.server, here);
+    if (here) await keep(context, name, here.server, here);
     const problem = await editEntry(context, tool, name, here?.hash, version.server, extras);
     if (problem) { results.push({ item: name, harness: tool, outcome: 'held', message: problem }); continue; }
     writes++;

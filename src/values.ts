@@ -30,3 +30,30 @@ export const isHttps = (value: unknown): value is string => typeof value === 'st
 
 /** True when a marketplace source names a folder on this computer (an absolute path), not a URL or owner/repo. */
 export const isFolder = (source: string) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(source.trim());
+
+/** A marketplace, plugin or skill name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
+export const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
+
+/** Orders two versions: as semantic versions when both are (pre-releases by semver's rules), otherwise as text (as Codex orders its cached plugin versions). */
+export function compareVersions(first: string, second: string): number {
+  const parse = (text: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text);
+  const [a, b] = [parse(first), parse(second)];
+  if (!a || !b) return first < second ? -1 : first > second ? 1 : 0;
+  for (const part of [1, 2, 3]) { const diff = Number(a[part]) - Number(b[part]); if (diff) return diff; }
+  // A pre-release comes before its release; pre-releases compare part by part, numbers as numbers and below words.
+  if (a[4] === b[4]) return 0;
+  if (!a[4] || !b[4]) return a[4] ? -1 : 1;
+  const [left, right] = [a[4].split('.'), b[4].split('.')];
+  for (let at = 0; at < Math.min(left.length, right.length); at++) {
+    const [x, y] = [left[at]!, right[at]!];
+    if (x === y) continue;
+    const [xn, yn] = [/^\d+$/.test(x), /^\d+$/.test(y)];
+    if (xn && yn) return Number(x) - Number(y);
+    if (xn !== yn) return xn ? -1 : 1;
+    return x < y ? -1 : 1;
+  }
+  return left.length - right.length;
+}
+
+/** Whether a name is a Git commit hash or a prefix of one (7 to 40 hex digits, at least one a letter, so 20250101 is not). */
+export const isCommitHash = (name: string) => /^(?=\d*[a-f])[0-9a-f]{7,40}$/i.test(name);

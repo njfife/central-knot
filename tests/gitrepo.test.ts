@@ -10,6 +10,7 @@ import { classify, connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, so
 import { applyChanges, manageView, readHistory, restoreFromHistory } from '../src/manage.ts';
 import { applyMcp, mcpView, restoreMcp } from '../src/mcp.ts';
 import { agentsView, applyAgents, restoreAgent } from '../src/agents.ts';
+import { applyBase, baseView, instructionsView, repoBase } from '../src/instructions.ts';
 import type { ShareContext } from '../src/share.ts';
 import type { HarnessId, RepoView } from '../src/types.ts';
 
@@ -418,26 +419,38 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
   } finally { await box.cleanup(); }
 });
 
-test('The base instructions travel as instructions/base.md when this build has them', async () => {
+test('The base instructions travel as instructions/base.md: Push reads the base here; Pull sets it, and the tools that get it get it', async () => {
   const box = await world();
   try {
-    const store = new Map<string, string | undefined>([['first', 'Be brief.\n'], ['second', undefined]]);
     let refuse = false;
-    const baseFor = (name: string): BaseInstructions => ({ read: async () => store.get(name), apply: async text => { if (refuse) return 'Busy.'; store.set(name, text); return undefined; } });
+    // The real base instructions (~/.central-knot/instructions/base.md), as main.ts hands them over.
+    const baseFor = (context: ShareContext): BaseInstructions => { const real = repoBase(context, context.read); return { read: real.read, apply: async text => (refuse ? 'Busy.' : real.apply(text)) }; };
+    const setBase = async (context: ShareContext, text: string) => {
+      const files = await instructionsView(context, await context.read());
+      const seen = Object.fromEntries(files.map(file => [file.tool, { path: file.path, hash: file.hash }]));
+      assert.equal((await applyBase(context, await context.read(), { text, expected: (await baseView(context)).hash, tools: ['claude-cli'], seen })).stopped, undefined);
+    };
     const first = await box.home('first');
+    await setBase(first, 'Be brief.\n');
     await connectRepo(first, box.remote, '');
-    assert.deepEqual(rows(live(await repoView(first, { base: baseFor('first') })).outgoing), ['Base instructions:added']);
-    await pushRepo(first, { base: baseFor('first') });
+    assert.deepEqual(rows(live(await repoView(first, { base: baseFor(first) })).outgoing), ['Base instructions:added']);
+    await pushRepo(first, { base: baseFor(first) });
     assert.equal(git(box.remote, 'show', 'main:instructions/base.md'), 'Be brief.');
     const second = await box.home('second');
+    await setBase(second, 'Be thorough.\n');
     await connectRepo(second, box.remote, '');
-    assert.deepEqual(rows(live(await repoView(second)).incoming), [], 'a build without base instructions leaves the file alone');
+    assert.deepEqual(rows(live(await repoView(second)).incoming), [], 'without the base handed over, the file is left alone');
     refuse = true;
-    await pullRepo(second, { base: baseFor('second') });
-    assert.deepEqual(live(await repoView(second, { base: baseFor('second') })).incoming.map(row => row.held), ['Busy.'], 'a failed item waits, named, for the next Pull');
+    await pullRepo(second, { base: baseFor(second) });
+    assert.deepEqual(live(await repoView(second, { base: baseFor(second) })).incoming.map(row => row.held), ['Busy.'], 'a failed item waits, named, for the next Pull');
     refuse = false;
-    await pullRepo(second, { base: baseFor('second') });
-    assert.equal(store.get('second'), 'Be brief.\n');
+    await pullRepo(second, { base: baseFor(second) });
+    assert.equal(await readFile(join(second.home, '.central-knot/instructions/base.md'), 'utf8'), 'Be brief.\n');
+    const [claude] = (await instructionsView(second, await second.read())).filter(file => file.tool === 'claude-cli');
+    assert.equal(claude.base?.state, 'same', 'Claude Code, which gets the base, holds the pulled text');
+    assert.match(claude.text, /Be brief\./);
+    assert.ok((await baseView(second)).versions.length >= 1, 'the base it replaced is kept as an earlier version');
+    assert.deepEqual(live(await repoView(second, { base: baseFor(second) })).incoming, []);
   } finally { await box.cleanup(); }
 });
 

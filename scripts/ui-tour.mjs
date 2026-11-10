@@ -10,7 +10,7 @@ import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import { writeMarket } from './fixture-market.mjs';
+import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
@@ -39,7 +39,8 @@ async function launch() {
   for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
   const page = await connect(target.webSocketDebuggerUrl);
   const { send, run } = page;
-  const settle = async () => { await wait(150); await run(`new Promise(done => { const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : setTimeout(c, 25); c(); })`); await wait(200); };
+  // A page that never settles fails the tour instead of holding it open.
+  const settle = async () => { await wait(150); await run(`new Promise((done, fail) => { const end = Date.now() + 30000; const c = () => (document.body.dataset.ready === 'true' || document.querySelector('.empty-state')) && document.body.dataset.busy !== 'true' ? done(true) : Date.now() > end ? fail(new Error('The page did not settle within 30 s.')) : setTimeout(c, 25); c(); })`); await wait(200); };
   const viewport = { width: 1280, height: 800 };
   /** Sizes the page as the window would be: the app's layout follows window.innerWidth and its resize event. */
   const size = async (width, height) => {
@@ -57,6 +58,7 @@ async function launch() {
     // A pointer click, as a mouse makes it (detail 1): pages tell a keyboard press (detail 0) apart to keep focus in place.
     click: async selector => { await run(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) throw new Error('No element: ' + ${JSON.stringify(selector)}); e.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })); })()`); await settle(); },
     has: selector => run(`!!document.querySelector(${JSON.stringify(selector)})`),
+    press: async key => { for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: { ArrowDown: 40, ArrowUp: 38, Escape: 27, Enter: 13 }[key] }); await settle(); },
     theme: async value => { await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value }] }); await settle(); },
     quit: () => { page.close(); child.kill('SIGKILL'); },
   };
@@ -95,6 +97,12 @@ async function shot(a, name, caption, pointer = { x: 2, y: a.viewport.height - 2
 }
 const waitFor = async (a, expression, ms = 8000) => { for (let spent = 0; spent < ms; spent += 250) { if (await a.run(expression)) return true; await wait(250); } return false; };
 const edit = (path, change) => writeFileSync(path, change(readFileSync(path, 'utf8')));
+// Types a marketplace source into "Add a marketplace" (opening the box first if needed) and clicks Add.
+async function addMarketplace(a, source) {
+  if (!(await a.has('#marketplace-source'))) await a.click('#open-add-marketplace');
+  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(source)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#add-marketplace');
+}
 
 let a = await launch();
 const practice = await a.run(`document.querySelector('.status-home').title`);
@@ -105,7 +113,7 @@ if (wanted('shell')) {
   await shot(a, 'first-launch-dark', 'The app as it first opens (dark appearance): the Overview, on the Practice copy, a throwaway set of sample skills, MCP servers and agents.');
   await a.theme('light'); await shot(a, 'first-launch-light', 'The same, in the light appearance.'); await a.theme('dark');
   await a.click('#nav-skills'); await shot(a, 'skills-page', 'Clicked "Skills" in the sidebar: the skills table.');
-  await a.click('#nav-tools'); await shot(a, 'tools-page', 'Clicked "Tools": which tools were found and where their files are.');
+  await a.click('#nav-harnesses'); await shot(a, 'harnesses-page', 'Clicked "Harnesses": each tool found, with what it has.');
   await a.click('#nav-history'); await shot(a, 'history-empty', 'Clicked "History" before anything happened.');
   await a.click('#nav-overview');
   if (await a.has('#intro-dismiss')) { await a.click('#intro-dismiss'); await shot(a, 'intro-dismissed', 'Dismissed the practice-copy note on the Overview.'); }
@@ -127,6 +135,55 @@ if (wanted('skills')) {
   if (await a.has('#use-review-claude-cli')) { await a.click('#use-review-claude-cli'); await shot(a, 'review-chosen-pending', 'Chose "Use Claude Code\'s copy": queued.'); await a.click('#apply'); await shot(a, 'review-applied', 'Clicked "Apply all".'); }
   await a.click('#open-standup'); await shot(a, 'details-synced', 'Opened standup, a managed skill whose copies are all the same.');
   if (await a.has('#files-standup')) { await a.click('#files-standup'); await shot(a, 'files-view', 'Clicked "Files and contents" in its details.'); await a.click('#skills-table'); }
+}
+
+// ---------- Disable and Remove, per tool ----------
+if (wanted('disable')) {
+  begin('disable');
+  await a.click('#nav-skills');
+  await a.click('#open-notes'); await shot(a, 'unmanaged-details', 'Opened notes, an unmanaged skill in Claude Code and Copilot CLI: each tool\'s row has an Enabled switch and Remove.');
+  await a.click('#switch-notes'); await a.click('#enable-notes-codex-cli');
+  await shot(a, 'managed-codex-disabled-pending', 'Turned Managed on for notes, then switched Codex\'s row to Disabled: queued, nothing written yet.');
+  await a.click('#apply');
+  const toml = readFileSync(join(practice, '.codex/config.toml'), 'utf8');
+  await shot(a, 'applied-disabled', `Clicked "Apply all". Codex got a copy and has it disabled. Codex's config.toml now ends with:\n\n\`\`\`toml\n${toml.slice(toml.lastIndexOf('[[skills.config]]'))}\`\`\`\n`);
+  await a.click('#open-notes');
+  await a.click('#open-standup'); await a.click('#remove-standup-copilot-cli');
+  await shot(a, 'remove-pending', 'Opened standup (unmanaged, only in Copilot CLI) and clicked Remove in its Copilot CLI row: queued.');
+  await a.click('#apply'); await shot(a, 'removed', 'Clicked "Apply all": the copy is gone from Copilot CLI and kept in History.');
+  await a.click('#open-release-notes'); await a.click('#enable-release-notes-claude-cli'); await a.click('#apply');
+  await shot(a, 'unmanaged-disabled', 'Opened release-notes (unmanaged, only in Claude Code), switched Claude Code to Disabled and clicked "Apply all".');
+  await a.click('#delete-release-notes');
+  await shot(a, 'delete-everywhere-confirm', 'Opened release-notes (unmanaged, only in Claude Code) and clicked "Delete everywhere…": it asks once more.');
+  await a.click('#delete-confirm-release-notes'); await shot(a, 'delete-everywhere-done', 'Clicked "Delete release-notes from every tool".');
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": the Disable and the removal, each with its own Undo or Restore.');
+  const restore = await a.run(`document.querySelector('.history-row[data-kind="removed"] button')?.id ?? ''`);
+  if (restore) { await a.click(`#${restore}`); await shot(a, 'history-restored', 'Clicked Restore on the newest removal (release-notes, in Claude Code).'); }
+  await a.click('#nav-skills');
+  await a.click('#open-review'); await shot(a, 'differing-details', 'Opened review, whose copies differ: the choice first, then each tool\'s switch and Remove.');
+  await a.click('#open-review');
+  writeFileSync(join(practice, '.copilot/settings.json'), '{ not json');
+  await a.click('#header-refresh'); await a.click('#open-notes');
+  await shot(a, 'switch-unavailable', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: its row says Disable unavailable, with the reason as the row\'s text.');
+  rmSync(join(practice, '.copilot/settings.json'));
+  await a.click('#header-refresh');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
+    for (const theme of ['dark', 'light']) {
+      await a.theme(theme);
+      if (!(await a.has('.details'))) await a.click('#open-notes');
+      await shot(a, `size-${width}-${theme}`, `notes' details (managed, disabled in Codex) at ${width}×${height}, ${theme}.`);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark'); await a.click('#enable-notes-claude-cli'); await a.click('#remove-notes-copilot-cli');
+  await shot(a, 'pending-860-dark', 'At 860×560: queued Disable in Claude Code and Remove in Copilot CLI for notes, not applied.');
+  await a.click('#discard');
+  if (!(await a.has('.details'))) await a.click('#open-notes');
+  await a.click('#files-notes'); await shot(a, 'files-view-860-dark', 'At 860×560: clicked "Files and contents" for notes. The details pane is narrow here, so each tool\'s switch and Remove share the tool\'s line.');
+  await a.click('#skills-table');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
 }
 
 // ---------- Sync, notices and History ----------
@@ -201,8 +258,7 @@ if (wanted('plugins')) {
   const market = join(scratch, 'market');
   writeMarket(market);
   await a.click('#nav-plugins'); await shot(a, 'plugins-empty', 'Clicked "Plugins" before adding a marketplace.');
-  await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-  await a.click('#add-marketplace'); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
+  await addMarketplace(a, market); await shot(a, 'plugins-added', 'Typed a marketplace folder (a local copy of a team marketplace) into "Add a marketplace" and clicked Add.');
   await a.click('#market-tab-about'); await waitFor(a, `!!document.querySelector('.plugin-readme, .plugin-muted')`); await shot(a, 'plugins-about', 'Clicked the "About" tab.');
   await a.click('#market-tab-plugins');
   await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`); await shot(a, 'plugin-page', 'Clicked the "document-tools" row.');
@@ -213,6 +269,250 @@ if (wanted('plugins')) {
   await a.click('#plugin-back');
   await a.click('#popen-0-spark'); await waitFor(a, `!!document.querySelector('.plugin-group, .plugin-muted:not(:empty)') && !/Reading/.test(document.querySelector('.plugin-page')?.textContent ?? '')`, 60000); await shot(a, 'plugin-page-remote', 'Opened "spark", whose files live in GitHub’s copilot-plugins repository (read from there).');
   if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'plugins-undone', 'Clicked "Undo" on the result of Apply all.'); }
+}
+
+// ---------- Profiles ----------
+if (wanted('profiles')) {
+  begin('profiles');
+  const name = async text => { await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`); await a.settle(); };
+  await a.click('#nav-profiles'); await shot(a, 'empty', 'Clicked "Profiles" in the sidebar before any profile exists.');
+  await a.click('#profile-new'); await shot(a, 'new-naming', 'Clicked "New profile": a profile is made and its name field is ready to type in.');
+  await name('Incident');
+  await shot(a, 'new-named', 'Typed "Incident" and pressed Enter. Nothing is in it yet.');
+  await a.click('#pf-skill\\:notes'); await a.click('#pf-mcp\\:docs');
+  await shot(a, 'incident-ticked', 'Ticked the notes skill and the docs MCP server. The blue rings show what switching to Incident turns off.');
+  await a.click('#profile-switch');
+  const claudeSettings = readFileSync(join(practice, '.claude/settings.json'), 'utf8');
+  await shot(a, 'incident-switched', `Clicked "Switch to Incident". Claude Code's settings.json now holds:\n\n\`\`\`json\n${claudeSettings}\`\`\`\n`);
+  await a.click('#pf-skill\\:review'); await shot(a, 'incident-drift', 'Ticked review in Incident, the profile in use: the subtitle says what Apply would change, nothing is written yet.');
+  await a.click('#pf-skill\\:review');
+  await a.click('#profile-delete'); await shot(a, 'delete-in-use', 'Clicked Delete on Incident, which is in use: it says why not, inline.');
+  await a.click('#profile-delete-cancel');
+  await a.click('#profile-new'); await name('Development');
+  await a.click('#profile-from-now'); await shot(a, 'development-from-now', 'Made a second profile, "Development", and clicked "Start from what\'s on now".');
+  await a.click('#pf-skill\\:standup');
+  await shot(a, 'development-edited', 'Ticked standup too.');
+  await a.click('#status-profile'); await shot(a, 'status-menu', 'Clicked "Incident" in the status bar: the profile menu, with focus on the profile in use.');
+  await a.press('ArrowDown'); await shot(a, 'status-menu-keys', 'Pressed the Down arrow key: focus moves to Development (Up, Down, Home and End move; Escape closes).');
+  await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes('Development')).click()`); await a.settle();
+  // A scripted click counts as a keyboard choice (focus returns to the status item, ringed); a mouse click leaves no ring.
+  await a.run(`document.activeElement?.blur()`);
+  await shot(a, 'switched-from-status', 'Chose "Development" in that menu.');
+  await a.click('#profile-row-none'); await shot(a, 'no-profile', 'Clicked "No profile" in the list: what profiles turned off, and how profiles work.');
+  await a.click('#nav-skills'); await shot(a, 'skills-with-profile', 'The Skills page while Development is in use: release-notes and review are off where a profile turned them off (the profile mark).');
+  await a.click('#nav-mcp'); await shot(a, 'mcp-with-profile', 'The MCP servers page while Development is in use: files is off in Copilot CLI and Codex.');
+  await a.click('#nav-skills');
+  // Rows stay open across pages, so notes may already be open from earlier.
+  if (!(await a.has('#enable-notes-claude-cli'))) await a.click('#open-notes');
+  await a.click('#enable-notes-claude-cli'); await a.click('#apply');
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
+  await shot(a, 'off-by-hand', 'On the Skills page, turned notes off in Claude Code by hand (its Enabled switch, then Apply all), then came back to Development: that switch shows as off by hand (its own mark), which profiles leave alone, and the subtitle says so.');
+  const copilotSettings = join(practice, '.copilot/settings.json');
+  const copilotKept = existsSync(copilotSettings) ? readFileSync(copilotSettings, 'utf8') : undefined;
+  writeFileSync(copilotSettings, '{ not json');
+  await a.click('#header-refresh');
+  await shot(a, 'cant-switch', 'Outside the app, Copilot\'s settings.json was broken, then Refresh: Copilot\'s cells say they can\'t be switched, and why is listed under the table.');
+  if (copilotKept === undefined) rmSync(copilotSettings); else writeFileSync(copilotSettings, copilotKept);
+  await a.click('#header-refresh');
+  await a.click('#nav-history'); await shot(a, 'history', 'Clicked "History": each switch is one row with Undo.');
+  const undo = await a.run(`document.querySelector('.history-row[data-kind="profile"] button')?.id ?? ''`);
+  if (undo) { await a.click(`#${undo}`); await shot(a, 'history-undone', 'Clicked "Undo switch" on the newest switch: Incident is in use again.'); }
+  await a.click('#nav-profiles');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Incident')).click()`); await a.settle();
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 1300 ? 1 : 2, mobile: false });
+    for (const theme of ['dark', 'light']) {
+      await a.theme(theme);
+      await a.settle();
+      await shot(a, `size-${width}-${theme}`, `Incident open on the Profiles page at ${width}×${height}, ${theme}.`);
+    }
+  }
+  // The narrowest window with a profile that is not in use: its header while renaming, and while confirming Delete.
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
+  await a.run(`[...document.querySelectorAll('.profile-row')].find(row => row.textContent.includes('Development')).click()`); await a.settle();
+  await a.click('#profile-rename');
+  await name('Development and code review for web apps');
+  await shot(a, 'size-860-long-name', 'At 860×560, renamed Development to a 40-character name: the header with Switch, Rename and Delete.');
+  await a.click('#profile-rename'); await shot(a, 'size-860-renaming', 'Clicked Rename again: the field has the header to itself, with Enter / Esc hints.');
+  await a.press('Escape');
+  await a.click('#profile-delete'); await shot(a, 'size-860-delete-confirm', 'At 860×560, clicked Delete on Development: the confirmation wraps under the title.');
+  await a.click('#profile-delete-cancel');
+  await a.click('#profile-switch'); await a.run(`document.activeElement?.blur()`);
+  await shot(a, 'size-860-long-name-in-use', 'Still at 860×560, switched to the profile with the 40-character name: the status bar item shortens it with an ellipsis (the full name is on hover).');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+}
+
+// ---------- One skill of an installed plugin, off and back on (ENB-06) ----------
+if (wanted('plugin-skills')) {
+  begin('plugin-skills');
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // document-tools as each tool records it installed: Claude Code's installed_plugins.json, Codex's config.toml and plugin
+  // cache, Copilot CLI's config.json. A stand-in `copilot` keeps its skill switch in settings.json as the real one does.
+  const copyTo = folder => { for (const name of ['pdf-reader', 'spreadsheet']) { mkdirSync(join(folder, 'skills', name), { recursive: true }); writeFileSync(join(folder, 'skills', name, 'SKILL.md'), readFileSync(join(market, 'plugins/document-tools/skills', name, 'SKILL.md'))); } return folder; };
+  const claudeCopy = copyTo(join(practice, '.claude/plugins/cache/ck-tools/document-tools/1.2.0'));
+  writeFileSync(join(practice, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'document-tools@team-tools': [{ scope: 'user', installPath: claudeCopy, version: '1.2.0' }] } }));
+  copyTo(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'));
+  edit(join(practice, '.codex/config.toml'), text => `${text}\n[marketplaces.team-tools]\nsource = ${JSON.stringify(market)}\n\n[plugins."document-tools@team-tools"]\nenabled = true\n`);
+  const copilotCopy = copyTo(join(practice, '.copilot/installed-plugins/team-tools/document-tools'));
+  mkdirSync(join(practice, '.copilot'), { recursive: true });
+  writeFileSync(join(practice, '.copilot/config.json'), JSON.stringify({ installedPlugins: [{ name: 'document-tools', marketplace: 'team-tools', version: '1.2.0', cache_path: copilotCopy }] }));
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  // Codex's switch is its config.toml, so its CLI is only asked its version (the switch is offered from a tested build).
+  writeFileSync(join(HOME, '.local/bin/codex'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "codex-cli 0.167.0" && exit 0\nexit 9\n`, { mode: 0o755 });
+  writeFileSync(join(HOME, '.local/bin/copilot'), `#!/bin/sh\n[ "$1" = "--version" ] && echo "GitHub Copilot CLI 1.0.108." && exit 0\nS="$HOME/.copilot/settings.json"\ncase "$1 $2" in\n  "skill disable") printf '{"disabledSkills":["%s"]}' "$3" > "$S" ;;\n  "skill enable") printf '{"disabledSkills":[]}' > "$S" ;;\n  *) exit 9 ;;\nesac\n`, { mode: 0o755 });
+  const at860 = async (name, caption) => {
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+    await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
+    await shot(a, name, caption);
+    await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  };
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`, 15000);
+  await shot(a, 'plugins-installed', 'document-tools is installed in Claude Code, Copilot CLI and Codex (by each tool’s own record). Clicked Refresh on team-tools.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
+  await shot(a, 'skills-switches', 'Opened document-tools. Its skills each have a switch in Copilot CLI and Codex; Claude Code has no switch for one skill of a plugin.');
+  await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
+  await a.click('#pskill-0-document-tools-pdf-reader-copilot-cli');
+  await shot(a, 'skill-chosen', 'Clicked pdf-reader’s switches under Codex and Copilot CLI. Nothing has changed yet: both wait for Apply all.');
+  await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').focus({ focusVisible: true })`);
+  await shot(a, 'skill-focus', 'Moved keyboard focus to pdf-reader’s chosen Codex switch (as Tab would): focus ring and waiting ring together.');
+  await a.theme('light'); await shot(a, 'skill-focus-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await a.run(`document.activeElement?.blur()`);
+  await at860('skill-chosen-860', 'The chosen state at 860×560, scrolled to the skills.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'skill-off', 'Clicked Apply all. Codex’s config.toml now names document-tools:pdf-reader with enabled = false, and Copilot CLI ran `copilot skill disable document-tools:pdf-reader`.');
+  await a.theme('light'); await shot(a, 'skill-off-light', 'The same, in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
+    await shot(a, `skill-off-${width}`, `The same page at ${width}×${height}.`);
+    await a.theme('light'); await shot(a, `skill-off-${width}-light`, `The same at ${width}×${height}, light.`); await a.theme('dark');
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 30000); await a.settle();
+  await shot(a, 'skill-undone', 'Clicked Undo: pdf-reader is on again in both tools.');
+  writeFileSync(join(practice, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['spreadsheet'] }));
+  await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-copilot-cli')`, 15000); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-skills')`);
+  await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
+  await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
+  await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
+}
+
+// ---------- Plugin versions and skill text ----------
+if (wanted('plugin-versions')) {
+  begin('plugin-versions');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  const market = join(scratch, 'market');
+  if (!existsSync(market)) writeMarket(market);
+  // Claude Code has document-tools 1.1.0, whose pdf-reader skill was worded differently; Codex has the marketplace's 1.2.0.
+  writeClaudeInstall(practice, 'team-tools', 'document-tools', '1.1.0', {
+    'skills/pdf-reader/SKILL.md': '---\nname: pdf-reader\ndescription: "Reads PDF files and pulls out text."\n---\n\nOpen the PDF and copy out its text.\n',
+    'skills/spreadsheet/SKILL.md': readFileSync(join(market, 'plugins/document-tools/skills/spreadsheet/SKILL.md'), 'utf8'),
+  });
+  cpSync(join(market, 'plugins/document-tools'), join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0'), { recursive: true });
+  // Both Claude Code and Codex have issue-tracker 1.9.0 (the marketplace offers 2.0.0): two tools named on one list row.
+  writeClaudeInstall(practice, 'team-tools', 'issue-tracker', '1.9.0', { 'skills/triage/SKILL.md': readFileSync(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), 'utf8') });
+  cpSync(join(market, 'plugins/issue-tracker'), join(practice, '.codex/plugins/cache/team-tools/issue-tracker/1.9.0'), { recursive: true });
+  edit(join(practice, '.codex/config.toml'), text => `${text.replace(/\n*$/, '\n')}\n[plugins."document-tools@team-tools"]\nenabled = true\n\n[plugins."issue-tracker@team-tools"]\nenabled = true\n`);
+  await a.click('#nav-plugins');
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  // Added already by the plugins feature: read again, so the installs written above show.
+  if (await a.has('[data-plugin="document-tools"]')) { await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+  else {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  await shot(a, 'list-versions', 'The team-tools marketplace (a local folder). Claude Code has document-tools 1.1.0; Codex has 1.2.0, the version the marketplace offers. Both have issue-tracker 1.9.0 where the marketplace offers 2.0.0. Copilot CLI isn\'t installed on this machine.');
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#pfile-0-skills-pdf-reader')`);
+  await shot(a, 'plugin-versions', 'Clicked the "document-tools" row.');
+  await a.click('#pfile-0-skills-pdf-reader');
+  await shot(a, 'skill-open', 'Clicked "pdf-reader" under Skills: its SKILL.md. Claude Code\'s copy (1.1.0) differs from the marketplace\'s and Codex\'s (1.2.0), so each text shows, named.');
+  await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-open-scrolled', 'Scrolled down to the opened SKILL.md.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'skill-same-everywhere', 'Also opened "spreadsheet", whose text is the same in every copy: one block, named as such.');
+  await a.click('#pfile-0-skills-spreadsheet');
+  await a.run(`document.querySelector('#pfile-0-skills-spreadsheet').focus()`);
+  await shot(a, 'keyboard-focus', 'Closed "spreadsheet" again; the keyboard focus is on its name.');
+  for (const [width, height] of [[860, 560], [1280, 800], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`);
+    await a.theme('dark'); await shot(a, `plugin-${width}-dark`, `document-tools with pdf-reader open, at ${width}×${height}, dark.`);
+    await a.theme('light'); await shot(a, `plugin-${width}-light`, `The same, light.`);
+    if (width === 860 || width === 2560) { await a.run(`document.querySelector('.plugin-file').scrollIntoView({ block: 'center' })`); await a.settle(); await shot(a, `plugin-${width}-file-light`, `At ${width}×${height}, scrolled to the opened SKILL.md.`); await a.theme('dark'); }
+  }
+  await a.theme('dark');
+  await a.click('#plugin-back');
+  await size(860, 560); await a.run(`document.querySelector('[data-plugin="issue-tracker"]').scrollIntoView({ block: 'center' })`); await a.settle();
+  await shot(a, 'list-860', 'Back to the marketplace list at 860×560, scrolled to issue-tracker, which two tools have at another version.');
+  await a.theme('light'); await shot(a, 'list-860-light', 'The same, light.'); await a.theme('dark');
+  await size(2560, 1440); await a.theme('light'); await shot(a, 'list-2560-light', 'The marketplace list at 2560×1440, light.');
+  await size(1280, 800); await a.theme('dark');
+}
+
+// ---------- A plugin's parts in tools without plugins ----------
+if (wanted('parts')) {
+  begin('parts');
+  // Pi is in the home (it takes no plugins), and no tool's CLI is on this tour's PATH, so Codex and Copilot CLI can't
+  // take plugins here either: each can take a plugin's parts instead.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.run('window.centralKnot.refresh()');
+  const market = join(scratch, 'parts-market');
+  writeMarket(market);
+  await a.click('#nav-skills'); await a.click('#nav-plugins');
+  if (await a.has('#marketplace-source')) {
+    await a.run(`(() => { const input = document.querySelector('#marketplace-source'); input.value = ${JSON.stringify(market)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await a.click('#add-marketplace');
+  }
+  if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await shot(a, 'list-offers', 'Plugins, team-tools: Pi takes no plugins, and Codex and Copilot CLI have no CLI on this computer, so their boxes are hatched with a plus: a click chooses the plugin’s parts instead.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-offer', 'Opened issue-tracker: "Its parts, as separate items" says which tools can take them and what goes in.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
+  await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-installed', 'Clicked Apply all: the skill and MCP server went into Pi and Codex as ordinary items.');
+  await a.click('#plugin-back');
+  await a.click('#popen-0-release-helper'); await waitFor(a, `/(Can go in|Nothing in it)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-left-behind', 'Opened release-helper (a command, an agent and hooks): what goes in where, and what stays with the plugin.');
+  await a.click('#plugin-back'); await shot(a, 'list-installed', 'Back to the list: Pi and Codex show the parts mark.');
+  await a.click('#nav-skills'); if (await a.has('#open-triage')) await a.click('#open-triage');
+  await shot(a, 'skills-provenance', 'Skills page, triage opened: it says which plugin it came from, with a way to its page.');
+  await a.click('#nav-mcp'); if (await a.has('#open-issues')) await a.click('#open-issues');
+  await shot(a, 'mcp-provenance', 'MCP page, issues opened: the server in Pi’s and Codex’s own formats, from issue-tracker.');
+  // The marketplace publishes a new version: the triage skill changed.
+  edit(join(market, 'plugins/issue-tracker/skills/triage/SKILL.md'), text => text.replace('Follow the steps.', 'Follow the steps, then label it.'));
+  edit(join(market, '.claude-plugin/marketplace.json'), text => text.replace('"version": "2.0.0"', '"version": "2.1.0"'));
+  await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back');
+  await a.click('#header-refresh'); await waitFor(a, `document.querySelector('#pcell-0-issue-tracker-pi-cli')?.dataset.state === 'parts-changed'`, 60000);
+  await shot(a, 'list-out-of-date', 'The marketplace published 2.1.0 and Refresh read it again: the parts show as out of date.');
+  await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await shot(a, 'page-out-of-date', 'issue-tracker’s page: "Parts out of date" with Update parts.');
+  await a.click('#pparts-issue-tracker'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-updated', 'Clicked Update parts, then Apply all.');
+  await a.click('#pcell-0-issue-tracker-pi-cli'); await shot(a, 'page-remove-chosen', 'Clicked Pi’s box: its parts are chosen for removal.');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await shot(a, 'page-removed', 'Clicked Apply all: Pi’s parts were removed together.');
+  if (await a.has('#plugins-undo')) { await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); await shot(a, 'page-undone', 'Clicked Undo: Pi’s parts are back.'); }
+  await a.theme('light'); await shot(a, 'page-light', 'The same page in the light appearance.');
+  await a.click('#plugin-back'); await shot(a, 'list-light', 'The list in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await size(width, height);
+    await shot(a, `list-${width}`, `The list at ${width}×${height}.`);
+    await a.click('#popen-0-issue-tracker'); await waitFor(a, `/(Can go in|Installed|Out of date)/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+    await shot(a, `page-${width}`, `issue-tracker’s page at ${width}×${height}.`);
+    await a.click('#plugin-back');
+  }
+  await size(1280, 800);
 }
 
 // ---------- Instructions ----------
@@ -329,7 +629,7 @@ async function everyPage(tag) {
   const isHovered = hovered && await waitFor(a, `!!document.querySelectorAll('.history-row')[1]?.matches(':hover')`, 2000);
   await shot(a, `${tag}-history`, `History ${at}${isHovered ? ', the pointer over the second row (its hover tint shows)' : ''}.`, pointer);
   await a.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
-  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `Tools ${at}.`);
   await a.click('#nav-settings'); await shot(a, `${tag}-settings`, `Settings ${at}.`);
 }
 
@@ -356,8 +656,8 @@ if (wanted('sizes')) {
     if (width === 860) {
       // An edit made outside the app while the Overview is open: the rail marks Skills with a dot until it is seen.
       await a.click('#nav-overview');
-      edit(join(practice, '.codex/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Codex for the rail.\n'));
-      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Codex) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
+      edit(join(practice, '.claude/skills/release-notes/SKILL.md'), text => text.replace(/\n*$/, '\nEdited in Claude Code for the rail.\n'));
+      if (await waitFor(a, `!!document.querySelector('.nav-unseen')`, 30000)) await shot(a, '860-rail-unseen-dot', 'At 860×560 with the sidebar as a rail: a skill edited outside the app (release-notes, in Claude Code) puts a dot at the Skills icon\'s top right, and the icons stay in one column.');
     }
     await everyPage(`${width}`);
     // Large windows open with the sidebar; folded to its rail, every page has the extra width too.
@@ -374,7 +674,8 @@ if (wanted('sizes')) {
       await a.click('#sidebar-toggle'); await everyPage('860-sidebar-open'); await a.click('#sidebar-toggle');
       // A message in the status bar at the minimum: the facts keep their words, and the message shortens.
       await a.click('#nav-skills');
-      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled])')?.id ?? ''`);
+      // A box whose copies differ opens the comparison instead of choosing a change, so it is skipped.
+      const box = await a.run(`document.querySelector('.ov-row[data-key] .cell-button:not([disabled]):not([data-state$="differs"])')?.id ?? ''`);
       if (box) {
         await a.click(`#${box}`); await a.click('#discard'); await shot(a, '860-status-message', 'Clicked a box, then Discard: the status bar says so at 860×560, with the sidebar as a rail.');
         await a.click('#sidebar-toggle');
@@ -434,7 +735,7 @@ async function toolViews(tag, home) {
   if (head) { await a.click(`#${head}`); await shot(a, `${tag}-skills-menu`, `${home}: Skills, with the first tool's menu open (it offers each other tool).`); await a.click(`#${head}`); }
   await ensureMarket(); await shot(a, `${tag}-plugins`, `${home}: Plugins, one box per tool.`);
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, `${tag}-instructions`, `${home}: Instructions, one card per tool.`);
-  await a.click('#nav-tools'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
+  await a.click('#nav-harnesses'); await shot(a, `${tag}-tools`, `${home}: Tools.`);
 }
 
 if (wanted('missing')) {
@@ -443,7 +744,7 @@ if (wanted('missing')) {
   await toolViews('before', 'The practice copy, with every tool');
   // This Mac's home looks for installed apps too: a tool installed here still counts; one that isn't (Pi) is named on Tools.
   for (const name of ['.claude', '.claude.json', '.codex']) cpSync(join(root, 'fixtures/home', name), join(HOME, name), { recursive: true });
-  await a.click('#home-actual'); await a.click('#nav-tools');
+  await a.click('#home-actual'); await a.click('#nav-harnesses');
   await shot(a, 'this-mac-tools', 'This Mac\'s home with only Claude Code\'s and Codex\'s folders: a tool installed on this machine still counts; a tool not found is named once, at the end.');
   await a.size(2560, 1440); await shot(a, 'this-mac-tools-2560', 'The same at 2560×1440: as many columns as cards.'); await a.size(1280, 800);
   const folder = join(scratch, 'two-tools');
@@ -456,7 +757,7 @@ if (wanted('missing')) {
   await toolViews('after', 'A folder with only Claude Code and Codex');
   await a.click('#nav-overview'); await shot(a, 'after-overview', 'The same folder\'s Overview: its first sentence names only the two tools.');
   await a.size(2560, 1440);
-  await a.click('#nav-tools'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
+  await a.click('#nav-harnesses'); await shot(a, 'after-2560-tools', 'The same folder\'s Tools at 2560×1440: two cards, two columns.');
   await a.click('#nav-instructions'); await waitFor(a, `!!document.querySelector('.ins-card, .empty')`); await shot(a, 'after-2560-instructions', 'Its Instructions at 2560×1440: two cards, two columns, one height.');
   await a.size(1280, 800);
   await a.size(860, 560);
@@ -470,7 +771,7 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: piOnly } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'pi-only-overview', 'A folder whose only tool is Pi: the sidebar and the Overview leave out Agents and Plugins, which Pi can\'t hold, and the Overview names them once.');
-  await a.click('#nav-tools'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
+  await a.click('#nav-harnesses'); await shot(a, 'pi-only-tools', 'The same folder\'s Tools: Pi\'s card names only what Pi can hold (skills and MCP servers).');
   await a.size(2560, 1440); await a.click('#nav-overview'); await shot(a, 'pi-only-2560-overview', 'The Pi-only Overview at 2560×1440: two kind cards in two columns.'); await a.size(1280, 800);
   // A folder with no tools at all: every page stays, each saying so.
   const empty = join(scratch, 'no-tools');
@@ -480,10 +781,10 @@ if (wanted('missing')) {
   writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), home: { mode: 'custom', path: empty } }));
   a = await launch();
   await a.click('#nav-overview'); await shot(a, 'no-tools-overview', 'A folder with no tools at all: the sidebar keeps Overview, History, Tools and Settings, and the Overview says no tools were found, with Choose another home….');
-  await a.click('#nav-tools'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-tools', 'Its Tools page: the same sentence and action, in the same place.');
   await a.click('#nav-history'); await waitFor(a, `!!document.querySelector('#history-choose-home, .history-row')`); await shot(a, 'no-tools-history', 'Its History page: the same sentence and action, in the same place.');
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
-  await a.click('#nav-tools'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
+  await a.click('#nav-harnesses'); await shot(a, 'no-tools-860-tools', 'Its Tools page at 860×560.');
   await a.size(1280, 800);
 }
 
@@ -629,6 +930,204 @@ if (wanted('settings')) {
   }
   await a.click('#nav-skills'); await shot(a, 'skills-860-unchanged', 'Another page at 860×560 for comparison: Skills, unchanged by the Settings work.');
   await size(1280, 800);
+}
+
+// ---------- Base instructions ----------
+if (wanted('base')) {
+  begin('base');
+  await a.click('#nav-instructions');
+  await waitFor(a, `!!document.querySelector('#base-card')`);
+  await a.run(`(() => { document.activeElement?.blur(); document.querySelector('#instructions-scroll').scrollTop = 0; })()`);
+  await shot(a, 'base-start', 'Clicked "Instructions". The Base instructions card is at the top; nothing is set up yet.');
+  await a.click('#base-from-claude-cli'); await shot(a, 'base-from-claude', 'Clicked "Claude Code’s CLAUDE.md" beside "or start from".');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- Write tests for every bug fix.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await shot(a, 'base-review', 'Added a line to the draft and clicked "Review changes".');
+  await a.click('#base-plan-codex-cli'); await shot(a, 'base-review-file', 'Clicked "Show the file" on the Codex row.');
+  await a.click('#base-save'); await wait(400); await shot(a, 'base-saved', 'Clicked "Save and update 3 files".');
+  await a.click('#ins-base-codex-cli'); await a.run(`document.querySelector('#ins-base-codex-cli').scrollIntoView({ block: 'center' })`); await shot(a, 'base-strip', 'Scrolled to the Codex card and clicked "Show" on its base instructions strip.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value = area.value.replace('Ask before adding a new dependency.', 'Ask before adding any new dependency or service.'); area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await shot(a, 'base-edit-review', 'Clicked "Edit" on the Base instructions card, changed one line, and clicked "Review changes".');
+  await a.click('#base-save'); await wait(400); await shot(a, 'base-edit-saved', 'Clicked "Save and update 3 files".');
+  edit(join(practice, '.codex/AGENTS.md'), text => text.replace('Run the tests', 'Run the full test suite').replace('- Write tests for every bug fix.', '- Write a test for every bug fix, first.'));
+  await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#base-restore-codex-cli')`);
+  await shot(a, 'base-edited-there', 'Outside the app, edited both Codex’s own text and its copy of the base in AGENTS.md, then clicked Refresh.');
+  await a.click('#base-diff-codex-cli'); await shot(a, 'base-edited-diff', 'Clicked "See the difference".');
+  await a.click('#base-usecopy-codex-cli'); await shot(a, 'base-usecopy-review', 'Clicked "Use AGENTS.md’s copy as the base…".');
+  await a.click('#base-back');
+  await a.click('#base-restore-codex-cli'); await shot(a, 'base-put-back-review', 'Cancelled, then clicked "Put the base back in AGENTS.md…" instead.');
+  await a.click('#base-save'); await shot(a, 'base-put-back', 'Clicked "Put the base back in AGENTS.md".');
+  await a.click('#outcome-undo-base'); await wait(400); await shot(a, 'base-undo', 'Clicked "Undo" on the result.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-tool-copilot-cli'); await a.click('#base-review');
+  await shot(a, 'base-untick-review', 'Clicked "Edit text or tools", unticked Copilot CLI, and clicked "Review changes".');
+  await a.click('#base-back'); await a.click('#base-cancel'); if (await a.has('#base-discard')) await a.click('#base-discard');
+  // Stop sharing with every tool: Codex's hand-edited copy stays, and its card offers taking the block out.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit'); await a.click('#base-stop');
+  await shot(a, 'base-stop-review', 'Clicked "Edit text or tools", then "Stop sharing with every tool…".');
+  await a.click('#base-save'); await shot(a, 'base-stopped', 'Clicked the save button.');
+  await a.run(`document.querySelector('#ins-base-out-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-stray-block', 'Scrolled to Codex: its edited block stays, with "Take the block out…".');
+  await a.click('#ins-base-out-codex-cli'); await shot(a, 'base-take-out-review', 'Clicked "Take the block out…".');
+  await a.click('#ins-back-codex-cli');
+  // Share it with every tool again for the steps below.
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli']) await a.click(`#base-tool-${tool}`);
+  await a.click('#base-review'); await a.click('#base-save');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'base-own-edit', 'Clicked "Edit" on Claude Code’s card: the editor holds only Claude Code’s own instructions.');
+  await a.click('#ins-cancel-claude-cli');
+  await a.theme('light'); await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`); await shot(a, 'base-light', 'The same page in the light appearance.'); await a.theme('dark');
+  for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) {
+    await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: width > 2000 ? 1 : 2, mobile: false }); await a.settle();
+    await shot(a, `base-${width}`, `The window at ${width}×${height}.`);
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 860, height: 560, deviceScaleFactor: 2, mobile: false }); await a.settle();
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.run(`document.querySelector('#base-restore-codex-cli')?.scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-conflict', 'At 860×560: the edited copy in AGENTS.md with its difference and both choices.');
+  await a.run(`document.querySelector('#instructions-scroll').scrollTop = 0`);
+  await a.click('#base-edit');
+  await a.run(`(() => { const area = document.querySelector('#base-text'); area.value += '- One more shared line.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  await a.click('#base-review'); await a.click('#base-review-discard');
+  await a.run(`document.querySelector('#base-review-discard-yes').scrollIntoView({ block: 'center' })`);
+  await shot(a, 'base-860-review-discard', 'At 860×560: Edit text or tools, added a line, Review changes, then Discard changes (the question is open).');
+  await a.click('#base-review-discard-yes');
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+}
+
+// ---------- Scrolled pages: sticky headers and toolbars (last: it adds a lot to the practice copy) ----------
+if (wanted('scroll')) {
+  begin('scroll');
+  // Stand-in CLIs (they answer --version and refuse anything else), so the plugin boxes are live and the column header
+  // shows its "Click a box…" hint, as on a computer with the tools installed. Nothing is clicked, so nothing runs.
+  mkdirSync(join(HOME, '.local/bin'), { recursive: true });
+  for (const [name, version] of [['claude', '2.1.309 (Claude Code)'], ['copilot', 'GitHub Copilot CLI 1.0.107.'], ['codex', 'codex-cli 0.142.3']]) {
+    writeFileSync(join(HOME, '.local/bin', name), `#!/bin/sh\n[ "$1" = "--version" ] && echo "${version}" && exit 0\nexit 9\n`);
+    chmodSync(join(HOME, '.local/bin', name), 0o755);
+  }
+  // A marketplace long enough to scroll (35 plugins), and a second one so the header shows "Refresh all".
+  const long = join(scratch, 'long-market');
+  writeMarket(long, 'long-list');
+  edit(join(long, '.claude-plugin/marketplace.json'), text => JSON.stringify({ ...JSON.parse(text), plugins: Array.from({ length: 35 }, (_, index) => ({
+    name: `team-plugin-${String(index + 1).padStart(2, '0')}`, source: './plugins/issue-tracker', category: index % 3 ? 'development' : 'productivity',
+    description: index % 2 ? 'MCP server for the team tracker, with skills for triage' : 'A longer description that goes on for a while to show how a row with plenty of text wraps or ends with an ellipsis at narrow sizes',
+  })) }, null, 2));
+  const second = join(scratch, 'second-market');
+  writeMarket(second, 'second-list');
+  await a.click('#nav-plugins');
+  for (const source of [long, second]) await addMarketplace(a, source);
+  await a.run(`[...document.querySelectorAll('.market-item')].find(item => /long-list/.test(item.textContent))?.click()`); await a.settle();
+  // Enough skills, MCP servers and agents in the practice copy that every table scrolls at every size.
+  for (let index = 1; index <= 40; index++) {
+    const name = `extra-${String(index).padStart(2, '0')}`;
+    for (const tool of index % 2 ? ['.claude'] : ['.claude', '.copilot']) {
+      mkdirSync(join(practice, tool, 'skills', name), { recursive: true });
+      writeFileSync(join(practice, tool, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: An extra skill so the table scrolls.\n---\n\nFollow the steps.\n`);
+    }
+    writeFileSync(join(practice, '.claude/agents', `${name}.md`), `---\nname: ${name}\ndescription: An extra agent so the table scrolls.\n---\n\nDo the task.\n`);
+  }
+  edit(join(practice, '.copilot/mcp-config.json'), text => {
+    const config = JSON.parse(text);
+    for (let index = 1; index <= 40; index++) config.mcpServers[`extra-${String(index).padStart(2, '0')}`] = { type: 'local', command: 'npx', args: ['-y', `@example/extra-${index}`], tools: ['*'] };
+    return JSON.stringify(config, null, 2);
+  });
+  await a.click('#header-refresh');
+  const sizes = [[860, 560, 2], [1280, 800, 2], [1728, 1117, 1], [2560, 1440, 1]];
+  // Scrolls the page's main scroller (the tallest one that can scroll) by `by` pixels, so sticky parts are tested over rows.
+  // Returns what scrolled and how far its pinned column header sits below the scroller's top (0 when the stack is right).
+  const scroll = by => a.run(`(() => {
+    const box = [...document.querySelectorAll('#page .scroll')].filter(e => e.scrollHeight > e.clientHeight).sort((x, y) => y.clientHeight - x.clientHeight)[0];
+    if (!box) return 'nothing scrolls';
+    box.scrollTop = ${by};
+    const head = box.querySelector('.ov-head');
+    if (!head) return box.id || box.className;
+    return (box.id || box.className) + '; column header ' + Math.round(head.getBoundingClientRect().top - box.getBoundingClientRect().top) + 'px below the scroller top';
+  })()`);
+  for (const page of ['plugins', 'overview', 'skills', 'mcp', 'agents', 'settings']) {
+    if (!(await a.has(`#nav-${page}`))) continue;
+    await a.click(`#nav-${page}`);
+    for (const [width, height, scale] of sizes) {
+      await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
+      for (const theme of ['dark', 'light']) {
+        await a.theme(theme);
+        const what = await scroll(Math.round(height * 0.4)); await wait(100);
+        await shot(a, `${page}-${width}-${theme}`, `${page} at ${width}×${height}, ${theme}, main list scrolled down ${Math.round(height * 0.4)}px (${what}).`);
+      }
+      await scroll(0);
+    }
+  }
+  await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
+  await a.theme('dark');
+}
+
+// ---------- Harnesses ----------
+if (wanted('harnesses')) {
+  begin('harnesses');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.run(`window.dispatchEvent(new Event('resize'))`); await a.settle(); };
+  const sizes = async (name, caption) => {
+    for (const [width, height] of [[860, 560], [1728, 1117], [2560, 1440]]) for (const theme of ['dark', 'light']) { await size(width, height); await a.theme(theme); await shot(a, `${name}-${width}-${theme}`, `${caption} Window ${width}×${height}, ${theme} appearance.`); }
+    await a.theme('dark'); await size(1280, 800);
+  };
+  await a.click('#nav-harnesses'); await waitFor(a, `!/…/.test(document.querySelector('.harness-cards')?.textContent ?? '…')`);
+  await shot(a, 'list-dark', 'Clicked "Harnesses" in the sidebar: one card per tool with what it has. Window 1280×800.');
+  await a.theme('light'); await shot(a, 'list-light', 'The same, light appearance.'); await a.theme('dark');
+  await sizes('list', 'The Harnesses list.');
+  if (await a.has('[id^="harness-claude-cli-differ-"]')) { await a.click('[id^="harness-claude-cli-differ-"]'); await shot(a, 'claude-differ-link', 'Clicked "1 skill with different copies" on the Claude Code card: its page, showing only those.'); await a.run(`[...document.querySelectorAll('.chip')].find(chip => chip.textContent.trim() === 'All')?.click()`); await a.settle(); await a.click('#harness-back'); }
+  await a.click('#harness-claude-cli'); await shot(a, 'claude-skills', 'Clicked the Claude Code card: its page, on the Skills tab. Its column comes first; skills only other tools have are under "Not in Claude Code".');
+  await sizes('claude-skills', 'Claude Code’s Skills tab.');
+  await a.click('#harness-add-from'); await shot(a, 'claude-add-menu', 'Clicked "Add from…" in the toolbar (the Claude Code column header opens the same menu): it adds other tools’ skills here.');
+  if (await a.has('#menu-add-copilot-cli-claude-cli:not([disabled])')) { await a.click('#menu-add-copilot-cli-claude-cli'); await shot(a, 'claude-pending', 'Clicked "Add" on the Copilot CLI row: the changes wait for Apply all.'); }
+  if (await a.has('#apply:not([disabled])')) { await a.click('#apply'); await a.settle(); await shot(a, 'claude-applied', 'Clicked "Apply all".'); }
+  await a.click('#open-release-notes'); await shot(a, 'claude-details', 'Opened release-notes’ details from its row.');
+  await a.click('#harness-tab-mcp'); await shot(a, 'claude-mcp', 'Clicked the "MCP servers" tab.');
+  await a.click('#harness-tab-agents'); await shot(a, 'claude-agents', 'Clicked the "Agents" tab.');
+  await a.click('#harness-tab-instructions'); await waitFor(a, `!!document.querySelector('#ins-edit-claude-cli')`); await shot(a, 'claude-instructions', 'Clicked the "Instructions" tab: Claude Code’s own file, editable here.');
+  await sizes('claude-instructions', 'The Instructions tab.');
+  await a.click('#ins-edit-claude-cli'); await shot(a, 'claude-instructions-editing', 'Clicked Edit.');
+  await size(860, 560); await shot(a, 'claude-instructions-editing-860', 'Editing at 860×560.');
+  await a.run(`(() => { const area = document.querySelector('#ins-text-claude-cli'); area.value += '- A line added in the tour, long enough to show how the review wraps a changed line at the smallest window size.\\n'; area.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+  if (await a.has('#ins-review-claude-cli')) { await a.click('#ins-review-claude-cli'); await shot(a, 'claude-instructions-review-860', 'Added a line and clicked "Review changes" at 860×560: the diff before saving.'); }
+  await size(1280, 800);
+  // Throw the tour's line away and edit afresh for the next shot.
+  for (const id of ['#ins-back-claude-cli', '#ins-cancel-claude-cli', '#ins-discard-claude-cli']) if (await a.has(id)) await a.click(id);
+  await a.click('#ins-edit-claude-cli');
+  await size(2560, 1440); await shot(a, 'claude-instructions-editing-2560', 'Editing at 2560×1440: the editor keeps a reading measure.'); await size(1280, 800); if (await a.has('#ins-cancel-claude-cli')) await a.click('#ins-cancel-claude-cli');
+  // With the Plugins tour run first, install document-tools again so this tab has something to show.
+  if (wanted('plugins')) {
+    await a.click('#nav-plugins'); if (await a.has('#plugin-back')) await a.click('#plugin-back'); await waitFor(a, `!!document.querySelector('#popen-0-document-tools')`); await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('.plugin-group')`);
+    if (await a.has('#pinstall-0-document-tools:not([disabled])')) { await a.click('#pinstall-0-document-tools'); await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle(); }
+    await a.click('#nav-harnesses'); await a.click('#harness-claude-cli');
+  }
+  await a.click('#harness-tab-plugins'); await waitFor(a, `!/Reading/.test(document.querySelector('#harness-body')?.textContent ?? '')`); await shot(a, 'claude-plugins', 'Clicked the "Plugins" tab: plugins installed in Claude Code, each opening its page on Plugins.');
+  await a.click('#harness-tab-about'); await shot(a, 'claude-about', 'Clicked the "About" tab: how it was found and where its files are.');
+  await sizes('claude-about', 'The About tab.');
+  await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
+  await a.theme('light'); await shot(a, 'copilot-skills-light', 'The same, light appearance.'); await a.theme('dark');
+  // A mouse click (detail 1), as a person makes it; a scripted click() reads as the keyboard.
+  await a.run(`document.querySelector('#harness-back').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))`); await a.settle(); await shot(a, 'back', 'Clicked "Harnesses" in the header’s breadcrumb with the mouse.');
+  // A fourth harness: Pi, with one skill of its own, so the table has four tool columns.
+  const piSkill = join(practice, '.pi/agent/skills/pi-notes');
+  mkdirSync(piSkill, { recursive: true });
+  writeFileSync(join(piSkill, 'SKILL.md'), '---\nname: pi-notes\ndescription: Notes kept in Pi only.\n---\n\nWrite short notes.\n');
+  // And a skill with a long name and a long description, to see how rows fit.
+  const longSkill = join(practice, '.claude/skills/summarise-incident-timeline-from-pager-and-chat-logs');
+  mkdirSync(longSkill, { recursive: true });
+  writeFileSync(join(longSkill, 'SKILL.md'), '---\nname: summarise-incident-timeline-from-pager-and-chat-logs\ndescription: Builds a minute-by-minute incident timeline from pager alerts, chat threads and deploy logs, then drafts the summary section of the postmortem with owners and open questions.\n---\n\nRead the logs.\n');
+  await a.click('#header-refresh'); await a.settle();
+  await shot(a, 'four-list', 'Added a Pi skills folder with one skill to the practice copy, then clicked Refresh: four harnesses.');
+  await a.click('#harness-pi-cli'); await a.click('#harness-tab-skills');
+  for (const [width, height] of [[860, 560], [1150, 800], [1280, 800], [1728, 1117]]) { await size(width, height); await shot(a, `pi-skills-${width}`, `Pi's page, Skills tab, with four tool columns. Window ${width}×${height}.`); }
+  await size(860, 560);
+  const last = await a.run(`[...document.querySelectorAll('.ov-head .tool-head-button')].at(-1)?.id`);
+  if (last) { await a.click(`#${last}`); await shot(a, 'last-menu-860', 'Clicked the right-most column header at 860×560: its menu stays inside the window.'); await a.click(`#${last}`); }
+  await a.click('#harness-tab-agents'); await shot(a, 'pi-agents-860', 'Pi’s Agents tab: Pi doesn’t use agents.');
+  await a.click('#harness-tab-skills'); await a.click('#cell-release-notes-pi-cli'); await shot(a, 'pi-pending-860', 'Ticked release-notes’ Pi box at 860×560: the change waits, and the toolbar wraps for it.'); await a.click('#discard');
+  await size(1280, 800);
+  // This computer's home (in the tour, an empty throwaway folder on Linux): detection, a Not found card, and its header.
+  await a.click('#home-actual'); await a.click('#nav-harnesses'); await shot(a, 'this-computer-list', 'Clicked "This computer’s home" at the bottom left, then Harnesses: each tool with how it was found; tools not found have a card that does not open.');
 }
 
 // ---------- Git repo ----------

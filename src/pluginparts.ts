@@ -3,20 +3,33 @@
 import { rerender, state as app } from './app.ts';
 import { h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
-import { queued, toggle } from './pluginplan.ts';
-import { clearNotice, market, openLink } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, stateOf, unavailable } from './pluginstatus.ts';
-import type { HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
+import { componentsFrom } from './pluginoutcomes.ts';
+import { pluginKey, queued, toggle, type PluginAction } from './pluginplan.ts';
+import { clearNotice, market, openLink, shownDetail } from './pluginstate.ts';
+import { PREVIEW_ONLY, cantUninstall, partsMark, partsOf, partsSummary, stateOf, unavailable, versionDiffers, versionWord } from './pluginstatus.ts';
+import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { toolNames as names } from './words.ts';
 
 /** The name a plugin is shown by: its display name when the catalog gives one. */
 export const pluginTitle = (plugin: PluginView) => plugin.displayName ?? plugin.name;
 
+/** What a plugin holds, as far as known: the catalog's counts, or its files once read (a plugin kept elsewhere). */
+export function componentsOf(entry: MarketplaceView, plugin: PluginView): Components | undefined {
+  if (plugin.components) return plugin.components;
+  // A plugin kept elsewhere has no counts from the catalog; once the marketplace's copy of its files is read, they give them.
+  const detail = shownDetail(pluginKey(entry.source, plugin.name));
+  return detail?.offered ? componentsFrom(detail) : undefined;
+}
+
+/** "Parts from version 1.1; the plugin is now 1.2", or the same without versions, for parts whose plugin has changed. */
+export const changedWords = (parts: { version?: string; now?: string }) => (parts.now && parts.version ? `Parts are from version ${parts.version}; the plugin is now ${parts.now}` : 'The plugin’s parts have changed since they were installed');
+
 /**
- * One tool's box for one plugin: installed, not installed, chosen for Apply all, or not available, each saying why.
- * `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * One tool's box for one plugin: installed (with its version), not installed, chosen for Apply all, or not available,
+ * each saying why. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * `offered` is the version to compare with, when there is one (see versionToCompare).
  */
-export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number) {
+export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
   const id = `pcell-${marketIndex}-${plugin.name}-${tool}`;
   const working = market.working;
   if (working?.source === entry.source && working.plugin === plugin.name && working.tools.includes(tool)) {
@@ -26,23 +39,38 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   const status = stateOf(entry, plugin.name, tool);
   const pending = queued(market.draft, entry.source, plugin.name, tool);
   const name = names[tool];
-  const choose = (action: 'install' | 'remove') => (event: Event) => {
+  const choose = (action: PluginAction) => (event: Event) => {
     event.stopPropagation();
     toggle(market.draft, { source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
     clearNotice();
     rerender();
   };
   /** look: the cell's classes; state: its data-state for tests and styles; action: what a click chooses (none: not clickable). */
-  const box = ({ look, state, title, glyph, action, disabled = !!app.busy || !view.canWrite }: { look: string; state: string; title: string; glyph: Element; action?: 'install' | 'remove'; disabled?: boolean }) =>
+  const box = ({ look, state, title, glyph, action, disabled = !!app.busy || !view.canWrite }: { look: string; state: string; title: string; glyph: Element; action?: PluginAction; disabled?: boolean }) =>
     h('div.ov-cell', { role: 'cell' },
       h(`button.cell-button.${look}`, { type: 'button', id, title, 'aria-label': title, disabled, 'data-state': state, onclick: action ? choose(action) : undefined }, glyph));
 
   const why = unavailable(view, entry, plugin.name, tool);
+  // A tool that can't take the plugin may take its parts as separate items (parts.ts): its box chooses those instead.
+  const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
+  if (mark) {
+    const parts = partsOf(entry, plugin.name, tool);
+    const preview = view.canWrite ? '' : ` ${PREVIEW_ONLY}`;
+    if (pending === 'remove-parts') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove-parts', title: `${name}: its parts are removed on Apply all. Click to keep them.`, glyph: icon('x', 15), action: 'remove-parts' });
+    if (pending === 'install-parts') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'parts-chosen', title: `${name}: its parts are ${parts ? 'updated' : 'installed as separate items'} on Apply all. Click to leave ${parts ? 'them as they are' : 'them out'}.`, glyph: icon('blocks', 15), action: 'install-parts' });
+    if (mark === 'changed' && parts) return box({ look: 'cell-differs.cell-on', state: 'parts-changed', title: `${name}: ${changedWords(parts)}. ${preview.trim() || 'Click to update them on Apply all.'}`, glyph: icon('refresh-cw', 14), action: 'install-parts' });
+    if (mark === 'installed' && parts) {
+      const from = [partsSummary(parts.items), versionWord(parts.version) && `from ${versionWord(parts.version)}`].filter(Boolean).join(', ');
+      return box({ look: 'cell-synced.cell-on.cell-parts', state: 'parts', title: `${name}: its parts are installed as separate items (${from}). ${preview.trim() || 'Click to remove them on Apply all.'}`, glyph: icon('blocks', 15), action: 'remove-parts' });
+    }
+    return box({ look: 'cell-parts-offer', state: 'parts-offer', title: `${name}: ${why} ${preview.trim() || 'Click to install its parts (skills, MCP servers, agents) as separate items on Apply all.'}`, glyph: icon('plus', 13, 'plugin-add-glyph'), action: 'install-parts' });
+  }
   if (why) return box({ look: 'cell-cannot', state: 'cannot', title: `${name}: ${why}`, glyph: h('span.cannot-dash', { 'aria-hidden': 'true' }, '–'), disabled: true });
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
-    const text = `${name}: installed${status.live ? ', loaded live from the marketplace folder' : ''}`;
+    const version = status.version ? ` ${status.version}${versionDiffers(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
+    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
     return box({ look: 'cell-synced.cell-on', state: 'installed', title: stuck ? `${text}. Can’t uninstall here: ${stuck}` : `${text}. Click to uninstall on Apply all.`,
@@ -62,7 +90,7 @@ const rendered = new Map<string, HTMLElement>();
  * A README as page content. Its opening title, a first paragraph that mostly repeats a description already on the page,
  * and what only repeats the parts the page lists (`parts`, see markdown.trimRepeats) are left out.
  */
-export function readme(body: string, name: string, descriptions: string[] = [], parts: NamedPart[] = []): HTMLElement {
+export function readme(body: string, name: string, descriptions: string[] = [], parts: Pick<NamedPart, 'name' | 'description'>[] = []): HTMLElement {
   const cacheKey = JSON.stringify([name, descriptions, parts, body]);
   const cached = rendered.get(cacheKey);
   if (cached) return cached;
@@ -71,6 +99,9 @@ export function readme(body: string, name: string, descriptions: string[] = [], 
   rendered.set(cacheKey, node);
   return node;
 }
+
+/** A note in the warning tone with its icon: a tool on another version, or a copy that differs. */
+export const versionNote = (text: string | Node, extra = '') => h(`span.plugin-version-differs${extra}`, {}, icon('circle-alert', 12), text);
 
 /** Parts joined with a quiet middle dot between them: "Version 1.2 · by Docs crew · productivity". */
 export const dotted = (parts: (string | Element)[]) => parts.flatMap((part, at) => (at ? [h('span.meta-dot', { 'aria-hidden': 'true' }, '·'), part] : [part]));
