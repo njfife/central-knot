@@ -489,6 +489,18 @@ if (wanted('plugin-versions')) {
     await shot(a, `update-page-${width}`, `Opened issue-tracker with its update chosen: each tool says "Will update to 2.0.0", and the button takes it back.`);
     await a.click('#plugin-back'); await a.click('#plugins-discard');
   }
+  // Codex's copy of document-tools changes by hand at the marketplace's version (1.2.0): its page says so and offers Update.
+  edit(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0/skills/spreadsheet/SKILL.md'), text => `${text}\nAlso sort every sheet by its first column.\n`);
+  await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `/differs from the marketplace’s copy/.test(document.querySelector('.plugin-panel')?.textContent ?? '')`, 15000);
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`); await a.settle();
+    await shot(a, `copy-differs-${width}`, `At ${width}×${height}: Codex's document-tools is 1.2.0, the marketplace's version, but its spreadsheet skill was changed by hand: "Installed · 1.2.0 · differs from the marketplace’s copy", and Update is offered for Codex (with Claude Code, which is behind).`);
+    await a.click('#pupdate-0-document-tools');
+    await shot(a, `copy-differs-chosen-${width}`, `Clicked Update: Codex "Will update to the marketplace’s copy", Claude Code "Will update to 1.2.0".`);
+    await a.click('#pupdate-0-document-tools');
+  }
+  await a.click('#plugin-back');
   await size(1280, 800); await a.theme('dark');
 }
 

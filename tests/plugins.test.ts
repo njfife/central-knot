@@ -504,6 +504,40 @@ test('An update the tool says it ran but its record doesn’t show fails with wh
   } finally { await box.cleanup(); }
 });
 
+test('A copy that differs at the same version is updated, and where the tool keeps its copy, uninstalled and installed again, then compared', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copy = join(box.home, '.claude/plugins/cache/ck-test-market/full/1.0.0');
+    const record = join(box.home, '.claude/plugins/installed_plugins.json');
+    await put(join(copy, '.claude-plugin/plugin.json'), '{"name":"full","version":"1.0.0"}');
+    await put(join(copy, 'skills/one/SKILL.md'), '---\nname: one\ndescription: One.\n---\nA\n');
+    const recorded = JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy, version: '1.0.0' }] } });
+    await put(record, recorded);
+    // Claude Code's stand-in: its update says it is at the latest; an install copies the marketplace's files again.
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), `#!/bin/sh
+echo "$*" >> "$HOME/calls.txt"
+case "$2" in
+  update) echo "full is already at the latest version (1.0.0)." ;;
+  uninstall) echo '{"plugins":{}}' > "${record}" ;;
+  install) cp "${root}/plugins/full/skills/one/SKILL.md" "${copy}/skills/one/SKILL.md"; echo '${recorded}' > "${record}" ;;
+esac
+`, { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    const catalog = await parseCatalog(root, root, 'folder');
+    const differs = async () => (await readFile(join(copy, 'skills/one/SKILL.md'), 'utf8')) !== (await readFile(join(root, 'plugins/full/skills/one/SKILL.md'), 'utf8'));
+    const report = await update(context, catalog, 'full', 'claude-cli', differs);
+    assert.deepEqual([report.outcome, report.changed, report.byContent, report.version], ['updated', true, 'reinstall', '1.0.0'], report.message);
+    assert.match(report.message, /^Reinstalled from the marketplace’s copy of 1\.0\.0: Claude Code’s own update kept the copy it had\./);
+    assert.deepEqual(report.runs.map(run => run.command), ['claude plugin update full@ck-test-market --scope user', 'claude plugin uninstall full@ck-test-market --scope user', 'claude plugin install full@ck-test-market --scope user']);
+    const again = await update(context, catalog, 'full', 'claude-cli', differs);
+    assert.deepEqual([again.outcome, again.changed, again.runs.length], ['updated', undefined, 0], 'the same copy runs nothing');
+  } finally { await box.cleanup(); }
+});
+
 /** Every file under `folder` with its bytes, to show nothing in it changed. */
 async function files(folder: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {};

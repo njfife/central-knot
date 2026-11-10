@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { findApp } from '../../src/discovery.ts';
@@ -19,11 +19,12 @@ const find = process.env.CK_HARNESS_APPS ? fromApp : async (name: string) => whi
 const binaries: Partial<Record<HarnessId, string>> = { 'claude-cli': await find('claude'), 'copilot-cli': await find('copilot'), 'codex-cli': await find('codex') };
 const put = async (path: string, text: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, text); };
 
-async function marker(root: string, version = '1.0.0') {
+async function marker(root: string, version = '1.0.0', token = 'ck-mk-1') {
   await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'ck-test-market', owner: { name: 'tests' }, plugins: [{ name: 'ck-marker', source: './plugins/ck-marker', version, description: 'Marker' }] }));
   await put(join(root, 'plugins/ck-marker/.claude-plugin/plugin.json'), JSON.stringify({ name: 'ck-marker', version }));
-  await put(join(root, 'plugins/ck-marker/skills/ck-marker-skill/SKILL.md'), '---\nname: ck-marker-skill\ndescription: Central Knot marker. Reply with token ck-mk-1.\n---\nReply with the token ck-mk-1.\n');
-  for (const args of [...(version === '1.0.0' ? [['init', '-q']] : []), ['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', version]]) execFileSync('git', args, { cwd: root, stdio: 'ignore' });
+  await put(join(root, 'plugins/ck-marker/skills/ck-marker-skill/SKILL.md'), `---\nname: ck-marker-skill\ndescription: Central Knot marker. Reply with token ${token}.\n---\nReply with the token ${token}.\n`);
+  const first = !(await readdir(root).catch((): string[] => [])).includes('.git');
+  for (const args of [...(first ? [['init', '-q']] : []), ['add', '-A'], ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', `${version} ${token}`]]) execFileSync('git', args, { cwd: root, stdio: 'ignore' });
 }
 
 for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
@@ -92,6 +93,35 @@ for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
       assert.deepEqual([report.outcome, report.changed, report.version], ['updated', true, '2.0.0'], JSON.stringify(report, null, 1));
       const state = await installState(context, tool, 'ck-test-market', 'ck-marker');
       assert.ok(state.state === 'installed' && state.version === '2.0.0', JSON.stringify(state));
+    } finally { server.kill(); await rm(base, { recursive: true, force: true }); }
+  });
+}
+
+for (const tool of ['claude-cli', 'copilot-cli', 'codex-cli'] as PluginTool[]) {
+  test(`${tool}: a copy whose content changed at the same version is updated, or reinstalled, until it matches`, { skip: binaries[tool] ? false : `${tool} not on PATH` }, async () => {
+    const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-harness-')));
+    const server = spawn(process.execPath, [join(import.meta.dirname, '../../scripts/git-http-fixture.mjs'), join(base, 'served'), '0']);
+    try {
+      const root = join(base, 'market');
+      await marker(root);
+      await mkdir(join(base, 'served'), { recursive: true });
+      const served = join(base, 'served/market.git');
+      execFileSync('git', ['clone', '-q', '--bare', root, served], { stdio: 'ignore' });
+      const url = `${await new Promise<string>(done => server.stdout.once('data', chunk => done(String(chunk).trim())))}/market.git`;
+      const context: PluginContext = { home: join(base, 'home'), dataDir: join(base, 'data'), binaries, timeoutMs: 120_000 };
+      await mkdir(context.home, { recursive: true });
+      assert.equal((await install(context, await readCatalog(context, url), 'ck-marker', tool)).outcome, 'installed');
+      // The skill's text changes; the version stays 1.0.0.
+      await marker(root, '1.0.0', 'ck-mk-2');
+      execFileSync('git', ['push', '-q', served, 'HEAD:' + execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: served, encoding: 'utf8' }).trim()], { cwd: root, stdio: 'ignore' });
+      const catalog = await readCatalog(context, url);
+      const skill = async () => { const state = await installState(context, tool, 'ck-test-market', 'ck-marker'); return state.state === 'installed' ? readFile(join(state.path, 'skills/ck-marker-skill/SKILL.md'), 'utf8').catch(() => '') : ''; };
+      const differs = async () => !(await skill()).includes('ck-mk-2');
+      assert.equal(await differs(), true, 'the installed copy still has the first text');
+      const report = await update(context, catalog, 'ck-marker', tool, differs);
+      console.log(tool, report.byContent, report.message, report.runs.map(run => `${run.command} => ${run.output.trim().slice(0, 200)}`));
+      assert.deepEqual([report.outcome, report.changed], ['updated', true], JSON.stringify(report, null, 1));
+      assert.equal(await differs(), false, 'and now it has the new text');
     } finally { server.kill(); await rm(base, { recursive: true, force: true }); }
   });
 }

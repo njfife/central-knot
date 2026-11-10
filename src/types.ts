@@ -394,6 +394,7 @@ export interface NativeRun { tool: HarnessId; command: string; ok: boolean; outp
 
 export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
   /** An update: the version the tool records now. */ version?: string;
+  /** An update of a copy that differed at the same version: done by the tool's own update, or by uninstalling and installing again. */ byContent?: 'update' | 'reinstall';
   /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
   /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
 

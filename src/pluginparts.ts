@@ -6,7 +6,7 @@ import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
 import { allQueued, pluginKey, queued, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { clearNotice, market, openLink, shownDetail } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, outdated, partsMark, partsOf, partsSummary, stateOf, unavailable, updateTools, versionDiffers, versionToCompare, versionWord } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, copyStale, outdated, partsMark, partsOf, partsSummary, stateOf, unavailable, updateTools, versionDiffers, versionToCompare, versionWord } from './pluginstatus.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -70,12 +70,14 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
   // A box that can't be clicked says why, never "Click to …". An available tool has its CLI, so only a preview stops an install.
   const preview = view.canWrite ? '' : PREVIEW_ONLY;
   if (status.state === 'installed') {
+    const detail = shownDetail(pluginKey(entry.source, plugin.name));
+    const stale = copyStale(entry, plugin.name, tool, offered, detail);
     const version = status.version ? ` ${status.version}${versionDiffers(status.version, offered) ? ` (the marketplace has ${offered})` : ''}` : '';
-    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}`;
+    const text = `${name}: installed${version}${status.live ? ', loaded live from the marketplace folder' : ''}${stale ? ', which differs from the marketplace’s copy' : ''}`;
     if (pending === 'remove') return box({ look: 'cell-pending.cell-pending-remove', state: 'remove', title: `${name}: uninstalled on Apply all. Click to keep it.`, glyph: icon('x', 15), action: 'remove' });
     const stuck = cantUninstall(view, entry, plugin.name, tool);
-    if (pending === 'update') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'update', title: `${name}: updated to ${offered} on Apply all. Click to uninstall it instead.`, glyph: icon('refresh-cw', 14), action: 'remove' });
-    if (outdated(entry, plugin.name, tool, offered)) return box({ look: 'cell-differs.cell-on', state: 'outdated', title: stuck ? `${text}. Can’t update here: ${stuck}` : `${text}. Click to update it on Apply all.`, glyph: icon('refresh-cw', 14), action: 'update', disabled: !!app.busy || !!stuck });
+    if (pending === 'update') return box({ look: 'cell-pending.cell-chosen.cell-on', state: 'update', title: `${name}: updated to ${stale || !offered ? 'the marketplace’s copy' : offered} on Apply all. Click to uninstall it instead.`, glyph: icon('refresh-cw', 14), action: 'remove' });
+    if (outdated(entry, plugin.name, tool, offered, detail)) return box({ look: 'cell-differs.cell-on', state: 'outdated', title: stuck ? `${text}. Can’t update here: ${stuck}` : `${text}. Click to update it on Apply all.`, glyph: icon('refresh-cw', 14), action: 'update', disabled: !!app.busy || !!stuck });
     return box({ look: 'cell-synced.cell-on', state: 'installed', title: stuck ? `${text}. Can’t uninstall here: ${stuck}` : `${text}. Click to uninstall on Apply all.`,
       glyph: icon('check', 16), action: 'remove', disabled: !!app.busy || !!stuck });
   }
@@ -88,11 +90,13 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
 }
 
 /**
- * What Update chooses for one plugin: an update in each tool whose installed copy is older than the marketplace's, and
+ * What Update chooses for one plugin: an update in each tool whose installed copy is older than the marketplace's or
+ * differs from it at the same version (pluginstatus.outdated), and
  * its parts brought up to date in each tool holding them out of date. Empty when nothing is out of date.
  */
 export function updateOps(view: PluginsView, entry: MarketplaceView, plugin: PluginView): PluginOp[] {
-  const { plugin: tools, parts } = updateTools(view, entry, plugin.name, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name))), componentsOf(entry, plugin));
+  const detail = shownDetail(pluginKey(entry.source, plugin.name));
+  const { plugin: tools, parts } = updateTools(view, entry, plugin.name, versionToCompare(plugin, detail), componentsOf(entry, plugin), detail);
   const op = (tool: PluginOp['tool'], action: PluginOp['action']): PluginOp => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action });
   return [...tools.map(tool => op(tool, 'update')), ...parts.map(tool => op(tool, 'install-parts'))];
 }

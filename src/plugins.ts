@@ -645,6 +645,10 @@ async function native(context: PluginContext, tool: PluginTool, args: string[]):
   return { tool, command, ok: result.code === 0, output, changed };
 }
 
+/** Each tool's own install and uninstall of plugin@marketplace (`id`). */
+const installArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] })[tool];
+const uninstallArgs = (tool: PluginTool, id: string) => ({ 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] })[tool];
+
 /** Installs one plugin into one tool: adds the marketplace there if needed (never replacing a different one of the same name), installs, then reads the tool's record. */
 export async function install(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
   const runs: NativeRun[] = [];
@@ -668,8 +672,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
     if (!add.ok) return { tool, outcome: 'failed', message: `Could not add the marketplace. ${lastLines(add.output)}`.trim(), runs };
   }
   const id = `${plugin}@${catalog.name}`;
-  const args = { 'claude-cli': ['plugin', 'install', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'install', id], 'codex-cli': ['plugin', 'add', id, '--json'] }[tool];
-  const installed = await native(context, tool, args);
+  const installed = await native(context, tool, installArgs(tool, id));
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
   if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}. ${nextStepFor(tool)}`.trim(), runs };
@@ -687,8 +690,13 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
  * marketplace update M`, then `plugin update P@M`; Codex `plugin marketplace upgrade M` (which moves the installed copy
  * on its own), then `plugin add P@M` again, which for a folder marketplace is what takes the new files. An update is
  * never undone: the tools keep no way back to the earlier copy.
+ *
+ * `differs` says whether the tool's installed copy differs in content from the marketplace's (pluginstatus.copyDiffers).
+ * A copy at the marketplace's version that differs is updated by the same route, and where the tool keeps its copy then
+ * (it is at the latest version, as far as it knows), uninstalled and installed again; only a copy that no longer differs
+ * counts, and the report says which route did it (`byContent`).
  */
-export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool): Promise<ActionReport> {
+export async function update(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs?: () => Promise<boolean>): Promise<ActionReport> {
   const name = toolNames[tool];
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { tool, outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
@@ -696,7 +704,9 @@ export async function update(context: PluginContext, catalog: Catalog, plugin: s
   if (before.state !== 'installed') return { tool, outcome: 'failed', message: `It isn’t installed in ${name} now.`, runs: [] };
   const offered = catalog.plugins.find(item => item.name === plugin)?.version;
   const current = (version?: string) => !!version && !!offered && compareVersions(version, offered) >= 0;
-  if (before.live || current(before.version)) return { tool, outcome: 'updated', version: before.version, message: `Already up to date in ${name}.`, runs: [] };
+  // The marketplace's version (or no version known on one side), so only the content can be behind.
+  const contentOnly = !!differs && !before.live && !(before.version && offered && compareVersions(before.version, offered) !== 0) && (await differs());
+  if (before.live || (current(before.version) && !contentOnly)) return { tool, outcome: 'updated', version: before.version, message: `Already up to date in ${name}.`, runs: [] };
   const runs: NativeRun[] = [];
   if (catalog.kind === 'git' && (await registeredSource(context, tool, catalog.name))) {
     const refresh = await native(context, tool, ['plugin', 'marketplace', tool === 'codex-cli' ? 'upgrade' : 'update', catalog.name]);
@@ -709,9 +719,36 @@ export async function update(context: PluginContext, catalog: Catalog, plugin: s
   runs.push(updated);
   const after = await installState(context, tool, catalog.name, plugin);
   if (after.state !== 'installed') return { tool, outcome: 'failed', message: `It is no longer installed in ${name}. ${lastLines(updated.output)}`.trim(), runs };
+  if (contentOnly) return contentUpdate(context, catalog, plugin, tool, differs!, runs, lastLines(updated.output));
   const moved = after.version !== before.version || after.path !== before.path;
   if (moved && (current(after.version) || !offered)) return { tool, outcome: 'updated', changed: true, version: after.version, message: `Updated${after.version ? ` to ${after.version}` : ''}. ${nextStepFor(tool)}`.trim(), runs };
   return { tool, outcome: 'failed', message: `Still ${after.version ?? 'the earlier copy'} in ${name}${offered ? `; the marketplace has ${offered}` : ''}. ${lastLines(updated.output)}`.trim(), runs };
+}
+
+/**
+ * The rest of an update for a copy whose content differs at the same version, after the tool's own update ran (`runs`,
+ * whose last words were `said`): done if the copy now matches the marketplace's; otherwise the tool kept its copy, so it
+ * is uninstalled and installed again, and checked once more.
+ */
+async function contentUpdate(context: PluginContext, catalog: Catalog, plugin: string, tool: PluginTool, differs: () => Promise<boolean>, runs: NativeRun[], said: string): Promise<ActionReport> {
+  const name = toolNames[tool];
+  const done = async (byContent: 'update' | 'reinstall'): Promise<ActionReport> => {
+    const state = await installState(context, tool, catalog.name, plugin);
+    const version = state.state === 'installed' ? state.version : undefined;
+    const copy = `the marketplace’s copy${version ? ` of ${version}` : ''}`;
+    const how = byContent === 'update' ? `Updated to ${copy}.` : `Reinstalled from ${copy}: ${name}’s own update kept the copy it had.`;
+    return { tool, outcome: 'updated', changed: true, version, byContent, message: `${how} ${nextStepFor(tool)}`.trim(), runs };
+  };
+  if (!(await differs())) return done('update');
+  const id = `${plugin}@${catalog.name}`;
+  const removed = await native(context, tool, uninstallArgs(tool, id));
+  runs.push(removed);
+  if ((await installState(context, tool, catalog.name, plugin)).state === 'installed') return { tool, outcome: 'failed', message: `Still differs from the marketplace’s copy in ${name}, and it couldn’t be reinstalled: ${lastLines(removed.output) || said}`.trim(), runs };
+  const added = await native(context, tool, installArgs(tool, id));
+  runs.push(added);
+  if ((await installState(context, tool, catalog.name, plugin)).state !== 'installed') return { tool, outcome: 'failed', message: `Uninstalled from ${name} to reinstall it, but it isn’t installed again. Install it again from this page. ${lastLines(added.output)}`.trim(), runs };
+  if (!(await differs())) return done('reinstall');
+  return { tool, outcome: 'failed', message: `Reinstalled, but ${name}’s copy still differs from the marketplace’s. ${lastLines(added.output)}`.trim(), runs };
 }
 
 /** Uninstalls through the tool's own command and reads its record again. The marketplace stays added there. */
@@ -722,8 +759,7 @@ export async function uninstall(context: PluginContext, marketplace: string, plu
   const before = await installState(context, tool, marketplace, plugin);
   if (before.state === 'not-installed') return { tool, outcome: 'uninstalled', message: `Not installed in ${name}.`, runs: [] };
   const id = `${plugin}@${marketplace}`;
-  const args = { 'claude-cli': ['plugin', 'uninstall', id, '--scope', 'user'], 'copilot-cli': ['plugin', 'uninstall', id], 'codex-cli': ['plugin', 'remove', id, '--json'] }[tool];
-  const removed = await native(context, tool, args);
+  const removed = await native(context, tool, uninstallArgs(tool, id));
   const state = await installState(context, tool, marketplace, plugin);
   if (state.state === 'not-installed') return { tool, outcome: 'uninstalled', changed: true, message: `Uninstalled from ${name}. The marketplace stays added there.${before.state === 'installed' && before.live ? ' Its folder is the marketplace’s own and stays.' : ''}`, runs: [removed] };
   return { tool, outcome: 'failed', message: `Still installed. ${lastLines(removed.output)}`.trim(), runs: [removed] };

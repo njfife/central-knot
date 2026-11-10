@@ -8,7 +8,7 @@ import { componentsFrom, outcomes } from './pluginoutcomes.ts';
 import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
-import { cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partStillIn, partsWhy, partWords, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
+import { cantSwitchSkill, comparableText, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partStillIn, partsWhy, partWords, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
 import { takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartPlan, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
@@ -46,7 +46,7 @@ function outcomesBlock(view: PluginsView, entry: MarketplaceView, plugin: Plugin
     h('span.plugin-outcome-what', {}, byTool[tools[0]!].map(line)))));
 }
 
-/** "Installed · 1.2.0", then `more` ("1 skill off"). When the tool has another version than the marketplace offers, a second line says which. */
+/** "Installed · 1.2.0", then `more` ("differs from the marketplace’s copy", "1 skill off"). When the tool has another version than the marketplace offers, a second line says which. */
 function installedLine(version: string | undefined, offered: string | undefined, more: string[] = []) {
   const line = [version ? `Installed · ${version}` : 'Installed', ...more].filter(Boolean).join(' · ');
   const other = marketplaceVersionNote(version, offered);
@@ -67,12 +67,13 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     const parts = partsOf(entry, plugin.name, tool);
-    if (chosen) return ({ install: 'Will install', update: compareTo ? `Will update to ${compareTo}` : 'Will update', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts' } as Partial<Record<PluginAction, string>>)[chosen] ?? '';
+    const stale = copyStale(entry, plugin.name, tool, compareTo, shownDetail(pluginKey(entry.source, plugin.name)));
+    if (chosen) return ({ install: 'Will install', update: stale ? 'Will update to the marketplace’s copy' : compareTo ? `Will update to ${compareTo}` : 'Will update', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts' } as Partial<Record<PluginAction, string>>)[chosen] ?? '';
     const state = stateOf(entry, plugin.name, tool);
     if (state.state === 'installed') {
       const switching = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { tool }).filter(op => op.action === action).length;
       const willOff = switching('skill-off'), willOn = switching('skill-on');
-      return installedLine(state.version, compareTo, [state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
+      return installedLine(state.version, compareTo, [stale ? 'differs from the marketplace’s copy' : '', state.skillsOff?.length ? `${plural(state.skillsOff.length, 'skill')} off` : '',
         willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : '']);
     }
     const mark = partsMark(view, entry, plugin.name, tool, components);

@@ -220,12 +220,23 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
 
 /** A result group: its tools, the words before them, and any after. */
 type Group = [string[], string, string?];
-/** The tools an update changed, by the version each records now ("updated to 2.0.0 in Claude Code and Codex"), the last group saying it can't be undone. */
+/**
+ * The tools an update changed, by the version each records now ("updated to 2.0.0 in Claude Code and Codex"), and apart
+ * from those, the copies that differed at the same version, by how each was brought up to date ("updated to the
+ * marketplace's copy of 1.2.0 in Codex", "reinstalled from the marketplace's copy of 1.2.0 in Claude Code"). The last
+ * group says it can't be undone.
+ */
 function updatedGroups(mine: PluginDone[]): Group[] {
   const changed = mine.filter(entry => entry.report.outcome === 'updated' && entry.report.changed).sort((first, second) => byToolOrder(first.tool, second.tool));
-  const versions = [...new Set(changed.map(entry => entry.report.version ?? ''))];
-  return versions.map((version, at): Group => [changed.filter(entry => (entry.report.version ?? '') === version).map(entry => names[entry.tool]),
-    `${at ? '' : 'updated '}${version ? `to ${version} ` : ''}in`, at === versions.length - 1 ? ', which can’t be undone' : undefined]);
+  const keyOf = (entry: PluginDone) => `${entry.report.byContent ?? ''}\u0000${entry.report.version ?? ''}`;
+  const keys = [...new Set(changed.map(keyOf))];
+  const firstPlain = keys.findIndex(key => key.startsWith('\u0000'));
+  return keys.map((key, at): Group => {
+    const [how, version] = key.split('\u0000') as [string, string];
+    const copy = `the marketplace’s copy${version ? ` of ${version}` : ''}`;
+    const verb = how === 'reinstall' ? `reinstalled from ${copy} in` : how === 'update' ? `updated to ${copy} in` : `${at === firstPlain ? 'updated ' : ''}${version ? `to ${version} ` : ''}in`;
+    return [changed.filter(entry => keyOf(entry) === key).map(entry => names[entry.tool]), verb, at === keys.length - 1 ? ', which can’t be undone' : undefined];
+  });
 }
 
 /**
