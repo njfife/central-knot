@@ -889,7 +889,8 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
   past.undoneBy = randomUUID();
   await replaceHistory(context, history);
   const results: DestinationResult[] = [
-    { item: past.item, outcome: 'written', message: 'The base instructions are back.' },
+    // What the Pull replaced is what comes back: the base it emptied, the text before its edit, or no base at all.
+    { item: past.item, outcome: 'written', message: past.kind === 'deleted' ? 'The base instructions are back.' : past.base.text.trim() ? 'The base instructions are as they were before that Pull.' : 'The base instructions are empty again, as before that Pull.' },
     ...done.written.map(file => ({ item: past.item, harness: file.tool, outcome: 'written' as const, message: `Back in ${harnesses[file.tool].name}.` })),
     ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : `${harnesses[file.tool].name}’s file could not be written.` })),
     ...(done.problem ? [notIn(past.item, done.problem)] : []),

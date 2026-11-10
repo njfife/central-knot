@@ -461,7 +461,8 @@ test('The base instructions travel as instructions/base.md: Push reads the base 
     const [replaced, edit] = (await readHistory(second)).filter(event => event.key === 'instructions:base');
     assert.deepEqual([edit.kind, edit.via, edit.base?.text, replaced.base?.text], ['edit', 'repo', 'Be brief.\n', 'Be thorough.\n']);
     assert.match((await undoPulledBase(second, await second.read(), replaced.id)).stopped ?? '', /changed after that save/, 'the base moved on since the first Pull');
-    assert.equal((await undoPulledBase(second, await second.read(), edit.id)).stopped, undefined);
+    const undone = await undoPulledBase(second, await second.read(), edit.id);
+    assert.deepEqual([undone.stopped, undone.results[0].message], [undefined, 'The base instructions are as they were before that Pull.']);
     assert.deepEqual([await readFile(join(second.home, '.central-knot/instructions/base.md'), 'utf8'), (await claudeText()).base?.state], ['Be brief.\n', 'same']);
     assert.match((await claudeText()).text, /Be brief\./);
     assert.equal((await undoPulledBase(second, await second.read(), edit.id)).stopped, 'That change was already undone.');
@@ -479,7 +480,7 @@ test('The base instructions travel as instructions/base.md: Push reads the base 
     assert.ok((await baseView(second)).versions.some(version => version.firstLine === 'Be brief.'), 'the deleted base is kept as an earlier version');
     const deletion = (await readHistory(second)).find(event => event.key === 'instructions:base' && event.kind === 'deleted')!;
     assert.deepEqual([deletion.kind, deletion.via, deletion.base?.text], ['deleted', 'repo', 'Be brief.\n']);
-    assert.equal((await undoPulledBase(second, await second.read(), deletion.id)).stopped, undefined);
+    assert.equal((await undoPulledBase(second, await second.read(), deletion.id)).results[0]?.message, 'The base instructions are back.');
     assert.deepEqual([(await baseView(second)).text, (await baseView(second)).tools, (await claudeText()).base?.state], ['Be brief.\n', ['claude-cli'], 'same']);
     assert.equal((await undoPulledBase(second, await second.read(), deletion.id)).stopped, 'That change was already undone.');
   } finally { await box.cleanup(); }
