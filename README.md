@@ -122,10 +122,10 @@ npm test             # TypeScript check and unit tests (tests/*.test.ts)
 ```
 
 - **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`.
-- **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron] [--only shell,skills,…]` takes screenshots of each feature on the Practice copy, at 860×560 up to 2560×1440, dark and light.
+- **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron]` is the light tour: the app opens on the Practice copy and each page is opened once, one picture each, in a few seconds. `--only shell,skills,…` takes the pictures of the named features; `--full` takes every feature at 860×560 up to 2560×1440, dark and light (about ten minutes, for a new release).
 - **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped). `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
 - **Smoke:** `npm run smoke:mac` opens a hidden window on fixture data only.
-- **CI:** `.github/workflows/mac.yml`.
+- **CI:** `.github/workflows/mac.yml` runs the unit tests, packages the app, then runs the light tour (its pictures are the run's `light-tour` download) and the end-to-end checks against the packaged app. It runs on every push to `next`, and on any pushed branch with `gh workflow run mac.yml --ref <branch>`.
 
 ### Packaging and release
 
