@@ -269,8 +269,9 @@ const missingSince = new Map<string, number>();
 /**
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
+ * `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), the
+ * rest keeping the settle window.
  */
-/** `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), the rest keeping the settle window. */
 export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };

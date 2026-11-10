@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discover } from '../src/discovery.ts';
@@ -21,11 +21,12 @@ async function world() {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-repo-')));
   const remote = join(base, 'config.git');
   execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
-  const home = async (name: string) => {
+  const home = async (name: string, present: HarnessId[] = tools) => {
     const path = join(base, name);
-    for (const folder of ['.claude/skills', '.copilot/skills']) await mkdir(join(path, folder), { recursive: true });
+    const folders: Partial<Record<HarnessId, string>> = { 'claude-cli': '.claude/skills', 'copilot-cli': '.copilot/skills', 'codex-cli': '.codex/skills' };
+    for (const tool of present) await mkdir(join(path, folders[tool]!), { recursive: true });
     const context: ShareContext = { home: path, mode: 'custom', build: 'test', settingsPath: join(base, `${name}.json`), realHome: join(base, 'real'),
-      read: () => Promise.all(tools.map(harness => discover({ home: path, mode: 'custom', harness }))) };
+      read: () => Promise.all(present.map(harness => discover({ home: path, mode: 'custom', harness }))) };
     return context;
   };
   return { base, remote, home, cleanup: () => rm(base, { recursive: true, force: true }) };
@@ -195,6 +196,28 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
   } finally { await box.cleanup(); }
 });
 
+test('A server deleted in the repo leaves Codex for good, even when it was the last one in Codex’s settings', async () => {
+  const box = await world();
+  try {
+    const first = await box.home('first');
+    await seedServerAndAgent(first);
+    await connectRepo(first, box.remote, '');
+    await pushRepo(first);
+    const codexOnly: HarnessId[] = ['claude-cli', 'codex-cli'];
+    const second = await box.home('second', codexOnly);
+    await connectRepo(second, box.remote, '');
+    await pullRepo(second);
+    const codexSettings = join(second.home, '.codex/config.toml');
+    assert.match(await readFile(codexSettings, 'utf8'), /\[mcp_servers\.docs\]/);
+    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }));
+    await applyMcp(first, tools, [], { settleMs: 0, now: Date.now() + 86_400_000 });
+    await pushRepo(first);
+    const view = live((await pullRepo(second)).view);
+    assert.doesNotMatch(await readFile(codexSettings, 'utf8'), /\[mcp_servers\.docs\]/);
+    assert.deepEqual([rows(view.incoming), rows(view.outgoing)], [[], []]);
+  } finally { await box.cleanup(); }
+});
+
 /** A computer with one Managed skill in the repo, and a second clone of the repo to commit to it as someone else would. */
 async function oneSkillAndAnAuthor(box: Awaited<ReturnType<typeof world>>, options: { off?: HarnessId[] } = {}) {
   const first = await box.home('first');
@@ -235,6 +258,12 @@ test('A commit outside the layout still has to be pulled before a push; the bran
     assert.ok(view.pushBlocked);
     view = live((await pullRepo(first)).view);
     assert.equal(view.pushBlocked, undefined);
+    // The repo out of reach: the reason is kept to show, and Pull and Push refuse rather than act on what was last seen.
+    await rename(box.remote, `${box.remote}.away`);
+    assert.match(live(await repoView(first, { check: true })).problem ?? '', /No access/);
+    assert.match((await pullRepo(first)).stopped ?? '', /No access/);
+    assert.match((await pushRepo(first)).stopped ?? '', /No access/);
+    await rename(`${box.remote}.away`, box.remote);
     git(box.remote, 'update-ref', '-d', 'refs/heads/main');
     view = live(await repoView(first, { check: true }));
     assert.deepEqual([view.branchGone, view.incoming, view.outgoing], [true, [], []]);
@@ -386,6 +415,11 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     assert.deepEqual(git(box.remote, 'ls-tree', '-r', '--name-only', 'main').split('\n'), ['.gitignore', 'README.md', 'mcp/notes.json', 'skills/README.md', 'skills/linked/SKILL.md', 'skills/linked/alias.md', 'skills/mine/SKILL.md', 'skills/mine/debug.log', 'skills/tidy/.DS_Store', 'skills/tidy/SKILL.md', 'skills/vendored']);
     assert.deepEqual(view.outgoing, []);
     assert.equal(git(box.remote, 'show', 'main:mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }');
+    // Changed here, it goes over the repo's file: the hand-written key stays.
+    await writeFile(join(here.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { notes: { type: 'local', command: 'notes-server', args: ['--v2'], tools: ['*'] } } }));
+    await applyMcp({ ...here, settleMs: 0 }, tools, []);
+    assert.equal((await pushRepo(here)).stopped, undefined);
+    assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/notes.json')), { type: 'stdio', command: 'notes-server', args: ['--v2'], note: 'ask Sam before changing' });
   } finally { await box.cleanup(); }
 });
 

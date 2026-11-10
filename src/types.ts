@@ -411,6 +411,8 @@ export interface RepoChange {
   alsoHere?: 'changed' | 'removed' | 'unmanaged';
   /** Incoming, an MCP server's or agent's deletion: 'waits' while Automatic sync is off (Pull can't spread it); 'ready' once sync is on after a Pull left it waiting. */
   sync?: 'waits' | 'ready';
+  /** Incoming: what Pull does with it now: brings it in, tries it again (the last Pull left it), leaves it until Automatic sync is on, or can't take it. */
+  pull?: 'moves' | 'again' | 'waits' | 'stuck';
   /** Outgoing: removed in the repo but changed here, so your change stays and goes back with the next Push. */
   keptHere?: boolean;
   /** Why it can't be brought across, if it can't. */

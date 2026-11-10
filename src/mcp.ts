@@ -308,8 +308,9 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
 /**
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
+ * `decideNow`: servers whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), never as a
+ * reset; the rest keep the settle window.
  */
-/** `decideNow`: servers whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), the rest keeping the settle window. */
 export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
@@ -333,7 +334,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   for (const tool of present) {
     if (missingFiles.has(tool) || unreadable.has(tool)) continue;
     const held = Object.entries(record.items).filter(([, item]) => item.state === 'shared' && !item.off.includes(tool) && item.copies.some(copy => copy.tool === tool && !copy.status && !copy.away));
-    const gone = held.filter(([name]) => !byName.get(name)?.[tool]);
+    // A server the person just removed (decideNow) is a deletion, even when it was the file's last one.
+    const gone = held.filter(([name]) => !byName.get(name)?.[tool] && !options.decideNow?.has(name));
     if (gone.length && (noSection.has(tool) || (held.length >= 2 && gone.length === held.length))) resetTools.add(tool);
   }
   const results: DestinationResult[] = [];

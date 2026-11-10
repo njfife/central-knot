@@ -1,5 +1,5 @@
 import { loadSettings } from './settingspage.ts';
-import { loadRepo, loadRepoSoon } from './repopage.ts';
+import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import type { ApplyResult, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HomeMode, HomeView, McpResult, ClaudeWrite } from './types.ts';
 import { plural } from './model.ts';
 import { andList, toolName, toolNames as namedTools } from './words.ts';
@@ -152,6 +152,7 @@ const readSummary = (view: HomeView) => {
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
+  if (view && view.home !== previous?.home) forgetRepoPrompts();
   const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
@@ -184,7 +185,7 @@ export function showPage(page: Page) {
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   // A home-switch result survives one page change, since switching is often followed by a click elsewhere.
   const carried = state.outcome?.carry ? { ...state.outcome, page, carry: false } : undefined;
-  if (page !== state.page) { announce(''); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
+  if (page !== state.page) { announce(''); forgetRepoPrompts(); state.outcome = carried; state.applied = undefined; state.mcpResult = undefined; state.agentsResult = undefined; state.skillsView = 'table'; }
   if (page === 'history') void loadHistory();
   if (page === 'settings') void loadSettings();
   if (page === 'repo') void loadRepo(true);

@@ -26,6 +26,12 @@ export const repo = {
   confirmDisconnect: false,
 };
 
+/** Leaving the page or the home: what the last Connect, Pull, Push or Disconnect said, and an open question, belong to it alone. */
+export function forgetRepoPrompts(): void {
+  repo.problem = undefined;
+  repo.confirmDisconnect = false;
+}
+
 /** Each load's turn: an older load that finishes late never overwrites a newer one, or ends its "Checking…". */
 let loads = 0;
 
@@ -41,6 +47,9 @@ let inFlight: Promise<RepoView | null> | undefined;
 /** Whether any load since the last check asked for one: whichever load ends up newest does it, so an overtaken load's ask isn't lost. */
 let wantCheck = false;
 
+/** An error from the main process in plain words (Electron prefixes the method it came through). */
+const errorText = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
   const turn = ++loads;
@@ -49,7 +58,8 @@ export async function loadRepo(check = false): Promise<void> {
   const joined = inFlight;
   if (joined) await joined.catch(() => undefined);
   let view: RepoView | undefined;
-  try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
+  // A read that fails keeps the last view on screen and says why, rather than leave a blank page.
+  try { view = (await api().repo(false)) ?? undefined; } catch (error) { view = repo.view; repo.problem = `Couldn’t read the repo’s state: ${errorText(error)}`; }
   if (turn !== loads) return;
   check = wantCheck && !joined;
   wantCheck = false;
@@ -99,7 +109,7 @@ const pull = (byKeyboard: boolean) => void pullNow().then(() => { if (byKeyboard
  * What a Pull did, for its band: what came in, what it left (one left is named; ones waiting for Automatic sync were foreseen by
  * their rows, any other is a surprise and warns), what a tool didn't take, and Claude Code's own step. `names` are the items named.
  */
-export function pullSummary(result: RepoResult): { text: string; note?: string; warn: boolean; names: string[]; claudeWaits: string[] } {
+function pullSummary(result: RepoResult): { text: string; note?: string; warn: boolean; names: string[]; claudeWaits: string[] } {
   const count = result.pulled ?? 0;
   const claudeWaits = result.waitsForClaude ?? [];
   const leftRows = result.view.connected ? result.view.incoming.filter(change => change.retry) : [];
@@ -131,11 +141,11 @@ export function pullSummary(result: RepoResult): { text: string; note?: string; 
 
 const pullNow = () => busy('Pulling from the repo…', async () => {
   const result = await api().pullRepo(state.home!.home);
-  const summary = pullSummary(result);
-  await settle(result, summary.text, summary.note, summary.warn);
+  const said = pullSummary(result);
+  await settle(result, said.text, said.note, said.warn);
   if (!state.outcome) return;
-  state.outcome.items = summary.names;
-  if (summary.claudeWaits.length) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
+  state.outcome.items = said.names;
+  if (said.claudeWaits.length) state.outcome.act = { label: 'Open MCP servers', id: 'repo-go-mcp', run: () => showPage('mcp') };
 });
 
 const push = (byKeyboard: boolean) => void pushNow().then(() => { if (byKeyboard) keepFocus('repo-push'); });
@@ -180,12 +190,9 @@ const commitText = (commit: RepoCommit) => h('span.repo-commit', { title: `${com
   h('span.mono.repo-sha', {}, commit.id.slice(0, 7)), commit.subject ? [' ', h('span.repo-subject', {}, commit.subject)] : null,
   commit.at ? [' ', h('span.tone-muted.repo-when', {}, when(commit.at))] : null);
 
-/**
- * What Pull can do with an incoming row right now: move it, try it again (the last Pull couldn't finish it), nothing until Automatic
- * sync is on (the main process marks those: an MCP server's or agent's deletion can't spread without it), or nothing (held).
- */
-type PullState = 'moves' | 'again' | 'waits' | 'stuck';
-const pullState = (change: RepoChange): PullState => (change.sync === 'waits' ? 'waits' : change.retry ? 'again' : change.held ? 'stuck' : 'moves');
+/** What Pull does with an incoming row now, as the main process decided it (classify): the page never works it out again. */
+type PullState = NonNullable<RepoChange['pull']>;
+const pullState = (change: RepoChange): PullState => change.pull ?? 'moves';
 
 /** A row's note: what Pull or Push will do with it, or why it can't; `warns` when the reader should look twice. */
 function rowNote(change: RepoChange, side: 'in' | 'out'): { text: string | HTMLElement; warns: boolean } | undefined {
@@ -233,11 +240,13 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
 /** An item its button won't move: held for good, or (coming in) waiting for Automatic sync. */
 const stuckRow = (change: RepoChange, side: 'in' | 'out') => (side === 'in' ? ['stuck', 'waits'].includes(pullState(change)) : !!change.held);
 
+/** A note under a list's head: why its button can't run, or what it does when it moves none of the rows. */
+interface SideNote { id?: string; text: string; warns: boolean; act?: HTMLElement }
 /**
- * One direction: its items, the button that moves them, what of them the button won't move (beside it, in the state line's words),
- * and a note under it (why the button can't run, or what it does when it moves none of the rows).
+ * One direction: its items, the button that moves them (`action`), what of them the button won't move (`stuck`, beside it, in the
+ * state line's words), and a note under it.
  */
-function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, stuck: string, note?: { id?: string; text: string; warns: boolean; act?: HTMLElement }) {
+function changeList({ id, title, changes, side, action, empty, stuck, note }: { id: string; title: string; changes: RepoChange[]; side: 'in' | 'out'; action: HTMLElement | null; empty: string; stuck: string; note?: SideNote }) {
   return h('section.repo-side', { 'aria-labelledby': id },
     // Title, its button, then what it won't move: the button stays put whatever is held. With no button there, the rows just below say it.
     h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck && action ? h('span.repo-stuck-count', {}, stuck) : null),
@@ -281,7 +290,7 @@ function sameCommitText(counts: Waiting): string {
 const pushCountText = (view: ConnectedRepoView, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
 
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
-function summary(view: ConnectedRepoView, counts: Waiting): HTMLElement {
+function stateLine(view: ConnectedRepoView, counts: Waiting): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
   const words = waitingWords(counts);
   const stuck = [words.stuckIn, words.stuckOut].filter(Boolean).join(', ');
@@ -382,7 +391,7 @@ function connectedPage(view: ConnectedRepoView) {
   const activity = parts.flatMap((text, index) => [index ? ' ' : '', h('span.repo-activity-part', {}, `${index ? text : text.charAt(0).toUpperCase() + text.slice(1)}${index < parts.length - 1 ? ',' : ''}`)]);
   return h('div.page.repo-page', {},
     h('div.toolbar.repo-toolbar', {},
-      summary(view, counts),
+      stateLine(view, counts),
       h('span.toolbar-spacer'),
       // While the question is open it stands in for this button, so the button steps aside rather than sit there dimmed.
       repo.confirmDisconnect ? null : button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled: locked, onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-cancel')?.focus(); } })),
@@ -407,10 +416,12 @@ function connectedPage(view: ConnectedRepoView) {
         : inSync ? h('p.repo-in-sync', {}, 'Refresh checks the repo for new commits.')
         : h('div.repo-sides', {},
           // When Pull moves none of the rows, the note under it explains the list, so no count beside it.
-          changeList('repo-incoming', 'From the repo', view.incoming, 'in', pullControl, view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', pullMovesNone ? '' : words.stuckIn,
-            pullMovesNone && !view.problem ? { id: PULL_NOTE_ID, text: movesNoneText, warns: false, act: turnSyncOn } : undefined),
-          changeList('repo-outgoing', 'From this computer', view.outgoing, 'out', pushControl, 'Nothing here that the repo doesn’t have.', words.stuckOut,
-            counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined)),
+          changeList({ id: 'repo-incoming', title: 'From the repo', changes: view.incoming, side: 'in', action: pullControl,
+            empty: view.latest ? 'Nothing new in the repo.' : 'The repo is empty. Push to put your Managed set in it.', stuck: pullMovesNone ? '' : words.stuckIn,
+            note: pullMovesNone && !view.problem ? { id: PULL_NOTE_ID, text: movesNoneText, warns: false, act: turnSyncOn } : undefined }),
+          changeList({ id: 'repo-outgoing', title: 'From this computer', changes: view.outgoing, side: 'out', action: pushControl,
+            empty: 'Nothing here that the repo doesn’t have.', stuck: words.stuckOut,
+            note: counts.push && !view.problem && view.pushBlocked ? { id: 'repo-outgoing-blocked', text: view.pushBlocked, warns: true } : undefined })),
       h('p.repo-aside', {}, `Only Managed ${carried(view.withBase)} go to the repo; other files there stay as they are.`)));
 }
 
@@ -456,7 +467,9 @@ function connectForm(allowed: boolean) {
 
 export function repoPage(): HTMLElement {
   const view = repo.view;
-  if (!view) return h('div.page', {}, h('div.toolbar'), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading…' : 'The repo could not be read.')));
+  // Never read (it failed the first time): the reason, and Disconnect, which needs no reading, as a way out.
+  if (!view) return h('div.page.repo-page', {}, h('div.bands', {}, problemBand(undefined)), h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading…' : 'The repo could not be read.'),
+    state.busy ? null : button({ variant: 'outline', size: 'small', icon: 'unplug', label: 'Disconnect', id: 'repo-disconnect-unread', onclick: () => void disconnect() })));
   if (view.connected) return connectedPage(view);
   return h('div.page.repo-page', {},
     h('div.bands', {}, view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)), problemBand(undefined), outcomeBand()),

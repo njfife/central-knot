@@ -1,5 +1,5 @@
 // History: what sync did on its own, newest first, with Undo or Restore where the kept content allows it (CON-02, DEL-03).
-import { clockTime } from './model.ts';
+import { clockTime, nearDay } from './model.ts';
 import { restoreEvent, showPage, state, presentCount } from './app.ts';
 import { toolNames } from './words.ts';
 import { changePanel, outcomeBand, seeChangeLink } from './matrix.ts';
@@ -59,10 +59,8 @@ function choices(event: HistoryEvent) {
 /** Rows are grouped by day; each row shows its time, or "Just now". */
 const time = (iso: string) => (Date.now() - Date.parse(iso) < 60_000 ? 'just now' : clockTime(iso));
 const day = (iso: string) => {
-  const date = new Date(iso);
-  if (date.toDateString() === new Date().toDateString()) return 'Today';
-  if (date.toDateString() === new Date(Date.now() - 86_400_000).toDateString()) return 'Yesterday';
-  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const near = nearDay(iso);
+  return near ? `${near.charAt(0).toUpperCase()}${near.slice(1)}` : new Date(iso).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
 };
 /** What an Undo, Redo or Restore button will do, said before the click. */
 const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
