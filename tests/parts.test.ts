@@ -249,3 +249,16 @@ test('A profile turning a part MCP server off is no edit: Remove parts still tak
     }
   } finally { await box.cleanup(); }
 });
+
+test('Claude Code with no CLI takes a plugin’s skills and agents as they are, and no MCP servers, which only Write to Claude Code writes', async () => {
+  const box = await sandbox();
+  try {
+    await mkdir(join(box.home, '.claude'), { recursive: true });
+    const claude = await installParts(box.context, { ...target, tool: 'claude-cli' }, await box.files());
+    assert.equal(claude.outcome, 'installed', claude.message);
+    assert.equal(await readFile(join(box.home, '.claude/skills/figma-design/SKILL.md'), 'utf8'), SKILL);
+    assert.equal(await readFile(join(box.home, '.claude/agents/designer.md'), 'utf8'), AGENT);
+    await assert.rejects(readFile(join(box.home, '.claude.json')));
+    assert.match(claude.message, /figma: Claude Code’s MCP servers are written only with Write to Claude Code/);
+  } finally { await box.cleanup(); }
+});

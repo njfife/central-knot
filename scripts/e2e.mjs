@@ -1534,6 +1534,15 @@ async function fewToolsFlow() {
   same('when the open page’s kind leaves the home, the Overview opens', [await a.text('.page-title'), await pages()], ['Overview', ['overview', 'harnesses', 'skills', 'mcp', 'instructions', 'profiles', 'history', 'repo', 'settings']]);
   const moved = await a.run(`document.querySelector('#announcement').dataset.text`);
   check('and the status bar says what was read and why the page moved', /^Read .*No tool here holds agents now\.$/.test(moved ?? ''), moved);
+  // Claude desktop alone, with no CLI and no .claude folder yet: Claude Code is here, said so with both versions.
+  mkdirSync(join(home, 'Applications/Claude.app/Contents'), { recursive: true });
+  writeFileSync(join(home, 'Applications/Claude.app/Contents/Info.plist'), '<?xml version="1.0"?>\n<plist><dict><key>CFBundleShortVersionString</key><string>4.16336.0</string></dict></plist>\n');
+  mkdirSync(join(home, 'Library/Application Support/Claude/claude-code/2.1.317'), { recursive: true });
+  await a.click('#header-refresh');
+  check('Claude desktop alone brings Claude Code back, with agents and plugins', (await pages()).includes('plugins'), await pages());
+  await a.click('#nav-harnesses');
+  const desktopCard = await a.text('#harness-claude-cli');
+  check('its card names the app, its version, its Code tab’s version and no CLI', desktopCard.includes('Claude desktop 4.16336.0 (Code tab 2.1.317) · no CLI found'), desktopCard);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
 }

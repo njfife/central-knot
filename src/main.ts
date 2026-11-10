@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { executableCandidates } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { noteTools, presentTools } from './presence.ts';
@@ -76,6 +76,7 @@ async function read(): Promise<Snapshot[]> {
   return Promise.all(harnessIds.map(id => discover({
     home, mode, harness: id, configOverride: overrideFor(id),
     binaries: mode === 'actual' ? executableCandidates(home, process.env.PATH ?? '', harnesses[id].binary) : [],
+    apps: mode === 'actual' ? appCandidates(home, harnesses[id].binary) : [],
     runProbes: mode === 'actual',
   })));
 }
@@ -600,14 +601,11 @@ async function startWatching() {
 }
 
 
-/** Whether a Claude Code process is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
+/** Whether Claude Code (its CLI, or Claude desktop and its Code tab) is running (macOS and Linux). When this can't be told, Write now goes ahead as asked. */
 function claudeRunning(): Promise<boolean> {
   if (current?.mode !== 'actual' || process.platform === 'win32') return Promise.resolve(false);
-  // The native `claude` binary, or Claude Code run through node (an npm install shows as node with its package in the command).
   const found = (args: string[]) => new Promise<boolean>(done => execFile('pgrep', args, error => done(!error)));
-  // Only node running the package's CLI counts, never a shell or search that merely mentions the package.
-  // A global npm install runs as `node …/bin/claude`.
-  return found(['-x', 'claude']).then(native => native || found(['-f', '^[^ ]*node .*(@anthropic-ai/claude-code/|/bin/claude( |$))']));
+  return found(['-x', 'claude']).then(native => native || found(['-f', CLAUDE_PROCESS]));
 }
 
 async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView | null> {
@@ -887,12 +885,12 @@ app.whenReady().then(async () => {
   // Write now is for when Claude Code is closed (MCP-02): a running Claude Code would write its older copy back over it.
   // Its Undo goes through the same check: Claude Code closed, or it would write its copy back over the undone one.
   handle('mcp:unwrite-claude', async (written, home) => (home === current?.home && Array.isArray(written)
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first, then click Undo again.', results: [], writes: 0 }
       : undoClaudeWrite(context(), written.filter((write): write is ClaudeWrite => !!write && typeof write.name === 'string' && typeof write.after === 'string' && (write.before === null || typeof write.before === 'string')))
     : { stopped: elsewhere, results: [], writes: 0 }));
   handle('mcp:write-claude', async (names, home) => (home === current?.home && Array.isArray(names)
     // The practice copy is sample files: the real Claude Code never reads them, so it need not be closed there.
-    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await presentNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
+    ? current?.mode !== 'fixture' && await claudeRunning() ? { stopped: 'Claude Code or Claude desktop is still running. Quit it first (every window and terminal session), then click Write to Claude Code again.', results: [], writes: 0 } : applyMcp(context(), await presentNow(), [], { claudeNow: names.filter((name): name is string => typeof name === 'string'), ...(syncOn ? {} : { only: new Set(names.filter((name): name is string => typeof name === 'string')) }) })
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.', results: [], writes: 0 }));
   handle('manage:apply', async (list, resume, home) => {
     if (home !== current?.home) return { stopped: elsewhere, results: [], harnessWrites: 0 } satisfies ApplyResult;

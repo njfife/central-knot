@@ -6,8 +6,15 @@ export interface ProbeResult {
   state: ProbeState;
   version?: string;
   detail: string;
-  /** Found only as an app's own bundled copy (ChatGPT desktop's Codex), which never counts as the CLI. */
-  bundled?: boolean;
+}
+
+/** A desktop app found on this computer, its version, and the version of the tool it carries inside when that can be read. */
+export interface DesktopApp {
+  name: string;
+  version?: string;
+  /** What the app carries: "Code tab", "Codex", "Copilot runtime". */
+  carries: string;
+  carriedVersion?: string;
 }
 
 export interface Skill {
@@ -40,8 +47,11 @@ export interface Snapshot {
   mode: HomeMode;
   label: string;
   root: string;
-  detection: 'Installed' | 'Config found but app not detected' | 'Not found' | 'Version unknown';
+  /** 'Installed' and 'Version unknown' are about the CLI; 'App only': its desktop app, with no CLI found. */
+  detection: 'Installed' | 'Config found but app not detected' | 'Not found' | 'Version unknown' | 'App only';
   probe: ProbeResult;
+  /** The tool's desktop app, when found (Claude desktop, the GitHub Copilot app, ChatGPT desktop): never counted as the CLI (CD §3). */
+  app?: DesktopApp;
   discovery: 'ready' | 'empty' | 'missing' | 'restricted' | 'failed';
   skills: Skill[];
   issues: string[];
@@ -466,8 +476,8 @@ export interface PluginsView {
   canWrite: boolean;
   reason?: string;
   marketplaces: MarketplaceView[];
-  /** Tools present only as a desktop app's bundled copy, with no CLI to run plugin commands. */
-  desktopOnly?: HarnessId[];
+  /** Tools present here only as their desktop app, with no CLI to run plugin commands: each with the app's name. */
+  desktopOnly?: Partial<Record<HarnessId, string>>;
   /** Each found CLI's version, where it could be read (a plugin skill's switch is offered only from a tested build). */
   versions?: Partial<Record<HarnessId, string>>;
 }

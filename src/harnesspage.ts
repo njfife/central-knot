@@ -8,7 +8,7 @@ import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
 import { andList, toolNames as names } from './words.ts';
 import { brandMark } from './brand.ts';
-import type { HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
+import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
 import { caughtUpBand, resetTablesForHarness, designOverview, differingIn, emptyKind, kindSource, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, loadPlugins, market } from './pluginstate.ts';
@@ -60,13 +60,20 @@ function pluginsIn(tool: HarnessId): PluginsHere {
 /** What a tool that takes no marketplace plugins (Pi) says about them: on its card, its tab's tooltip and its Plugins tab. */
 const pluginsNotHandled = (tool: HarnessId) => `Central Knot doesn’t move ${names[tool]}’s plugins`;
 
-/** How the tool was found, short: a sample or chosen folder is only a folder; on this computer, installed (with its version) or not. */
+/**
+ * How the tool was found, short: a sample or chosen folder is only a folder; on this computer, its CLI (with its version),
+ * its desktop app with no CLI, or neither. Both found: both named, since the app is never the CLI.
+ */
 const detectionLine = (snapshot: Snapshot, home: HomeView) => {
   if (home.mode === 'fixture') return 'Sample folder';
   if (home.mode === 'custom') return 'Folder only';
-  if (snapshot.detection === 'Installed') return `Installed${snapshot.probe.version ? ` · ${snapshot.probe.version}` : ''}`;
-  return snapshot.probe.detail.startsWith('ChatGPT desktop') ? 'ChatGPT desktop’s Codex' : snapshot.detection;
+  const app = snapshot.app ? appLine(snapshot.app) : '';
+  if (snapshot.detection === 'Installed') return [`Installed${snapshot.probe.version ? ` · ${snapshot.probe.version}` : ''}`, app].filter(Boolean).join('; ');
+  if (snapshot.detection === 'App only') return `${app} · no CLI found`;
+  return snapshot.detection;
 };
+/** A desktop app with its version and the version of what it carries: "Claude desktop 4.16336.0 (Code tab 2.1.317)". */
+const appLine = (app: DesktopApp) => `${app.name}${app.version ? ` ${app.version}` : ''}${app.carriedVersion ? ` (${app.carries} ${app.carriedVersion})` : ''}`;
 
 // ---------- Every harness ----------
 
@@ -288,7 +295,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
     h('div.harness-about-column', {},
       section('This harness', h('dl.facts', {},
         ...fact('Found as', detectionLine(snapshot, home)),
-        ...(home.mode === 'actual' && snapshot.detection !== 'Installed' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
+        ...(home.mode === 'actual' && snapshot.detection !== 'Installed' && snapshot.detection !== 'App only' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
         ...fact('Read by', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))),
         ...fact('Config folder', path(snapshot.root)))),
       issues.length > 0 && section('Read problems', h('ul.plain-list', { role: 'status' }, issues.map(issue => h('li', {}, issue))))),

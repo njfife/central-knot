@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocked, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
+import { blocked, partsOffer, comparableText, installsIn, limitNote, offeredVersion, partStillIn, otherVersions, otherVersionsLine, toolsWithoutPlugin, unavailable } from '../src/pluginstatus.ts';
 import { readInto, type Read } from '../src/reads.ts';
 import type { HomeView, MarketplaceView, PluginDetail, PluginsView } from '../src/types.ts';
 
@@ -11,7 +11,7 @@ const view: PluginsView = { home: '/h', tools: ['claude-cli', 'copilot-cli', 'co
 test('A tool can take a plugin only when its CLI is there, it is not held or refused, and it is not installed yet', () => {
   assert.deepEqual(toolsWithoutPlugin(view, entry, 'p'), ['copilot-cli']);
   assert.match(blocked({ ...view, clis: {} }, entry, 'claude-cli') ?? '', /command-line tool wasn’t found/);
-  assert.match(blocked({ ...view, clis: {}, desktopOnly: ['codex-cli'] }, entry, 'codex-cli') ?? '', /Only ChatGPT desktop/);
+  assert.match(blocked({ ...view, clis: {}, desktopOnly: { 'claude-cli': 'Claude desktop' } }, entry, 'claude-cli') ?? '', /^Only Claude desktop was found here. Claude Code’s command-line tool wasn’t found, and plugins install only through it.$/);
   assert.equal(blocked(view, { ...entry, copilotRefuses: 'Copilot refuses npm.' }, 'copilot-cli'), 'Copilot refuses npm.');
   assert.deepEqual(toolsWithoutPlugin(view, { ...entry, copilotRefuses: 'x' }, 'p'), []);
   // One answer for every box, panel and key: held says why, installed is never unavailable, a missing CLI is.
@@ -77,4 +77,12 @@ test('A part removed from a tool by hand is no longer installed there; a kind th
   assert.equal(partStillIn(home, 'pi-cli', { kind: 'skill', name: 'triage' }), false);
   assert.equal(partStillIn(home, 'pi-cli', { kind: 'mcp', name: 'issues' }), true);
   assert.equal(partStillIn(home, 'codex-cli', { kind: 'agent', name: 'helper' }), true);
+});
+
+test('Claude Code is offered a plugin’s parts only when it has no CLI', () => {
+  const fresh: MarketplaceView = { ...entry, states: {} };
+  assert.equal(partsOffer(view, fresh, 'p', 'claude-cli'), false);
+  assert.equal(partsOffer({ ...view, clis: { ...view.clis, 'claude-cli': false }, desktopOnly: { 'claude-cli': 'Claude desktop' } }, fresh, 'p', 'claude-cli'), true);
+  // A plugin with only MCP servers has nothing Claude Code takes as parts.
+  assert.equal(partsOffer({ ...view, clis: {} }, fresh, 'p', 'claude-cli', { skills: 0, commands: 0, agents: 0, hooks: false, mcp: 1, mcpRootVariable: false, bin: false }), false);
 });
