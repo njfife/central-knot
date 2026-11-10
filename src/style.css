@@ -1364,7 +1364,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* Skills: every tool's row has the same three columns (tool, what happens there, its switch and Remove), so the switches line up. */
 .details-skills .details-tool-head { grid-template-columns: 196px minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
-/* In a narrow pane they drop under the line instead of squeezing it. */
 .details-tools { container-type: inline-size; }
 /* In a narrow pane (the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
 @container (max-width: 560px) {
@@ -1401,6 +1400,5 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .toolbar-end > .apply { min-width: 0; }
 .toolbar-end .apply-count { white-space: normal; min-width: 0; }
 .ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
-/* Keyboard focus on a queued switch shows as focus, not as the dashed queued mark. */
 /* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
 .tool-switch .switch:focus-visible, .managed-pending .switch:focus-visible, .cell-switch-queued:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

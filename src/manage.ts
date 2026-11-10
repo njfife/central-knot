@@ -86,7 +86,9 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       const problem = switches.get(tool)!.problem;
       if (problem) (entry.facts.switchProblem ??= {})[tool] = problem;
       if (unverified.get(tool)) (entry.facts.disableUnverified ??= {})[tool] = unverified.get(tool)!;
-      if (entry.facts.copies[tool] && isDisabled(context, switches.get(tool)!, switchTarget(entry, tool)!)) (entry.facts.disabled ??= []).push(tool);
+      // A tool without a copy is asked too, about the copy it would get: a switch left from an earlier removal still holds there.
+      const target = switchTarget(entry, tool) ?? { folder: entry.facts.name, name: Object.values(entry.skills).flat()[0]?.name ?? entry.facts.name, skillFile: join(ownCopyDir(context, tool, entry.facts.name), 'SKILL.md') };
+      if (isDisabled(context, switches.get(tool)!, target)) (entry.facts.disabled ??= []).push(tool);
     }
   }
   // A skill converted from an agent never goes back to the agent's own tool on its own (AGT-03): only an explicit request could.
@@ -450,8 +452,10 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     // A managed skill removed from a tool stops syncing there, or the next pass would put it back.
     const removing = item.state === 'shared' ? (change.remove ?? []).filter(tool => harnesses[tool]) : [];
     item.off = [...new Set([...change.off, ...removing])].filter(tool => harnesses[tool]);
-    const stopping = removing.filter(tool => !wasOff.includes(tool));
-    const lastCopies = removing.length > 0 && (Object.keys(entry.facts.copies) as HarnessId[]).every(tool => removing.includes(tool));
+    // Tools this removal stops syncing to: not ones already off, or turned off in this same change (Restore leaves those off).
+    const stopping = removing.filter(tool => !wasOff.includes(tool) && !change.off.includes(tool));
+    // The last copies: once removed, no tool the skill still syncs to has one (a copy in a tool whose box is off doesn't count).
+    const lastCopies = removing.length > 0 && !(Object.keys(entry.facts.copies) as HarnessId[]).some(tool => !item.off!.includes(tool));
     taken.set(change.key, { stoppedSync: stopping, records: item.copies.filter(copy => stopping.includes(copy.harness)), lastCopies });
     // A copy is tracked only while the skill syncs to its tool: one removed while off, or while unmanaged, is no deletion later.
     item.copies = item.state === 'shared' ? item.copies.filter(copy => !item.off!.includes(copy.harness)) : [];
@@ -812,7 +816,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
   const removeCopies = async (change: Change, entry: Gathered, item: RecordItem) => {
     const { stoppedSync, records, lastCopies } = taken.get(change.key)!;
     const name = entry.facts.name;
-    const removed: NonNullable<HistoryEvent['losers']> = [];
+    const removed: HistoryEvent['losers'] = [];
     const keepSyncing = async (tool: HarnessId) => {
       if (!stoppedSync.includes(tool)) return;
       // A copy stays after all, so a skill these removals were to unmanage stays managed.
@@ -823,7 +827,8 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
     };
     for (const tool of change.remove ?? []) {
       const copy = entry.facts.copies[tool];
-      if (!copy) continue;
+      // Gone since the page was read: nothing to remove, so that tool syncs as before.
+      if (!copy) { await keepSyncing(tool); continue; }
       const refusal = (copy.writable ? undefined : `${toolName(tool)} reads it at ${copy.directory}, which Central Knot does not change. Remove it there yourself.`) ?? await rootProblem(context, tool);
       if (refusal) { await keepSyncing(tool); results.push({ item: name, harness: tool, outcome: 'held', message: refusal }); continue; }
       try {
@@ -861,7 +866,7 @@ async function runApply(context: ShareContext, changes: Change[], resume: boolea
       const target = await liveSwitchTarget(context, entry, tool);
       if (!target) { if (disabled) results.push({ item: name, harness: tool, outcome: 'held', message: `${toolName(tool)} has no copy to disable.` }); continue; }
       let flipped: { changed: boolean; previous?: string };
-      try { flipped = await setDisabled(context, tool, target, disabled); }
+      try { flipped = await setDisabled(context, tool, target, disabled, disabled ? undefined : await overrideBeforeDisable(context, change.key, tool, target)); }
       catch (error) {
         results.push({ item: name, harness: tool, outcome: 'failed', message: `Could not ${disabled ? 'disable' : 'enable'} it in ${toolName(tool)}: ${switchFailure(error)}` });
         continue;
@@ -1231,6 +1236,17 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
     await saveHistory(context.home, history, clock(context));
   }
   return { results, harnessWrites: writes };
+}
+
+/**
+ * What Claude Code's override for this copy held before its latest Disable (say "name-only"), from History, so Enable puts
+ * that back instead of no override. Undefined when the Disable replaced nothing, or no Disable is on record.
+ */
+async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
+  if (tool !== 'claude-cli') return undefined;
+  const disables = (await readHistory(context.home)).filter(event => event.kind === 'switched' && event.key === key)
+    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target.folder === target.folder));
+  return disables.at(-1)?.before;
 }
 
 /** Puts a stored revision of a skill into a tool's own skills folder under `folder`; nothing may be there yet. */

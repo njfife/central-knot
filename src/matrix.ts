@@ -152,12 +152,16 @@ function setDisabledIn(key: string, tool: Tool, disabled: boolean) {
   rerender();
 }
 
+/** Whether a tool has (or gets on Apply all) a copy of this skill, so a switch there has something to act on. */
+const hasCopyAfterApply = (skill: SampleSkill, tool: Tool) => !['absent', 'cannot'].includes(cellOf(skill, tool)) && !skill.removing?.includes(tool);
+
 /** Skills: whether this tool's switch is clicked to change on Apply all. */
 const switchQueued = (key: string, tool: Tool) => view.draft.get(key)?.switches?.[tool] !== undefined;
 
-/** Skills: the switches a draft changes, as Apply all sends them. */
-function switchChanges(draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
-  const clicked = Object.entries(draft.switches ?? {}) as [Tool, boolean][];
+/** Skills: the switches a draft changes, as Apply all sends them; a Disable clicked for a tool that then won't have a copy is dropped. */
+function switchChanges(key: string, draft: Draft): { disable?: Tool[]; enable?: Tool[] } {
+  const after = effective(committedOf(key));
+  const clicked = (Object.entries(draft.switches ?? {}) as [Tool, boolean][]).filter(([tool, off]) => !off || hasCopyAfterApply(after, tool));
   const disable = clicked.filter(([, off]) => off).map(([tool]) => tool), enable = clicked.filter(([, off]) => !off).map(([tool]) => tool);
   return { ...(disable.length ? { disable } : {}), ...(enable.length ? { enable } : {}) };
 }
@@ -197,7 +201,7 @@ function applyAll() {
   const count = view.draft.size;
   if (!designMode) {
     const changes = [...view.draft].map(([key, draft]) => ({ key, managed: draft.managed, off: draft.off, use: draft.resolve, useHash: draft.seen, seenManaged: draft.seenManaged,
-      ...switchChanges(draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
+      ...switchChanges(key, draft), ...(draft.remove?.length ? { remove: draft.remove } : {}) })) as Change[];
     const drafts = view.draft;
     if (kind === 'mcp') void applyMcpChanges(changes, () => drafts.clear());
     else if (kind === 'agents') void applyAgentsChanges(changes, () => drafts.clear());
@@ -262,7 +266,7 @@ function pendingSummary(count: number): string {
   const replaced = [...view.draft.keys()].reduce((total, key) => total + toolList().filter(tool => replacedOnApply(effective(committedOf(key)), tool)).length, 0);
   // Skills: copies that go, and switches that flip, on Apply all.
   const removed = next.reduce((total, skill) => total + (skill.removing?.length ?? 0), 0);
-  const flips = next.flatMap(skill => toolList().filter(tool => !skill.removing?.includes(tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
+  const flips = next.flatMap(skill => toolList().filter(tool => hasCopyAfterApply(skill, tool) && switchQueued(skill.key, tool)).map(tool => !!skill.disabled?.includes(tool)));
   const disabling = flips.filter(Boolean).length, enabling = flips.length - disabling;
   return `${count} ${count === 1 ? shortNoun[kind][0] : shortNoun[kind][1]} to change${fresh ? ` · ${fresh} new ${fresh === 1 ? 'copy' : 'copies'}` : ''}${replaced ? ` · ${replaced} ${replaced === 1 ? 'copy' : 'copies'} to replace` : ''}${removed ? ` · ${removed} ${removed === 1 ? 'copy' : 'copies'} to remove` : ''}${disabling ? ` · ${disabling} ${disabling === 1 ? 'copy' : 'copies'} to disable` : ''}${enabling ? ` · ${enabling} ${enabling === 1 ? 'copy' : 'copies'} to enable` : ''}`;
 }
@@ -427,7 +431,7 @@ function switchLine(skill: SampleSkill, tool: Tool): string {
   // An older build: no new Disable, but a copy disabled there can still be enabled (its effect there isn't verified).
   if (!disabled && !was && skill.disableUnverified?.[tool]) return skill.disableUnverified[tool]!;
   if (skill.disableUnverified?.[tool] && was) return disabled ? 'Disabled. Enable is offered here, though its effect on this build isn’t verified.' : 'Enabled again on Apply all (its effect on this build isn’t verified).';
-  if (disabled && !was && skill.copies[tool] === undefined) return `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
+  if (disabled && skill.copies[tool] === undefined) return was ? `Gets a copy on Apply all, still disabled there from before: ${names[tool]} won’t load it.` : `Gets a copy on Apply all, disabled: ${names[tool]} won’t load it.`;
   if (disabled && !was) return 'Disabled on Apply all.';
   // "Still synced" only where the skill really syncs to this tool: its box can be off while the copy stays disabled.
   const syncing = skill.managed && !skill.off.includes(tool);
@@ -630,7 +634,6 @@ function details(skill: SampleSkill, closable = true) {
       : syncingTo.length ? `Managed in ${syncingTo.length === toolList().length && syncingTo.length > 2 ? `all ${syncingTo.length} tools` : andList(syncingTo)}` : 'Managed · syncing to no tool')
     : differs ? 'Not managed yet. Its copies differ.' : kind === 'skills' ? 'Unmanaged · edits don’t sync between tools' : 'Unmanaged. Central Knot leaves every copy alone until you manage it.';
 
-  // What each tool row's two actions mean, said once under the rows, before the first click.
   // What the rows' controls mean, said once under them: only the terms the visible controls offer. Managed skills (as they will be
   // after Apply all) sync, so a tool's box in the table is told apart too.
   const switchShown = toolList().some(tool => !skill.removing?.includes(tool) && !skill.cannot?.[tool] && !skill.switchProblem?.[tool]

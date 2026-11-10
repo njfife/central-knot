@@ -190,6 +190,10 @@ export interface ManageView {
   caughtUp: DestinationResult[];
 }
 
+/**
+ * One skill's change for applyChanges. `managed` and `off` always say how it should be managed afterwards: a caller changing only
+ * switches or removals passes the skill's current ones (from its SkillFacts), with `seenManaged`, or it changes those too.
+ */
 export interface Change {
   key: string;
   managed: boolean;

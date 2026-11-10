@@ -3,14 +3,15 @@
 // user-wide settings file, which is edited in place: only the switch changes. Every other byte stays, apart from these: the JSON
 // list holding Copilot's or Pi's switches is written back as a list (same entries, JSON layout); a list or map Enable leaves empty
 // goes with its last entry (and a JSON settings file that wasn't there is left as `{}`); a config.toml without a final newline
-// gains one when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it.
+// gains one when a rule is added; a person's Codex rule with no `enabled` key keeps the `enabled` line a Disable gave it; a JSON
+// settings file with Windows line ends gets plain ones in the lines added while a skill is disabled (Enable takes them out again).
 //   Claude Code  settings.json   "skillOverrides": { "<folder>": "off" }   (keyed by folder: Claude names a skill after it)
 //   Copilot CLI  settings.json   "disabledSkills": ["<name>"]              (what `copilot skill disable` writes; by name)
 //   Codex        config.toml     [[skills.config]] path = "<…/SKILL.md>" enabled = false   (by path: a name rule would hit every same-name skill)
 //   Pi           settings.json   "skills": ["-skills/<folder>/SKILL.md"]   (the exact exclusion `pi config` writes)
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { harnesses, toolConfigRoot } from './harnesses.ts';
+import { toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
 import { appendTomlTable, eolOf, readTomlTables, removeTomlTables, setJsonMember, tableEnd, tomlValue, type TomlTable } from './textedit.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';

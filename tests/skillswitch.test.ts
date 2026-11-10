@@ -184,6 +184,15 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     await restoreFromHistory(box.context, (await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'whole')!.id);
     const whole = (await manageView(box.context)).skills.find(item => item.key === 'whole')!;
     assert.deepEqual([whole.managed, whole.off, Object.keys(whole.copies).length], [true, [], 2]);
+    // A copy in a tool whose box is off doesn't count: removing the synced ones still unmanages the skill, with no stray result.
+    await skill(box.home, 'claude-cli', 'side'); await skill(box.home, 'copilot-cli', 'side');
+    await applyChanges(box.context, [{ key: 'side', managed: true, off: ['copilot-cli'] }]);
+    const side = await applyChanges(box.context, [{ key: 'side', managed: true, off: ['copilot-cli'], remove: ['claude-cli'], seenManaged: true }]);
+    assert.deepEqual([side.results.map(entry => entry.outcome), (await manageView(box.context)).skills.find(item => item.key === 'side')!.managed], [['removed'], false]);
+    // Unticking a tool and removing its copy in one change: Restore later doesn't turn syncing there back on.
+    await skill(box.home, 'claude-cli', 'both'); await applyChanges(box.context, [{ key: 'both', managed: true, off: [] }]);
+    await applyChanges(box.context, [{ key: 'both', managed: true, off: ['copilot-cli'], remove: ['copilot-cli'], seenManaged: true }]);
+    assert.deepEqual((await readHistory(box.home)).find(event => event.kind === 'removed' && event.key === 'both')!.stoppedSync, []);
     // Removing the very copy chosen for every tool is refused, changing nothing.
     await skill(box.home, 'claude-cli', 'pick'); await skill(box.home, 'copilot-cli', 'pick', text('pick', 'Other.'));
     const refused = await applyChanges(box.context, [{ key: 'pick', managed: true, off: [], use: 'claude-cli', remove: ['claude-cli'] }]);

@@ -235,7 +235,6 @@ export const loadHistory = () => busy('Reading History…', async () => {
   announce('');
 });
 
-/** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 /** A restored copy keeps its tool's switch as it was: said when that leaves it disabled, so it doesn't seem not to load for no reason. */
 function stillDisabled(key: string, restored: DestinationResult[]) {
   const disabled = state.home?.manage.skills.find(skill => skill.key === key)?.disabled ?? [];
@@ -243,6 +242,7 @@ function stillDisabled(key: string, restored: DestinationResult[]) {
   return tools.length ? `It is still disabled in ${andList(tools.map(tool => toolName(tool)))}.` : '';
 }
 
+/** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
   const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
@@ -396,12 +396,15 @@ const undoChoices = (ids: string[]) => busy('Undoing the choice…', async () =>
 /** Undo of Apply all's new copies, for every skill it made Managed: each goes back to unmanaged, its new copies removed. */
 export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async () => {
   const home = state.home!;
+  // The run's own switches and removals ride along (undone first); only the 'added' events unmanage anything.
+  const kinds = new Map((await api().history()).map(event => [event.id, event.kind]));
   const results: DestinationResult[] = [];
+  const alongside: DestinationResult[] = [];
   let stopped: string | undefined;
   for (const id of ids) {
     const result = await api().restore(id, home.manage.gate.state === 'needs-resume', home.home);
     if (result.stopped) { stopped = result.stopped; break; }
-    results.push(...result.results);
+    (kinds.get(id) === 'added' ? results : alongside).push(...result.results);
   }
   const view = await api().refresh();
   if (view) state.home = view;
@@ -409,7 +412,8 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
   const items = [...new Set(results.map(entry => entry.item))];
-  if (!stopped) state.outcome = { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andList(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` };
+  const also = alongside.filter(entry => entry.outcome === 'switched' || entry.outcome === 'written').map(entry => `${entry.item}: ${entry.outcome === 'written' ? `back in ${toolName(entry.harness ?? '')}` : entry.message.replace(/\.$/, '')}.`);
+  if (!stopped) state.outcome = { page: state.page, items, text: `Undone: removed ${plural(removed, 'new copy', 'new copies')}; ${andList(items)} ${items.length === 1 ? 'is' : 'are'} unmanaged again.${also.length ? ` ${also.join(' ')}` : ''}${stayed.length ? ` ${stayed.map(entry => entry.message).join(' ')}` : ''}` };
   for (const item of items) flashRow(item);
   announce(stopped ?? state.outcome?.text ?? '', !stopped);
 });
