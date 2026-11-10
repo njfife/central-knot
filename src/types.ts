@@ -79,6 +79,8 @@ export interface DesktopApi {
   history(): Promise<HistoryList>;
   /** What the home's tools keep in memory, read only. */
   memory(readId?: number): Promise<MemoryView | null>;
+  /** Sends memories into a tool's own memory, in this order; each is read again and sent only if unchanged. */
+  sendMemory(tool: MemoryTool, picks: MemoryPick[], home: string): Promise<MemorySendResult>;
   applyMcp(changes: Change[], resume: boolean, home: string): Promise<McpResult>;
   writeClaude(names: string[], home: string): Promise<McpResult>;
   /** Undo of Write to Claude Code: entries back to what Claude Code held before. Claude Code must be closed. */
@@ -556,13 +558,33 @@ export interface MemoryNote {
   index?: true;
   /** It could not be read. */
   unreadable?: true;
+  /** Where Central Knot has sent it, from the home's record (memorysent.ts). */
+  sent?: MemorySent[];
 }
 /** One Claude Code project's memory folder. */
 export interface MemoryProject { folder: string; /** The project folder's name, shortened for display. */ label: string; /** Its newest file's time. */ newest: string; notes: MemoryNote[] }
 /** Codex's memory: the folder Codex uses, whether its memory is on, and its summary when there is one. */
-export interface CodexMemory { folder: string; on: boolean; summary?: { path: string; text: string; at: string } }
+export interface CodexMemory { folder: string; on: boolean; summary?: { path: string; text: string; at: string };
+  /** Central Knot has sent it notes: what Codex took from them is marked in its summary. */
+  noted?: true }
 /** What the Memory page shows: only the tools in this home have a part. */
 export interface MemoryView { claude?: MemoryProject[]; codex?: CodexMemory; copilot: boolean }
+/** A tool whose own memory a memory can be sent into. */
+export type MemoryTool = 'codex-cli';
+/** One memory to send: its file, and the hash of the text the page showed. */
+export interface MemoryPick { path: string; hash: string }
+/** A memory sent: to which tool, when, and whether its text has changed since. */
+export interface MemorySent { to: MemoryTool; at: string; changed: boolean }
+/** One line of `memory/sent.json`: the last send of a memory file to a tool, with the note it became (Codex). */
+export interface SentEntry { source: string; to: string; hash: string; at: string; note?: string }
+/** What a send did: stopped before anything (why), else the memories sent and those not, each with why. */
+export interface MemorySendResult {
+  stopped?: string;
+  sent: string[];
+  failed: { path: string; title: string; why: string }[];
+  /** Sent, but the record could not be written: why. */
+  unrecorded?: string;
+}
 
 // ---------- Instructions ----------
 

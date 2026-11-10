@@ -8,6 +8,7 @@ const api: DesktopApi = {
   history: () => ipcRenderer.invoke('history:list'),
   instructions: readId => ipcRenderer.invoke('instructions:view', readId),
   memory: readId => ipcRenderer.invoke('memory:view', readId),
+  sendMemory: (tool, picks, home) => ipcRenderer.invoke('memory:send', tool, picks, home),
   convertAgent: (key, home) => ipcRenderer.invoke('agents:convert', key, home),
   eventChange: eventId => ipcRenderer.invoke('history:change', eventId),
   showFile: path => ipcRenderer.invoke('file:show', path),

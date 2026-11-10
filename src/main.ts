@@ -15,6 +15,7 @@ import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.t
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { memoryView } from './memory.ts';
+import { sendMemories } from './memorysend.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
@@ -23,7 +24,7 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, UpdateView, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { Appearance, ApplyResult, AppPreferences, UpdateView, BaseApply, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, MemoryPick, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
 
@@ -678,6 +679,7 @@ const logFailure = (channel: string, error: unknown) => log(`request ${channel} 
 
 /** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
+const isPicks = (picks: unknown): picks is MemoryPick[] => Array.isArray(picks) && picks.every(pick => typeof pick?.path === 'string' && isAbsolute(pick.path) && typeof pick.hash === 'string');
 const notOpenHome = 'The home on screen is not the one open. Nothing was saved. Read it again.';
 const isTools = (value: unknown): value is HarnessId[] => Array.isArray(value) && ids(value).length === value.length;
 const isTool = (value: unknown): value is HarnessId => isTools([value]);
@@ -852,8 +854,11 @@ app.whenReady().then(async () => {
     ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
   handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
-  // Memory: read only; nothing on its page writes.
+  // Memory: what the tools keep, and sending picked memories into a tool's own memory (each read again first).
   handle('memory:view', async readId => (current ? memoryView(current.home, await readFor(readId as number | undefined)) : null));
+  handle('memory:send', async (tool, picks, home) => (home === current?.home && tool === 'codex-cli' && isPicks(picks)
+    ? sendMemories(context(), await read(), tool, picks)
+    : { stopped: notOpenHome, sent: [], failed: [] }));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));

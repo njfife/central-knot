@@ -6,6 +6,7 @@ import { FRONTMATTER, frontmatter } from './discovery.ts';
 import { sha256 } from './share.ts';
 import { readTomlTables, type TomlValue } from './textedit.ts';
 import { isPresent } from './presence.ts';
+import { readSent, sentMarks } from './memorysent.ts';
 import type { CodexMemory, MemoryNote, MemoryProject, MemoryView, Snapshot } from './types.ts';
 
 const INDEX = 'MEMORY.md';
@@ -123,14 +124,21 @@ export async function codexMemory(codexHome: string): Promise<CodexMemory> {
   return { folder, on, ...(summary !== undefined && at ? { summary: { path, text: summary, at } } : {}) };
 }
 
-/** The Memory page's view: Claude Code's and Codex's memory where those tools are in this home, and whether Copilot is. */
+/**
+ * The Memory page's view: Claude Code's and Codex's memory where those tools are in this home, and whether Copilot is.
+ * Each memory carries where Central Knot has sent it (the home's record).
+ */
 export async function memoryView(home: string, snapshots: Snapshot[]): Promise<MemoryView> {
   const present = (harness: Snapshot['harness']) => snapshots.find(snapshot => snapshot.harness === harness && isPresent(snapshot));
   const claude = present('claude-cli');
   const codex = present('codex-cli');
+  const sent = await readSent(home);
+  const marked = (note: MemoryNote): MemoryNote => { const marks = note.unreadable ? [] : sentMarks(sent, note.path, note.hash); return marks.length ? { ...note, sent: marks } : note; };
+  const projects = claude ? (await claudeMemory(claude.root, home)).map(project => ({ ...project, notes: project.notes.map(marked) })) : undefined;
+  const noted = sent.some(entry => entry.to === 'codex-cli');
   return {
-    ...(claude ? { claude: await claudeMemory(claude.root, home) } : {}),
-    ...(codex ? { codex: await codexMemory(codex.root) } : {}),
+    ...(projects ? { claude: projects } : {}),
+    ...(codex ? { codex: { ...await codexMemory(codex.root), ...(noted ? { noted: true as const } : {}) } } : {}),
     copilot: !!present('copilot-cli'),
   };
 }
