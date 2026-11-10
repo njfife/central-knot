@@ -31,6 +31,9 @@ export const isHttps = (value: unknown): value is string => typeof value === 'st
 /** True when a marketplace source names a folder on this computer (an absolute path), not a URL or owner/repo. */
 export const isFolder = (source: string) => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(source.trim());
 
+/** An agent's or command's name from its file's name: without `.md`, and without Copilot's `.agent.md` (`reviewer.agent.md` is `reviewer`). */
+export const nameOfFile = (file: string) => file.replace(/\.md$/, '').replace(/\.agent$/, '');
+
 /** A marketplace, plugin or skill name the tools accept, that can't be read as an option: letters, digits, dot, dash, underscore. */
 export const SAFE_NAME = /^[\w][\w.-]{0,199}$/;
 

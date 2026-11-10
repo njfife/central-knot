@@ -61,6 +61,7 @@ const api: DesktopApi = {
   onProfileSwitched: callback => { ipcRenderer.on('profile:switched', (_event, result) => callback(result)); },
   setPluginSkill: (source, marketName, plugin, skill, tool, on, home) => ipcRenderer.invoke('plugins:skill', source, marketName, plugin, skill, tool, on, home),
   partsPlan: (source, plugin) => ipcRenderer.invoke('plugins:parts-plan', source, plugin),
-  pluginParts: (source, marketName, plugin, tool, mode, run, home) => ipcRenderer.invoke('plugins:parts', source, marketName, plugin, tool, mode, run ?? null, home),
+  pluginItemTexts: (plugin, marketName, kind, name) => ipcRenderer.invoke('plugin-items:texts', plugin, marketName, kind, name),
+  pluginParts: (source, marketName, plugin, tool, mode, run, home, pick) => ipcRenderer.invoke('plugins:parts', source, marketName, plugin, tool, mode, run ?? null, home, pick ?? null),
 };
 contextBridge.exposeInMainWorld('centralKnot', api);

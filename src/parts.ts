@@ -1,13 +1,15 @@
 // A plugin's parts in a tool that can't take the plugin itself (Pi, or Claude Code, Codex and Copilot CLI where their
-// plugin route is blocked here, such as a desktop app with no CLI): its skills, MCP servers and agents written as ordinary items, through the same writers the Skills, MCP
+// plugin route is blocked here, such as a desktop app with no CLI), or single parts of it in one that hasn't the plugin
+// (Claude Code, which has no switch for one skill of a plugin): its skills, MCP servers and agents written as ordinary items, through the same writers the Skills, MCP
 // and Agents pages use (byte-exact skill copies, each tool's MCP format, each tool's agent format). Values go in as-is.
 // What went in is recorded per plugin and tool (plugin-parts.json), so the items say where they came from, can be removed
 // together, show when the plugin has changed, and every run can be undone from the content kept in Central Knot's store
 // (skills in the Skills store, MCP servers in the MCP store, agent files beside them).
 // Nothing is ever overwritten that these parts did not put there, and a part edited or managed since is left alone.
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { lstat, mkdir, readFile, readdir, readlink, rm, stat, unlink } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { isAbsolute, join, sep } from 'node:path';
 import { agentText, fileFor, fromMarkdown, isAgentTool, keyOf, readAgentRecord, safeName } from './agents.ts';
 import { PLUGIN_ONLY, type PluginFiles } from './catalogdetail.ts';
 import { loadProblems, parseSkill } from './discovery.ts';
@@ -18,7 +20,7 @@ import { partsSummary, partsTools, partWords, samePart } from './pluginstatus.ts
 import {
   changedWhileSyncing, errorCode, exists, importRevision, sha256, itemKey, partsRecordPath, placeCopy, readParts, readRecord, readTree, removeFileChecked, storeDirectory, storedRevision, targetFor, writeAccess, writeDurably, writeFileChecked, type ShareContext,
 } from './share.ts';
-import type { ActionReport, HarnessId, PartItem, PartKind, PartPlan, PartsInstall } from './types.ts';
+import type { ActionReport, HarnessId, PartItem, PartKind, PartPlan, PartRef, PartsInstall, PartsPick } from './types.ts';
 import { sameSource } from './plugins.ts';
 import { toolNames } from './words.ts';
 
@@ -106,7 +108,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
   }
   for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) {
     // Claude Code rewrites its MCP file while running, so its servers are written only with Write to Claude Code (MCP-02).
-    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are written only with Write to Claude Code on the MCP servers page, so parts leave them out.' }); continue; }
+    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are added with “Write to Claude Code” on the MCP servers page, so parts leave them out.', wholeKind: true }); continue; }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { unread.add(unreadKey('mcp', server)); plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
     const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
     if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
@@ -119,7 +121,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
     ready.push({ kind: 'mcp', name: server, hash: serverHash(neutral), store: async () => { await keepServer(context, server, neutral); } });
   }
   for (const agent of files.agents) {
-    if (tool === 'pi-cli') { plan.push({ kind: 'agent', name: agent.name, why: 'Pi has no agents.' }); continue; }
+    if (tool === 'pi-cli') { plan.push({ kind: 'agent', name: agent.name, why: 'Pi has no agents.', wholeKind: true }); continue; }
     if (!agent.whole) { unread.add(unreadKey('agent', agent.name)); plan.push({ kind: 'agent', name: agent.name, why: 'Its file is too large to read.' }); continue; }
     if (!safeName(agent.name)) { plan.push({ kind: 'agent', name: agent.name, why: 'Its name can’t be a file name.' }); continue; }
     const parsed = fromMarkdown(agent.name, agent.text);
@@ -139,7 +141,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
 /**
  * The plan for each tool that can take parts, for the plugin's page: which parts would go in, and why each other one
  * wouldn't, including a name the tool already has from elsewhere (`installs`: this plugin's parts already there, which
- * are its own and no clash).
+ * are its own and no clash). A part the person turned off or removed there is `out`: it can go in, and stays out until chosen.
  */
 export async function planParts(context: ShareContext, files: PluginFiles, tools: HarnessId[], installs: PartsInstall[]): Promise<Partial<Record<HarnessId, PartPlan[]>>> {
   const plans: Partial<Record<HarnessId, PartPlan[]>> = {};
@@ -152,20 +154,25 @@ export async function planParts(context: ShareContext, files: PluginFiles, tools
       if (part.why) continue;
       const own = ours.find(item => samePart(item, part));
       const now = await onDisk(context, tool, part);
-      // A part of this plugin's already there follows the run's rules for it: removed, changed or managed since means left.
-      if (own && (own.removed || (own.seen && now.state === 'absent'))) { part.why = `You removed it from ${toolNames[tool]}, so it stays out.`; continue; }
-      if (own && now.state === 'unreadable') { part.why = sentence(`its place in ${toolNames[tool]} can’t be read right now`); continue; }
-      if (own && now.state === 'there') {
+      if (now.state === 'unreadable') { part.why = sentence(now.why); continue; }
+      // A part of this plugin's already there follows the run's rules for it: changed or managed since means left.
+      if (own && !own.removed && now.state === 'there') {
         const left = leftBecause(own, now, holds);
         // A changed skill is written through the skills folder, which may be a link or shared: the run would refuse it.
         const rewrite = part.kind === 'skill' && holds.skillRootProblem && ready.find(item => samePart(item, part))?.hash !== own.hash;
         if (left) part.why = sentence(left);
         else if (rewrite) part.why = holds.skillRootProblem;
+        // Taking it out goes through the same folder: its switch says so before Apply all would fail.
+        else if (part.kind === 'skill' && holds.skillRootProblem) part.fixed = holds.skillRootProblem;
         continue;
       }
-      if (own) continue;
+      // Claimed by a run that stopped before writing it: the next run writes it.
+      if (own && !own.removed && !own.seen) continue;
       const why = blocker(now, holds, part, tool);
       if (why) part.why = sentence(why);
+      // Out by the person's choice (turned off here, or removed from the tool by hand): it stays out until turned on.
+      else if (own) part.out = true;
+      else if (now.state === 'absent' && now.brokenLink !== undefined) part.limit = [part.limit, `it would replace a broken link there${now.brokenLink ? `, which led to ${now.brokenLink}` : ''}`].filter(Boolean).join('; ');
     }
     plans[tool] = plan;
   }
@@ -173,16 +180,23 @@ export async function planParts(context: ShareContext, files: PluginFiles, tools
 }
 
 /**
- * What a plugin's parts are for one tool, as content: the parts that can go in there and their hashes. Compared with the
- * digest recorded at install, it tells that something this tool would get has changed (a new agent doesn't make Pi's
- * parts out of date). Undefined while some of them can't be read (nothing is claimed either way).
+ * Whether a tool's parts, as recorded (`install`), are still what the plugin's parts for it are: nothing it holds or
+ * would get has changed (a new agent doesn't make Pi's parts out of date, nor does a change to a part its record has as
+ * out). Undefined while some of them can't be read (nothing is claimed either way). The record's digest identifies the
+ * parts' content when it was taken, over the parts not out then; a part removed by hand since may no longer match that,
+ * so a digest over every part counts too.
  */
-export async function partsDigest(context: ShareContext, files: PluginFiles, tool: HarnessId): Promise<string | undefined> {
-  const { ready, unread } = await partsFor(context, files, tool);
-  return digestOf(ready, unread, files);
+export async function partsCurrent(context: ShareContext, files: PluginFiles, install: Pick<PartsInstall, 'tool' | 'digest' | 'items'>): Promise<boolean | undefined> {
+  const { ready, unread } = await partsFor(context, files, install.tool);
+  return isCurrent(install, ready, unread, files);
 }
-const digestOf = (ready: PartItem[], unread: Set<string>, files: PluginFiles) =>
-  (unread.size || files.unread.servers ? undefined : sha256(JSON.stringify(ready.map(({ kind, name, hash }) => [kind, name, hash]))));
+const isCurrent = (install: Pick<PartsInstall, 'digest' | 'items'>, ready: PartItem[], unread: Set<string>, files: PluginFiles) => {
+  const now = digestOf(ready, unread, files, install.items);
+  return now === undefined ? undefined : now === install.digest || digestOf(ready, unread, files, []) === install.digest;
+};
+/** `items`: the tool's record; a part it has as out by the person's choice is left out, so a change to it is no change to what the tool holds. */
+const digestOf = (ready: PartItem[], unread: Set<string>, files: PluginFiles, items: PartItem[]) =>
+  (unread.size || files.unread.servers ? undefined : sha256(JSON.stringify(ready.filter(part => !items.some(item => item.removed && samePart(item, part))).map(({ kind, name, hash }) => [kind, name, hash]))));
 
 // ---------- What a tool holds now ----------
 
@@ -194,29 +208,50 @@ const agentFile = (context: ShareContext, tool: HarnessId, name: string) => {
 };
 
 /**
- * A part as it is in the tool now, read fresh: absent, there but unreadable right now, or there with `seen`, its fingerprint.
+ * A part as it is in the tool now, read fresh: absent, there but unreadable right now (with why), or there with `seen`, its fingerprint.
  * For an MCP entry `seen` covers the tool's own settings on it too (a narrowed Copilot `tools`, say), so an edit to those
  * counts as an edit; `neutralHash` is its neutral hash, which an MCP write is checked against. The tool's on/off key (Codex's
  * and Pi's `enabled`) is left out: profiles own that switch, and a server turned off is not one the person edited.
  */
-type OnDisk = { state: 'absent' } | { state: 'unreadable' } | { state: 'there'; seen: string; neutralHash?: string };
+type OnDisk = { state: 'absent'; /** A link is in a skill's place whose target is gone (where it led): it holds nothing, so a part may take its place. */ brokenLink?: string }
+  | { state: 'unreadable'; /** What is in its place and why it couldn't be read, to finish "Couldn't change the skill: …". */ why: string }
+  | { state: 'there'; seen: string; neutralHash?: string };
 async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartItem, 'kind' | 'name'>): Promise<OnDisk> {
+  const name = toolNames[tool];
   if (item.kind === 'skill') {
     const dir = skillDir(context, tool, item.name);
-    if (!(await exists(dir))) return { state: 'absent' };
-    const tree = await readTree(dir).catch(() => undefined);
-    return tree ? { state: 'there', seen: tree.hash } : { state: 'unreadable' };
+    const at = await lstat(dir).catch(() => undefined);
+    if (!at) return { state: 'absent' };
+    try { return { state: 'there', seen: (await readTree(dir)).hash }; }
+    catch (error) {
+      if (at.isSymbolicLink() && await leadsNowhere(dir)) return { state: 'absent', brokenLink: shown(context, await readlink(dir).catch(() => '')) };
+      return { state: 'unreadable', why: whyUnread(name, shown(context, dir), at, error) };
+    }
   }
   if (item.kind === 'mcp') {
     const read = await readTool(context, tool);
-    if (read.problem || read.invalid?.includes(item.name)) return { state: 'unreadable' };
+    if (read.problem) return { state: 'unreadable', why: `${name}’s settings file can’t be read right now (${read.problem.replace(/\.$/, '')})` };
+    if (read.invalid?.includes(item.name)) return { state: 'unreadable', why: `${name}’s settings hold an entry of that name in a form Central Knot doesn’t read` };
     const entry = read.entries.find(candidate => candidate.name === item.name);
     if (!entry) return { state: 'absent' };
     const { enabled: _switch, ...settings } = entry.extras;
     return { state: 'there', seen: sha256(JSON.stringify([entry.hash, canonical(tool === 'codex-cli' || tool === 'pi-cli' ? settings : entry.extras)])), neutralHash: entry.hash };
   }
-  const text = await readFile(agentFile(context, tool, item.name), 'utf8').catch(error => (errorCode(error) === 'ENOENT' ? undefined : null));
-  return text === undefined ? { state: 'absent' } : text === null ? { state: 'unreadable' } : { state: 'there', seen: sha256(text) };
+  const file = agentFile(context, tool, item.name);
+  try { return { state: 'there', seen: sha256(await readFile(file, 'utf8')) }; }
+  catch (error) { return errorCode(error) === 'ENOENT' ? { state: 'absent' } : { state: 'unreadable', why: `its file in ${name} couldn’t be read (${shown(context, file)}: ${errorCode(error) ?? 'unknown error'})` }; }
+}
+/** A path as a person reads it: one in their own home folder starts with `~`. */
+const shown = (context: ShareContext, path: string) => (context.realHome && path.startsWith(`${context.realHome}${sep}`) ? `~${path.slice(context.realHome.length)}` : path);
+/** Whether a link's target is gone (and not merely out of reach: a target that can't be checked counts as there). */
+const leadsNowhere = async (link: string) => stat(link).then(() => false, error => errorCode(error) === 'ENOENT');
+/** Why a skill's place in a tool couldn't be read, naming what is there, where, the system's own error code, and what to do about it. */
+function whyUnread(tool: string, dir: string, at: Stats, error: unknown): string {
+  const code = errorCode(error) ?? 'unknown error';
+  if (at.isSymbolicLink()) return `a link is in its place in ${tool} (${dir}), and what it leads to couldn’t be read (${code}); remove the link, then try again`;
+  if (!at.isDirectory()) return `a file is in its place in ${tool} (${dir}), where its folder would go; move or delete it, then try again`;
+  if (code === 'EACCES' || code === 'EPERM') return `this computer didn’t let Central Knot read its folder in ${tool} (${dir}: ${code}); allow that, then try again`;
+  return `its folder in ${tool} couldn’t be read (${dir}: ${code}); Refresh, then try again`;
 }
 type There = Extract<OnDisk, { state: 'there' }>;
 
@@ -225,7 +260,12 @@ type NamesInUse = Awaited<ReturnType<typeof namesInUse>>;
 async function namesInUse(context: ShareContext, tool: HarnessId) {
   const roots = harnesses[tool].skillRoots(configRoot(harnesses[tool], context.home, context.overrides?.[tool]), context.home).map(root => root.path);
   const skillNames = new Set<string>();
-  for (const root of roots) for (const entry of await readdir(root).catch(() => [] as string[])) skillNames.add(entry.toLowerCase());
+  for (const root of roots) {
+    for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+      // A link that leads nowhere is no skill of that name: the tool loads nothing from it.
+      if (!entry.isSymbolicLink() || !(await leadsNowhere(join(root, entry.name)))) skillNames.add(entry.name.toLowerCase());
+    }
+  }
   const sync = (await readRecord(context.home)).record;
   const mcpRecord = await readMcpRecord(context.home);
   const agentRecord = await readAgentRecord(context.home);
@@ -249,13 +289,13 @@ const stillOurs = (old: PartItem, now: There) =>
   (old.seen ? now.seen === old.seen : old.kind === 'mcp' ? now.neutralHash === old.hash : now.seen === old.hash);
 
 /**
- * Why a new part can't go in, if it can't, the same for the page's plan and for a run: its place can't be read right now,
+ * Why a new part can't go in, if it can't, the same for the page's plan and for a run: its place can't be read right now (and why),
  * the tool already has one of that name (here or in another folder it reads), or one of that name is managed, so its own
  * page decides where it goes and it is never claimed as a part.
  */
 function blocker(now: OnDisk, holds: NamesInUse, part: Pick<PartItem, 'kind' | 'name'>, tool: HarnessId): string | undefined {
   if (part.kind === 'skill' && holds.skillRootProblem) return holds.skillRootProblem.replace(/\.$/, '');
-  if (now.state === 'unreadable') return `its place in ${toolNames[tool]} can’t be read right now`;
+  if (now.state === 'unreadable') return now.why;
   if (now.state === 'there' || (part.kind === 'skill' && holds.skillNamed(part.name))) return `${toolNames[tool]} already has one of that name`;
   if (holds.managed(part)) return 'one of that name is managed, so its own page decides where it goes';
   return undefined;
@@ -312,49 +352,60 @@ async function take(context: ShareContext, tool: HarnessId, item: PartItem, was:
 const plainReason = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? 'it changed just now, so it was left as it is' : error instanceof Error ? error.message.replace(/\.$/, '') : String(error));
 
 /**
- * What a move has done so far: the parts held, notes on what was left alone, writes made and changes that failed, and the
+ * What a move has done so far: the parts held, notes on what was left alone, what else it did, writes made and changes that failed, and the
  * parts already gone from the tool when it looked (`goneBefore`), so its Undo never puts back what the person had removed.
  */
-interface Moved { held: PartItem[]; notes: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
+interface Moved { held: PartItem[]; notes: string[]; /** What the run did that is worth telling but needs no attention (a broken link replaced), in a sentence each. */ said: string[]; /** Skills written in place of a broken link, by name. */ replaced: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
 
 /**
- * Moves one tool from the parts it holds (`from`) to the parts wanted (`to`), part by part (see `settle`). Returns the parts
- * held afterwards (none when all that is left are parts the person removed), notes on what was left alone, how many
+ * Moves one tool from the parts it holds (`from`) to the parts wanted (`to`), part by part (see `settle`). `restoring`: an
+ * Undo; `on`: parts the person just turned on. Returns the parts held afterwards, notes on what was left alone, how many
  * writes were made, and how many failed (each keeps its old state).
  */
-async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[], restoring = false): Promise<Moved> {
+async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[], { restoring = false, on = [] as PartRef[] } = {}): Promise<Moved> {
   const holds = await namesInUse(context, tool);
-  const moved: Moved = { held: [], notes: [], wrote: 0, failed: 0, goneBefore: [] };
+  const moved: Moved = { held: [], notes: [], said: [], replaced: [], wrote: 0, failed: 0, goneBefore: [] };
   for (const each of [...from, ...to.filter(item => !from.some(old => samePart(old, item)))]) {
     const old = from.find(item => samePart(item, each));
-    try { await settle(context, tool, holds, old, to.find(item => samePart(item, each)), moved, restoring); }
+    try { await settle(context, tool, holds, old, to.find(item => samePart(item, each)), moved, { restoring, asked: on.some(ref => samePart(ref, each)) }); }
     catch (error) {
       moved.failed++;
       moved.notes.push(`Couldn’t change ${labelOf(old ?? each)}: ${plainReason(error)}.`);
       if (old) moved.held.push(old);
     }
   }
-  if (!moved.held.some(item => !item.removed)) moved.held = [];
   return moved;
 }
+
+/** A record's items after a run: none when all that is left are parts that are out (nothing of the plugin's is in the tool). */
+const stillHeld = (items: PartItem[]) => (items.some(item => !item.removed) ? items : []);
 
 const labelOf = (part: Pick<PartItem, 'kind' | 'name'>) => `the ${partWords[part.kind][0]} “${part.name}”`;
 
 /**
  * One part's move from what was put there (`old`) to what is wanted (`want`), the first rule that applies deciding:
- *  1. its place can't be read right now: a failure, nothing changes, it stays on record;
- *  2. the person removed it: it stays out (on record as removed) while the plugin still has it, and is forgotten once
- *     something of that name is there again (that one is the person's own);
- *  3. new, or claimed by a run that stopped before writing it: written where nothing blocks it (`blocker`);
- *  4. removed by hand since it went in: left out, and remembered as removed;
- *  5. edited since, or 6. managed since: left as it is, no longer a part (`leftBecause`);
- *  7. the plugin dropped it: removed; 8. unchanged: kept; 9. changed: replaced.
- * Rules 7 and 9 (and 3, in an Undo) write through the tool's skills folder, so for a skill they fail while it is a link or shared
+ *  1. it is in, or is to go in, and its place can't be read right now: a failure, nothing changes, it stays on record (nothing
+ *     can be said of what is there, not even that it is unchanged);
+ *  2. it is wanted out (`want.removed`: turned off, or removed by the person before): a copy these parts put there and
+ *     still theirs is taken out, and it stays on record as out;
+ *  3. it is out (`old.removed`): it stays out, and on record, while the plugin still has it, whatever is in its place
+ *     since, unless the person just turned it on (`asked`) or an Undo puts it back;
+ *  4. new, claimed by a run that stopped before writing it, or turned on and not there: written where nothing blocks it
+ *     (`blocker`), over a link that leads nowhere if one is in its place;
+ *  5. removed by hand since it went in: left out, and remembered as out;
+ *  6. edited since, or 7. managed since: left as it is, no longer a part (`leftBecause`);
+ *  8. the plugin dropped it: removed; 9. unchanged: kept; 10. changed: replaced.
+ * Rules 2, 8 and 10 (and 4, in an Undo) write through the tool's skills folder, so for a skill they fail while it is a link or shared
  * with another tool (as on the Skills page). A failure throws: `move` records it and keeps the part's old state.
  */
-async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse, old: PartItem | undefined, want: PartItem | undefined, moved: Moved, restoring: boolean) {
+async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse, old: PartItem | undefined, want: PartItem | undefined, moved: Moved, { restoring, asked }: { restoring: boolean; asked: boolean }) {
   const part = (old ?? want)!;
   const label = labelOf(part);
+  const ours = old && !old.removed ? old : undefined;
+  // Rules 2 and 3 where nothing of these parts is in the tool: its place is not even read, so what sits there (the
+  // person's own item, something unreadable) never fails the run or lets the part back in.
+  // (One the plugin has dropped stays on record as out too: should the plugin bring it back, it doesn't come back unasked.)
+  if (!ours && (!want || want.removed || (old?.removed && !restoring && !asked))) { const out = want ?? (restoring ? undefined : old); if (out) moved.held.push(outOf(out)); return; }
   const now = await onDisk(context, tool, part);
   const writeIn = async (replacing: There | undefined) => {
     // A part read from the plugin brings its content to the store first; one from the record (an Undo) is there already.
@@ -365,36 +416,60 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
     moved.held.push({ kind: want!.kind, name: want!.name, hash: want!.hash, ...(written.state === 'there' ? { seen: written.seen } : {}) });
   };
   const throughSkillsFolder = () => { if (part.kind === 'skill' && holds.skillRootProblem) throw new Error(holds.skillRootProblem); };
-  if (now.state === 'unreadable') throw new Error(`it can’t be read in ${toolNames[tool]} right now`);
-  // `want` alone is removed in an Undo's target state (asFound): the person had removed it before that run.
-  if (old?.removed || want?.removed) {
-    if (want && now.state === 'absent') moved.held.push({ ...want, removed: true });
+  if (now.state === 'unreadable') throw new Error(now.why);
+  if (ours && want?.removed) {
+    if (now.state === 'there') {
+      const left = leftBecause(ours, now, holds);
+      if (left) { moved.notes.push(`Left ${label} as it is: ${left}.`); return; }
+      throughSkillsFolder();
+      await take(context, tool, ours, now);
+      moved.wrote++;
+    // Gone already when this run looked: its Undo leaves it out.
+    } else if (ours.seen) moved.goneBefore.push(ours);
+    moved.held.push(outOf(want));
     return;
   }
-  if (!old || (!old.seen && now.state === 'absent')) {
-    // Claimed but never written, and not wanted now: nothing to take out, and nothing an Undo should write.
-    if (!want) { if (old) moved.goneBefore.push(old); return; }
+  if (!ours || (now.state === 'absent' && (!ours.seen || asked))) {
+    // Gone when this run looked (claimed but never written, or removed by hand): its Undo leaves it out.
+    if (ours) moved.goneBefore.push(ours);
+    // Not wanted now: nothing to take out, and nothing an Undo should write.
+    if (!want) return;
     // An Undo putting a part back through a skills folder that became a link fails (retryable), never quietly skips it.
     if (restoring) throughSkillsFolder();
     const why = blocker(now, holds, part, tool);
-    if (why) { moved.notes.push(`Left ${label}: ${why}. Once that is sorted out, Update parts on the plugin’s page adds it.`); return; }
+    if (why) { moved.notes.push(`Didn’t put in ${label}: ${why}. Once that is sorted out, turn its switch on under “What it holds” on the plugin’s page, or use Update parts.`); return; }
+    if (now.state === 'absent' && now.brokenLink !== undefined) { moved.said.push(await clearBrokenLink(context, tool, part.name, now.brokenLink)); moved.replaced.push(part.name); }
     await writeIn(undefined);
     return;
   }
   if (now.state === 'absent') {
-    moved.goneBefore.push(old);
+    moved.goneBefore.push(ours);
     if (!want) return;
     moved.notes.push(`Left out ${label}: it was removed from ${toolNames[tool]} after it was installed.`);
-    moved.held.push({ ...want, removed: true });
+    moved.held.push(outOf(want));
     return;
   }
-  const left = leftBecause(old, now, holds);
+  const left = leftBecause(ours, now, holds);
   if (left) { moved.notes.push(`Left ${label} as it is: ${left}.`); return; }
-  if (!want) { throughSkillsFolder(); await take(context, tool, old, now); moved.wrote++; return; }
+  if (!want) { throughSkillsFolder(); await take(context, tool, ours, now); moved.wrote++; return; }
   // Unchanged: kept, and a part claimed before it was written learns what it is on disk now.
-  if (want.hash === old.hash) { moved.held.push(old.seen ? old : { ...old, seen: now.seen }); return; }
+  if (want.hash === ours.hash) { moved.held.push(ours.seen ? ours : { ...ours, seen: now.seen }); return; }
   throughSkillsFolder();
   await writeIn(now);
+}
+
+/** A part on record as out: by its kind, name and the hash it had, and nothing else of the item it was made from. */
+const outOf = (item: PartItem): PartItem => ({ kind: item.kind, name: item.name, hash: item.hash, removed: true });
+
+/**
+ * Removes the link in a new skill's place whose target is gone, so the skill can go in, and says so. Only the link itself
+ * goes, and only while it still leads nowhere.
+ */
+async function clearBrokenLink(context: ShareContext, tool: HarnessId, name: string, led: string): Promise<string> {
+  const link = skillDir(context, tool, name);
+  if (!(await lstat(link)).isSymbolicLink() || !(await leadsNowhere(link))) throw changedWhileSyncing();
+  await unlink(link);
+  return `A broken link named “${name}” in ${toolNames[tool]}’s skills folder was replaced${led ? ` (it led to ${led}, which isn’t there)` : ''}.`;
 }
 
 // ---------- Runs ----------
@@ -416,16 +491,18 @@ async function saveRun(context: ShareContext, run: PartsRun): Promise<string> {
 const asFound = (before: PartsInstall | null, moved: Moved): PartsInstall | null =>
   (before ? { ...before, items: before.items.map(item => (moved.goneBefore.some(gone => samePart(gone, item)) ? { ...item, removed: true as const } : item)) } : null);
 
-const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: string, more: { run?: string; changed?: boolean; notes?: string[]; updated?: boolean } = {}): ActionReport =>
-  ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}) });
+const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: string, more: { run?: string; changed?: boolean; notes?: string[]; updated?: boolean; replaced?: string[] } = {}): ActionReport =>
+  ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}), ...(more.replaced?.length ? { replacedLinks: more.replaced } : {}) });
 
 /**
- * Installs a plugin's parts in a tool, or brings them up to date: unchanged parts are replaced, new ones added, ones the
- * plugin dropped removed. Edited, deleted or managed parts stay as they are; a part whose source can't be read now keeps
- * its installed copy. The record names every part before anything is written, so a run that stops halfway still owns
- * what it wrote. A run with failures keeps the old version and digest, so the plugin still shows as changed. Undoable.
+ * Installs a plugin's parts in a tool, or brings them up to date: parts still as they went in are replaced by the plugin's
+ * current ones, new ones added, ones the plugin dropped removed. Edited, deleted or managed parts stay as they are; a part whose source can't be read now keeps
+ * its installed copy. With `pick`, each part in `on` goes in (also one turned off or removed before) and each one in
+ * `off` comes out and stays out. Unless `pick.rest`, only those parts change, and the first pick for a tool leaves the
+ * plugin's other parts out too. The record names every part before anything is written, so a run that stops halfway still owns what it wrote.
+ * A run with failures keeps the old version and digest, so the plugin still shows as changed. Undoable.
  */
-export async function installParts(context: ShareContext, target: PartsTarget, files: PluginFiles): Promise<ActionReport> {
+export async function installParts(context: ShareContext, target: PartsTarget, files: PluginFiles, pick?: PartsPick): Promise<ActionReport> {
   const { tool } = target;
   if (!partsTools.includes(tool)) return report(tool, 'failed', `${toolNames[tool]} takes the plugin itself.`);
   const access = await writeAccess(context);
@@ -433,47 +510,116 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const before = await entryFor(context.home, target);
   const { ready, plan, unread } = await partsFor(context, files, tool);
   if (!ready.length && !before) return report(tool, 'failed', `Nothing in it can go into ${toolNames[tool]}. ${plan.map(part => part.why).filter(Boolean)[0] ?? 'It has no skills, MCP servers or agents.'}`);
-  // A part whose source can't be read now stays as it is, never read as dropped by the plugin.
-  const unreadable = (before?.items ?? []).filter(item => unread.has(unreadKey(item.kind, item.name)) || unread.has(unreadKey(item.kind, '*')) || (item.kind === 'mcp' && files.unread.servers));
-  // Each ready part saves its content into the store only when it is about to be written (see settle's writeIn).
-  const wanted: PartItem[] = [...ready, ...unreadable];
-  const digest = digestOf(ready, unread, files);
+  const held = before?.items ?? [];
+  const whole = wholeChange(held, ready, unread, files);
+  const change = pick ? pickedChange(held, ready, plan, pick, pick.rest ? whole : undefined) : whole;
+  // Only single parts change: the others stay as they are, at the version they have.
+  const only = !!pick && !pick.rest;
   const record = (items: PartItem[], version: string | undefined, contentDigest: string): PartsInstall | null => (items.length
     ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version, tool, at: new Date().toISOString(), digest: contentDigest, items }
     : null);
   const previous = { version: before?.version, digest: before?.digest ?? '' };
   // Claimed first: every part this run may write is on record (as the plugin was), so a run that stops halfway still owns it.
-  const claimed = [...(before?.items ?? []), ...wanted.filter(item => !before?.items.some(old => samePart(old, item)))];
+  const claimed = [...held, ...[...change.aside, ...change.to].filter(item => !held.some(old => samePart(old, item)))];
   await saveEntry(context.home, target, record(claimed, previous.version, previous.digest));
-  const moved = await move(context, tool, before?.items ?? [], wanted);
-  // Settled: what is there now. With failures it keeps the plugin's old version and digest, so it still shows as changed.
-  // A digest undefined (some source unread now) keeps the old one: once readable, the plugin may show as changed though
-  // nothing differs, and that update writes nothing and only brings the record up to date.
-  const after = moved.failed ? record(moved.held, previous.version, previous.digest) : record(moved.held, target.version, digest ?? previous.digest);
+  const moved = await move(context, tool, change.from, change.to, { on: pick?.on });
+  moved.failed += change.cannot.length;
+  moved.notes.push(...change.cannot);
+  const items = stillHeld([...change.aside, ...moved.held]);
+  const settled = settledAs(before, target.version, digestOf(ready, unread, files, items),
+    { failed: moved.failed > 0, only, current: !!before && (isCurrent(before, ready, unread, files) === true || holdsNow(items, ready)) });
+  const after = record(items, settled.version, settled.digest);
   await saveEntry(context.home, target, after);
   // A version change counts only while parts remain: a record that just went away is no change to undo.
   const changed = moved.wrote > 0 || (!!after && before?.version !== after.version);
   const run = changed ? await saveRun(context, { target: { source: target.source, plugin: target.plugin, tool: target.tool }, before: asFound(before, moved), after }) : undefined;
-  const skipped = plan.filter(part => part.why).map(part => `${part.name}: ${part.why}`);
+  const skipped = only ? [] : plan.filter(part => part.why).map(part => `${part.name}: ${part.why}`);
   const left = skipped.length ? ` Not installed: ${skipped.join('; ')}` : '';
-  const { outcome, message } = installOutcome(tool, moved, !!before);
+  const { outcome, message } = installOutcome(tool, moved, items, !!before, only);
   const notes = outcome === 'failed' ? [] : moved.notes;
-  return report(tool, outcome, `${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${left}`, { run, changed, notes, updated: outcome === 'installed' && !!before });
+  // A run that failed partway says what it did change too: what the tool has now.
+  const has = outcome === 'failed' && moved.wrote && items.some(item => !item.removed) ? ` ${toolNames[tool]} now has ${partsSummary(items.filter(item => !item.removed), ', ')}.` : '';
+  return report(tool, outcome, [`${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${has}`, ...moved.said].join(' ') + left, { run, changed, notes, updated: outcome === 'installed' && !!before, replaced: moved.replaced });
 }
 
 /**
- * What an install or update run comes to, in order: a part failed; nothing went in where nothing was before (each name
- * taken already); every part was deleted by hand since; the plugin no longer has any part for this tool; or installed
- * (or brought up to date) with what is there now.
+ * The version and digest a run leaves on record (`digest`: of the parts as they are now, undefined while some source
+ * can't be read, which keeps the old one: once readable, the plugin may show as changed though nothing differs, and that
+ * update writes nothing and only brings the record up to date).
  */
-function installOutcome(tool: HarnessId, moved: Moved, update: boolean): { outcome: ActionReport['outcome']; message: string } {
+function settledAs(before: PartsInstall | null, version: string | undefined, digest: string | undefined, run: { failed: boolean; only: boolean; current: boolean }): { version: string | undefined; digest: string } {
+  const previous = { version: before?.version, digest: before?.digest ?? '' };
+  // A run with failures keeps the old ones, so the plugin still shows as changed. A first run has none: what it did put
+  // in is at this version, and what failed is not on record, so the page still offers it.
+  if (run.failed) return before ? previous : { version, digest: digest ?? '' };
+  // A pick of single parts brings no other part up to date: unless what the tool holds is what the plugin has now
+  // (`current`), the parts stay at the version they have, still out of date.
+  if (run.only && before && !run.current) return previous;
+  return { version, digest: digest ?? previous.digest };
+}
+
+/** Whether a record's items are the plugin's parts as they are now: each one held has its current content, and each part it has is held or out. */
+const holdsNow = (items: PartItem[], ready: PartItem[]) => items.every(item => item.removed || ready.some(part => samePart(part, item) && part.hash === item.hash))
+  && ready.every(part => items.some(item => samePart(item, part)));
+
+/**
+ * What one run moves: the parts it settles, from the state on record (`from`) to the state wanted (`to`); the record's
+ * other items, carried as they are (`aside`); and parts it can't take up at all, each saying why (`cannot`).
+ */
+interface PartsChange { from: PartItem[]; to: PartItem[]; aside: PartItem[]; cannot: string[] }
+
+/** The whole plugin: every part that can go in, and the installed copy of each one whose source can't be read now (never read as dropped). */
+function wholeChange(held: PartItem[], ready: Ready[], unread: Set<string>, files: PluginFiles): PartsChange {
+  const unreadable = held.filter(item => unread.has(unreadKey(item.kind, item.name)) || unread.has(unreadKey(item.kind, '*')) || (item.kind === 'mcp' && files.unread.servers));
+  // Each ready part saves its content into the store only when it is about to be written (see settle's writeIn).
+  return { from: held, to: [...ready, ...unreadable], aside: [], cannot: [] };
+}
+
+/**
+ * Single parts, chosen (`pick`), beside the rest of the tool's parts: those move as the whole plugin's do (`rest`), or
+ * stay as they are, and with no record yet are recorded as out, so a later update brings in only what was chosen. A part
+ * turned on is wanted in (`settle` writes it even where the record has it out or it is gone from the tool); one turned
+ * off is wanted out.
+ */
+function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: PartsPick, rest: PartsChange | undefined): PartsChange {
+  // Each part once, whatever the request repeats: one named both ways comes out.
+  const once = (refs: PartRef[]) => refs.filter((ref, at) => refs.findIndex(other => samePart(other, ref)) === at);
+  const off = once(pick.off), on = once(pick.on).filter(ref => !off.some(other => samePart(other, ref)));
+  const picked = (item: Pick<PartItem, 'kind' | 'name'>) => [...on, ...off].some(ref => samePart(ref, item));
+  const others = <T extends PartItem>(items: T[]) => items.filter(item => !picked(item));
+  const change: PartsChange = rest ? { ...rest, from: others(rest.from), to: others(rest.to) }
+    : { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(outOf))], cannot: [] };
+  for (const ref of on) {
+    const want = ready.find(item => samePart(item, ref));
+    const old = held.find(item => samePart(item, ref));
+    if (want) change.to.push(want);
+    else change.cannot.push(`Couldn’t add ${labelOf(ref)}: ${(plan.find(part => samePart(part, ref))?.why ?? 'The plugin no longer has it.').replace(/\.$/, '')}.`);
+    if (old) (want ? change.from : change.aside).push(old);
+  }
+  for (const ref of off) {
+    const old = held.find(item => samePart(item, ref));
+    const known = old ?? ready.find(item => samePart(item, ref));
+    if (!known) continue;
+    if (old) change.from.push(old);
+    change.to.push(outOf(known));
+  }
+  return change;
+}
+
+/**
+ * What an install, update or pick comes to, in order: a part failed; nothing went in where nothing was before (each name
+ * taken already); every part was deleted by hand since; the plugin no longer has any part for this tool; or installed
+ * (brought up to date, or changed by a pick) with what is there now (`items`).
+ */
+function installOutcome(tool: HarnessId, moved: Moved, items: PartItem[], update: boolean, picked: boolean): { outcome: ActionReport['outcome']; message: string } {
   const name = toolNames[tool];
   if (moved.failed) return { outcome: 'failed', message: 'Not every part could be changed.' };
-  if (!moved.held.length && !update) return { outcome: 'failed', message: 'Nothing was installed.' };
-  if (!moved.held.length && !moved.wrote) return { outcome: 'uninstalled', message: `None of its parts are in ${name} any more.` };
-  if (!moved.held.length) return { outcome: 'uninstalled', message: `Parts removed: the plugin no longer has any that can go into ${name}.` };
-  const there = partsSummary(moved.held.filter(item => !item.removed), ', ');
-  return { outcome: 'installed', message: `${update ? 'Parts brought up to date' : 'Parts installed'}: ${there}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}` };
+  if (!items.length && !update) return { outcome: 'failed', message: 'Nothing was installed.' };
+  if (!items.length && (picked || !moved.wrote)) return { outcome: 'uninstalled', message: `None of its parts are in ${name} any more.` };
+  if (!items.length) return { outcome: 'uninstalled', message: `Parts removed: the plugin no longer has any that can go into ${name}.` };
+  const there = partsSummary(items.filter(item => !item.removed), ', ');
+  const done = picked ? `Parts changed: ${name} now has ${there}` : `${update ? 'Parts brought up to date' : 'Parts installed'}: ${there}`;
+  return { outcome: 'installed', message: `${done}. ${harnesses[tool].nextStep.replace(/^Written\. /, '')}` };
 }
 
 /** Removes a plugin's parts from a tool: each one still as it was installed. Edited or managed parts stay. Undoable. */
@@ -484,7 +630,8 @@ export async function removeParts(context: ShareContext, target: PartsOf): Promi
   const before = await entryFor(context.home, target);
   if (!before) return report(tool, 'uninstalled', `No parts of it are in ${toolNames[tool]}.`);
   const moved = await move(context, tool, before.items, []);
-  const after = moved.held.length ? { ...before, items: moved.held } : null;
+  const items = stillHeld(moved.held);
+  const after = items.length ? { ...before, items } : null;
   await saveEntry(context.home, target, after);
   const run = moved.wrote ? await saveRun(context, { target: { source: target.source, plugin: target.plugin, tool: target.tool }, before: asFound(before, moved), after }) : undefined;
   if (moved.failed) return report(tool, 'failed', [`Not every part could be removed from ${toolNames[tool]}.`, ...moved.notes].join(' '), { run, changed: moved.wrote > 0 });
@@ -504,9 +651,10 @@ export async function undoParts(context: ShareContext, run: string): Promise<Act
   const access = await writeAccess(context);
   if (!access.allowed) return report(tool, 'failed', access.reason);
   const current = await entryFor(context.home, past.target);
-  const moved = await move(context, tool, current?.items ?? [], past.before?.items ?? [], true);
+  const moved = await move(context, tool, current?.items ?? [], past.before?.items ?? [], { restoring: true });
   const base = past.before ?? current;
-  await saveEntry(context.home, past.target, base && moved.held.length ? { ...base, items: moved.held } : null);
+  const items = stillHeld(moved.held);
+  await saveEntry(context.home, past.target, base && items.length ? { ...base, items } : null);
   if (moved.failed) return report(tool, 'failed', [`Not everything was undone in ${toolNames[tool]}.`, ...moved.notes].join(' '));
   await rm(runPath(context.home, run), { force: true });
   // Nothing left to undo (every part was edited or removed since, or only the version changed): done, so it isn't offered again.
@@ -515,6 +663,7 @@ export async function undoParts(context: ShareContext, run: string): Promise<Act
     if (past.before?.version !== past.after?.version) message = `Its record is back to ${past.before?.version ? `version ${past.before.version}` : 'how it was'}; no file needed changing.`;
     return report(tool, past.before ? 'installed' : 'uninstalled', message, { notes: moved.notes });
   }
-  const done = past.before ? `Parts put back in ${toolNames[tool]}: ${partsSummary(moved.held.filter(item => !item.removed), ', ')}.` : `Parts removed from ${toolNames[tool]}.`;
+  const there = partsSummary(moved.held.filter(item => !item.removed), ', ');
+  const done = past.before ? `${toolNames[tool]}’s parts are back as they were${there ? `: ${there}` : ''}.` : `Parts removed from ${toolNames[tool]}.`;
   return report(tool, past.before ? 'installed' : 'uninstalled', done, { changed: true, notes: moved.notes });
 }

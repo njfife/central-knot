@@ -910,6 +910,28 @@ async function practiceFlow() {
   check('Restore Codex’s edit puts the edit back, and the copy stops again', readFileSync(codexAgent, 'utf8').includes('Edited in Codex.') && await a.exists('#cell-code-reviewer-codex-cli[data-state="stopped"]'), JSON.stringify(await a.all('[id^=cell-code-reviewer]', 'e.id + "=" + e.dataset.state')) + ' ' + (await a.text('main'))?.slice(0, 400));
   await a.click('#nav-skills');
 
+  // What a plugin installed whole brings shows on Skills and MCP servers with the plugin's mark, before Plugins was ever
+  // opened, from a marketplace nothing here has added: Claude Code's own record and copy are enough.
+  writeClaudeInstall(practice, 'ck-outside', 'outside-tools', '0.3.0', {
+    'skills/outside-skill/SKILL.md': '---\nname: outside-skill\ndescription: Comes with a plugin.\n---\n\nSteps.\n',
+    '.mcp.json': JSON.stringify({ mcpServers: { 'outside-server': { command: 'npx', args: ['-y', 'outside'] } } }),
+  });
+  await a.click('#header-refresh');
+  const outside = 'outside-tools@ck-outside/outside-skill', outsideRow = `.ov-row[data-key="${outside}"]`;
+  for (let tries = 0; tries < 40 && !(await a.exists(outsideRow)); tries++) await wait(100);
+  same('a plugin’s skill is a row with its mark, filled under Claude Code, empty elsewhere, with no Managed switch',
+    [/from outside-tools/.test(await a.text(outsideRow) ?? ''), await cellState(a, outside, 'claude-cli'), await cellState(a, outside, 'copilot-cli'), await a.exists(`${outsideRow} .switch`), await a.exists('.ov-section-plugins')],
+    [true, 'plugin', 'plugin-none', false, true]);
+  await a.click(`[id="open-${outside}"]`);
+  check('its details say which plugin it is from and where it is handled', /From the plugin[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
+  await a.click('#nav-mcp');
+  same('its MCP server too, on the MCP servers page', await cellState(a, 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
+  rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && await a.exists('[data-key="outside-tools@ck-outside/outside-server"]'); tries++) await wait(100);
+  check('and gone once the plugin is', !(await a.exists('[data-key="outside-tools@ck-outside/outside-server"]')));
+  await a.click('#nav-skills');
+
   // Plugins: a folder marketplace is browsed (its README, each plugin's contents) and installs are chosen, then applied.
   const market = join(scratch, 'market');
   writeMarket(market, 'ck-test-market');
@@ -1214,7 +1236,7 @@ async function practiceFlow() {
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/Not the skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !/Can’t go in: skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   await a.click('#pcell-0-issue-tracker-pi-cli');
   await a.click('#plugins-apply');
   check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
@@ -1227,6 +1249,30 @@ async function practiceFlow() {
   check('Update parts adds it', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.'), await a.text('.bands'));
   await a.click('#punparts-issue-tracker');
   await a.click('#plugins-apply');
+  // Single parts: a switch under Pi puts in that one skill alone, over a link there that leads nowhere; the rest stays out.
+  rmSync(join(practice, '.pi/agent/skills/triage'), { recursive: true, force: true });
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
+  await a.click('#header-refresh');
+  for (let tries = 0; tries < 40 && !/would replace a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: it would replace a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
+  const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
+  same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
+  await a.click(partSwitch('skill-triage'));
+  check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('skill-triage') === 'part-on true' && /Will add 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to add/.test(await a.text('.toolbar') ?? '')
+    && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
+  await a.click('#plugins-apply');
+  check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
+    && /skill triage put into Pi/i.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
+  check('the log file says what that change came to: the plugin, the parts picked, the tool, and the broken link replaced',
+    /plugins:parts issue-tracker@[\w-]+ \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
+  for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
+  await a.click(partSwitch('skill-triage'));
+  await a.click('#plugins-apply');
+  check('turning its switch off takes it out again', !existsSync(join(practice, '.pi/agent/skills/triage')), await a.text('.bands'));
   rmSync(join(practice, '.pi'), { recursive: true, force: true });
   await a.run('window.centralKnot.refresh()');
   // One skill of an installed plugin, off and back on (ENB-06): Codex's switch is a [[skills.config]] block naming
@@ -1241,12 +1287,18 @@ async function practiceFlow() {
   for (let tries = 0; tries < 60 && !(await a.run(`(document.querySelector('[data-plugin="document-tools"]')?.textContent ?? '').includes('Installed') || !!document.querySelector('#pcell-0-document-tools-codex-cli[data-state="installed"]')`)); tries++) await wait(100);
   await a.click('#popen-0-document-tools');
   for (let tries = 0; tries < 60 && !(await a.exists('#pskill-0-document-tools-pdf-reader-codex-cli')); tries++) await wait(100);
-  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
+  same('an installed plugin’s skills each get a switch in the tool that has it, on', await a.all('.plugin-skills .switch[id^="pskill-"]', 'e.id + "=" + e.getAttribute("aria-checked")'), ['pskill-0-document-tools-pdf-reader-codex-cli=true', 'pskill-0-document-tools-spreadsheet-codex-cli=true']);
   await a.click('#pskill-0-document-tools-pdf-reader-codex-cli');
   check('turning one off only chooses it', /1 skill to turn off/.test(await a.text('.toolbar') ?? '') && readFileSync(codexConfig, 'utf8') === configBefore, await a.text('.toolbar'));
   await a.click('#plugins-apply');
   check('Apply all turns it off with Codex’s own switch, by name', readFileSync(codexConfig, 'utf8') === `${configBefore}\n[[skills.config]]\nname = "document-tools:pdf-reader"\nenabled = false\n`, readFileSync(codexConfig, 'utf8'));
   check('and the page shows it off', await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`) === 'false' && /Installed (· [^·]+ )?· 1 skill off/.test(await a.text('.plugin-panel')) && /pdf-reader turned off in Codex/.test(await a.text('.toolbar') ?? ''), await a.text('.plugin-page'));
+  // The Skills page shows the same switch in Codex's box for the plugin's skill.
+  const pdfRow = 'document-tools@ck-test-market/pdf-reader';
+  await a.click('#nav-skills');
+  for (let tries = 0; tries < 40 && await cellState(a, pdfRow, 'codex-cli') !== 'plugin-off'; tries++) await wait(100);
+  same('on the Skills page its Codex box shows it off, the plugin’s other skill on', [await cellState(a, pdfRow, 'codex-cli'), await cellState(a, 'document-tools@ck-test-market/spreadsheet', 'codex-cli')], ['plugin-off', 'plugin']);
+  await a.click('#nav-plugins');
   await a.click('#plugins-undo');
   same('Undo turns it back on: config.toml is as it was', [readFileSync(codexConfig, 'utf8') === configBefore, await a.run(`document.querySelector('#pskill-0-document-tools-pdf-reader-codex-cli').getAttribute('aria-checked')`)], [true, 'true']);
   writeFileSync(codexConfig, configBefore.slice(0, configBefore.indexOf('\n[marketplaces.ck-test-market]')));

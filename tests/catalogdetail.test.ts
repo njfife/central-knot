@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { inside, marketplacePage, pluginContents, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
+import { inside, marketplacePage, pluginContents, pluginFiles, readmeIn, remoteOf, sourceOf } from '../src/catalogdetail.ts';
 
 const noLinks = process.platform === 'win32';
 const put = async (path: string, text: string) => { await mkdir(dirname(path), { recursive: true }); await writeFile(path, text); };
@@ -55,6 +55,10 @@ test('Agents and Codex skills nested deeper than one folder are read, as far dow
     await put(join(root, 'skills/a/b/c/d/e/f/SKILL.md'), '---\nname: seventh\ndescription: S\n---\n');
     await put(join(root, 'skills/.hidden/tucked/SKILL.md'), '---\nname: hidden\ndescription: H\n---\n');
     assert.deepEqual((await pluginContents(root, {}, root)).agents.map(agent => agent.name), ['deep']);
+    // Copilot's naming: reviewer.agent.md is the agent "reviewer", on the page and as a part.
+    await put(join(root, 'agents/reviewer.agent.md'), '---\ndescription: Reviews\n---\n');
+    assert.deepEqual((await pluginContents(root, {}, root)).agents.map(agent => agent.name), ['deep', 'reviewer']);
+    assert.deepEqual((await pluginFiles(root, {}, root)).agents.map(agent => agent.name).sort(), ['deep', 'reviewer']);
     assert.deepEqual((await pluginContents(root, {}, root, { codex: {} })).skills.map(skill => skill.name), ['nested', 'sixth']);
   } finally { await cleanup(); }
 });

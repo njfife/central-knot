@@ -4,8 +4,8 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
-import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
-import { githubRepo, isFolder, isHttps, record, strings, text } from './values.ts';
+import type { HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
+import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
 /** No file from a repository is read past this; front matter and READMEs need far less. */
@@ -123,6 +123,9 @@ async function skillsIn(root: string, folder: string, paths: string[], subfolder
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
+/** A command's or agent's name from its file (values.nameOfFile). */
+const agentName = (file: string) => nameOfFile(basename(file));
+
 /**
  * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders, NESTED_LEVELS down.
  * Each part's `path` is its file relative to the plugin's `folder`. A file listed there that can't be read, or a folder
@@ -140,9 +143,9 @@ async function markdownIn(root: string, folder: string, paths: string[], unread?
     for (const file of files) {
       if (found.some(part => part.path === relative(folder, file))) continue;
       const body = await partFile(root, file);
-      if (body === undefined) { if (unread && await present(file)) unread.push(basename(file, '.md')); continue; }
+      if (body === undefined) { if (unread && await present(file)) unread.push(agentName(file)); continue; }
       const meta = nameAndDescription(body);
-      found.push({ name: meta.name || basename(file, '.md'), description: meta.description ?? '', text: body, path: relative(folder, file) });
+      found.push({ name: meta.name || agentName(file), description: meta.description ?? '', text: body, path: relative(folder, file) });
     }
   }
   return found.sort((first, second) => first.name.localeCompare(second.name));
@@ -261,6 +264,14 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
   };
 }
 
+/**
+ * What a tool's installed copy of a plugin holds (in `path`), as that tool reads it: Codex by its own manifest, Copilot CLI
+ * with a skills list replacing the skills folder. `entry`: its marketplace entry, where known.
+ */
+export async function installedContents(tool: HarnessId, path: string, entry: Record<string, unknown> = {}, atMarketplaceRoot = false): Promise<PluginContents> {
+  return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot });
+}
+
 /** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */
 export interface PluginFiles {
   /** The plugin's folder: a server's relative paths are checked against it. */
@@ -291,8 +302,8 @@ export async function pluginFiles(folder: string, entry: Record<string, unknown>
     // Read again with its size known: a part copied as an item is never a cut copy.
     const file = join(folder, part.path);
     const read = await readInside(root, file, PART_FILE_LIMIT);
-    if (read) agents.push({ name: basename(file, '.md'), text: read.text, whole: read.whole });
-    else unread.agents.push(basename(file, '.md'));
+    if (read) agents.push({ name: agentName(file), text: read.text, whole: read.whole });
+    else unread.agents.push(agentName(file));
   }
   return { folder, skills: skills.map(dir => ({ name: basename(dir), dir })), agents, servers: servers.values, unread };
 }

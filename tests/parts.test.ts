@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { discover } from '../src/discovery.ts';
 import { applyChanges } from '../src/manage.ts';
-import { installParts, partsDigest, readParts, removeParts, undoParts } from '../src/parts.ts';
+import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from '../src/parts.ts';
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
@@ -149,10 +149,10 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
   try {
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     const installed = (await readParts(box.home))[0]!;
-    assert.equal(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.equal(await partsCurrent(box.context, await box.files(), installed), true);
     await writeFile(join(box.plugin, 'skills', 'figma-design', 'SKILL.md'), SKILL.replace('Use the figma server.', 'Use the figma server, v2.'));
     await rm(join(box.plugin, 'agents'), { recursive: true });
-    assert.notEqual(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.equal(await partsCurrent(box.context, await box.files(), installed), false);
 
     const updated = await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
     assert.equal(updated.outcome, 'installed', updated.message);
@@ -259,6 +259,198 @@ test('Claude Code with no CLI takes a plugin’s skills and agents as they are, 
     assert.equal(await readFile(join(box.home, '.claude/skills/figma-design/SKILL.md'), 'utf8'), SKILL);
     assert.equal(await readFile(join(box.home, '.claude/agents/designer.md'), 'utf8'), AGENT);
     await assert.rejects(readFile(join(box.home, '.claude.json')));
-    assert.match(claude.message, /figma: Claude Code’s MCP servers are written only with Write to Claude Code/);
+    assert.match(claude.message, /figma: Claude Code’s MCP servers are added with “Write to Claude Code”/);
+  } finally { await box.cleanup(); }
+});
+
+/** A sandbox whose plugin has three skills (figma-design, tdd, grill-me) and nothing else Pi takes. */
+async function threeSkills() {
+  const box = await sandbox();
+  for (const name of ['tdd', 'grill-me']) {
+    await mkdir(join(box.plugin, 'skills', name), { recursive: true });
+    await writeFile(join(box.plugin, 'skills', name, 'SKILL.md'), `---\nname: ${name}\ndescription: ${name}\n---\n\n${name}\n`);
+  }
+  await rm(join(box.plugin, '.mcp.json'));
+  const pi = (name: string) => join(box.home, '.pi/agent/skills', name);
+  const inPi = async () => (await Promise.all(['figma-design', 'grill-me', 'tdd'].map(async name => (await readFile(join(pi(name), 'SKILL.md'), 'utf8').then(() => name, () => ''))))).filter(Boolean);
+  return { ...box, pi, inPi, to: { ...target, tool: 'pi-cli' as const } };
+}
+const skill = (name: string) => ({ kind: 'skill' as const, name });
+
+test('A link that leads nowhere in a skill’s place is replaced and said; a file there, or a link to a real folder, is named and left', async () => {
+  const box = await threeSkills();
+  try {
+    await mkdir(join(box.home, '.pi/agent/skills'), { recursive: true });
+    // What an uninstalled skills manager leaves behind: links into a folder that is gone.
+    await symlink(join(box.home, '.agents/skills/tdd'), box.pi('tdd'));
+    await writeFile(box.pi('grill-me'), 'not a folder');
+    const plans = await planParts(box.context, await box.files(), ['pi-cli'], []);
+    const plan = (name: string) => plans['pi-cli']!.find(part => part.name === name)!;
+    assert.match(plan('tdd').limit ?? '', /it would replace a broken link there, which led to .*\.agents\/skills\/tdd/);
+    assert.equal(plan('tdd').why, undefined);
+    assert.match(plan('grill-me').why ?? '', /A file is in its place in Pi \(.*\.pi\/agent\/skills\/grill-me\)/);
+
+    const report = await installParts(box.context, box.to, await box.files());
+    assert.equal(report.outcome, 'failed', report.message);
+    assert.match(report.message, /Couldn’t change the skill “grill-me”: a file is in its place in Pi \(.*grill-me\), where its folder would go; move or delete it, then try again\./);
+    assert.match(report.message, /A broken link named “tdd” in Pi’s skills folder was replaced \(it led to .*\.agents\/skills\/tdd, which isn’t there\)/);
+    assert.match(report.message, /Pi now has 2 skills\./);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'tdd']);
+    assert.equal(await readFile(box.pi('grill-me'), 'utf8'), 'not a folder');
+
+    // A link that leads somewhere is someone's skill: never replaced, and never read as a broken one.
+    await removeParts(box.context, box.to);
+    await mkdir(join(box.home, 'elsewhere/tdd'), { recursive: true });
+    await writeFile(join(box.home, 'elsewhere/tdd/SKILL.md'), 'theirs');
+    await symlink(join(box.home, 'elsewhere/tdd'), box.pi('tdd'));
+    await rm(box.pi('grill-me'));
+    const again = await installParts(box.context, box.to, await box.files());
+    assert.match(again.notes?.join(' ') ?? '', /Didn’t put in the skill “tdd”: Pi already has one of that name/);
+    assert.equal(await readFile(join(box.home, 'elsewhere/tdd/SKILL.md'), 'utf8'), 'theirs');
+  } finally { await box.cleanup(); }
+});
+
+test('Single parts: a first pick leaves the rest out, an update keeps them out, each can be turned on or off, and Undo goes back', async () => {
+  const box = await threeSkills();
+  try {
+    const first = await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    assert.equal(first.outcome, 'installed', first.message);
+    assert.match(first.message, /Parts changed: Pi now has 1 skill\./);
+    assert.deepEqual(await box.inPi(), ['tdd']);
+    // The rest are out by choice: the plan says so, and an update brings none of them in.
+    const out = async () => (await planParts(box.context, await box.files(), ['pi-cli'], await readParts(box.home)))['pi-cli']!.filter(part => part.out).map(part => part.name).sort();
+    assert.deepEqual(await out(), ['figma-design', 'grill-me']);
+    const second = '---\nname: tdd\ndescription: tdd\n---\n\ntdd, second edition\n';
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), second);
+    const update = await installParts(box.context, box.to, await box.files());
+    assert.equal(update.outcome, 'installed', update.message);
+    assert.deepEqual(await box.inPi(), ['tdd']);
+    assert.equal(await readFile(join(box.pi('tdd'), 'SKILL.md'), 'utf8'), second);
+
+    // One more on, one off, in one run; its Undo puts both back as they were.
+    const swap = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [skill('tdd')] });
+    assert.equal(swap.outcome, 'installed', swap.message);
+    assert.deepEqual(await box.inPi(), ['grill-me']);
+    assert.deepEqual(await out(), ['figma-design', 'tdd']);
+    const undone = await undoParts(box.context, swap.partsRun!);
+    assert.equal(undone?.outcome, 'installed', undone?.message ?? 'no report');
+    assert.deepEqual(await box.inPi(), ['tdd']);
+    assert.deepEqual(await out(), ['figma-design', 'grill-me']);
+
+    // A part removed from the tool by hand is out too, and turning it on writes it again.
+    await rm(box.pi('tdd'), { recursive: true });
+    assert.deepEqual(await out(), ['figma-design', 'grill-me', 'tdd']);
+    const back = await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    assert.equal(back.outcome, 'installed', back.message);
+    assert.deepEqual(await box.inPi(), ['tdd']);
+
+    // Turning the last one off leaves nothing of the plugin in the tool, and no record.
+    const none = await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('tdd')] });
+    assert.equal(none.outcome, 'uninstalled', none.message);
+    assert.deepEqual([await box.inPi(), await readParts(box.home)], [[], []]);
+    // Undo of a first pick takes out what it put in.
+    const only = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
+    await undoParts(box.context, only.partsRun!);
+    assert.deepEqual([await box.inPi(), await readParts(box.home)], [[], []]);
+  } finally { await box.cleanup(); }
+});
+
+test('A pick beside an install of all the parts is that install with exceptions; a part that can’t go in fails by name', async () => {
+  const box = await threeSkills();
+  try {
+    const most = await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('grill-me')], rest: true });
+    assert.equal(most.outcome, 'installed', most.message);
+    assert.match(most.message, /Parts installed: 2 skills/);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'tdd']);
+    // The one left out stays out on the next update, until it is turned on with the rest.
+    assert.deepEqual(await (async () => { await installParts(box.context, box.to, await box.files()); return box.inPi(); })(), ['figma-design', 'tdd']);
+    const all = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [], rest: true });
+    assert.equal(all.outcome, 'installed', all.message);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+    // A request naming one part both ways, or twice, takes it once, and out wins: the record never doubles.
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd'), skill('TDD'), skill('grill-me')], off: [skill('grill-me')] });
+    assert.deepEqual([(await readParts(box.home))[0]!.items.map(item => `${item.name}${item.removed ? ' (out)' : ''}`).sort(), await box.inPi()], [['figma-design', 'grill-me (out)', 'tdd'], ['figma-design', 'tdd']]);
+    await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
+    // Pi has no agents: asking for one changes nothing else and says why.
+    const agent = await installParts(box.context, box.to, await box.files(), { on: [{ kind: 'agent', name: 'designer' }], off: [] });
+    assert.equal(agent.outcome, 'failed');
+    assert.match(agent.message, /Couldn’t add the agent “designer”: Pi has no agents\./);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+  } finally { await box.cleanup(); }
+});
+
+test('Turning back on a part removed by hand writes it, and Undo takes it out again; a part left out is no change to the rest', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files());
+    await rm(box.pi('tdd'), { recursive: true });
+    const back = await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    assert.equal(back.outcome, 'installed', back.message);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+    // Before that run tdd was gone from Pi: its Undo returns there.
+    await undoParts(box.context, back.partsRun!);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me']);
+
+    // What is out by choice is left out of what "out of date" compares: a change to it is no change to what Pi holds.
+    const current = async () => partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!);
+    await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('grill-me')] });
+    assert.equal(await current(), true, 'turning a part off leaves the rest up to date');
+    await writeFile(join(box.plugin, 'skills/grill-me/SKILL.md'), '---\nname: grill-me\ndescription: changed\n---\n\nchanged\n');
+    assert.equal(await current(), true, 'a part that is out can change without the rest going out of date');
+    await writeFile(join(box.plugin, 'skills/figma-design/SKILL.md'), '---\nname: figma-design\ndescription: changed\n---\n\nchanged\n');
+    assert.equal(await current(), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A part that is out never fails a run or comes back: not with something unreadable in its place, nor after an item of the person’s comes and goes', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    // Something of the person's sits where a part that is out would go: a file, then a skill of their own.
+    await writeFile(box.pi('grill-me'), 'not a folder');
+    const changed = '---\nname: tdd\ndescription: tdd\n---\n\ntdd, changed\n';
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), changed);
+    const update = await installParts(box.context, box.to, await box.files());
+    assert.equal(update.outcome, 'installed', update.message);
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), true);
+    await rm(box.pi('grill-me'));
+    await mkdir(box.pi('figma-design'));
+    await writeFile(join(box.pi('figma-design'), 'SKILL.md'), 'mine');
+    await installParts(box.context, box.to, await box.files());
+    await rm(box.pi('figma-design'), { recursive: true });
+    // With their own gone again, an update still brings in only what was chosen.
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), `${changed}more\n`);
+    await installParts(box.context, box.to, await box.files());
+    assert.deepEqual(await box.inPi(), ['tdd']);
+
+    // Turning off the one part that had changed leaves nothing out of date.
+    await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), `${changed}again\n`);
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), false);
+    await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('tdd')] });
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), true);
+  } finally { await box.cleanup(); }
+});
+
+test('A part turned off stays off when the plugin drops it and brings it back; a first run that fails partway records what it did put in', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    // The plugin drops grill-me (which is out), is updated, then brings it back.
+    const kept = await readFile(join(box.plugin, 'skills/grill-me/SKILL.md'), 'utf8');
+    await rm(join(box.plugin, 'skills/grill-me'), { recursive: true });
+    await installParts(box.context, box.to, await box.files());
+    await mkdir(join(box.plugin, 'skills/grill-me'));
+    await writeFile(join(box.plugin, 'skills/grill-me/SKILL.md'), kept);
+    await installParts(box.context, box.to, await box.files());
+    assert.deepEqual(await box.inPi(), ['tdd']);
+    await removeParts(box.context, box.to);
+
+    // A first install where one part's place can't be read: the others go in at this version, and that one is not on record.
+    await writeFile(box.pi('grill-me'), 'not a folder');
+    const first = await installParts(box.context, box.to, await box.files());
+    assert.equal(first.outcome, 'failed', first.message);
+    const record = (await readParts(box.home))[0]!;
+    assert.deepEqual([record.version, record.items.map(item => item.name).sort()], ['1.0.0', ['figma-design', 'tdd']]);
   } finally { await box.cleanup(); }
 });

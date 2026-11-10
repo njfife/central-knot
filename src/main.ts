@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type MenuItemConstructorOptions } from 'electron';
 import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
-import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
@@ -18,20 +18,29 @@ import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draft
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
+import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { Appearance, ApplyResult, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
-/** A short main-process log (window life and failed requests) in the app's data folder, for finding out what happened on a tester's Mac. */
+/** A short main-process log (window life, failed requests, and what each change came to: see logOutcome) in the app's data folder, for finding out what happened on a tester's Mac. */
 function log(line: string) {
   try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
+}
+/** Keeps the log short: once it passes a megabyte, only its newer half stays (from a line's start). Run once, at start. */
+function trimLog() {
+  try {
+    if (statSync(logPath()).size < 1_000_000) return;
+    const text = readFileSync(logPath(), 'utf8');
+    writeFileSync(logPath(), text.slice(text.indexOf('\n', Math.floor(text.length / 2)) + 1));
+  } catch { /* no log yet, or it can't be read: nothing to trim */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
 // Test-only, read only when set: an update's restart is opened by macOS afresh, with no arguments and the login's own HOME, so
@@ -455,6 +464,9 @@ async function syncThenView(explicit = false): Promise<HomeView> {
     mcp: await mcpView(shared, presentTools(snapshots), pendingMcpNotices.splice(0)),
     agents: await agentsView(shared, presentTools(snapshots), pendingAgentNotices.splice(0)),
   };
+  // What plugins installed whole bring, read with the home so the Skills, MCP servers and Agents pages show it without Plugins.
+  // With the view's own reads, so each tool's installed plugins are read once for these rows and the pages' Through a plugin boxes.
+  made.pluginItems = await readPluginItems(pluginItemsContext(shared.overrides, shared.reads), presentTools(snapshots));
   lastItems = switchItems(made.manage, made.mcp);
   followProfiles(made.profiles);
   // Only once the view is built is anything kept about this home, so a switch that fails leaves nothing behind.
@@ -678,6 +690,34 @@ const elsewhere = 'The home on screen is not the one open. Nothing was written. 
 /** Keeps a failed request's error for a problem report; the page says what happened in plain words. */
 const logFailure = (channel: string, error: unknown) => log(`request ${channel} failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
 
+/** What the plugin items reader needs of the open home: files only, so no tool's CLI. */
+const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | undefined, reads?: Map<string, Promise<unknown>>) => ({ home: current!.home, dataDir: app.getPath('userData'), binaries: {}, overrides, reads });
+
+/**
+ * Keeps what a change came to, for a problem report: a refusal for the whole home, each plugin step as its tool reported
+ * it (with the tool's own output when its command failed), and each item an Apply all couldn't change. The words the page
+ * showed, and where they name one, the path and the system's error code; never an item's content.
+ */
+function logOutcome(channel: string, args: unknown[], result: unknown) {
+  try { logged(channel, args, result); } catch (error) { logFailure(`${channel} (logging its outcome)`, error); }
+}
+function logged(channel: string, args: unknown[], result: unknown) {
+  if (!result || typeof result !== 'object') return;
+  const { stopped, reports, results } = result as { stopped?: unknown; reports?: unknown; results?: unknown };
+  if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
+  // A plugin step's request names the marketplace and the plugin second and third; a pick of single parts names them last.
+  const pick = channel === 'plugins:parts' ? args[7] as PartsPick | null : null;
+  const picked = pick ? ` (${[pick.on.length ? `on: ${pick.on.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.off.length ? `off: ${pick.off.map(part => `${part.kind} ${part.name}`).join(', ')}` : '', pick.rest ? 'with the rest' : ''].filter(Boolean).join('; ')})` : '';
+  const plugin = channel.startsWith('plugins:') && typeof args[1] === 'string' && typeof args[2] === 'string' ? ` ${args[2]}@${args[1]}${picked}` : '';
+  for (const report of Array.isArray(reports) ? reports as ActionReport[] : []) {
+    log(`${channel}${plugin} in ${report.tool}: ${report.outcome}${report.changed ? '' : ', nothing changed'}: ${[report.message, ...(report.notes ?? [])].join(' ')}`);
+    for (const run of report.runs.filter(run => !run.ok)) log(`${channel}${plugin} in ${report.tool}: \`${run.command}\` failed: ${run.output.trim().slice(0, 2000)}`);
+  }
+  for (const item of Array.isArray(results) ? results as DestinationResult[] : []) {
+    if (item.outcome === 'failed' || item.outcome === 'held') log(`${channel} ${item.item}${item.harness ? ` in ${item.harness}` : ''}: ${item.outcome}: ${item.message}`);
+  }
+}
+
 /** One thing at a time: planning and writing never interleave. The page's requests, menu actions and background passes all wait their turn here. */
 let queue: Promise<unknown> = Promise.resolve();
 const notOpenHome = 'The home on screen is not the one open. Nothing was saved. Read it again.';
@@ -715,7 +755,7 @@ const handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>)
 function handleNow(channel: string, work: (...args: unknown[]) => Promise<unknown>) {
   ipcMain.handle(channel, (event, ...args) => {
     if (event.sender !== window.webContents) throw new Error('Unexpected sender.');
-    return work(...args).catch(error => { logFailure(channel, error); throw error; });
+    return work(...args).then(result => { logOutcome(channel, args, result); return result; }, error => { logFailure(channel, error); throw error; });
   });
 }
 
@@ -782,6 +822,7 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { 
 
 app.whenReady().then(async () => {
   if (!primary) return;
+  trimLog();
   await loadSyncSetting();
   await loadAppSettings();
   void clearDraftFolders();
@@ -847,6 +888,9 @@ app.whenReady().then(async () => {
     openExternal: url => shell.openExternal(url),
     share: () => context(),
   });
+  // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
+  handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
+    ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));
   // The window is read in the same turn as the events, so History's caption always describes the events it shows.
   handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.

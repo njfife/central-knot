@@ -4,9 +4,9 @@ import { rerender, state as app } from './app.ts';
 import { button, h, icon } from './dom.ts';
 import { markdown } from './markdown.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
-import { allQueued, pluginKey, queued, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
+import { allQueued, clear, pickOf, pluginKey, queued, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { clearNotice, market, openLink, shownDetail } from './pluginstate.ts';
-import { PREVIEW_ONLY, cantUninstall, copyStale, outdated, partsMark, partsOf, partsSummary, stateOf, unavailable, updateTools, versionDiffers, versionToCompare, versionWord } from './pluginstatus.ts';
+import { PREVIEW_ONLY, cantUninstall, copyStale, outdated, partsMark, partsOf, partsSummary, pickWords, stateOf, unavailable, updateTools, versionDiffers, versionToCompare, versionWord } from './pluginstatus.ts';
 import type { Components, HarnessId, MarketplaceView, NamedPart, PluginView, PluginsView } from './types.ts';
 import { andList, toolNames as names } from './words.ts';
 
@@ -27,7 +27,7 @@ export const changedWords = (parts: { version?: string; now?: string }) => (part
 /**
  * One tool's box for one plugin: installed (with its version), out of date, not installed, chosen for Apply all, or not
  * available, each saying why. An out-of-date box looks like parts out of date and, like it, a click chooses the update;
- * a second click turns that into an uninstall, a third leaves it as it is. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
+ * a second click turns that into an uninstall, a third leaves it as it is. Single parts picked for the tool show as a choice too. `marketIndex` is the marketplace's place in the list, so box ids stay unique across marketplaces.
  * `offered` is the version to compare with, when there is one (see versionToCompare).
  */
 export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, marketIndex: number, offered: string | undefined) {
@@ -51,6 +51,13 @@ export function toolBox(view: PluginsView, entry: MarketplaceView, plugin: Plugi
     h('div.ov-cell', { role: 'cell' },
       h(`button.cell-button.${look}`, { type: 'button', id, title, 'aria-label': title, disabled, 'data-state': state, onclick: action ? choose(action) : undefined }, glyph));
 
+  // Single parts picked for this tool on the plugin's page, and nothing chosen for the tool as a whole: the box shows that, and a click takes it back.
+  const pick = pickOf(market.draft, entry.source, plugin.name, tool);
+  if (pick && !pending) {
+    const title = `${name}: ${pickWords(pick).replace(/^W/, 'w')} on Apply all, as chosen under “What it holds”. Click to take that back.`;
+    const takeBack = (event: Event) => { event.stopPropagation(); clear(market.draft, { source: entry.source, plugin: plugin.name, tool, action: 'pick-parts' }); clearNotice(); rerender(); };
+    return h('div.ov-cell', { role: 'cell' }, h('button.cell-button.cell-pending.cell-chosen.cell-on', { type: 'button', id, title, 'aria-label': title, disabled: !!app.busy, 'data-state': 'parts-picked', onclick: takeBack }, icon('blocks', 15)));
+  }
   const why = unavailable(view, entry, plugin.name, tool);
   // A tool that can't take the plugin may take its parts as separate items (parts.ts): its box chooses those instead.
   const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
