@@ -22,6 +22,8 @@ export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
 /** Found: Central Knot reads and writes this harness in this home, so it has a page. */
 export const harnessFound = (home: HomeView, tool: HarnessId) => home.manage.tools.includes(tool);
 /** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
+/** A harness's page whose tool a new read no longer finds closes, so it doesn't reopen by itself if a later read finds it again. */
+function forgetLostHarness() { if (state.harness && state.home && !harnessFound(state.home, state.harness)) state.harness = undefined; }
 export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home && harnessFound(state.home, state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
 export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
@@ -124,7 +126,7 @@ const readFlag = (key: string) => { try { return localStorage.getItem(key) === '
 const writeFlag = (key: string) => { try { localStorage.setItem(key, '1'); } catch { /* said again next time */ } };
 
 /** After the first Apply all on a page, its tip has done its job. */
-const retireTip = (kind: 'skills' | 'mcp' | 'agents') => { try { localStorage.setItem(`ck-help-dismissed-${kind}`, '1'); } catch { /* shows again */ } };
+const retireTip = (kind: Kind) => { try { localStorage.setItem(`ck-help-dismissed-${kind}`, '1'); } catch { /* shows again */ } };
 
 export const applyManage = (changes: Change[], onDone: () => void) => busy('Applying…', async () => {
   const home = state.home!;
@@ -194,6 +196,7 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
   const view = await api().refresh();
   if (!view) return;
   state.home = view;
+  forgetLostHarness();
   state.applied = undefined;
   announce(readSummary(view));
 });
@@ -457,7 +460,7 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background pass changed something: read again quietly, keeping drafts, unless the person is in the middle of an action. */
 let refreshing = false;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
-const pages: Page[] = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'history', 'settings'];
+const pages = Object.keys(titles) as Page[];
 api().onNavigate(page => { if (pages.includes(page as Page)) showPage(page as Page); });
 
 api().onSyncChanged(async () => {
@@ -469,6 +472,7 @@ api().onSyncChanged(async () => {
     const view = await api().refresh();
     if (view) {
       state.home = view; announce('');
+      forgetLostHarness();
       const outcome = state.outcome;
       if (!outcome?.act) state.outcome = undefined;
       // A sync notice is now the news: the earlier result steps aside, and its Undo stays in History. Two Undo buttons for

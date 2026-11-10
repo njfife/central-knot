@@ -129,8 +129,10 @@ export function browse(patch: Partial<typeof market.nav>): void {
   document.getElementById('plugins-scroll')?.scrollTo(0, 0);
 }
 
-/** The quiet read below: reading, then the view, or null when it failed. A home switch (resetMarket) clears it, so an old answer is dropped. */
-// One read per home, kept in a one-key Map so it can use readInto like the instruction reads.
+/**
+ * peekPlugins' quiet read: reading, then the view, or null when it failed. One read per home, kept in a one-key Map so it can
+ * use readInto like the instruction reads; a home switch (resetMarket) clears it, so an old answer is dropped.
+ */
 const peeks = new Map<'view', Read<PluginsView | null>>();
 export const peekState = () => readState(peeks.get('view'));
 /**

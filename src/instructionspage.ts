@@ -2,11 +2,10 @@
 // (INS-01, INS-02). There is no turn-off switch: instruction files are edited, never disabled, deleted or emptied by Central Knot.
 import { harnessTabShown, instructionReadState, loadInstructionVersion, readInstructionsQuietly, saveInstructionText, rerender, shownPath, startInstructionEdit, state } from './app.ts';
 import { toolNames } from './words.ts';
-import { goHarness } from './harnesspage.ts';
 import { fileName, plural } from './model.ts';
 import { button, emptyState, h, icon, pathText } from './dom.ts';
 import { brandMark, outcomeBand } from './matrix.ts';
-import type { InstructionFile } from './types.ts';
+import type { HarnessId, InstructionFile } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
@@ -127,7 +126,7 @@ const savedHere = (file: InstructionFile) => state.instructionEdit?.tool !== fil
  * One tool's file: shown on Instructions for every tool, and on that tool's Harnesses page. `titled`: false on a harness's
  * page, where the header already names the tool, so the card leads with the file's path.
  */
-export function instructionCard(file: InstructionFile, { titled = true } = {}) {
+export function instructionCard(file: InstructionFile, { titled = true, goToOther }: { titled?: boolean; goToOther?: (tool: HarnessId) => void } = {}) {
   const editing = state.instructionEdit?.tool === file.tool;
   const other = state.instructionEdit && !editing ? state.instructions?.find(entry => entry.tool === state.instructionEdit!.tool) : undefined;
   // An open editor with no changes locks nothing: Edit elsewhere just moves to that file. A changed one asks first.
@@ -156,8 +155,8 @@ export function instructionCard(file: InstructionFile, { titled = true } = {}) {
             startInstructionEdit(file);
           } }),
           lockedWhy ? h('span.ins-locked', {}, lockedWhy,
-            // On a harness's page the other file's editor is on another harness's page: a link goes there.
-            otherDirty && state.page === 'harnesses' ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, disabled: !!state.busy, onclick: () => goHarness(other!.tool, 'instructions') })] : null) : null)),
+            // Where the other file's editor is on another page (a harness's), `goToOther` goes there.
+            otherDirty && goToOther ? [' ', button({ variant: 'link', size: 'micro', label: `Go to ${names[other!.tool]}’s file`, id: `ins-go-${other!.tool}`, disabled: !!state.busy, onclick: () => goToOther(other!.tool) })] : null) : null)),
     file.versions.length ? h('details.ins-versions', {}, h('summary', {}, icon('chevron-right', 12, 'tone-faint'), `Earlier versions (${file.versions.length})`),
       h('ul.plain-list', {}, file.versions.slice(0, 20).map(version => h('li.ins-version', {},
         h('span', {}, new Date(version.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }), h('span.tone-faint', {}, ` (${ago(version.at)}) · ${version.differs ? `${version.differs} ${version.differs === 1 ? 'line differs' : 'lines differ'} from now` : 'same as now'}`)),

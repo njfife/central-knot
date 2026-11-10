@@ -175,6 +175,9 @@ async function harnessFlow() {
   await a.click('#cell-release-notes-copilot-cli');
   same('its box here adds it here only', [await cellState(a, 'release-notes', 'copilot-cli'), await cellState(a, 'release-notes', 'codex-cli')], ['will-sync', 'absent']);
   await a.click('#discard');
+  await a.click('#manage-all');
+  same('Manage on a harness page takes what it has and leaves items only other tools have', [await switchOn(a, 'notes'), await switchOn(a, 'release-notes')], [true, false]);
+  await a.click('#discard');
   await a.click('#harness-add-from');
   await a.click('#menu-add-claude-cli-copilot-cli');
   const queued = await cellState(a, 'release-notes', 'copilot-cli');

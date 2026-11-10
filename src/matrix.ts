@@ -4,11 +4,10 @@
 import { brandMark } from './brand.ts';
 import { caughtUpNames } from './model.ts';
 import { andList, toolNames } from './words.ts';
-import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow } from './app.ts';
+import { convertAgent, flashRequests, harnessKindShown, applyAgentsChanges, applyManage, applyMcpChanges, deleteEverywhereKey, rerender, announce, restoreEvent, setSync, shownPath, showFile, showPage, state, syncNow, writeClaudeNow, type Kind } from './app.ts';
 import { button, closeButton, emptyState, h, icon, middle, withToolCount } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { applied, cellOf, comparedTools, designMode, sample, syncOf, tools as sampleTools, variant, type Cell, type SampleSkill, type Tool } from './design.ts';
-import type { Kind } from './app.ts';
 import type { Change, HomeView, ManageView, SkillFacts, SyncNotice, HarnessId } from './types.ts';
 import { folded, lineDiff } from './diff.ts';
 import { planAdd as planAddPure, withBoth, withHolders, withOnlyBoth } from './addplan.ts';
@@ -57,7 +56,7 @@ function committedList(): SampleSkill[] {
   if (designMode) return view.committed;
   if (!state.home) return [];
   const { facts, waiting } = kindSource(state.home, kind);
-  if (factsCache[kind]?.from !== facts) factsCache[kind] = { from: facts, list: facts.map(fact => rowOf(fact, new Set(waiting))) };
+  if (factsCache[kind]?.from !== facts) { const waits = new Set(waiting); factsCache[kind] = { from: facts, list: facts.map(fact => rowOf(fact, waits)) }; }
   return factsCache[kind]!.list;
 }
 /** The harness a Harnesses page shows: its column comes first, and bulk actions keep to what it has. */
@@ -872,9 +871,9 @@ export function fitOpenMenu() {
   menu.style.setProperty('--menu-room', `${Math.max(160, window.innerHeight - box.top - 36)}px`);
 }
 
-/** Moving to another harness starts every table closed (the kind pages' too, which share them): no row details, menu or Copies differ filter carried over. */
+/** Moving to another harness starts every table fresh (the kind pages' too, which share them), whichever was drawn last. */
 export function resetTablesForHarness() {
-  for (const each of Object.values(views)) { each.comparing = undefined; each.toolMenu = undefined; if (each.filter === 'attention') each.filter = 'all'; }
+  for (const each of Object.values(views)) startFresh(each, each.shownFor);
 }
 
 /** Option A: the actions sit in the headers. A tool's header adds everything the other tool has; a group header manages the group. */

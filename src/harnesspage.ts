@@ -164,6 +164,7 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromK
 
 function everyHarness(home: HomeView) {
   const done = outcomeBand();
+  const cards = listed(home);
   // What the read's catch-up copied is news here too, not only on the Skills tables.
   const caught = caughtUpBand(home.manage);
   return h('div.page', {}, done || caught ? h('div.bands', {}, done, caught) : null,
@@ -173,7 +174,7 @@ function everyHarness(home: HomeView) {
           : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
           home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
             button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'])),
-      h('div.harness-cards', { 'data-count': String(listed(home).length) }, listed(home).map(snapshot => summaryCard(snapshot, home)))));
+      h('div.harness-cards', { 'data-count': String(cards.length) }, cards.map(snapshot => summaryCard(snapshot, home)))));
 }
 
 // ---------- One harness ----------
@@ -233,7 +234,7 @@ function instructionsTab(tool: HarnessId) {
   const body = !state.instructions ? instructionsNotRead()
     : !file ? h('p.empty', {}, `${names[tool]} has no instruction file Central Knot reads.`)
       : [h('p.page-note', {}, icon('info', 14, 'tone-muted'), 'Changes are reviewed before saving, and earlier versions are kept. ',
-        button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file, { titled: false })];
+        button({ variant: 'link', size: 'micro', label: 'Every tool’s file', id: 'harness-all-instructions', onclick: () => showPage('instructions') })), instructionCard(file, { titled: false, goToOther: other => goHarness(other, 'instructions') })];
   return h('div.page', {}, instructionBands(), h('div.scroll.harness-scroll', { id: 'harness-body' }, body));
 }
 
