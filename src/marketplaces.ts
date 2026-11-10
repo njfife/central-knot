@@ -1,14 +1,12 @@
 // Marketplaces in the main process: the list added here, each catalog as last read, what each tool has installed, and the
 // requests the Plugins page makes. Kept apart from the other features: createMarketplaces holds the logic as plain
 // functions (tested), and registerMarketplaces wires them to IPC with a few host functions from main.ts.
-import { access, constants, readFile, rm } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
-import { harnesses } from './harnesses.ts';
-import { appCandidates, executableCandidates } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
-import { findApp, probeVersion } from './discovery.ts';
+import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
@@ -63,12 +61,10 @@ export interface Routes { binaries: Partial<Record<HarnessId, string>>; apps: Pa
 async function findClis(): Promise<Routes> {
   const routes: Routes = { binaries: {}, apps: {} };
   for (const tool of pluginTools) {
-    for (const candidate of executableCandidates(homedir(), process.env.PATH ?? '', harnesses[tool].binary)) {
-      try { await access(candidate, constants.X_OK); routes.binaries[tool] = candidate; break; } catch { /* next */ }
-    }
-    if (routes.binaries[tool]) continue;
-    const app = await findApp(appCandidates(homedir(), harnesses[tool].binary));
-    if (app?.binary) { routes.binaries[tool] = app.binary; routes.apps[tool] = app; }
+    const found = await findBinary(tool, homedir());
+    if (!found) continue;
+    routes.binaries[tool] = found.binary;
+    if (found.app) routes.apps[tool] = found.app;
   }
   return routes;
 }

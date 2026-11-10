@@ -5,7 +5,7 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parseDocument } from 'yaml';
 import { configRoot, harnesses, type HarnessDefinition } from './harnesses.ts';
-import { pathBeside, type AppCandidate } from './platform.ts';
+import { appCandidates, executableCandidates, pathBeside, type AppCandidate } from './platform.ts';
 import type { DesktopApp, HarnessId, HomeMode, ProbeResult, Skill, Snapshot } from './types.ts';
 import { machineNames } from './machine.ts';
 import { compareVersions } from './values.ts';
@@ -99,6 +99,19 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
     return { name: candidate.name, ...(version ? { version } : {}), carries: candidate.carries, ...(carriedVersion ? { carriedVersion } : {}), ...(binary ? { binary } : {}) };
   }
   return undefined;
+}
+
+/**
+ * The binary that runs a tool on this computer: its own CLI, from the same candidate list version probes use; with no CLI,
+ * the copy of the tool its desktop app carries (Claude desktop's Code tab, the GitHub Copilot app's runtime, ChatGPT
+ * desktop's Codex), with that app. That copy never counts as a CLI install (CD §3).
+ */
+export async function findBinary(tool: HarnessId, home: string): Promise<{ binary: string; app?: DesktopApp } | undefined> {
+  for (const candidate of executableCandidates(home, process.env.PATH ?? '', harnesses[tool].binary)) {
+    if (await runnable(candidate)) return { binary: candidate };
+  }
+  const app = await findApp(appCandidates(home, harnesses[tool].binary));
+  return app?.binary ? { binary: app.binary, app } : undefined;
 }
 
 const OPENING = /^﻿?---[ \t]*\r?\n/;
