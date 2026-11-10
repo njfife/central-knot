@@ -1631,7 +1631,16 @@ function forgetOtherHomes() {
       view.draft.delete(key);
       if (stale) announce(`${skill!.name ?? key}: the copy you chose changed, so that choice was dropped. Choose again.`);
       else if (moved) announce(`${skill!.name ?? key} changed since you edited it, so your change to it was dropped.`);
+      continue;
     }
+    // A switch clicked here that the tool now has anyway (a profile switch flipped it meanwhile) has nothing left to do.
+    const done = (Object.entries(draft.switches ?? {}) as [Tool, boolean][]).filter(([tool, off]) => off === !!skill.disabled?.includes(tool));
+    if (!done.length) continue;
+    const switches = Object.fromEntries(Object.entries(draft.switches!).filter(([tool]) => !done.some(([gone]) => gone === tool)));
+    const next = { ...draft, switches };
+    if (!next.resolve && next.managed === skill.managed && [...next.off].sort().join() === [...skill.off].sort().join() && !next.remove?.length && !Object.keys(switches).length) view.draft.delete(key); else view.draft.set(key, next);
+    const [, off] = done[0];
+    announce(`${skill.name ?? key} is already ${off ? 'disabled' : 'enabled'} in ${andList(done.map(([tool]) => names[tool]))} now, so that change was dropped.`);
   }
 }
 

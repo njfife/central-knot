@@ -450,6 +450,26 @@ async function practiceFlow() {
   same('Undo switch puts every switch back', readSwitches().map(settled), switchesBefore.map(settled));
   same('…and No profile is in use again', (await a.text('#status-profile'))?.trim(), 'No profile');
   await a.click('#nav-skills');
+  // A switch from the status bar with changes queued: a queued Disable the switch already made is dropped, saying so; the other
+  // stays; and the switch's result shows over the pending changes, with its Undo.
+  const switchFromBar = async name => { await a.click('#status-profile'); await a.run(`[...document.querySelectorAll('.pf-menu-item')].find(item => item.textContent.includes(${JSON.stringify(name)})).click()`); await a.settle(); };
+  const statusShown = () => a.run(`(() => { const region = document.querySelector('#announcement'); return region.classList.contains('visually-hidden') ? '' : region.dataset.text; })()`);
+  await a.click('#open-notes'); await a.click('#enable-notes-claude-cli');
+  await a.click('#open-standup'); await a.click('#enable-standup-claude-cli');
+  await switchFromBar('Incident');
+  check('a queued Disable that the profile switch already made is dropped; the other stays', (await a.text('.apply-count .count-full')) === '1 change · 1 copy to disable', await a.text('.apply-count .count-full'));
+  check('the switch’s result shows over pending changes, with Undo switch', (await a.text('.band-done') ?? '').includes('Incident is the profile now') && await a.exists('#outcome-undo'), await a.text('.bands'));
+  await a.click('#outcome-undo');
+  await a.click('#discard');
+  // On History (no result band) the switch is listed at once and its result is said in the status bar, as is its Undo from there.
+  await a.click('#nav-history');
+  const profileRows = async () => (await a.all('.history-row[data-kind="profile"]')).length;
+  const rowsBeforeSwitch = await profileRows();
+  await switchFromBar('Incident');
+  check('a switch from the status bar on History is listed at once and said', (await profileRows()) === rowsBeforeSwitch + 1 && /^Incident is the profile now/.test(await statusShown() ?? ''), [rowsBeforeSwitch, await profileRows(), await statusShown()]);
+  await a.run(`document.querySelector('.history-row[data-kind="profile"] .history-actions button').click()`); await a.settle();
+  check('its Undo from History says what it did in the status bar', /^Undone:/.test(await statusShown() ?? '') && (await a.text('#status-profile'))?.trim() === 'No profile', await statusShown());
+  await a.click('#nav-skills');
 
   // Two-way: an edit in one tool spreads on the next read, Undo puts it back; a deletion spreads after the settle window; Restore returns it.
   const standupPath = tool => join(practice, `.${tool}/skills/standup/SKILL.md`);
