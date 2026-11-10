@@ -131,9 +131,14 @@ async function saveSyncSetting(on: boolean) {
   await mkdir(app.getPath('userData'), { recursive: true });
   await writeFile(syncSettingsPath(), `${JSON.stringify({ syncOn: on }, null, 2)}\n`);
   refreshTray();
-  // Plugin updates pause with Automatic sync (off means nothing is written to the tools in the background): Settings says so,
-  // and turned on again, a check that came due meanwhile runs now.
-  if (pluginUpdates) { send('plugin-updates:changed', await pluginUpdates.view()); if (on) void pluginUpdates.tick().catch(error => logFailure('plugin updates', error)); }
+  // Plugin updates pause with Automatic sync (off means nothing is written to the tools in the background).
+  await pluginUpdatesSwitched(on);
+}
+/** A switch that plugin updates follow was turned (their own in Settings, or Automatic sync): the page hears of it, and turned on, a check that is due runs now. */
+async function pluginUpdatesSwitched(on: boolean) {
+  if (!pluginUpdates) return;
+  send('plugin-updates:changed', await pluginUpdates.view());
+  if (on) void pluginUpdates.tick().catch(error => logFailure('plugin updates', error));
 }
 
 /** Sends the page a message, when there is a window to send it to. */
@@ -869,7 +874,8 @@ app.on('second-instance', showWindow);
 app.on('activate', () => { log('opened again'); showWindow(); });
 // A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
 // A plugin being updated by itself is let finish (a few seconds; fifteen at most): the tool's command runs on whatever the app
-// does, and what follows it here (turning a turned-off plugin off again, the note) must not be lost. No further step starts.
+// does, and what follows it here (turning a turned-off plugin off again, the note saved) must not be lost. No further step
+// starts, so the check ends with that one. A check that is only reading the marketplaces holds nothing up.
 let heldForPlugin = false;
 app.on('before-quit', event => {
   quitting = true;
@@ -878,7 +884,8 @@ app.on('before-quit', event => {
   heldForPlugin = true;
   event.preventDefault();
   log('quit waits for a plugin update under way');
-  void Promise.race([pluginStep.catch(() => undefined), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
+  const check = pluginUpdates?.underWay() ?? pluginStep;
+  void Promise.race([check.catch(() => undefined), new Promise(done => setTimeout(done, 15_000))]).then(() => app.quit());
 });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
@@ -921,8 +928,7 @@ app.whenReady().then(async () => {
     if (typeof on !== 'boolean') throw new Error('Invalid plugin updates setting.');
     await saveAppSettings({ pluginUpdates: on });
     log(`plugin updates: turned ${on ? 'on' : 'off'}`);
-    // Turned on: the page hears of it, and a check runs now if the last one is long enough ago.
-    if (pluginUpdates) { send('plugin-updates:changed', await pluginUpdates.view()); if (on) void pluginUpdates.tick().catch(error => logFailure('plugin updates', error)); }
+    await pluginUpdatesSwitched(on);
     return preferences();
   });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
@@ -951,16 +957,8 @@ app.whenReady().then(async () => {
     && (change.use === undefined || change.use === 'separate' || harnessIds.includes(change.use)) && (change.useHash === undefined || typeof change.useHash === 'string') && (change.seenManaged === undefined || typeof change.seenManaged === 'boolean')
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
-  // Marketplaces and plugins: their own module, given only what it needs from here. A change the person makes to a plugin on
-  // its page that works (an update, an uninstall, its parts) settles what failed there by itself before.
-  const settling = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => handle(channel, async (...args) => {
-    const result = await work(...args);
-    const reports = (result as PluginActionResult | null)?.reports;
-    if (/^plugins:(update|install|uninstall|parts)$/.test(channel) && Array.isArray(reports) && typeof args[0] === 'string' && typeof args[2] === 'string')
-      void pluginUpdates?.settled(args[0], args[2], reports.filter(report => report.outcome === 'installed' || report.outcome === 'updated' || report.outcome === 'uninstalled').map(report => report.tool)).catch(error => logFailure('plugin updates', error));
-    return result;
-  });
-  const markets = registerMarketplaces({ handle: settling, handleNow }, {
+  // Marketplaces and plugins: their own module, given only what it needs from here.
+  const markets = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
     read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
@@ -968,6 +966,8 @@ app.whenReady().then(async () => {
     pickFolder: async () => { const choice = await dialog.showOpenDialog(window, { title: 'Choose a marketplace folder', properties: ['openDirectory'] }); return choice.canceled ? undefined : choice.filePaths[0]; },
     openExternal: url => shell.openExternal(url),
     share: () => context(),
+    // A change to a plugin that worked (an update, an uninstall, its parts) settles what failed there by itself before.
+    changed: (source, plugin, tools) => void pluginUpdates?.settled(source, plugin, tools).catch(error => logFailure('plugin updates', error)),
   });
   // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
   // Apply all, and is logged as one; none starts once the app is quitting (one already running is waited for: see before-quit).
@@ -998,7 +998,8 @@ app.whenReady().then(async () => {
         if (!news) return;
         // What the tools have changed: every page reads again. Nobody saw it: the menu bar icon says so until the window is back.
         if (news === 'updated') send('sync:changed');
-        if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = news; refreshTray(); }
+        // An update not yet seen stays the news when a later check only failed.
+        if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = unseenPlugins === 'updated' ? 'updated' : news; refreshTray(); }
       },
     });
     if (paced !== 'never') {

@@ -664,14 +664,15 @@ export interface PluginUpdateLine { at: number; source: string; plugin: string; 
  * Automatic plugin updates as the main process has them, for the open home. `on`: the switch in Settings; `paused`:
  * Automatic sync is off, so nothing is updated by itself whatever the switch says. `checking`: a check is under way.
  * `checked`: the last check: when, how many updates it made, how many are failing now, the
- * marketplaces it couldn't read (`offline`: every Git one, so it is tried again sooner), and why it did nothing (`stopped`).
+ * marketplaces it couldn't read (`offline`: every Git one, so it is tried again sooner), and why it did nothing (`stopped`;
+ * `partway`: it stopped during its updates, so the rest are tried again sooner). `failed` counts the failures the note still shows.
  * The note: `updated`, what was updated since the note was last closed, oldest first, and `failed`, the updates that couldn't
- * be made (each is tried again). `first`: no note of updates has been closed in this home yet, so the note says once that
+ * be made (`again`: tried again by itself). `first`: no note has been closed in this home yet, so the note says once that
  * plugins update by themselves now.
  */
 export interface PluginUpdatesView {
   on: boolean; paused: boolean; checking: boolean;
-  checked?: { at: number; updated: number; failed: number; unread: string[]; offline?: true; stopped?: string };
+  checked?: { at: number; updated: number; failed: number; unread: string[]; offline?: true; stopped?: string; partway?: true };
   updated: PluginUpdateLine[]; failed: PluginUpdateLine[]; first: boolean;
 }
 /** Why this copy can't update itself (see updates.ts for each one's words). */

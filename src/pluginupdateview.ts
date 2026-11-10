@@ -26,11 +26,14 @@ export function checkedWords(view: PluginUpdatesView | undefined): { text: strin
   // Off means Central Knot writes nothing to the tools in the background; a check the person asks for still runs.
   if (view.paused) return { text: `Paused while Automatic sync is off: nothing is updated by itself. Check now still updates what is behind.${checked ? ` Last checked ${at(checked.at)}.` : ''}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
   if (!checked) return { text: 'Not checked yet in this home. The first check comes soon after Central Knot opens.', tone: 'info' };
-  // A check that stopped (nothing may be changed in this home; the app was quitting) says how far it got.
-  if (checked.stopped) return { text: `Last checked ${at(checked.at)}. ${checked.updated ? `${plural(checked.updated, 'update')} made, then it stopped` : 'Nothing was updated'}: ${checked.stopped}`, tone: 'attention', note: !!(view.updated.length || view.failed.length) };
+  const note = !!(view.updated.length || view.failed.length);
+  // A check that stopped during its updates (the app was quitting, the home was switched) says how far it got; the rest come soon.
+  if (checked.partway) return { text: `Last checked ${at(checked.at)}. ${checked.updated ? `${plural(checked.updated, 'update')} made before it stopped` : 'It stopped before any update was made'}; the rest are tried again soon.`, tone: 'info', note };
+  // Nothing may be changed in this home: that is how the home is, not a failure.
+  if (checked.stopped) return { text: `Nothing is updated in this home. ${checked.stopped}`, tone: 'info', note };
   const unread = checked.unread.length ? ` ${andList(checked.unread)} couldn’t be read, so ${checked.unread.length > 1 ? 'their' : 'its'} plugins weren’t checked.` : '';
   const did = [checked.updated ? `${plural(checked.updated, 'update')} made` : '', checked.failed ? `${plural(checked.failed, 'update')} couldn’t be made` : ''].filter(Boolean).join(', ');
-  return { text: `Last checked ${at(checked.at)}. ${did ? `${did.charAt(0).toUpperCase()}${did.slice(1)}.` : 'Nothing needed updating.'}${unread}`, tone: checked.failed || unread ? 'attention' : 'info', note: !!(view.updated.length || view.failed.length) };
+  return { text: `Last checked ${at(checked.at)}. ${did ? `${did.charAt(0).toUpperCase()}${did.slice(1)}.` : 'Nothing needed updating.'}${unread}`, tone: checked.failed || unread ? 'attention' : 'info', note };
 }
 
 /** Takes main's view. News (something was updated, or else an update failed) is said in the status bar, and the Plugins page reads its tools again. */
@@ -103,11 +106,12 @@ function noteBand(what: 'updated' | 'failed', lines: PluginUpdateLine[], lead: s
 export function pluginUpdateNotes(): (HTMLElement | null)[] {
   const view = pluginUpdates.view;
   if (!view) return [];
-  // Said once, until a note of updates is first closed: this is new, and where it is turned off.
+  // Said once, until a note is first closed: this is new, and where it is turned off.
   const isNew = view.first ? h('span.plugin-auto-new', { id: 'plugin-updates-new' }, 'Plugins now update by themselves. ',
     h('button.text-action', { type: 'button', id: 'plugin-updates-settings', onclick: () => showPage('settings') }, 'Settings'), ' turns that off.') : undefined;
   return [
     noteBand('updated', view.updated, 'Updated automatically.', isNew),
-    noteBand('failed', view.failed.map(line => (view.on && !view.paused ? line : { ...line, again: undefined })), 'Couldn’t update automatically.'),
+    // Where the first thing to say is a failure, that note says it is new.
+    noteBand('failed', view.failed.map(line => (view.on && !view.paused ? line : { ...line, again: undefined })), 'Couldn’t update automatically.', view.updated.length ? undefined : isNew),
   ];
 }

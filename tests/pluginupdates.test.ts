@@ -10,14 +10,14 @@ const due = (plugin: string, tool: HarnessId, action: DueUpdate['action'] = 'upd
 function setup(options: { on?: boolean; every?: number } = {}) {
   const box = {
     home: '/home/a' as string | undefined, on: options.on ?? true, paused: false, offline: false, clock: 1_000_000, due: [] as DueUpdate[], unread: [] as string[], stopped: undefined as string | undefined,
-    read: undefined as string[] | undefined, stops: new Set<string>(), answers: new Map<string, Partial<ActionReport>>(), calls: [] as string[], logs: [] as string[], said: [] as { view: PluginUpdatesView; news?: 'updated' | 'failed' }[], saved: undefined as UpdatesRecord[] | undefined,
+    unreadSources: [] as string[], stops: new Set<string>(), answers: new Map<string, Partial<ActionReport>>(), calls: [] as string[], logs: [] as string[], said: [] as { view: PluginUpdatesView; news?: 'updated' | 'failed' }[], saved: undefined as UpdatesRecord[] | undefined,
     /** The saved record of the home that is open. */
     record: () => box.saved?.find(saved => saved.home === box.home),
   };
   const report = (plugin: string, tool: HarnessId): ActionReport => ({ tool, outcome: 'updated', changed: true, version: '2.0.0', message: 'Updated to 2.0.0.', runs: [], ...box.answers.get(`${plugin} ${tool}`) });
   const host: AutoUpdateHost = {
     home: () => box.home, on: () => box.on, paused: () => box.paused, now: () => box.clock, every: options.every ?? 4 * HOUR, log: line => box.logs.push(line),
-    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, read: box.read ?? ['/market'], ...(box.offline ? { offline: true as const } : {}) }),
+    pending: async () => ({ stopped: box.stopped, ops: box.stopped ? [] : box.due, unread: box.unread, unreadSources: box.unreadSources, ...(box.offline ? { offline: true as const } : {}) }),
     api: {
       update: async (_source, _market, plugin, tools) => {
         if (box.stops.has(plugin)) return { stopped: 'Central Knot was quitting.', reports: [] };
@@ -131,7 +131,7 @@ test('Closing the note empties it; a failure that stays the same stays closed, a
   box.due = [due('issue-tracker', 'codex-cli')];
   box.said.length = 0;
   view = await updates.check(true);
-  assert.deepEqual([view.failed, box.said.some(said => said.news), view.checked?.failed], [[], false, 1], 'still failing the same way: not said again, still counted');
+  assert.deepEqual([view.failed, box.said.some(said => said.news), view.checked?.failed, box.record()?.failures.length], [[], false, 0, 1], 'still failing the same way: not said again, and Settings counts only what the note shows');
   box.answers.set('issue-tracker codex-cli', { outcome: 'failed', changed: undefined, message: 'Codex’s command-line tool wasn’t found.' });
   view = await updates.check(true);
   assert.deepEqual([view.failed.map(line => line.text), box.said.at(-1)?.news ?? box.said.find(said => said.news)?.news], [['Codex’s command-line tool wasn’t found.'], 'failed'], 'a failure alone is news of its own kind, never "updated"');
@@ -152,7 +152,11 @@ test('A home where nothing may be changed is checked and left alone, saying why;
   box.stopped = 'Preview only: nothing can be changed in this home.';
   box.calls.length = 0;
   const view = await updates.check();
-  assert.deepEqual([box.calls, view.checked?.stopped, view.updated], [[], 'Preview only: nothing can be changed in this home.', []]);
+  assert.deepEqual([box.calls, view.checked?.stopped, view.checked?.partway, view.updated], [[], 'Preview only: nothing can be changed in this home.', undefined, []]);
+  box.clock += 4 * HOUR - 1;
+  box.logs.length = 0;
+  await updates.tick();
+  assert.deepEqual(box.logs, [], 'and looked at again at the usual time, not sooner');
   box.home = undefined;
   assert.equal((await updates.check()).checked, undefined, 'no home open: nothing to check');
 });
@@ -208,11 +212,10 @@ test('A check that reached no Git marketplace is tried again in half an hour, no
   assert.deepEqual(box.calls, ['update document-tools claude-cli']);
 });
 
-test('The note says once that plugins update by themselves now: until a note of updates is first closed in that home', async () => {
+test('The note says once that plugins update by themselves now: until a note is first closed in that home', async () => {
   const { box, updates } = setup();
   box.due = [due('document-tools', 'claude-cli')];
   assert.equal((await updates.check()).first, true);
-  assert.equal((await updates.close('failed')).first, true, 'closing the other half doesn’t count');
   assert.equal((await updates.close('updated')).first, false);
   box.due = [due('issue-tracker', 'claude-cli')];
   assert.equal((await updates.check(true)).first, false);
@@ -243,12 +246,12 @@ test('A marketplace that couldn’t be read settles nothing: its failures stay a
   await updates.check();
   await updates.close('failed');
   // Offline: nothing is due because nothing could be read.
-  box.due = []; box.read = []; box.unread = ['team']; box.offline = true;
+  box.due = []; box.unreadSources = ['/market']; box.unread = ['team']; box.offline = true;
   box.clock += 4 * HOUR;
   await updates.check();
-  assert.deepEqual([box.record()?.failures.map(failure => [failure.plugin, failure.tries, failure.closed]), (await updates.view()).checked?.failed], [[['document-tools', 1, true]], 1]);
+  assert.deepEqual([box.record()?.failures.map(failure => [failure.plugin, failure.tries, failure.closed]), (await updates.view()).checked?.failed], [[['document-tools', 1, true]], 0], 'kept, and still closed: the count is of what the note shows');
   // Back online and still failing the same way: not news again.
-  box.due = [due('document-tools', 'codex-cli')]; box.read = undefined; box.unread = []; box.offline = false;
+  box.due = [due('document-tools', 'codex-cli')]; box.unreadSources = []; box.unread = []; box.offline = false;
   box.said.length = 0;
   await updates.check(true);
   assert.deepEqual([box.said.some(said => said.news), (await updates.view()).failed], [false, []]);
@@ -270,11 +273,34 @@ test('Check now during a check the schedule started is made after it, so the upd
   stopping.box.due = [due('document-tools', 'claude-cli'), due('issue-tracker', 'claude-cli')];
   stopping.box.stops.add('issue-tracker');
   const view = await stopping.updates.check();
-  assert.deepEqual([view.checked?.updated, view.checked?.stopped, view.updated.map(line => line.plugin)], [1, 'Central Knot was quitting.', ['document-tools']]);
+  assert.deepEqual([view.checked?.updated, view.checked?.stopped, view.checked?.partway, view.updated.map(line => line.plugin)], [1, 'Central Knot was quitting.', true, ['document-tools']]);
   stopping.box.stops.clear();
   stopping.box.due = [due('issue-tracker', 'claude-cli')];
   stopping.box.calls.length = 0;
   stopping.box.clock += 30 * 60_000;
   await stopping.updates.tick();
   assert.deepEqual(stopping.box.calls, ['update issue-tracker claude-cli']);
+});
+
+test('News is told only of the home that is open: a home switched during a check’s updates keeps its record, and the new home hears nothing', async () => {
+  const { box, updates } = setup();
+  box.due = [due('document-tools', 'claude-cli')];
+  // The person switches homes while Claude Code's update runs.
+  box.answers.set('document-tools claude-cli', {});
+  const answers = box.answers.get.bind(box.answers);
+  box.answers.get = key => { box.home = '/home/b'; return answers(key); };
+  await updates.check();
+  assert.deepEqual(box.said.filter(said => said.news), [], 'nothing is said about home b');
+  assert.deepEqual(box.saved?.find(saved => saved.home === '/home/a')?.updated.map(line => line.plugin), ['document-tools'], 'and home a has its note when it is opened again');
+});
+
+test('A failure whose marketplace was taken off the list is settled at the next check', async () => {
+  const { box, updates } = setup();
+  box.due = [due('document-tools', 'codex-cli')];
+  box.answers.set('document-tools codex-cli', { outcome: 'failed', changed: undefined, message: 'Codex said no.' });
+  await updates.check();
+  // The marketplace is gone from every list: neither read nor unreadable, and nothing of it is due.
+  box.due = [];
+  const view = await updates.check(true);
+  assert.deepEqual([view.failed, view.checked?.failed], [[], 0]);
 });

@@ -355,9 +355,10 @@ export function pluginsPage() {
         // Reading the marketplaces again (Git can take seconds) while the last read stays on screen, or that it failed.
         : rereadBand(market.read, 'Reading marketplaces… Nothing is installed by this.'),
       problemBand(lines)),
-    // The note of what was updated by itself scrolls with the page, so however long it is, the list is never squeezed.
+    // The note of what was updated by itself scrolls with the page, so however long it is, the list is never squeezed. It
+    // heads a marketplace's list, not a plugin's own page.
     shown
       ? h('div.market-layout', {}, marketList(view, shown.entry),
-        h('div.market-pane', {}, toolbar(shown, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
+        h('div.market-pane', {}, toolbar(shown, lines), h('div.scroll.market-main', { id: 'plugins-scroll' }, openPlugin(shown.entry) ? null : pluginUpdateNotes(), marketPage(view, shown.entry, shown.index))))
       : h('div.scroll.market-main', { id: 'plugins-scroll' }, pluginUpdateNotes(), empty));
 }

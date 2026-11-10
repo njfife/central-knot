@@ -44,8 +44,8 @@ export interface UpdatesRecord {
   told?: true;
 }
 
-/** What a check found to do (marketplaces.pendingUpdates). */
-export interface Pending { stopped?: string; ops: DueUpdate[]; unread: string[]; /** The marketplaces that were read, as added. */ read: string[]; offline?: true }
+/** What a check found to do (marketplaces.pendingUpdates). `unread`: the marketplaces that couldn't be read, by name, and `unreadSources`, as added. */
+export interface Pending { stopped?: string; ops: DueUpdate[]; unread: string[]; unreadSources: string[]; offline?: true }
 
 /** What the automatic updates need from the app around them. */
 export interface AutoUpdateHost {
@@ -97,6 +97,9 @@ export function autoUpdates(host: AutoUpdateHost) {
       failed: (mine?.failures ?? []).filter(failure => !failure.closed).map(({ at, source, plugin, text, manual }) => ({ at, source, plugin, text, ...(manual ? {} : { again: true as const }) })), first: !mine?.told };
   };
 
+  /** The check under way, if one is (Quit waits for it while a tool's command runs, so its note is saved). */
+  const underWay = (): Promise<unknown> | undefined => running;
+
   /** The view, with the saved records read if they haven't been yet. */
   async function view(): Promise<PluginUpdatesView> {
     const home = host.home();
@@ -104,14 +107,20 @@ export function autoUpdates(host: AutoUpdateHost) {
     return shown();
   }
 
-  /** Saves every home's record, the most recently checked first and no more than HOMES_KEPT of them (a practice copy is a new folder each launch). */
-  async function save(news?: 'updated' | 'failed') {
+  /**
+   * Saves every home's record, the most recently checked first and no more than HOMES_KEPT of them (a practice copy is a
+   * new folder each launch). `news` is `about` one home: told only while that home is still the one open.
+   */
+  async function save(about?: UpdatesRecord, news?: 'updated' | 'failed') {
     const open = host.home();
     const kept = [...(records?.values() ?? [])].sort((first, second) => Number(second.home === open) - Number(first.home === open) || (second.checked?.at ?? 0) - (first.checked?.at ?? 0)).slice(0, HOMES_KEPT);
     records = new Map(kept.map(saved => [saved.home, saved]));
     await host.save(kept).catch(error => host.log(`plugin updates: the record couldn’t be saved: ${error instanceof Error ? error.message : String(error)}`));
-    host.changed(shown(), news);
+    host.changed(shown(), about && about.home === host.home() ? news : undefined);
   }
+
+  /** How many failures the note still shows: the Settings row counts these, so it never points at a note that was closed. */
+  const open = (mine: UpdatesRecord) => mine.failures.filter(failure => !failure.closed).length;
 
   /**
    * One check. Reads what is due, leaves out failed updates still waiting for their next try (`asked`: a check the person
@@ -135,19 +144,19 @@ export function autoUpdates(host: AutoUpdateHost) {
     let due: Pending;
     try { due = await host.pending(home); } catch (error) {
       host.log(`plugin updates: the marketplaces couldn’t be read: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-      due = { stopped: 'The marketplaces couldn’t be read. The log file says why.', ops: [], unread: [], read: [] };
+      due = { stopped: 'The marketplaces couldn’t be read. The log file says why.', ops: [], unread: [], unreadSources: [] };
     }
     // The home was switched while the marketplaces were read: what is due was worked out for the other one.
     if (host.home() !== home) return;
     if (due.stopped) {
       host.log(`plugin updates: not checked: ${due.stopped}`);
-      mine.checked = { at, updated: 0, failed: mine.failures.length, unread: [], stopped: due.stopped };
+      mine.checked = { at, updated: 0, failed: open(mine), unread: [], stopped: due.stopped };
       await save();
       return;
     }
-    // A failure whose update is no longer due is settled (updated by hand, uninstalled, the marketplace moved back): but
-    // only where its marketplace was read just now. One that couldn't be read says nothing about its plugins.
-    mine.failures = mine.failures.filter(failure => !due.read.includes(failure.source) || due.ops.some(op => keyOf(op) === failure.key));
+    // A failure whose update is no longer due is settled (updated by hand, uninstalled, the marketplace moved back or was
+    // taken off the list): unless its marketplace couldn't be read just now, which says nothing about its plugins.
+    mine.failures = mine.failures.filter(failure => due.unreadSources.includes(failure.source) || due.ops.some(op => keyOf(op) === failure.key));
     const waits = (op: DueUpdate) => {
       const failure = mine.failures.find(known => known.key === keyOf(op));
       return !!failure && failure.offered === op.offered && (!!failure.manual || (!asked && at < failure.at + retryAfter(failure.tries, host.every)));
@@ -157,16 +166,16 @@ export function autoUpdates(host: AutoUpdateHost) {
     const { done, stopped } = ops.length ? await runPlan(ops, api, home) : { done: [] as PluginDone[], stopped: undefined };
     if (stopped) host.log(`plugin updates: stopped: ${stopped}`);
     const news = keep(mine, ops, done, at);
-    mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: mine.failures.length, unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped } : {}) };
-    await save(news);
+    mine.checked = { at, updated: done.filter(entry => succeeded(entry.report) && entry.report.changed).length, failed: open(mine), unread: due.unread, ...(due.offline ? { offline: true as const } : {}), ...(stopped ? { stopped, partway: true as const } : {}) };
+    await save(mine, news);
   }
 
   /** Keeps what a check's updates came to: the note's lines for what changed, and each failure with its count of tries. Says what is news. */
   function keep(mine: UpdatesRecord, ops: DueUpdate[], done: PluginDone[], at: number): 'updated' | 'failed' | undefined {
     const changed = done.filter(entry => succeeded(entry.report) && (entry.report.changed || entry.report.notes?.length));
-    // The words Apply all uses, one line per plugin, without its warning before the click (Settings says an update can't be
-    // undone); a part left alone (edited since, say) is a line of its own to read.
-    const lines = resultLines(changed).map(line => ({ at, source: line.source, plugin: line.plugin, text: line.text.replace(', which can’t be undone', ''), ...(line.ok ? {} : { warn: true as const }) }));
+    // The words Apply all uses, one line per plugin, as read afterwards (Settings says an update can't be undone); a part
+    // left alone (edited since, say) is a line of its own to read.
+    const lines = resultLines(changed, false, { after: true }).map(line => ({ at, source: line.source, plugin: line.plugin, text: line.text, ...(line.ok ? {} : { warn: true as const }) }));
     mine.updated = [...mine.updated, ...lines].slice(-NOTE_LINES);
     let failedNew = false;
     for (const entry of done) {
@@ -188,13 +197,14 @@ export function autoUpdates(host: AutoUpdateHost) {
   /**
    * The schedule's turn (main calls it every few minutes, so a computer that slept through a check's time checks soon after
    * it wakes): a check, when the switch is on, Automatic sync is too, and the last check in this home is long enough ago.
-   * One that reached no Git marketplace, or stopped partway, is made again sooner.
+   * One that reached no Git marketplace, or stopped partway through its updates, is made again sooner. (A home where
+   * nothing may be changed is looked at again at the usual time.)
    */
   async function tick(): Promise<void> {
     const home = host.home();
     if (!host.on() || host.paused() || running || !home) return;
     const last = (await recordFor(home)).checked;
-    if (last && host.now() - last.at < (last.offline || last.stopped ? Math.min(host.every, SOON_MS) : host.every)) return;
+    if (last && host.now() - last.at < (last.offline || last.partway ? Math.min(host.every, SOON_MS) : host.every)) return;
     await check();
   }
 
@@ -209,20 +219,25 @@ export function autoUpdates(host: AutoUpdateHost) {
     const left = mine.failures.filter(failure => !(failure.source === source && failure.plugin === plugin && tools.includes(failure.tool)));
     if (left.length === mine.failures.length) return;
     mine.failures = left;
-    if (mine.checked) mine.checked = { ...mine.checked, failed: left.length };
+    if (mine.checked) mine.checked = { ...mine.checked, failed: open(mine) };
     await save();
   }
 
-  /** Closes one half of the note: what was updated is no longer listed, or the failures shown now are not shown again while they stay the same. */
+  /**
+   * Closes one half of the note: what was updated is no longer listed, or the failures shown now are not shown again while
+   * they stay the same. Either way the person has seen a note, so later ones no longer say that this is new.
+   */
   async function close(what: 'updated' | 'failed'): Promise<PluginUpdatesView> {
     const home = host.home();
     if (!home) return shown();
     const mine = await recordFor(home);
-    if (what === 'updated') { mine.updated = []; mine.told = true; }
+    mine.told = true;
+    if (what === 'updated') mine.updated = [];
     else for (const failure of mine.failures) failure.closed = true;
+    if (mine.checked) mine.checked = { ...mine.checked, failed: open(mine) };
     await save();
     return shown();
   }
 
-  return { view, check, tick, close, settled };
+  return { view, check, tick, close, settled, underWay };
 }

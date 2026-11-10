@@ -18,6 +18,8 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
+  /** What the host was told worked (MarketplaceHost.changed). */
+  const told: string[] = [];
   const ran: (string | undefined)[] = [];
   const host: MarketplaceHost = {
     home: () => ({ home }),
@@ -26,6 +28,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
     openExternal: async () => {},
+    changed: (_source, plugin, tools) => { told.push(`${plugin} ${tools.join(',')}`); },
     // With Pi in the home, the parts engine's context too, so a plugin's parts can go into it.
     ...(options.pi ? { share: () => ({ home, mode: 'custom' as const, read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') }) } : {}),
   };
@@ -39,7 +42,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     update: async (_context, _catalog, plugin, tool, _differs, options) => { calls.push(`update ${plugin} ${tool}${options?.reinstall === false ? ' (no reinstall)' : ''}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
-  return { base, home, calls, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
+  return { base, home, calls, told, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
 }
 
 test('Adding a marketplace reads it once, stores how it was given, and the view lists it with its plugins', async () => {
@@ -331,11 +334,12 @@ test('What is due by itself is what Update all would choose: an older copy and o
     const due = await box.markets.pendingUpdates(box.home);
     assert.deepEqual(due.ops.map(op => [op.plugin, op.tool, op.action, op.offered, op.marketName, op.source]), [
       ['notes', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'pi-cli', 'install-parts', '2.0.0', 'team', root]]);
-    assert.deepEqual([due.stopped, due.unread, due.read], [undefined, ['Folder: broken'], [root]], 'named as the Plugins page names it; the one that was read is told apart');
+    assert.deepEqual([due.stopped, due.unread, due.unreadSources], [undefined, ['Folder: broken'], [broken]], 'named as the Plugins page names it, and by where it was added from');
     // The update itself is the button's, told not to uninstall in order to reinstall.
     box.calls.length = 0;
     await box.markets.update(root, 'team', 'pdf', ['claude-cli'], box.home, { reinstall: false });
     assert.deepEqual(box.calls, ['update pdf claude-cli (no reinstall)']);
+    assert.equal(box.told.at(-1), 'pdf claude-cli', 'the host hears which tools a change worked in, so a failure noted there before is settled');
     assert.deepEqual((await box.markets.pendingUpdates('/another/home')).ops, [], 'only the home that is open');
   } finally { await box.cleanup(); }
 });
@@ -347,7 +351,7 @@ test('Where nothing may be changed, nothing is due and the reason is given', asy
     await versioned(root, 'team', { pdf: { version: '2.0.0' } });
     await box.markets.add(root);
     await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
-    assert.deepEqual(await box.markets.pendingUpdates(box.home), { stopped: 'Preview only.', ops: [], unread: [], read: [] });
+    assert.deepEqual(await box.markets.pendingUpdates(box.home), { stopped: 'Preview only.', ops: [], unread: [], unreadSources: [] });
   } finally { await box.cleanup(); }
 });
 
