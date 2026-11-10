@@ -1282,6 +1282,7 @@ span.ins-confirm { margin-top: 0; }
 .details .details-limits.details-part { margin-left: 0; }
 .row-tag.row-part { display: inline-flex; align-items: center; gap: 4px; }
 .plugin-panel-hint { margin: -4px 0 10px; font-size: 12px; color: var(--ink-soft); }
+.plugin-panel-note { max-width: var(--measure); margin: 10px 0 0; font-size: 12px; color: var(--ink-soft); }
 .plugin-section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 28px; }
 .plugin-section-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .plugin-parts-about { margin: 6px 0 10px; max-width: var(--measure); font-size: 13px; line-height: 20px; color: var(--ink-soft); }
