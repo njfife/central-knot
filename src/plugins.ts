@@ -512,11 +512,7 @@ export async function installedPlugins(context: PluginContext, tool: PluginTool)
         const source = record(record(record(own?.extraKnownMarketplaces)?.[marketplace])?.source);
         if (source?.source !== 'directory' || !text(source.path)) return undefined;
         const item = await folderItem(context, text(source.path), plugin);
-        const folder = item?.folder;
-        // installState reads only a plugin turned on; one turned off is read here the same way.
-        const state: InstallState = folder && (await hasFiles(folder)) ? await installedCopy(folder, item.entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(own, plugin, skills))
-          : { state: 'not-known', reason: 'Copilot CLI has it, but the folder it loads from is gone.' };
-        return { plugin, marketplace, state, off: turned[id] === false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
+        return { plugin, marketplace, state: await installState(context, tool, marketplace, plugin, item?.entry), off: turned[id] === false, entry: item?.entry, atMarketplaceRoot: item?.isMarketplaceRoot };
       })];
     }
     case 'codex-cli': {

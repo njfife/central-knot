@@ -108,7 +108,9 @@ interface KindFact { managed: boolean; edited?: unknown[]; differs: boolean; cop
 function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof icon>[0], facts: KindFact[], holders: HarnessId[], waitsForClaude = 0) {
   const { title, short: noun } = kindNouns[page];
   // A plugin's items count with the rest, said apart: nothing here manages them.
-  const fromPlugins = !designMode && state.home ? pluginItemCount(state.home, page) : 0;
+  // (The design preview has sample items and no home to count them in.)
+  const home = designMode ? undefined : state.home;
+  const fromPlugins = home ? pluginItemCount(home, page) : 0;
   const total = facts.length + fromPlugins;
   const managed = facts.filter(fact => fact.managed).length;
   const differs = facts.filter(fact => fact.differs).length;
@@ -121,7 +123,7 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
   const status = !attention ? null : differs
     ? h(`button.kind-card-state.kind-card-link.${attention.tone}`, { type: 'button', id: `overview-${page}-differ`, title: attention.title, onclick: () => { showFiltered(page, 'attention'); showPage(page); } }, icon(attention.glyph, 13), attention.text)
     : h(`span.kind-card-state.${attention.tone}`, { title: attention.title }, icon(attention.glyph, 13), attention.text);
-  const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length + (fromPlugins || state.home?.pluginItems?.length ? pluginItemCount(state.home!, page, tool) : 0);
+  const countFor = (tool: HarnessId) => facts.filter(fact => fact.copies[tool] !== undefined).length + (home ? pluginItemCount(home, page, tool) : 0);
   const tools = holders.map(tool => {
     const count = countFor(tool);
     return h('span.kind-tool', {}, brandMark(tool, 12), h('span', {}, toolName(tool)), h('strong.kind-tool-count', {}, String(count)));

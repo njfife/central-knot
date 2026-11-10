@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { pluginFiles } from '../src/catalogdetail.ts';
 import { discover } from '../src/discovery.ts';
 import { applyChanges } from '../src/manage.ts';
-import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from '../src/parts.ts';
+import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from '../src/parts.ts';
 import { saveProfile, switchProfile } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
 import { readTomlTables } from '../src/textedit.ts';
@@ -149,10 +149,10 @@ test('Updates: changed parts replaced, dropped ones removed, unreadable sources 
   try {
     await installParts(box.context, { ...target, tool: 'codex-cli' }, await box.files());
     const installed = (await readParts(box.home))[0]!;
-    assert.equal(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.equal(await partsCurrent(box.context, await box.files(), installed), true);
     await writeFile(join(box.plugin, 'skills', 'figma-design', 'SKILL.md'), SKILL.replace('Use the figma server.', 'Use the figma server, v2.'));
     await rm(join(box.plugin, 'agents'), { recursive: true });
-    assert.notEqual(await partsDigest(box.context, await box.files(), 'codex-cli'), installed.digest);
+    assert.equal(await partsCurrent(box.context, await box.files(), installed), false);
 
     const updated = await installParts(box.context, { ...target, version: '2.0.0', tool: 'codex-cli' }, await box.files());
     assert.equal(updated.outcome, 'installed', updated.message);
@@ -371,5 +371,28 @@ test('A pick beside an install of all the parts is that install with exceptions;
     assert.equal(agent.outcome, 'failed');
     assert.match(agent.message, /Couldn’t add the agent “designer”: Pi has no agents\./);
     assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+  } finally { await box.cleanup(); }
+});
+
+test('Turning back on a part removed by hand writes it, and Undo takes it out again; a part left out is no change to the rest', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files());
+    await rm(box.pi('tdd'), { recursive: true });
+    const back = await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    assert.equal(back.outcome, 'installed', back.message);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+    // Before that run tdd was gone from Pi: its Undo returns there.
+    await undoParts(box.context, back.partsRun!);
+    assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me']);
+
+    // What is out by choice is left out of what "out of date" compares: a change to it is no change to what Pi holds.
+    const current = async () => partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!);
+    await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('grill-me')] });
+    assert.equal(await current(), true, 'turning a part off leaves the rest up to date');
+    await writeFile(join(box.plugin, 'skills/grill-me/SKILL.md'), '---\nname: grill-me\ndescription: changed\n---\n\nchanged\n');
+    assert.equal(await current(), true, 'a part that is out can change without the rest going out of date');
+    await writeFile(join(box.plugin, 'skills/figma-design/SKILL.md'), '---\nname: figma-design\ndescription: changed\n---\n\nchanged\n');
+    assert.equal(await current(), false);
   } finally { await box.cleanup(); }
 });

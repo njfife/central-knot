@@ -645,7 +645,7 @@ if (wanted('plugin-items')) {
   await size(1280, 800);
   await a.click('[id="open-document-tools@team-tools/pdf-reader"]');
   await shot(a, 'skill-open', 'Opened pdf-reader: what it is, where it is handled (a link to document-tools’ page), and each tool’s copy.');
-  await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]');
+  await a.click('[id="pfile-document-tools@team-tools/pdf-reader"]'); await waitFor(a, `!!document.querySelector('.details-plugin .plugin-file')`, 15000);
   await shot(a, 'skill-open-file', 'Clicked “Show its SKILL.md”.');
   await a.theme('light'); await shot(a, 'skill-open-light', 'The same, light.'); await a.theme('dark');
   await size(860, 560); await shot(a, 'skill-open-860', 'The open row at 860×560.');

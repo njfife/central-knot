@@ -103,14 +103,21 @@ function handledNote(row: PluginRow, lead: string, id: string) {
 const wholeNote = (skill: SampleSkill) => wholeOf(skill).map(row => h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'),
   h('span', {}, `Also inside the plugin ${inWhere(row)}: there it comes and goes with the plugin.`)));
 
-/** Plugin items whose file is shown, by row key, so a redraw keeps it open. */
-const filesShown = new Set<string>();
+/** Plugin items whose file is shown, by row key (a redraw keeps it open), with each tool's text once read. */
+const filesShown = new Map<string, { tool: HarnessId; text: string }[] | undefined>();
+/** Shows or hides a plugin item's file; showing reads it from each tool's copy. */
+function toggleFile(row: PluginRow) {
+  if (filesShown.delete(row.key)) { rerender(); return; }
+  filesShown.set(row.key, undefined);
+  rerender();
+  const read = (texts: { tool: HarnessId; text: string }[]) => { if (filesShown.has(row.key)) { filesShown.set(row.key, texts); rerender(); } };
+  void window.centralKnot.pluginItemTexts(row.plugin, row.marketName, row.kind, row.name).then(read, () => read([]));
+}
 
 /** A plugin item's details: what it is, where it comes from and is handled, each tool's copy, and its file as each tool's copy has it. */
 function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const [type, ...rest] = row.description.split(' · ');
-  const copies = pluginTools(row).flatMap(tool => (row.copies[tool]?.text !== undefined ? [{ tool, text: row.copies[tool]!.text! }] : []));
-  const shown = filesShown.has(row.key);
+  const shown = filesShown.has(row.key), copies = filesShown.get(row.key);
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
   return h(`div.compare.details.details-plugin${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
     h('div.details-head', {},
@@ -118,10 +125,11 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
       kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
         : row.description ? h('p.details-description', {}, row.description) : null,
       handledNote(row, '', `open-whole-${row.key}`),
-      copies.length ? h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => { if (shown) filesShown.delete(row.key); else filesShown.add(row.key); rerender(); })) : null),
+      row.kind === 'mcp' ? null : h('div.details-actions', {}, smallAction(shown ? `Hide its ${file}` : `Show its ${file}`, `pfile-${row.key}`, () => toggleFile(row)))),
     h('div.details-tools', {}, toolList().map(tool => h('div.details-tool', {}, h('div.details-tool-head', {},
       h('span.details-tool-label', {}, brandMark(tool, 14), h('strong', {}, names[tool])), h('span.details-tool-line', {}, toolWords(row, tool as HarnessId)))))),
-    shown ? h('div.plugin-file', {}, fileBlocks(`pfile-${row.key}-text`, file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 })) : null);
+    !shown ? null : !copies?.length ? h('p.details-limits', {}, copies ? 'Its file couldn’t be read.' : 'Reading…')
+      : h('div.plugin-file', {}, fileBlocks(`pfile-${row.key}-text`, file, copies, holders => `${file} · ${andList(holders.map(holder => names[holder.tool]))}`, { named: copies.length > 1 })));
 }
 
 /** A plugin item's row: its name with the plugin's mark, no Managed switch, and a box per tool. */

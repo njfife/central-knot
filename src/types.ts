@@ -70,7 +70,7 @@ export type SyncGate =
 
 export interface DestinationResult { item: string; harness?: HarnessId; /** `switched`: disabled or enabled there with the tool's own switch. */ outcome: 'written' | 'kept' | 'held' | 'removed' | 'switched' | 'stayed' | 'failed'; message: string; replaced?: true; caughtUp?: true; chooseAgain?: true; /** `switched`: which way. */ disabled?: boolean }
 
-export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
+export interface HomeView { mode: HomeMode; label: string; home: string; snapshots: Snapshot[]; manage: ManageView; /** MCP servers across tools, managed like skills. */ mcp: McpView; /** Agents across tools, managed like skills; lossy destinations one-way. */ agents: McpView; /** The Sync switch (SYN-03): off stops background writes; explicit actions still run. */ syncOn: boolean; /** Plugins' parts in tools without the plugin, so those items can say where they came from. */ parts?: PartsInstall[]; /** The plugins installed whole in this home's tools, with what each brings. */ pluginItems?: InstalledPlugin[]; /** Whether this build offers the Practice copy (dev builds and tests only). */ practice: boolean; /** The read this view was built from, to pass back for a request made right after (DesktopApi.plugins). */ readId: number; /** Profiles: named sets of skills and MCP servers to have on. */ profiles: ProfilesView }
 
 export interface DesktopApi {
   selectHome(mode: HomeMode): Promise<HomeView | null>;
@@ -156,6 +156,8 @@ export interface DesktopApi {
   partsPlan(source: string, plugin: string): Promise<Partial<Record<HarnessId, PartPlan[]>> | null>;
   /** Installs (or updates), removes or undoes a plugin's parts in one tool; `run` names the parts run an Undo reverses; `pick` installs or takes out only the parts it names. */
   pluginParts(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string, pick?: PartsPick): Promise<PluginActionResult>;
+  /** One skill's or agent's file as each tool's installed copy of a plugin has it, read when its row is opened. */
+  pluginItemTexts(plugin: string, marketName: string, kind: PartKind, name: string): Promise<{ tool: HarnessId; text: string }[]>;
 }
 
 export interface PluginActionResult { stopped?: string; reports: ActionReport[] }
@@ -409,7 +411,7 @@ export interface PartItem { kind: PartKind; name: string; hash: string; /** What
 /** A plugin's parts in one tool: from which plugin and version, when, and which items. `digest` identifies the parts' content then. */
 export interface PartsInstall { source: string; marketName: string; plugin: string; version?: string; tool: HarnessId; at: string; digest: string; items: PartItem[] }
 /** One part of a plugin for one tool: it can go in (with a limit, maybe), or `why` not. `out`: the person turned it off or removed it there, so it stays out until chosen. */
-export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string; out?: true }
+export interface PartPlan { kind: PartKind; name: string; why?: string; limit?: string; out?: true; /** It is in and can stay, but can't be taken out or rewritten there now, and why. */ fixed?: string }
 /** A part by kind and name. */
 export type PartRef = Pick<PartItem, 'kind' | 'name'>;
 /**
@@ -422,7 +424,7 @@ export interface PartsState { version?: string; at: string; items: Pick<PartItem
 
 // ---------- What a plugin installed whole brings (pluginitems.ts) ----------
 /** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
-export interface PluginItem { kind: PartKind; name: string; description: string; /** Skills and agents: the file as written. */ text?: string; /** MCP servers: what it runs or connects to. */ runs?: string }
+export interface PluginItem { kind: PartKind; name: string; description: string; /** Skills and agents: the file as written, when it was asked for (DesktopApi.pluginItemTexts). */ text?: string; /** MCP servers: what it runs or connects to. */ runs?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;
@@ -431,8 +433,6 @@ export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: 
   /** Why what it brings couldn't be read; then `items` is empty. */ problem?: string;
   /** Its marketplace is on the Plugins page (it is added in a tool), so the plugin's page can be opened there. */ listed: boolean;
   /** Where that tool has its marketplace from, as it records it. */ source?: string }
-/** Declared apart from HomeView's own line, so changes beside it merge cleanly: the plugins installed whole in this home's tools. */
-export interface HomeView { pluginItems?: InstalledPlugin[] }
 
 /** A catalog plugin as the page gets it: what the catalog says about it, without its raw entry or repository address. */
 export type PluginView = Omit<CatalogPlugin, 'remote' | 'entry'>;

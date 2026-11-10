@@ -33,7 +33,8 @@ test('Claude Code: what an installed plugin brings, from its own record and copy
     await copy(cache);
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'demo@elsewhere': [{ scope: 'user', installPath: cache, version: '1.2.0' }], 'proj@elsewhere': [{ scope: 'project', installPath: cache }] } }));
     await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'demo@elsewhere': false } }));
-    const [found, ...rest] = await readPluginItems(box.context, ['claude-cli', 'pi-cli']);
+    const [found, ...rest] = await readPluginItems(box.context, ['claude-cli', 'pi-cli'], { texts: true });
+    assert.equal((await readPluginItems(box.context, ['claude-cli']))[0]!.items[0]!.text, undefined, 'the home’s own read carries no file text');
     assert.equal(rest.length, 0, 'a project-scope install is not this person’s everywhere');
     assert.deepEqual(brief([found!]), [{ tool: 'claude-cli', plugin: 'demo', marketName: 'elsewhere', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] }]);
     assert.equal(found!.version, '1.2.0');

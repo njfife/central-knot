@@ -211,7 +211,23 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
   assert.equal(queued(draft, at.source, 'pdf', 'claude-cli'), undefined);
   toggle(draft, op('pdf', 'claude-cli'));
   assert.equal(pickOf(draft, at.source, 'pdf', 'claude-cli'), undefined);
-  // An empty pick is no choice.
-  setPick(draft, op('pdf', 'codex-cli'), flipPick(flipPick(undefined, part('tdd'), true), part('tdd'), true));
+  // A second click on a part's switch takes its choice back, whichever way the switch now points; an empty pick is no choice.
+  setPick(draft, op('pdf', 'codex-cli'), flipPick(flipPick(undefined, part('tdd'), true), part('tdd'), false));
   assert.equal(pickOf(draft, at.source, 'pdf', 'codex-cli'), undefined);
+  assert.deepEqual(flipPick(flipPick(undefined, part('tdd'), false), part('tdd'), true), { on: [], off: [] });
+});
+
+test('A new view keeps a pick: a part to put in stays even when the record still lists it (removed by hand), and one to take out goes once it is no longer there', () => {
+  const part = (name: string) => ({ kind: 'skill' as const, name });
+  const entry = (items: string[]) => ({ source: 'anthropics/skills', name: 'anthropic-agent-skills', plugins: [{ name: 'pdf' }], states: {}, parts: { pdf: { 'pi-cli': { at: '', items: items.map(part) } } } });
+  const view = (items: string[]) => ({ home: '/h', tools: ['pi-cli'], clis: {}, canWrite: true, marketplaces: [entry(items)] }) as unknown as Parameters<typeof prune>[1];
+  const draft: PluginDraft = new Map();
+  setPick(draft, op('pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
+  prune(draft, view(['tdd', 'grill-me']));
+  assert.deepEqual(pickOf(draft, 'anthropics/skills', 'pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
+  prune(draft, view(['tdd']));
+  assert.deepEqual(pickOf(draft, 'anthropics/skills', 'pdf', 'pi-cli'), { on: [part('tdd')], off: [] });
+  setPick(draft, op('pdf', 'pi-cli'), { on: [], off: [part('grill-me')] });
+  prune(draft, view(['tdd']));
+  assert.equal(pickOf(draft, 'anthropics/skills', 'pdf', 'pi-cli'), undefined);
 });

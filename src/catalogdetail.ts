@@ -4,7 +4,7 @@
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
-import type { NamedPart, PluginContents, PluginDetail } from './types.ts';
+import type { HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
 import { githubRepo, isFolder, isHttps, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
@@ -262,6 +262,14 @@ export async function pluginContents(folder: string, entry: Record<string, unkno
     bin: (await listInside(root, folder)).includes('bin'),
     version: text(declared.version) || undefined,
   };
+}
+
+/**
+ * What a tool's installed copy of a plugin holds (in `path`), as that tool reads it: Codex by its own manifest, Copilot CLI
+ * with a skills list replacing the skills folder. `entry`: its marketplace entry, where known.
+ */
+export async function installedContents(tool: HarnessId, path: string, entry: Record<string, unknown> = {}, atMarketplaceRoot = false): Promise<PluginContents> {
+  return pluginContents(path, entry, path, { codex: tool === 'codex-cli' ? await codexManifest(path) : undefined, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot });
 }
 
 /** The files behind a plugin's skills, agents and MCP servers, for installing them as separate items (plugin parts). */

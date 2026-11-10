@@ -80,11 +80,14 @@ export function setPick(draft: PluginDraft, at: Pick<PluginOp, 'source' | 'marke
   if (queued(draft, at.source, at.plugin, at.tool) === 'install') draft.delete(opKey(at));
 }
 
-/** A pick with one part's choice flipped: chosen to go `on` (or out), or, chosen that way already, taken back. */
+/**
+ * A pick after a click on one part's switch: a part already in the pick is taken back out of it (the click undoes the
+ * choice); any other is chosen to go in (`on`) or to come out, away from where it stands now.
+ */
 export function flipPick(pick: PartsPick | undefined, part: PartRef, on: boolean): PartsPick {
-  const without = (refs: PartRef[]) => refs.filter(ref => !samePart(ref, part));
-  const chosen = (on ? pick?.on : pick?.off)?.some(ref => samePart(ref, part));
-  return { on: [...without(pick?.on ?? []), ...(on && !chosen ? [part] : [])], off: [...without(pick?.off ?? []), ...(!on && !chosen ? [part] : [])] };
+  const without = (refs: PartRef[] = []) => refs.filter(ref => !samePart(ref, part));
+  const chosen = [...(pick?.on ?? []), ...(pick?.off ?? [])].some(ref => samePart(ref, part));
+  return { on: [...without(pick?.on), ...(on && !chosen ? [part] : [])], off: [...without(pick?.off), ...(!on && !chosen ? [part] : [])] };
 }
 
 /** Chooses one change. The whole plugin, or all its parts out, takes back single parts picked there; an install or update of its parts keeps them, as its exceptions. */
@@ -115,8 +118,8 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
  * no longer installed or that can't be uninstalled now (pluginstatus.cantUninstall), an update of one no longer installed,
  * loaded live from its folder or that can't be changed now (as for an uninstall), and a skill switch where the plugin
  * isn't installed, the tool can't switch it (pluginstatus.cantSwitchSkill), or it already is as chosen. Parts go stale where
- * they can't go in now or are there and up to date, and their removal where none are there. A pick keeps only the parts
- * it would still change.
+ * they can't go in now or are there and up to date, and their removal where none are there. A pick loses the parts to
+ * take out that are no longer there (see stillPicked), and goes once it names none.
  */
 export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   for (const [key, op] of draft) {
@@ -130,7 +133,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
       : op.action === 'update' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool) || !!(stateOf(entry, op.plugin, op.tool) as { live?: boolean }).live
       : op.action === 'install-parts' ? !view.canWrite || !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
       : op.action === 'remove-parts' ? !parts || !view.canWrite
-      : op.action === 'pick-parts' ? !view.canWrite || !partsPickable(view, entry, op.plugin, op.tool) || !pickStill(draft, op, parts?.items ?? [])
+      : op.action === 'pick-parts' ? !view.canWrite || !partsPickable(view, entry, op.plugin, op.tool) || !stillPicked(draft, op, parts?.items ?? [])
       : op.action === 'undo-parts' || skillChoiceStale(view, entry, op));
     if (stale) draft.delete(key);
   }
@@ -146,13 +149,15 @@ function skillChoiceStale(view: PluginsView, entry: MarketplaceView, op: PluginO
 }
 
 /**
- * Drops from a pick what it would no longer change (a part to put in that is there, one to take out that isn't; while an
- * update of the tool's parts is chosen too, one to take out may be a part that update would add) and says whether anything is left.
+ * Whether a pick still names a part, once the parts to take out that aren't on the tool's record (`there`) are dropped
+ * from it; while an install or update of the tool's parts is chosen too, one to take out may be a part that run would
+ * add, so it stays. Parts to put in all stay: one on record may have been removed from the tool by hand, which only the
+ * run can tell, and putting in one that is there changes nothing.
  */
-function pickStill(draft: PluginDraft, op: PluginOp, there: PartRef[]): boolean {
-  const has = (part: PartRef) => there.some(item => samePart(item, part));
+function stillPicked(draft: PluginDraft, op: PluginOp, there: PartRef[]): boolean {
   const updating = queued(draft, op.source, op.plugin, op.tool) === 'install-parts';
-  op.pick = { on: (op.pick?.on ?? []).filter(part => !has(part)), off: (op.pick?.off ?? []).filter(part => has(part) || updating) };
+  const pick = op.pick ?? { on: [], off: [] };
+  op.pick = { ...pick, off: pick.off.filter(part => updating || there.some(item => samePart(item, part))) };
   return op.pick.on.length + op.pick.off.length > 0;
 }
 
@@ -240,12 +245,15 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const { plugin, source, skill } = mine[0]!;
     // Tools in the page's column order, so "Codex and Pi" never reads "Pi and Codex" the next time. An unchanged parts
     // result is one group whatever kind of run it was: only a change tells an update from an install.
-    const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false } = {}) => mine
-      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!parts || !changed || !!entry.report.partsUpdated === updated))
+    // A pick of single parts is said as such; with the rest of the tool's parts it is that install or update.
+    const picked = (entry: PluginDone) => entry.action === 'pick-parts' && !entry.pick?.rest;
+    const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false, single = false } = {}) => mine
+      .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!parts || !changed || (picked(entry) === single && (single || !!entry.report.partsUpdated === updated))))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const partsGroups: Group[] = [
       [tools('installed', true, { parts: true }), undo ? 'parts put back in' : 'parts installed in'],
       [tools('installed', true, { parts: true, updated: true }), 'parts updated in'],
+      [[...tools('installed', true, { parts: true, single: true }), ...tools('uninstalled', true, { parts: true, single: true })], 'single parts changed in'],
       [tools('uninstalled', true, { parts: true }), 'parts removed from'],
       ...(undo
         ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]

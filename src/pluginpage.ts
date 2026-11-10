@@ -295,7 +295,8 @@ function partStand(view: PluginsView, entry: MarketplaceView, plugin: PluginView
   const pick = pickOf(market.draft, entry.source, plugin.name, tool);
   const chosen = pick?.on.some(same) ? 'on' as const : pick?.off.some(same) ? 'off' as const
     : whole === 'remove-parts' && there ? 'off' as const : whole === 'install-parts' && !there && !!planned && !planned.why && !planned.out ? 'on' as const : undefined;
-  const why = chosen ? undefined : !view.canWrite ? PREVIEW_ONLY : planned ? planned.why : 'It can’t go in here as a separate item.';
+  // One that is in needs no plan to come out, unless its folder can't be written through (`fixed`).
+  const why = chosen ? undefined : !view.canWrite ? PREVIEW_ONLY : there ? planned?.why ?? planned?.fixed : planned ? planned.why : 'It can’t go in here as a separate item.';
   return { there, chosen, on: chosen ? chosen === 'on' : there, why, whole, pick };
 }
 

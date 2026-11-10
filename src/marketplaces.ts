@@ -4,13 +4,13 @@
 import { access, constants, readFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { codexManifest, marketplacePage, pluginContents, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
+import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { harnesses } from './harnesses.ts';
 import { appCandidates, executableCandidates } from './platform.ts';
 import { failedFor } from './pluginplan.ts';
 import { findApp, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
-import { installParts, partsDigest, planParts, readParts, removeParts, undoParts } from './parts.ts';
+import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
@@ -202,10 +202,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const install of installs) {
       const item = catalog?.plugins.find(entry => entry.name === install.plugin);
       const read = item ? await filesOnce(install.plugin) : undefined;
-      const digest = read ? await partsDigest(share, read, install.tool).catch(() => undefined) : undefined;
+      const current = read ? await partsCurrent(share, read, install).catch(() => undefined) : undefined;
       const state: PartsState = { version: install.version, at: install.at, items: install.items.filter(item => !item.removed).map(({ kind, name }) => ({ kind, name })) };
       const newVersion = !!item?.version && !!install.version && item.version !== install.version;
-      if ((digest && digest !== install.digest) || newVersion) { state.changed = true; if (newVersion) state.now = item!.version; }
+      if (current === false || newVersion) { state.changed = true; if (newVersion) state.now = item!.version; }
       (states[install.plugin] ??= {})[install.tool] = state;
     }
     return { parts: states, recordedName: installs[0]?.marketName };
@@ -225,8 +225,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const states = (await statesFor(ctx, tools, catalog, source, [item]))[item.name] ?? {};
     const copies = await Promise.all(Object.entries(states).map(async ([tool, state]) => {
       if (state?.state !== 'installed') return undefined;
-      const codex = tool === 'codex-cli' ? await codexManifest(state.path) : undefined;
-      const { skills, commands, agents } = await pluginContents(state.path, item.entry ?? {}, state.path, { codex, skillsListReplaces: tool === 'copilot-cli', atMarketplaceRoot: !!item.isMarketplaceRoot });
+      const { skills, commands, agents } = await installedContents(tool as HarnessId, state.path, item.entry, !!item.isMarketplaceRoot);
       return [tool, { skills, commands, agents, version: state.version }] as const;
     }));
     return Object.fromEntries(copies.filter(copy => !!copy));
