@@ -54,7 +54,7 @@ test('S3 Apply all for a different agent must not consume a folder reset',()=>bo
 test('S4 process death during agent Restore must not delete it everywhere',()=>box(async b=>{
  await fs.writeFile(b.paths[0],md('BASE'));await applyAgents(b.context,tools,managed('reviewer'));
  await fs.writeFile(b.paths[0],md('EDIT'));await applyAgents(b.context,tools,[]);
- const event=(await readHistory(b.home)).find(e=>e.kind==='edit')!;
+ const event=(await readHistory(b.context)).find(e=>e.kind==='edit')!;
  const script=`import fs from 'node:fs/promises';import {syncBuiltinESMExports} from 'node:module';import {restoreAgent} from './src/agents.ts';
  const original=fs.link;fs.link=async(from,to)=>{if(String(to)===process.env.CK_TARGET)process.exit(73);return original(from,to);};syncBuiltinESMExports();
  const c=JSON.parse(process.env.CK_CONTEXT);c.read=async()=>[];await restoreAgent(c,['claude-cli','copilot-cli','codex-cli'],process.env.CK_EVENT);`;
@@ -69,7 +69,7 @@ test('S6 Restore must not adopt an MCP edit saved after its write as baseline',(
  const target=join(b.home,'.copilot/mcp-config.json');
  await fs.writeFile(target,json('BASE'));await applyMcp(b.context,tools.slice(1),managed('docs'));
  await fs.writeFile(target,json('EDIT'));await applyMcp(b.context,tools.slice(1),[]);
- const event=(await readHistory(b.home)).find(e=>e.kind==='edit')!;
+ const event=(await readHistory(b.context)).find(e=>e.kind==='edit')!;
  const original=fs.link;let injected=false;
  fs.link=async(from,to)=>{await original(from,to);if(String(to)===target&&!injected){injected=true;await fs.writeFile(target,json('CONCURRENT'));}};syncBuiltinESMExports();
  try{await restoreMcp(b.context,tools.slice(1),event.id);}finally{fs.link=original;syncBuiltinESMExports();}

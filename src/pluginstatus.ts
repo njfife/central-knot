@@ -120,7 +120,7 @@ export const removableTools = (view: PluginsView, entry: MarketplaceView, plugin
 export const marketTitle = (entry: MarketplaceView) => entry.name || entry.sourceLabel;
 
 /** Tools that can still take this plugin: available there and not installed yet. */
-export const missingTools = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
+export const toolsWithoutPlugin = (view: PluginsView, entry: MarketplaceView, plugin: string) =>
   view.tools.filter(tool => !unavailable(view, entry, plugin, tool) && !installed(entry, plugin, tool));
 
 /**
