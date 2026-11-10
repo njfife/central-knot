@@ -221,6 +221,58 @@ test('The copy of the tool a desktop app carries is found where the app keeps it
   } finally { await setup.cleanup(); }
 });
 
+/** An Electron app's app.asar holding only a package.json with this version, in the archive's own layout. */
+async function asar(path: string, version: string) {
+  const body = Buffer.from(JSON.stringify({ name: 'app', version }));
+  const header = Buffer.from(JSON.stringify({ files: { 'package.json': { size: body.length, offset: '0' } } }));
+  const padded = Math.ceil(header.length / 4) * 4;
+  const head = Buffer.alloc(16 + padded);
+  [4, 8 + padded, 4 + padded, header.length].forEach((value, index) => head.writeUInt32LE(value, index * 4));
+  header.copy(head, 16);
+  await mkdir(join(path, '..'), { recursive: true });
+  await writeFile(path, Buffer.concat([head, body]));
+}
+
+test('Desktop apps are found where Windows and Linux install them, with the copy of the tool only where its route was proved', { skip: process.platform === 'win32' }, async () => {
+  const setup = await fixture();
+  try {
+    const system = join(setup.home, '.system');
+    // A system folder (/usr/lib, Program Files) is stood in under the fixture; the layout inside it is the vendor's.
+    const rebased = (candidates: ReturnType<typeof appCandidates>) => candidates.filter(candidate => !candidate.app.startsWith('/Applications')).map(candidate => (candidate.app.startsWith(setup.home) ? candidate : { ...candidate, app: join(system, candidate.app.replace(/^C:\\/, '')) }));
+    const tool = async (path: string, output: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, `#!/bin/sh\n${output}\n`, { mode: 0o755 }); };
+    const cliVersion = async (path: string) => { await mkdir(join(path, '..'), { recursive: true }); await writeFile(path, 'export declare const COPILOT_CLI_VERSION = "1.0.102-0.unstable.r41779900948.gf482387";\n'); };
+
+    // Windows: MSIX packages are found through the app execution aliases they install, which link into the package folder.
+    const packages = join(system, 'Program Files/WindowsApps');
+    const alias = async (family: string, name: string, target: string) => { const folder = join(setup.home, 'AppData/Local/Microsoft/WindowsApps', family); await mkdir(folder, { recursive: true }); await symlink(target, join(folder, name)); };
+    const claudePackage = join(packages, 'Claude_4.23118.1.0_x64__pzs8sxrjxfjjc');
+    await asar(join(claudePackage, 'app/resources/app.asar'), '4.23118.1');
+    await alias('Claude_pzs8sxrjxfjjc', 'claude-desktop.exe', join(claudePackage, 'app/Claude.exe'));
+    const codeTab = join(setup.home, 'AppData/Local/Claude-Data/claude_pzs8sxrjxfjjc/claude-code');
+    await tool(join(codeTab, '2.1.321/d020ce1b5d30/claude.exe'), 'echo 2.1.321');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'claude', 'win32'))), { name: 'Claude desktop', version: '4.23118.1', carries: 'Code tab', carriedVersion: '2.1.321', binary: join(codeTab, '2.1.321/d020ce1b5d30/claude.exe') });
+    const chatgptPackage = join(packages, 'OpenAI.Codex_26.1023.6621.0_x64__2p2nqsd0c76g0');
+    await asar(join(chatgptPackage, 'app/resources/app.asar'), '26.1023.51421');
+    await tool(join(chatgptPackage, 'app/resources/codex.exe'), 'echo codex-cli 0.165.0-alpha.1.2');
+    await alias('OpenAI.Codex_2p2nqsd0c76g0', 'codex-core-command-runner.exe', join(chatgptPackage, 'app/resources/codex-command-runner.exe'));
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'codex', 'win32'))), { name: 'ChatGPT desktop', version: '26.1023.51421', carries: 'Codex', carriedVersion: '0.165.0-alpha.1.2', binary: join(chatgptPackage, 'app/resources/codex.exe') });
+    // The Copilot app's runtime route wasn't run on Windows: its version is shown, no copy is used.
+    await cliVersion(join(setup.home, 'AppData/Local/GitHub Copilot/copilot-sdk/cliVersion.d.ts'));
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'win32'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.102-0.unstable.r41779900948.gf482387' });
+
+    // Linux: the vendors' packages install under /usr/lib; ChatGPT's preview was also unpacked under ~/.local/opt.
+    await asar(join(system, 'usr/lib/claude-desktop/resources/app.asar'), '4.23118.1');
+    await tool(join(setup.home, '.config/Claude/claude-code/2.1.321/d020ce1b5d30/claude'), 'echo 2.1.321');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'claude', 'linux'))), { name: 'Claude desktop', version: '4.23118.1', carries: 'Code tab', carriedVersion: '2.1.321' }, 'the Linux Code tab was never run: its version only');
+    const opt = join(setup.home, '.local/opt/chatgpt');
+    await asar(join(opt, 'resources/app.asar'), '26.901.51231');
+    await tool(join(opt, 'resources/codex'), 'echo codex-cli 0.153.4');
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'codex', 'linux'))), { name: 'ChatGPT desktop', version: '26.901.51231', carries: 'Codex', carriedVersion: '0.153.4', binary: join(opt, 'resources/codex') });
+    await cliVersion(join(system, 'usr/lib/GitHub Copilot/copilot-sdk/cliVersion.d.ts'));
+    assert.deepEqual(await findApp(rebased(appCandidates(setup.home, 'copilot', 'linux'))), { name: 'GitHub Copilot app', carries: 'Copilot runtime', carriedVersion: '1.0.102-0.unstable.r41779900948.gf482387' });
+  } finally { await setup.cleanup(); }
+});
+
 test('Write to Claude Code waits for Claude desktop and its Code tab as well as the CLI', () => {
   const running = (command: string) => new RegExp(CLAUDE_PROCESS).test(command);
   assert.ok(running('/Users/n/Library/Application Support/Claude/claude-code/2.1.321/e6736b2d954d/claude.app/Contents/MacOS/claude --output-format stream-json'));
