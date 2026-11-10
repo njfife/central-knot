@@ -50,6 +50,21 @@ function scanValue(text: string, at: number): number {
   return at + match[0].length;
 }
 
+/**
+ * A JSON file that may hold comments and trailing commas (JSONC, as OpenCode's settings may), parsed. The text is not changed:
+ * comments become spaces and a comma before a closing bracket is dropped, outside strings only. Throws when it is not JSON then.
+ */
+export function readJsonc(text: string): unknown {
+  let plain = '';
+  for (let at = text.charCodeAt(0) === 0xfeff ? 1 : 0; at < text.length;) {
+    if (text[at] === '"') { const end = scanString(text, at); plain += text.slice(at, end); at = end; continue; }
+    if (text.startsWith('//', at) || text.startsWith('/*', at)) { const end = skipSpace(text, at); plain += ' '; at = Math.max(end, at + 2); continue; }
+    if (text[at] === ',') { const next = skipSpace(text, at + 1); if (text[next] === '}' || text[next] === ']') { at++; continue; } }
+    plain += text[at++];
+  }
+  return JSON.parse(plain);
+}
+
 /** The members of the object starting at `at` (the "{"). */
 function members(text: string, at: number): { members: Member[]; close: number } {
   const list: Member[] = [];

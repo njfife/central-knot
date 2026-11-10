@@ -3,14 +3,14 @@
 // The safety rules are the skills engine's: a file that is missing or unreadable is never read as deletions, every write rereads
 // and checks the file and never overwrites a save made meanwhile, only this server's own recorded copies are ever removed, and every
 // entry replaced or removed is kept whole per tool (its own settings too) so Restore puts it back as it was.
-import { withoutBom } from './values.ts';
+import { record, withoutBom } from './values.ts';
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
-import { configRoot, harnesses } from './harnesses.ts';
+import { configRoot, harnesses, openCodeSettings } from './harnesses.ts';
 import { mcpTools } from './presence.ts';
 import { FORMAT_VERSION, NOTHING_CHANGED, errorCode, readRecord, recoverParked, sha256, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
+import { readJsonc, readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import { mcpSwitchFacts, readMcpSwitches, setMcpDisabled } from './mcpswitch.ts';
 import { throughPlugins } from './plugins.ts';
@@ -56,6 +56,7 @@ export function mcpFile(context: ShareContext, tool: HarnessId): string {
     // Pi 1.5.0 reads ~/.pi/agent/mcp.json, in the same mcpServers shape as Claude's (CD §5, Appendix A).
     case 'pi-cli': return join(rootOf(context, tool), 'mcp.json');
     case 'codex-cli': return join(rootOf(context, tool), 'config.toml');
+    case 'opencode-cli': return openCodeSettings(rootOf(context, tool));
   }
 }
 
@@ -83,6 +84,39 @@ export function fromJson(name: string, tool: HarnessId, file: string, raw: Recor
   };
   const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['type', 'command', 'args', 'env', 'cwd', 'url', 'headers'].includes(key)));
   return { name, tool, file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) };
+}
+
+// OpenCode keeps its servers under `mcp` in its settings file, in two places both of its lines read (measured on 1.19.5 and
+// 2.2.5): `mcp.<name>`, and `mcp.servers.<name>`, which the newer line's own command writes. An entry is
+// `{ type: "local", command: [program, ...arguments], environment }` or `{ type: "remote", url, headers }`.
+
+/** `mcp.servers` when it is the newer line's holder of servers, not a server someone named "servers" (which has a `type`). */
+const openCodeHolder = (mcp: Record<string, unknown>) => { const holder = record(mcp.servers); return holder && typeof holder.type !== 'string' ? holder : undefined; };
+
+/** Where a server's entry is in OpenCode's settings, as a path of keys; nothing when it has none. Throws when the text isn't JSON. */
+export function openCodePlace(text: string, name: string): string[] | undefined {
+  const mcp = record(record(text.trim() ? readJsonc(text) : {})?.mcp) ?? {};
+  const holder = openCodeHolder(mcp);
+  if (holder && Object.hasOwn(holder, name)) return ['mcp', 'servers', name];
+  return Object.hasOwn(mcp, name) && !(holder && name === 'servers') ? ['mcp', name] : undefined;
+}
+
+function fromOpenCode(name: string, file: string, raw: Record<string, unknown>): McpEntry {
+  const remote = raw.type === 'remote' || (raw.type === undefined && typeof raw.url === 'string');
+  const command = Array.isArray(raw.command) ? raw.command.map(String) : typeof raw.command === 'string' ? [raw.command] : [];
+  const server: NeutralServer = remote
+    ? { transport: 'http', url: typeof raw.url === 'string' ? raw.url : undefined, headers: nonEmpty(strings(raw.headers)) }
+    : { transport: 'stdio', command: command[0], args: command.length > 1 ? command.slice(1) : undefined, env: nonEmpty(strings(raw.environment)) };
+  const extras = Object.fromEntries(Object.entries(raw).filter(([key]) => !['type', 'command', 'environment', 'url', 'headers'].includes(key)));
+  return { name, tool: 'opencode-cli', file, server, extras, hash: serverHash(server), hostBound: hostBound(name, server) };
+}
+
+/** A server as OpenCode's settings hold it, with its own fields there kept. */
+function openCodeEntry(server: NeutralServer, extras: Record<string, unknown>): Record<string, unknown> {
+  const entry: Record<string, unknown> = server.transport === 'stdio'
+    ? { type: 'local', command: [server.command, ...(server.args ?? [])], environment: server.env, ...extras }
+    : { type: 'remote', url: server.url, headers: server.headers, ...extras };
+  return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
 
 /**
@@ -135,13 +169,24 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
       }
       return { entries, exists: true, text, invalid: [...inline], section: tables.some(table => table.path[0] === 'mcp_servers') || inline.size > 0 };
     }
+    const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
+    if (tool === 'opencode-cli') {
+      const settings = record(readJsonc(text));
+      if (!settings || ('mcp' in settings && !record(settings.mcp))) throw new Error('mcp is not an object');
+      const mcp = record(settings.mcp) ?? {};
+      const holder = openCodeHolder(mcp);
+      const all = [...Object.entries(mcp).filter(([name]) => !(holder && name === 'servers')), ...Object.entries(holder ?? {})];
+      // A name in both places is held: which one OpenCode uses was not measured.
+      const twice = new Set(all.map(([name]) => name).filter((name, index, names) => names.indexOf(name) !== index));
+      return { entries: all.filter(([name, raw]) => valid(raw) && !twice.has(name)).map(([name, raw]) => fromOpenCode(name, file, raw as Record<string, unknown>)),
+        invalid: [...new Set(all.filter(([name, raw]) => !valid(raw) || twice.has(name)).map(([name]) => name))], exists: true, text, section: 'mcp' in settings };
+    }
     const parsed = JSON.parse(withoutBom(text)) as { mcpServers?: unknown };
     const section = !!parsed && typeof parsed === 'object' && 'mcpServers' in parsed;
     // A servers member that is there but is not an object (null, a list) makes the file unreadable: never read as no servers.
     const servers = section ? parsed.mcpServers : {};
     if (!servers || typeof servers !== 'object' || Array.isArray(servers)) throw new Error('mcpServers is not an object');
     const all = Object.entries(servers as Record<string, unknown>);
-    const valid = (raw: unknown): raw is Record<string, unknown> => !!raw && typeof raw === 'object' && !Array.isArray(raw);
     return { entries: all.filter(([, raw]) => valid(raw)).map(([name, raw]) => fromJson(name, tool, file, raw as Record<string, unknown>)), invalid: all.filter(([, raw]) => !valid(raw)).map(([name]) => name), exists: true, text, section };
   } catch {
     return { entries: [], exists: true, problem: `${file} could not be read as ${tool === 'codex-cli' ? 'TOML' : 'JSON'}, so its servers are not offered and it is never written.` };
@@ -150,7 +195,8 @@ export async function readTool(context: ShareContext, tool: HarnessId): Promise<
 
 /** Why a tool cannot hold this server, if it cannot (CD §5, Unsupported). */
 export function cannotHold(tool: HarnessId, server: NeutralServer): string | undefined {
-  if ((tool === 'codex-cli' || tool === 'pi-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
+  if ((tool === 'codex-cli' || tool === 'pi-cli' || tool === 'opencode-cli') && server.transport === 'sse') return `${harnesses[tool].name} has no SSE transport.`;
+  if (tool === 'opencode-cli' && server.cwd) return 'OpenCode has no working folder setting for a server.';
   if (server.transport === 'stdio' && !server.command) return 'It has no command to run.';
   if (server.transport !== 'stdio' && !server.url) return 'It has no URL.';
   return undefined;
@@ -168,6 +214,11 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
     if (server.env) body += `\n${tomlHeader(['mcp_servers', name, 'env'])}\n${Object.entries(server.env).map(([key, value]) => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key)} = ${tomlValue(value)}`).join('\n')}\n`;
     for (const [key, raw] of Object.entries(extras)) if (typeof raw === 'string' && key.startsWith('[')) body += `\n${raw.replace(/\s*$/, '')}\n`;
     return setTomlTable(text, ['mcp_servers'], name, body);
+  }
+  if (tool === 'opencode-cli') {
+    // An entry stays where it is; a new one goes under `mcp` itself, the place both lines read and switch the same way.
+    const place = openCodePlace(text, name) ?? ['mcp', name];
+    return setJsonMember(text, place, server && openCodeEntry(server, extras));
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);
   return setJsonMember(text, ['mcpServers', name], jsonEntry(tool, server, extras));
@@ -491,7 +542,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
       for (const copy of missing) recorded.delete(copy.tool);
     }
     // Which content wins: a one-sided edit; competing edits by the fixed tool order (Copilot, Claude, Codex); else the baseline.
-    const order: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli', 'pi-cli'];
+    const order: HarnessId[] = ['copilot-cli', 'claude-cli', 'codex-cli', 'pi-cli', 'opencode-cli'];
     const source = [...edited].sort((first, second) => order.indexOf(first.tool) - order.indexOf(second.tool))[0]
       ?? entries.find(entry => entry.hash === item.hash) ?? (entries.length && new Set(entries.map(entry => entry.hash)).size === 1 ? entries[0] : undefined);
     if (!source) { results.push({ item: name, outcome: 'held', message: 'Copies differ. Choose which copy to use.' }); continue; }

@@ -847,3 +847,32 @@ Nathan asked that closing the app on a Mac leave it running in the top right (th
 **Not proven.** A real click on the menu bar icon's Open Central Knot: Computer Use could not reach the menu bar icon. The same code runs when the app is opened again, which was checked.
 
 **Lesson.** Computer Use asks macOS to open the app each time it looks at it, which rightly brings a closed window back. The log's "opened again" line shows it. A test of "stays closed" must read the state with the shell before Computer Use looks again.
+
+## OpenCode as a tool, November 10, 2026
+
+Nathan asked for the features still open in the original plan, each in its own thread. This is the first of the "more tools" thread: OpenCode becomes a tool like the others (plan 11c, SPEC OC-01 to OC-04), built the way Pi was added.
+
+**Measured first** (picoder, Linux x64, OpenCode 1.19.5 from npm `opencode-linux-x64` and 2.2.5 from `@opencode/cli-linux-x64`, throwaway homes outside any real home, a stand-in model server that records what a session is sent). Both lines agree unless said:
+
+- Skills are listed and sent to the model from `~/.config/opencode/skills`, `~/.claude/skills` and `~/.agents/skills`.
+- A skill is turned off by `"permission": { "skill": { "<name>": "deny" } }` in the settings file: by name, whichever folder holds it. The last rule that matches the name decides (`{ "x": "deny", "*": "allow" }` leaves x on), so the rule has to go last. A denied skill is left out of what a new session is sent.
+- MCP servers are read from `mcp.<name>` and from `mcp.servers.<name>` (what 2.2.5's own `mcp add --global` writes). `enabled: false` turns an entry under `mcp` off on both lines; `disabled: true` turns one under `mcp.servers` off on both; `enabled: false` under `mcp.servers` is honoured by 1.19.5 only.
+- Settings: 1.19.5 reads `config.json`, `opencode.json` and `opencode.jsonc`; 2.2.5 reads the last two; `opencode.jsonc` decides where both have a key. 1.19.5 adds `"$schema"` to a file it loads.
+- Agents are `agents/<name>.md` (and the older `agent/`). With no `mode`, 1.19.5 makes one `all`, 2.2.5 `primary` (never handed work); `mode: all` is read by both. A `name` in the frontmatter names the agent on 1.19.5; 2.2.5 goes by the file name. `disable: true` leaves one out. `~/.claude/agents` is not read.
+- `~/.config/opencode/AGENTS.md` is sent in every session.
+- `--version` prints `1.19.5` or `opencode v2.2.5`, makes empty folders and a log, and starts nothing.
+- Nathan's Mac has both lines: Homebrew's CLI 1.19.5, the installer's 2.2.5 in `~/.opencode/bin` (first on his terminal's PATH) and OpenCode.app 2.2.5, which names the OpenCode it carries in `Contents/Resources/opencode-cli.version`.
+
+**Built.**
+
+- **Found** when its CLI or OpenCode desktop is there (`~/.opencode/bin/opencode` first, then the usual places; `/Applications/OpenCode.app`). The app's own copy is never run: a 2.x started on a fresh data folder stops a 1.x from working (OC-03). Its folder follows `XDG_CONFIG_HOME`.
+- **Skills.** One tool definition with three skill folders. A skill OpenCode reads in Claude Code's folder or `~/.agents/skills` counts as OpenCode's copy, so sync writes no second one; Remove is offered only in its own folder. Disable is the deny rule, written last; Enable takes it out, or adds an `allow` after a wider `deny`. `permission` written as one word is reported and never edited. A skill with no frontmatter or no `name` is marked as one OpenCode 1.x can't load.
+- **MCP servers.** Read from both places; a new entry goes under `mcp` in the form both lines read, an existing one is changed where it is. Each place gets its own off key. `opencode.jsonc` is the file when there is one. Comments and trailing commas stay (`readJsonc` in `src/textedit.ts`). SSE and a working folder have no form there, and say so.
+- **Agents.** Markdown in `agents/`, named by the file. A new one is written with `mode: all` so both lines treat it alike; OpenCode's own fields stay in its file.
+- **Instructions.** `AGENTS.md` in its folder, with base instructions like any other tool.
+- **Plugins.** OpenCode takes no plugin whole (a Claude-format repository fails on both lines, OC-02), so a plugin's skills, MCP servers and agents go in as parts, as for Pi.
+- **Five tools.** The tables, the plugin table and a plugin's part switches get narrower steps so nothing is cut off at 860×560 with five tools, sidebar open or folded.
+- **Also fixed on the way.** A tool that takes no plugins (Pi too) was named among the tools marketplaces come from and plugins install into; the Git repo page's note named tools the person may not have.
+- **End-to-end runs** look for OpenCode only inside their throwaway home (`CK_TEST_HOME_ONLY`): the Mac they run on has OpenCode installed, which would otherwise add a tool to every flow that opens "This Mac's home".
+
+**Not done.** Disable for one agent (`disable: true`): no tool had an agent switch before, so it is its own step. Agents in the older `agent/` folder are not listed. With both `opencode.json` and `opencode.jsonc` present, only `opencode.jsonc` is read. OpenCode writes no draft of the base instructions (2.x answers through a background service Central Knot never starts). Its own npm plugins are not moved. Windows and Linux app locations. A skill with no `name` is refused for OpenCode even where only 2.x is installed.

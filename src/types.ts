@@ -1,5 +1,5 @@
 export type HomeMode = 'fixture' | 'custom' | 'actual';
-export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli';
+export type HarnessId = 'claude-cli' | 'copilot-cli' | 'codex-cli' | 'pi-cli' | 'opencode-cli';
 export type ProbeState = 'ok' | 'missing' | 'timeout' | 'failed' | 'malformed' | 'restricted' | 'not-run';
 
 export interface ProbeResult {
@@ -37,6 +37,8 @@ export interface Skill {
   codexProblem?: string;
   /** Why Pi would not load it: Pi 1.5.0 silently drops a skill with no frontmatter, invalid YAML or no description (CD §4). */
   piProblem?: string;
+  /** Why OpenCode's older line would not load it: 1.19.5 silently leaves out a skill with no frontmatter or no name in it (2.2.5 loads it). */
+  opencodeProblem?: string;
   content: string;
   notes: string[];
   status: string;

@@ -17,6 +17,7 @@ const readText = (path: string) => readFile(path, 'utf8').then(text => text, () 
 /** Every file a save can write in a tool's folder (Pi's CLAUDE.md: the file Pi reads when its folder has no AGENTS.md). */
 export const instructionFiles: Record<HarnessId, string[]> = {
   'claude-cli': ['CLAUDE.md'], 'copilot-cli': ['copilot-instructions.md'], 'codex-cli': ['AGENTS.md', 'AGENTS.override.md'], 'pi-cli': ['AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md'],
+  'opencode-cli': ['AGENTS.md'],
 };
 /** Where earlier versions are kept: one folder per tool, and one for the base instructions. */
 type Shelf = HarnessId | 'base';
@@ -53,6 +54,9 @@ async function bind(tool: HarnessId, root: string): Promise<{ path: string; read
       notes.push('SYSTEM.md and APPEND_SYSTEM.md, if present, replace or extend Pi’s built-in prompt; they are not shown or changed here.');
       return { path, readers: 'Pi reads this in every session.', notes };
     }
+    case 'opencode-cli':
+      // Sent in a new session by 1.19.5 and 2.2.5 alike (measured with a stand-in model, 2026-11-10).
+      return { path: join(root, 'AGENTS.md'), readers: 'OpenCode reads this in every session, in the CLI and the desktop app.', notes: [] };
     case 'copilot-cli': {
       const notes: string[] = [];
       try { if ((await readdir(join(root, 'instructions'))).some(name => name.endsWith('.md'))) notes.push('Copilot CLI also reads the files in instructions/. Text repeated in both is read twice.'); } catch { /* none */ }

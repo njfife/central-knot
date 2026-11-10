@@ -259,7 +259,7 @@ const NO_STANDING_COPY = 'No copy here can stand for it just now: each is turned
 /** Said of an item sync still manages but no tool here shows right now (unreadable, or its folder away). */
 const UNSEEN = 'No tool here shows it right now (unreadable, or its folder is away). If it was deleted, Push sends that once sync has recorded it.';
 /** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
-const CLAUDE_ONLY = 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
+const CLAUDE_ONLY = 'A tool besides Claude Code is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
 /** Said of an MCP server's deletion only Claude Code's settings could make here. */
 const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
 /**

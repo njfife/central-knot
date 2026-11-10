@@ -344,7 +344,7 @@ export function pluginsPage() {
     h('div.market-empty-add', {},
       addBox(true),
       h('div.market-examples', {}, h('span', {}, 'Or try one:'), EXAMPLES.map(example => h('button.market-example', { type: 'button', disabled: !!app.busy, onclick: () => void addMarketplace(example) }, example))),
-      h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.map(tool => names[tool]))} show up here by themselves.`)));
+      h('p.empty-aside', {}, `Marketplaces you added in ${orList(view.tools.filter(takesPlugins).map(tool => names[tool]))} show up here by themselves.`)));
   return h('div.page.plugins-page', {},
     shown ? null : toolbar(undefined, lines),
     h('div.bands', {},
