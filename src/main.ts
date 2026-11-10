@@ -590,6 +590,7 @@ app.whenReady().then(async () => {
     return preferences();
   });
   handleNow('settings:open-sign-in', openSignInSettings);
+  // handleNow, not handle: changeHistoryWindow counts the request on arrival, then takes its own turn in the queue.
   handleNow('settings:history-days', async (days): Promise<HistoryWindowSaved> => {
     if (!isHistoryDays(days)) throw new Error('Invalid history days.');
     return changeHistoryWindow(days);

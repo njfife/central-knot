@@ -1392,4 +1392,5 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .appearance-choice:hover { border-color: var(--control-line); color: var(--ink); }
 .appearance-choice.selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); color: var(--ink); font-weight: 600; }
 .appearance-choice:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
-
+/* A short phrase and its link stay on one line, so a link never wraps away from the words that lead to it. */
+.keep-together { white-space: nowrap; }

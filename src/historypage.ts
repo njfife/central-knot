@@ -83,7 +83,7 @@ function actions(event: HistoryEvent, action?: string) {
 
 /** How long History keeps things, with the way to change it. */
 const keptFor = () => state.historyDays
-  ? [` Kept for ${state.historyDays} days. Change in `, h('button.inline-link', { type: 'button', id: 'history-intro-settings', onclick: () => showPage('settings') }, 'Settings'), '.']
+  ? [` Kept for ${state.historyDays} days. `, h('span.keep-together', {}, 'Change in ', h('button.inline-link', { type: 'button', id: 'history-intro-settings', onclick: () => showPage('settings') }, 'Settings'), '.')]
   : [];
 
 export function historyPage() {

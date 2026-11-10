@@ -211,14 +211,14 @@ export const shownPath = (path: string) => {
 // ---------- History ----------
 
 /** History's events and the window they cover, as main read them together. */
-async function readHistory() {
+async function refreshHistoryState() {
   const { events, days } = await api().history();
   state.history = events;
   state.historyDays = days;
 }
 
 export const loadHistory = () => busy('Reading History…', async () => {
-  await readHistory();
+  await refreshHistoryState();
   announce('');
 });
 
@@ -230,7 +230,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (!result.stopped) state.dismissed.add(eventId);
   const view = await api().refresh();
   if (view) state.home = view;
-  await readHistory();
+  await refreshHistoryState();
   state.applied = result;
   const restored = result.results.filter(entry => entry.outcome === 'written');
   const where = [...new Set(restored.map(entry => toolName(entry.harness ?? '') ?? entry.harness ?? ''))].filter(Boolean);
@@ -371,7 +371,7 @@ export const undoAdded = (ids: string[]) => busy('Undoing Apply all…', async (
   }
   const view = await api().refresh();
   if (view) state.home = view;
-  await readHistory();
+  await refreshHistoryState();
   const removed = results.filter(entry => entry.outcome === 'removed').length;
   const stayed = results.filter(entry => entry.outcome === 'held');
   const items = [...new Set(results.map(entry => entry.item))];

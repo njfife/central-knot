@@ -9,7 +9,7 @@ import {
   FORMAT_VERSION, clearStaleStages, landingOf, copyTree, errorCode, exists, finishCopy, importRevision, itemKey, placeCopy, plainError, readRecord, readTree,
   remember, removeTree, saveRecord, stagingFolder, storeDirectory, storeFolder, syncGate, syncsHere, targetFor, writeAccess, writeDurably, type RecordItem, type ShareContext, type SyncRecord,
 } from './share.ts';
-import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
+import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
 /** Tools shown as columns: those installed or holding skills. */
 export const presentTools = (snapshots: Snapshot[]) => snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).map(snapshot => snapshot.harness);
@@ -255,7 +255,7 @@ async function saveHistory(context: ShareContext, events: HistoryEvent[]) {
  * that kept. Only in a home this build syncs and may write ('done'). Elsewhere the next History write there applies it: this
  * build's once it syncs the home ('later'), or, in a preview-only home or one another build syncs, that copy's ('elsewhere').
  */
-export async function pruneHistory(context: ShareContext): Promise<'done' | 'later' | 'elsewhere'> {
+export async function pruneHistory(context: ShareContext): Promise<Exclude<HistoryPrune, 'no-home' | 'failed'>> {
   if (!(await syncsHere(context))) {
     const { record } = await readRecord(context.home);
     return (await writeAccess(context)).allowed && (!record || record.owner === context.build) ? 'later' : 'elsewhere';

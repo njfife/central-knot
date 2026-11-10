@@ -564,7 +564,8 @@ async function practiceFlow() {
       Math.round(document.querySelector('#setting-log-title').getBoundingClientRect().left - page.getBoundingClientRect().left)];
   })()`), [0, 0, 16]);
   const appSettings = join(scratch, 'data/app-settings.json');
-  const savedSettings = () => JSON.parse(readFileSync(appSettings, 'utf8'));
+  // The app rewrites this file in place, so a read can land mid-write: read again until it parses.
+  const savedSettings = () => { for (let tries = 0; ; tries++) { try { return JSON.parse(readFileSync(appSettings, 'utf8')); } catch (error) { if (tries > 50) throw error; } } };
   // Every writer saves through one chain: saves sent together land in order, the file stays whole, and other fields stay.
   // They bypass the page, so the open page (showing System) can only come to show Light by hearing that main saved it.
   await a.run(`Promise.all(['light', 'system', 'dark', 'system', 'light'].map(choice => window.centralKnot.setAppearance(choice)))`);
@@ -601,7 +602,7 @@ async function practiceFlow() {
   await keepFor(a, 7);
   const question = await a.text('#history-shorten-text') ?? '';
   same('a shorter window asks first, naming from when, and keeps the saved choice until confirmed (which its other button names)',
-    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too, the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
+    [/^History before .+ will be removed and can’t be restored\. Your other homes remove it too the next time they record a change\.$/.test(question), await a.text('#history-shorten'), await a.text('#history-shorten-cancel'), await a.run(`document.querySelector('#history-days').value`), savedSettings().historyDays],
     [true, 'Shorten to 7 days', 'Keep 90 days', '90', 90]);
   await a.shot('settings-history-confirm');
   await a.run(`document.querySelector('#history-days').focus()`);
@@ -665,7 +666,7 @@ async function practiceFlow() {
   const intro = await a.text('.history-intro');
   await a.click('#history-intro-settings');
   same('Shorten saves, removes the older History from this home’s file, says from when (even after a re-read while it waited), and History shows only what is left, how long it keeps it, and the way to Settings',
-    [savedSettings().historyDays, agedOnFile(), /^History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
+    [savedSettings().historyDays, agedOnFile(), /^Saved\. History before .+ was removed\.$/.test(removedNote), noteAfterOtherRow, listed.includes('aged-5-days'), listed.includes('aged-20-days'), intro, await a.exists('#history-days')],
     [7, ['aged-5'], true, false, true, false, 'What sync and Apply all changed in your tools, newest first. Undo puts the earlier version back. Kept for 7 days. Change in Settings.', true]);
   // Start at sign-in: only an installed app can register a login item, so here the row is off, can't be changed, and says why
   // in its hint's place. Main refuses a change too, and nothing about it is saved.
@@ -790,7 +791,7 @@ async function realHomeFlow() {
     const previewNote = (await a.text('#setting-history-message') ?? '').trim();
     same('the History window survives a restart; shortening it never writes a preview-only home, whose History still shows only the window, and the row says another copy removes the older History later rather than that it was removed',
       [restarted, readFileSync(previewHistory, 'utf8') === before, (await a.run('window.centralKnot.history()')).events.length, (await a.run('window.centralKnot.getSettings()')).historyDays, previewNote],
-      [7, true, 0, 7, 'Saved. This home’s older History is removed the next time Central Knot records a change there.']);
+      [7, true, 0, 7, 'Saved. Older History in this home is removed the next time Central Knot records a change in it.']);
     await a.run('window.centralKnot.setHistoryDays(30)');
     rmSync(join(HOME, '.central-knot'), { recursive: true });
     await a.quit();

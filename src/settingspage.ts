@@ -79,15 +79,19 @@ export async function loadSettings() {
 export function openSettings() {
   messages.clear();
   shortening = undefined;
-  // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row.
+  // An action still running from the last visit keeps its effect (a save still saves) but no longer speaks for its row, except
+  // a History window change still under way: its outcome (removed, or couldn't be) is only ever said in that row.
+  const updating = attempts.get('history');
   attempts.clear();
+  if (updatingHistory && updating !== undefined) attempts.set('history', updating);
   void loadSettings();
 }
 
 /**
  * Runs one row's action (a save, Show log file) and shows its outcome in that row: `work` returns a message to show (or
  * nothing), or throws, and `failure` puts why in plain words. A failure is about the value the row showed when it began (still
- * in effect). Only the row's newest attempt changes the row, and an outcome a newer read has settled says nothing. True when it worked.
+ * in effect). Only the row's newest attempt changes the row, and an outcome a newer read has settled says nothing. It first clears
+ * the other rows' finished notes, so the page says one thing at a time. True when it worked.
  */
 async function act(row: string, work: () => Promise<RowMessage | undefined>, failure: (error: string) => string): Promise<boolean> {
   const mine = ++attempted;
@@ -191,17 +195,17 @@ function chooseHistoryDays(days: HistoryDays) {
 /** Where a window of `days` starts, as of now, in the person's own date and time format. */
 const removedBefore = (days: HistoryDays) => new Date(Date.now() - days * DAY_MS).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const shortenQuestion = (days: HistoryDays) =>
-  `History before ${removedBefore(days)} will be removed and can’t be restored. Your other homes remove it too, the next time they record a change.`;
+  `History before ${removedBefore(days)} will be removed and can’t be restored. Your other homes remove it too the next time they record a change.`;
 
 /**
  * What a shorter window did to older History, as main reports it. Only 'done' says anything was removed (with a check); the
  * window is saved in every case, and History already shows only what it covers.
  */
 const pruneNotes: Record<HistoryPrune, (before: string) => Pick<RowMessage, 'text' | 'detail' | 'tone'>> = {
-  done: before => ({ text: `History before ${before} was removed.`, tone: 'done' }),
-  later: before => ({ text: `Saved. History before ${before} will be removed from this home the next time it records a change.`, tone: 'info' }),
+  done: before => ({ text: `Saved. History before ${before} was removed.`, tone: 'done' }),
+  later: before => ({ text: `Saved. History before ${before} will be removed the next time this home records a change.`, tone: 'info' }),
   // Whichever copy records a change there applies its own window, so this one's date isn't promised.
-  elsewhere: () => ({ text: 'Saved. This home’s older History is removed the next time Central Knot records a change there.', tone: 'info' }),
+  elsewhere: () => ({ text: 'Saved. Older History in this home is removed the next time Central Knot records a change in it.', tone: 'info' }),
   'no-home': () => ({ text: 'Saved.', tone: 'info' }),
   failed: before => ({ text: `Saved, but History before ${before} couldn’t be removed.`, detail: 'Central Knot will try again the next time this home records a change. The log file says why.', tone: 'failure' }),
 };
@@ -245,7 +249,7 @@ function shortenConfirmation(days: HistoryDays): HTMLElement {
     h('div.setting-confirm-actions', {},
       button({ variant: 'danger', size: 'small', label: `Shorten to ${days} days`, id: 'history-shorten', onclick: () => void saveHistoryDays(days) }),
       // Says what it keeps: the saved window, which the select still shows.
-      button({ variant: 'ghost', size: 'small', label: `Keep ${current!.historyDays} days`, id: 'history-shorten-cancel', onclick: closeShortening })));
+      button({ variant: 'outline', size: 'small', label: `Keep ${current!.historyDays} days`, id: 'history-shorten-cancel', onclick: closeShortening })));
 }
 
 /** Shows the log in the file manager. Where it could only open the folder, the row says so and names the file to look for. */
