@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
-import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const flag = name => args.includes(name);
@@ -113,21 +113,22 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(userData = join(scratch, 'data'), extra = [], home = HOME) {
-  const port = 9400 + randomInt(500);
   const env = { HOME: home, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  // A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
-  const inspect = flag('--electron') ? port + 1000 : undefined;
-  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: 'ignore' });
+  // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
+  // debugPorts). A dev run also opens its main process to the checks (an installed app doesn't take --inspect).
+  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', `--user-data-dir=${userData}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : []), ...extra], { env, stdio: ['ignore', 'ignore', 'pipe'] });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
+  let port, inspect;
+  try { ({ port, inspect } = await debugPorts(child, flag('--electron'))); } catch (error) { child.kill('SIGKILL'); throw error; }
   let targets;
   for (let attempt = 0; attempt < 150 && !targets; attempt++) {
-    await wait(200);
     try { targets = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).filter(target => target.type === 'page'); if (!targets.length) targets = undefined; } catch { /* still starting */ }
+    if (!targets) await wait(200);
   }
-  if (!targets) { child.kill('SIGKILL'); throw new Error('The app did not open a debug port.'); }
+  if (!targets) { child.kill('SIGKILL'); throw new Error('The app opened no window.'); }
   const pageErrors = [];
   const page = await connect(targets[0].webSocketDebuggerUrl, data => {
     if (data.method === 'Runtime.exceptionThrown') pageErrors.push(data.params.exceptionDetails.exception?.description ?? data.params.exceptionDetails.text);
@@ -194,6 +195,9 @@ async function mainHelpers(port) {
     told: () => run(`(() => { delete ${electron}.BrowserWindow.getAllWindows()[0].webContents.send; return globalThis.ckTold; })()`),
     /** Sends the page a message, as the main process does after a background pass. */
     tellPage: channel => run(`(() => { ${electron}.BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channel)}); return true; })()`),
+    /** Notes the arguments of each `channel` request (`calls` reads them), until `restore` runs. */
+    noteCalls: channel => run(`(() => { const handlers = ${electron}.ipcMain._invokeHandlers, real = handlers.get(${JSON.stringify(channel)}); globalThis.ckAside = real; globalThis.ckCalls = []; handlers.set(${JSON.stringify(channel)}, (event, ...args) => { globalThis.ckCalls.push(args); return real(event, ...args); }); return true; })()`),
+    calls: () => run(`globalThis.ckCalls`),
     restore: channel => run(`(() => { ${electron}.ipcMain._invokeHandlers.set(${JSON.stringify(channel)}, globalThis.ckAside); delete globalThis.ckAside; return true; })()`),
     close,
   };
@@ -566,6 +570,19 @@ async function practiceFlow() {
     let keptNotice = false;
     for (let tries = 0; tries < 40 && !keptNotice; tries++) { await wait(250); keptNotice = (await a.text('.sync-notices') ?? '').includes('standup was edited in Codex'); }
     check('a notice from a background read set aside for an action is still shown', keptNotice, await a.text('.bands'));
+  }
+  // A home switch that can't save its settings changes nothing: the page stays on this home, and this home (not the one asked
+  // for) is still the one watched, so an edit on disk spreads within seconds, not at the next poll (20 s).
+  if (process.platform !== 'win32' && process.getuid() !== 0) {
+    const settingsFile = join(scratch, 'data/app-settings.json');
+    chmodSync(settingsFile, 0o444);
+    await a.click('#home-actual');
+    chmodSync(settingsFile, 0o644);
+    const said = await a.text('#announcement');
+    writeFileSync(standupPath('claude'), standupBefore.replace(/\n*$/, '\nEdited after a switch that failed.\n'));
+    let stillWatched = false;
+    for (let tries = 0; tries < 32 && !stillWatched; tries++) { await wait(250); stillWatched = readNow(standupPath('copilot')).includes('switch that failed'); }
+    same('a home switch whose settings can’t be saved stays on this home, still watched', [/could not finish\. Still on Practice copy/.test(said ?? ''), await a.text('#home-label'), stillWatched], [true, 'Practice copy', true]);
   }
   // Sync off: edits are noted, not spread; the page shows them pending; Sync now spreads once; Apply all still works.
   await a.click('#sync-switch');
@@ -1037,6 +1054,20 @@ async function practiceFlow() {
     await main.restore('plugins:view');
     for (let tries = 0; tries < 50 && await a.exists('.rereading'); tries++) await wait(100);
     same('Plugins says it is reading again, keeping what it showed, until the read is done', [...rereading, await a.exists('.rereading')], [true, true, false]);
+    // Refresh on Harnesses (which only counts installs) reads the marketplaces as last read; Plugins' own Refresh fetches them anew.
+    check('the marketplace request is noted', await main.noteCalls('plugins:view'));
+    await a.click('#nav-harnesses');
+    for (let tries = 0; tries < 50 && (await main.calls()).length < 1; tries++) await wait(100);
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && (await main.calls()).length < 2; tries++) await wait(100);
+    const onHarnesses = await main.calls();
+    await a.click('#nav-plugins');
+    await a.click('#header-refresh');
+    for (let tries = 0; tries < 50 && !(await main.calls()).some(([fresh]) => fresh === true); tries++) await wait(100);
+    const onPlugins = (await main.calls()).slice(onHarnesses.length);
+    await main.restore('plugins:view');
+    for (let tries = 0; tries < 50 && (await a.exists('.rereading') || !(await a.exists('[data-plugin="document-tools"]'))); tries++) await wait(100);
+    same('Refresh on Harnesses reads the marketplaces as last read; Refresh on Plugins, anew', [onHarnesses.length, onHarnesses.some(([fresh]) => fresh === true), onPlugins.some(([fresh]) => fresh === true)], [2, false, true]);
   }
   // A Refresh that fails says so and stays said: the page's own read does not run after it and clear the message.
   if (main) {
