@@ -788,7 +788,7 @@ export async function addMarketplace(context: PluginContext, catalog: Catalog, t
   if (refusal) return { outcome: 'held', message: `${refusal} Nothing was added to ${name}.`, runs: [] };
   const held = await heldBy(context, tool, catalog.name, catalog.source);
   if (held) return { outcome: 'held', message: heldReason(tool, catalog.name, held), runs: [] };
-  if (await registeredSource(context, tool, catalog.name)) return { outcome: 'there', message: `Already in ${name}’s own list.`, runs: [] };
+  if (await registeredSource(context, tool, catalog.name)) return { outcome: 'there', message: `Already in ${name}’s own plugin list.`, runs: [] };
   // Codex's CLI won't add a marketplace to a home whose .codex folder doesn't exist yet (a fresh Practice copy).
   if (tool === 'codex-cli') await mkdir(configRootOf(context, tool), { recursive: true });
   // The tool's own add fetches a Git marketplace and fails silently, so this computer's access is checked first.
@@ -796,7 +796,7 @@ export async function addMarketplace(context: PluginContext, catalog: Catalog, t
   if (access && access.state !== 'ok') return { outcome: 'failed', message: `${access.message} Nothing was added to ${name}.`, runs: [] };
   const add = await native(context, tool, ['plugin', 'marketplace', 'add', catalog.source]);
   // Only the tool's own record counts: a command that said it worked and listed nothing did not add it.
-  if (add.ok && (await registeredSource(context, tool, catalog.name))) return { outcome: 'added', message: `Added to ${name}’s own list of marketplaces.`, runs: [add] };
+  if (add.ok && (await registeredSource(context, tool, catalog.name))) return { outcome: 'added', message: `Added to ${name}’s own plugin list.`, runs: [add] };
   return { outcome: 'failed', message: `Could not add the marketplace${add.ok ? `: ${name} doesn’t list it` : ''}. ${lastLines(add.output)}`.trim(), runs: [add] };
 }
 

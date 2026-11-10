@@ -23,7 +23,7 @@ export const ACTIVITIES: Record<MarketActivity, { label: string; band: string }>
   removing: { label: 'Removing from the list…', band: 'Removing from the list…' },
   applying: { label: 'Applying…', band: 'Applying… Each change runs that tool’s own command and can take a few seconds.' },
   undoing: { label: 'Undoing…', band: 'Undoing… Each change runs that tool’s own command and can take a few seconds.' },
-  listing: { label: 'Adding the marketplace…', band: 'Adding the marketplace to the tool’s own list… Nothing is installed by this.' },
+  listing: { label: 'Listing the marketplace…', band: 'Listing the marketplace in the tool’s own plugin list… Nothing is installed by this.' },
 };
 
 /** `marketName`: the marketplace to open when `source` is spelled as a tool recorded it, not as the page lists it (a plugin item's link). */
@@ -287,7 +287,7 @@ export const addCarriedTo = (entry: MarketplaceView, tool: HarnessId) => act('li
   showView(result.view);
   const name = marketTitle(entry), added = result.report?.outcome === 'added' || result.report?.outcome === 'there';
   tell({ page: 'plugins', item: name, warn: !added,
-    text: added ? `${name} is now in ${toolNames[tool]}’s own list of marketplaces. Nothing was installed.` : `${name} was not added to ${toolNames[tool]}. ${result.stopped ?? result.report?.message ?? ''}`.trim() });
+    text: added ? `Nothing was installed: ${name} is now listed in ${toolNames[tool]}.` : `${name} was not listed in ${toolNames[tool]}. ${result.stopped ?? result.report?.message ?? ''}`.trim() });
 });
 
 export const pickMarketplaceFolder = () => api().pickMarketplaceFolder();

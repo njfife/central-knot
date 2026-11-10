@@ -26,6 +26,7 @@ import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
 import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
+import { toolList } from './words.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
 import { CARRIED_FOLDER, STANDARD_BUILD, aboutBuild, openBundle, readCustomBuildSync, releaseDate, releaseLabel, type ActiveBundle } from './bundle.ts';
 
@@ -540,11 +541,11 @@ function addCarriedSoon(present: HarnessId[]) {
   if (!bundle || !carriedMarket) return;
   void carriedMarket.addCarried(present, queued).then(reports => {
     for (const report of reports) log(`bundle: ${bundle?.release.marketplace} in ${report.tool}: ${report.outcome}: ${report.message}`);
-    const added = reports.filter(report => report.outcome === 'added').map(report => harnesses[report.tool].name);
+    const added = reports.filter(report => report.outcome === 'added').map(report => report.tool);
     if (!added.length) return;
-    // The page reads the tools again, and the status bar says once what was done on the person's behalf.
+    // The page reads the tools again, and the status bar says once what was done on the person's behalf: first, that nothing was installed.
     send('sync:changed');
-    send('said', `${custom?.marketplace?.displayName ?? bundle?.release.marketplace} was added to ${added.length > 1 ? `${added.slice(0, -1).join(', ')} and ${added.at(-1)}` : added[0]}, so its plugins also show in ${added.length > 1 ? 'those tools’ own plugin lists' : 'that tool’s own plugin list'}. Nothing was installed.`);
+    send('said', `Nothing was installed: ${custom?.marketplace?.displayName ?? bundle?.release.marketplace} is now listed in ${toolList(added)}. Its About tab says more.`);
   }, error => logFailure('adding the carried marketplace to the tools', error));
 }
 
