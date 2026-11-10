@@ -14,7 +14,7 @@ export const isPresent = (snapshot: Snapshot): boolean =>
 
 /**
  * Whether Cowork is here: it comes with Claude desktop, found on this computer beside Claude Code. Cowork is no tool on
- * any page: the Cowork session tried used the plugins in the person's Claude account and not one put in Cowork's folder
+ * any page: the one Cowork session tried had only the account's plugins on offer, and not the one put in Cowork's folder
  * on the computer, though Claude desktop listed it (capability-data section 7), so Central Knot installs nothing there.
  * Where it is here, Claude Code's card and each plugin's page say so once (words.ts, coworkWords).
  */

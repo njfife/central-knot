@@ -1,8 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { hasCowork } from '../src/presence.ts';
-import { harnessIds } from '../src/harnesses.ts';
-import { toolNames } from '../src/words.ts';
 import type { Snapshot } from '../src/types.ts';
 
 const snapshot = (more: Partial<Snapshot>): Snapshot => ({ harness: 'claude-cli', harnessName: 'Claude Code', surface: 'CLI', mode: 'actual', label: 'This Mac', root: '/home/.claude',
@@ -16,9 +14,4 @@ test('Cowork is here exactly where Claude desktop was found; another tool’s de
   assert.equal(hasCowork([snapshot({ harness: 'codex-cli', harnessName: 'Codex', app: { name: 'ChatGPT desktop', carries: 'Codex' } })]), false, 'ChatGPT desktop is not Claude’s');
   // A chosen folder or the Practice copy: apps are never looked for there, so nothing is known and nothing is said.
   assert.equal(hasCowork([snapshot({ mode: 'custom', detection: 'Config found but app not detected', probe: { state: 'not-run', detail: '' } })]), false);
-});
-
-test('Cowork is no tool: no page has a column, a card or a name for it', () => {
-  assert.equal((harnessIds as string[]).some(id => /cowork/i.test(id)), false);
-  assert.equal(Object.values(toolNames).some(name => /cowork/i.test(name)), false);
 });
