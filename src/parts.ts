@@ -495,8 +495,8 @@ const report = (tool: HarnessId, outcome: ActionReport['outcome'], message: stri
   ({ tool, outcome, message, runs: [], changed: !!more.changed, ...(more.run ? { partsRun: more.run } : {}), ...(more.notes?.length ? { notes: more.notes } : {}), ...(more.updated ? { partsUpdated: true } : {}), ...(more.replaced?.length ? { replacedLinks: more.replaced } : {}) });
 
 /**
- * Installs a plugin's parts in a tool, or brings them up to date: unchanged parts are replaced, new ones added, ones the
- * plugin dropped removed. Edited, deleted or managed parts stay as they are; a part whose source can't be read now keeps
+ * Installs a plugin's parts in a tool, or brings them up to date: parts still as they went in are replaced by the plugin's
+ * current ones, new ones added, ones the plugin dropped removed. Edited, deleted or managed parts stay as they are; a part whose source can't be read now keeps
  * its installed copy. With `pick`, each part in `on` goes in (also one turned off or removed before) and each one in
  * `off` comes out and stays out. Unless `pick.rest`, only those parts change, and the first pick for a tool leaves the
  * plugin's other parts out too. The record names every part before anything is written, so a run that stops halfway still owns what it wrote.
@@ -518,7 +518,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const record = (items: PartItem[], version: string | undefined, contentDigest: string): PartsInstall | null => (items.length
     ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version, tool, at: new Date().toISOString(), digest: contentDigest, items }
     : null);
-  const previous = settledAs(before, undefined, undefined, { failed: true, only, current: false });
+  const previous = { version: before?.version, digest: before?.digest ?? '' };
   // Claimed first: every part this run may write is on record (as the plugin was), so a run that stops halfway still owns it.
   const claimed = [...held, ...[...change.aside, ...change.to].filter(item => !held.some(old => samePart(old, item)))];
   await saveEntry(context.home, target, record(claimed, previous.version, previous.digest));
@@ -582,18 +582,21 @@ function wholeChange(held: PartItem[], ready: Ready[], unread: Set<string>, file
  * off is wanted out.
  */
 function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: PartsPick, rest: PartsChange | undefined): PartsChange {
-  const picked = (item: Pick<PartItem, 'kind' | 'name'>) => [...pick.on, ...pick.off].some(ref => samePart(ref, item));
+  // Each part once, whatever the request repeats: one named both ways comes out.
+  const once = (refs: PartRef[]) => refs.filter((ref, at) => refs.findIndex(other => samePart(other, ref)) === at);
+  const off = once(pick.off), on = once(pick.on).filter(ref => !off.some(other => samePart(other, ref)));
+  const picked = (item: Pick<PartItem, 'kind' | 'name'>) => [...on, ...off].some(ref => samePart(ref, item));
   const others = <T extends PartItem>(items: T[]) => items.filter(item => !picked(item));
   const change: PartsChange = rest ? { ...rest, from: others(rest.from), to: others(rest.to) }
     : { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(outOf))], cannot: [] };
-  for (const ref of pick.on) {
+  for (const ref of on) {
     const want = ready.find(item => samePart(item, ref));
     const old = held.find(item => samePart(item, ref));
     if (want) change.to.push(want);
     else change.cannot.push(`Couldn’t add ${labelOf(ref)}: ${(plan.find(part => samePart(part, ref))?.why ?? 'The plugin no longer has it.').replace(/\.$/, '')}.`);
     if (old) (want ? change.from : change.aside).push(old);
   }
-  for (const ref of pick.off) {
+  for (const ref of off) {
     const old = held.find(item => samePart(item, ref));
     const known = old ?? ready.find(item => samePart(item, ref));
     if (!known) continue;

@@ -100,7 +100,8 @@ export function partsEligible(view: PluginsView, entry: MarketplaceView, plugin:
 /**
  * Whether single parts of this plugin can be chosen for this tool: it takes parts, and has some of this plugin's already,
  * or can't take the plugin itself, or (Claude Code) could but has no switch for one skill of a plugin, so a few of its
- * skills as separate items is the only way to have some there and not others. Never where the plugin itself is installed.
+ * skills as separate items is the only way to have some there and not others. Where the plugin itself is installed, only
+ * while parts of it are on record there too (they can still come out).
  */
 export function partsPickable(view: PluginsView, entry: MarketplaceView, plugin: string, tool: HarnessId): boolean {
   if (!partsTools.includes(tool) || !view.tools.includes(tool)) return false;

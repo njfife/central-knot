@@ -115,6 +115,12 @@ test('a plugin’s skill the person also has (its part in Pi, shown there as thr
   assert.deepEqual((['claude-cli', 'copilot-cli', 'pi-cli', 'codex-cli'] as const).map(tool => inTool(triage!, tool)), [true, true, true, false]);
 });
 
+test('a Codex plugin’s MCP server that is also the plugin’s part in Pi is that one row (no box shows Codex has it through the plugin)', () => {
+  const part: PartsInstall = { ...piPart, items: [{ kind: 'mcp', name: 'issues', hash: '' }] };
+  const home = { ...homeOf([], [install('codex-cli')], [part]), mcp: { servers: [fact('issues', { 'pi-cli': true })] } } as unknown as HomeView;
+  assert.deepEqual([pageRows(home, 'mcp').rows.length, pageRows(homeOf([], [install('codex-cli')]), 'mcp').rows.map(row => row.name)], [0, ['issues']]);
+});
+
 test('a personal skill that only shares the name stays its own row beside the plugin’s', () => {
   const home = homeOf([fact('triage', { 'claude-cli': true })], [install('claude-cli')]);
   assert.deepEqual([pageRows(home, 'skills').rows.map(row => row.key), pluginItemCount(home, 'skills'), pluginItemCount(home, 'skills', 'claude-cli'), pluginItemCount(home, 'skills', 'pi-cli')], [['issue-tracker@m/triage'], 1, 1, 0]);

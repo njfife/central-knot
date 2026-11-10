@@ -367,6 +367,10 @@ test('A pick beside an install of all the parts is that install with exceptions;
     const all = await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [], rest: true });
     assert.equal(all.outcome, 'installed', all.message);
     assert.deepEqual(await box.inPi(), ['figma-design', 'grill-me', 'tdd']);
+    // A request naming one part both ways, or twice, takes it once, and out wins: the record never doubles.
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd'), skill('TDD'), skill('grill-me')], off: [skill('grill-me')] });
+    assert.deepEqual([(await readParts(box.home))[0]!.items.map(item => `${item.name}${item.removed ? ' (out)' : ''}`).sort(), await box.inPi()], [['figma-design', 'grill-me (out)', 'tdd'], ['figma-design', 'tdd']]);
+    await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
     // Pi has no agents: asking for one changes nothing else and says why.
     const agent = await installParts(box.context, box.to, await box.files(), { on: [{ kind: 'agent', name: 'designer' }], off: [] });
     assert.equal(agent.outcome, 'failed');

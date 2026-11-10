@@ -38,9 +38,14 @@ export function offIn(row: PluginRow, tool: HarnessId): 'plugin' | 'skill' | und
 /** Whether a tool has an item of the person's: a copy of its own there, or through a plugin installed there (its box says so). The tables and every count ask this. */
 export const inTool = (fact: Pick<SkillFacts, 'copies' | 'plugin'>, tool: HarnessId) => fact.copies[tool] !== undefined || !!fact.plugin?.[tool];
 
-/** Whether a person's own row already shows this plugin's item: some tool has that row's item through this plugin (its box says so). */
-const onOwnRow = (fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
-  && Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName);
+/**
+ * Whether a row of the person's own is this plugin's item already: some tool has that row's item through this plugin (its
+ * box says so), or the row's copy in some tool is on record as this plugin's part (a Codex plugin's MCP server put into
+ * Pi, which no box shows as through the plugin, since Codex may not start a plugin's servers).
+ */
+const onOwnRow = (home: HomeView, fact: SkillFacts, row: PluginRow) => [fact.key, fact.name].some(name => !!name && samePart(row, { kind: row.kind, name }))
+  && (Object.values(fact.plugin ?? {}).some(given => given.plugin === row.plugin && given.marketplace === row.marketName)
+    || (home.parts ?? []).some(install => install.plugin === row.plugin && install.marketName === row.marketName && fact.copies[install.tool] !== undefined && install.items.some(item => !item.removed && samePart(item, row))));
 
 const memo = new WeakMap<HomeView, Partial<Record<Page, PageRows>>>();
 
@@ -64,8 +69,8 @@ export function pageRows(home: HomeView, page: Page): PageRows {
   }
   // Every tool with the plugin, so a copy without this item (Codex and an agent, another version) says so in its cell.
   for (const row of byKey.values()) for (const install of home.pluginItems ?? []) if (install.plugin === row.plugin && install.marketName === row.marketName) row.installs[install.tool] = install;
-  // One row, not two: an item a person's own row shows as "Through a plugin" in some tool stays that row's.
-  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(fact, row))).sort((first, second) => first.name.localeCompare(second.name));
+  // One row, not two: an item that is already a row of the person's own stays that row's.
+  const rows = [...byKey.values()].filter(row => !facts.some(fact => onOwnRow(home, fact, row))).sort((first, second) => first.name.localeCompare(second.name));
   const unread = (home.pluginItems ?? []).filter(install => install.problem);
   const made = { rows, unread };
   memo.set(home, { ...known, [page]: made });
