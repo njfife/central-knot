@@ -1998,6 +1998,8 @@ async function fewToolsFlow() {
   cli('.local/bin/claude', '2.1.309 (Claude Code)');
   await a.click('#header-refresh');
   same('a tool that holds agents and plugins brings them back', await pages(), ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings']);
+  await a.click('#nav-harnesses');
+  check('Claude Code’s CLI alone says nothing of Cowork', !(await a.text('#harness-claude-cli')).includes('Cowork'), await a.text('#harness-claude-cli'));
   // On Agents, its only tool goes away: the page it was on no longer exists here, so the Overview opens.
   await a.click('#nav-agents');
   rmSync(join(home, '.claude'), { recursive: true, force: true });
@@ -2015,6 +2017,9 @@ async function fewToolsFlow() {
   await a.click('#nav-harnesses');
   const desktopCard = await a.text('#harness-claude-cli');
   check('its card names the app, its version, its Code tab’s version and no CLI', desktopCard.includes('Claude desktop 4.16336.0 (Code tab 2.1.317) · no CLI found'), desktopCard);
+  // Cowork comes with Claude desktop and is no tool here: the card says which plugins it uses (capability-data section 7).
+  check('with Claude desktop here, the card says Cowork uses the Claude account’s plugins', /Cowork—?uses the plugins in your Claude account/.test(desktopCard), desktopCard);
+  await fitsAtMinimum(a, 'Harnesses with Claude desktop and its Cowork line');
   // Once the Code tab's own Claude Code is there, plugins install through it (PLG-04): the box says so, and never calls it the CLI.
   const codeTab = join(home, 'Library/Application Support/Claude/claude-code/2.1.317/e6736b2d954d/claude.app/Contents/MacOS/claude');
   const ranLog = join(scratch, 'code-tab-runs.txt');
@@ -2040,9 +2045,11 @@ async function fewToolsFlow() {
     await wait(300);
     await a.shot(`app-only-plugin-${width}`);
     check(`at ${width}×${height} the app-only plugin box’s route line is not cut off`, await a.run(`(() => { const line = document.querySelector('.plugin-tool-via'); const box = line.getBoundingClientRect(); return box.width > 0 && line.scrollWidth <= line.clientWidth + 1 && box.right <= innerWidth; })()`));
+    check(`at ${width}×${height} the line about Cowork is whole, inside the tools panel`, await a.run(`(() => { const note = document.querySelector('#plugin-cowork-note'); if (!note) return false; const box = note.getBoundingClientRect(), panel = note.closest('.plugin-panel').getBoundingClientRect(); return box.width > 0 && note.scrollWidth <= note.clientWidth + 1 && box.right <= panel.right && box.bottom <= panel.bottom; })()`));
   }
   await a.send('Emulation.clearDeviceMetricsOverride');
   check('with only Claude desktop, the plugin box names its route, its Code tab, and offers no parts instead', box.includes('Claude CodePlugin not installedThrough Claude desktop’s Code tab 2.1.317') && !box.includes('Only Claude desktop'), box);
+  check('and says once that Cowork uses the Claude account’s plugins, with no box for it', box.includes('Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there.') && (await a.all('.plugin-tool-name')).every(name => !name.includes('Cowork')), box);
   same('no page errors, few tools', a.pageErrors, []);
   await a.quit();
   // In the Practice copy (a real home is preview only off macOS) the install runs through that copy and its record counts.
@@ -2066,6 +2073,9 @@ async function realHomeFlow() {
   await a.click('#nav-harnesses');
   const tools = await a.text('#harnesses-scroll');
   check('versions probed', tools.includes('2.1.309') && tools.includes('1.0.107') && tools.includes('0.142.3'), tools.slice(0, 300));
+  // Cowork comes with Claude desktop: Claude Code's card says which plugins it uses exactly when that app was found.
+  const claudeCard = await a.text('#harness-claude-cli');
+  same('Claude Code’s card speaks of Cowork only where Claude desktop is here', /Cowork—?uses the plugins in your Claude account/.test(claudeCard), claudeCard.includes('Claude desktop'));
   await a.click('#harness-codex-cli');
   await a.click('#harness-tab-about');
   const codexAbout = await a.text('#harness-body');
