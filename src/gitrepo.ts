@@ -867,17 +867,17 @@ export async function undoSettingsChange(context: ShareContext, eventId: string)
 
 /**
  * The base instructions: handed to the base-instructions feature to apply (only reached when this build has it, so `base` is set).
- * A deletion is in History, with the base's own Undo, which puts the base and its tools back.
+ * An edit or a deletion is in History, with the base's own Undo, which puts the earlier base and its tools back.
  */
 async function pullBase(context: ShareContext, dir: string, change: RepoChange, item: SideItem | undefined, base: BaseInstructions | undefined): Promise<DestinationResult[]> {
   const done = await base?.apply(item ? await readFile(join(dir, item.paths[0]), 'utf8') : undefined);
   if (done?.stopped) return [notIn(change.name, done.stopped)];
-  if (item) return [{ item: change.name, outcome: 'written', message: 'Base instructions updated.' }];
-  if (done?.undo) await appendHistory(context, [{ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: 'deleted', losers: [], orderProved: true, base: done.undo }]);
+  if (done?.undo) await appendHistory(context, [{ id: randomUUID(), at: new Date().toISOString(), key: change.key, item: change.name, kind: item ? 'edit' : 'deleted', losers: [], orderProved: true, base: done.undo }]);
+  if (item) return [{ item: change.name, outcome: 'written', message: 'Base instructions updated. History can undo it.' }];
   return [{ item: change.name, outcome: 'written', message: 'Deleted in the repo, so the base instructions were emptied and taken out of the tools that got them. History can undo it.' }];
 }
 
-/** Undo of a Pull that deleted the base instructions: the base's own Undo, said per tool. Only once, and only while the base is still empty. */
+/** Undo of a Pull that edited or deleted the base instructions: the base's own Undo, said per tool. Only once, and only while the base is still as the Pull left it. */
 export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[], eventId: string): Promise<{ stopped?: string; results: DestinationResult[]; harnessWrites: number }> {
   const history = await readHistory(context);
   const past = history.find(event => event.id === eventId);
@@ -889,7 +889,8 @@ export async function undoPulledBase(context: ShareContext, snapshots: Snapshot[
   past.undoneBy = randomUUID();
   await replaceHistory(context, history);
   const results: DestinationResult[] = [
-    { item: past.item, outcome: 'written', message: 'The base instructions are back.' },
+    // What the Pull replaced is what comes back: the base it emptied, the text before its edit, or no base at all.
+    { item: past.item, outcome: 'written', message: past.kind === 'deleted' ? 'The base instructions are back.' : past.base.text.trim() ? 'The base instructions are as they were before that Pull.' : 'The base instructions are empty again, as before that Pull.' },
     ...done.written.map(file => ({ item: past.item, harness: file.tool, outcome: 'written' as const, message: `Back in ${harnesses[file.tool].name}.` })),
     ...done.left.map(file => ({ item: past.item, harness: file.tool, outcome: 'held' as const, message: file.why === 'edited' ? `${harnesses[file.tool].name}’s file changed since, so it was left as it is.` : `${harnesses[file.tool].name}’s file could not be written.` })),
     ...(done.problem ? [notIn(past.item, done.problem)] : []),

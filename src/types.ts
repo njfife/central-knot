@@ -126,8 +126,8 @@ export interface DesktopApi {
   showFile(path: string): Promise<void>;
   /** A marketplace's own README, from the copy already read. */
   marketplaceReadme(source: string): Promise<string | null>;
-  /** One plugin's contents and README; null when its files can't be found. */
-  pluginDetail(source: string, plugin: string): Promise<PluginDetail | null>;
+  /** One plugin's contents and README; null when its files can't be found, or with `local` when they would have to be fetched first. */
+  pluginDetail(source: string, plugin: string, local?: boolean): Promise<PluginDetail | null>;
   /** Opens an https link in the browser. */
   openExternal(url: string): Promise<void>;
   /** `restoring`: an earlier version put back (or a save undone): its base copy is judged again, counting as one Central Knot
@@ -341,7 +341,7 @@ export interface HistoryEvent {
    * what Undo puts back), and a hash of what it wrote (Undo goes ahead only while the file still holds that).
    */
   settingsFile?: { path: string; kept: string; wrote: string };
-  /** 'deleted' by Pull, of the base instructions (key 'instructions:base'): what the base's own Undo puts back, the base and its tools. */
+  /** 'edit' or 'deleted' by Pull, of the base instructions (key 'instructions:base'): what the base's own Undo puts back, the base and its tools. */
   base?: BaseUndo;
 }
 

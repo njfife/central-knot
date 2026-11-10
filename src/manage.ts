@@ -1320,14 +1320,20 @@ async function restoreRemoved(context: ShareContext, record: SyncRecord, history
 }
 
 /**
- * A Claude Code override (say "name-only") that 0.4.0-preview.1 recorded only in History, for an Enable to put back. Undefined
- * when the store keeps a value for the folder (setDisabled uses that), or the latest Disable on record replaced nothing.
+ * A Claude Code override (say "name-only") that 0.4.0-preview.1 recorded only in History, for an Enable to put back: the Skills
+ * page's and a profile's alike. Undefined when the store keeps a value for the folder (setDisabled uses that), or the latest
+ * Disable on record replaced nothing. A profile turning the skill off counts as a Disable too: it keeps what it replaced in the
+ * store, so an older value in History is no longer the one to put back.
  */
-async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
+export async function overrideBeforeDisable(context: ShareContext, key: string, tool: HarnessId, target: SwitchTarget): Promise<string | undefined> {
   if (tool !== 'claude-cli' || (await readKeptOverrides(context))[target.folder] !== undefined) return undefined;
-  const disables = (await readHistory(context)).filter(event => event.kind === 'switched' && event.key === key)
-    .flatMap(event => (event.switched ?? []).filter(entry => entry.tool === tool && entry.disabled && entry.target?.folder === target.folder));
-  return disables.at(-1)?.before;
+  let before: string | undefined;
+  for (const event of await readHistory(context)) {
+    if (event.kind === 'profile' && event.profile?.flips.some(flip => flip.tool === tool && flip.disabled && flip.item === `skill:${key}`)) before = undefined;
+    if (event.kind !== 'switched' || event.key !== key) continue;
+    for (const entry of event.switched ?? []) if (entry.tool === tool && entry.disabled && entry.target?.folder === target.folder) before = entry.before;
+  }
+  return before;
 }
 
 /** Puts a stored revision of a skill into a tool's own skills folder under `folder`; nothing may be there yet. */

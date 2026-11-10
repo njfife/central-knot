@@ -255,6 +255,24 @@ test('Refresh lets go of the copies a marketplace’s plugins keep from other re
   } finally { await box.cleanup(); }
 });
 
+test('The list’s background read (local) reads only what is on disk: a plugin or marketplace that would need fetching is not read', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'team', plugins: [{ name: 'notes', source: { source: 'github', repo: 'example/notes', path: 'plugin' } }] }));
+    await box.markets.add(root);
+    // Its repository isn't copied here yet: the page's read tries it (here a stand-in that fails), the background read doesn't.
+    assert.equal(await box.markets.detail(root, 'notes', true), null);
+    assert.match((await box.markets.detail(root, 'notes'))?.problem ?? '', /not in tests/);
+    const copy = engine.remoteCopyFolder({ home: box.home, dataDir: join(box.base, 'data', 'plugins'), binaries: {} }, { url: 'https://github.com/example/notes.git' });
+    await put(join(copy, 'plugin/README.md'), 'notes');
+    assert.notEqual(await box.markets.detail(root, 'notes', true), null, 'once on disk, it is read');
+    // A Git marketplace with no copy on disk is not fetched for it.
+    assert.equal(await box.markets.detail('https://127.0.0.1:1/gone.git', 'notes', true), null);
+    assert.equal(box.calls.filter(call => call.startsWith('read https')).length, 0, box.calls.join('\n'));
+  } finally { await box.cleanup(); }
+});
+
 test('Turning a plugin skill off is offered on a build older than the one tested; Refresh reads the build again for the note', { skip: process.platform === 'win32' }, async () => {
   const box = await setup({ codex: true });
   try {

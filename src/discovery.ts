@@ -90,7 +90,8 @@ export async function findApp(candidates: AppCandidate[], timeoutMs?: number): P
       }
     } else if ('file' in carried) {
       carriedVersion = (await readFile(join(app, carried.file), 'utf8').catch(() => '')).match(VERSION)?.[0];
-      if (carriedVersion && carried.runtimes && carried.binary) binary = await runnable(join(carried.runtimes, `copilot-sdk-runtime-${carriedVersion}`, carried.binary));
+      // The runtime's folder is named by its version alone (app 1.2.0), or after `copilot-sdk-runtime-` (app 1.1).
+      for (const folder of carriedVersion && carried.runtimes && carried.binary ? [carriedVersion, `copilot-sdk-runtime-${carriedVersion}`] : []) binary ??= await runnable(join(carried.runtimes!, folder, carried.binary!));
     } else {
       const copy = join(app, carried.binary);
       carriedVersion = (await probeVersion(copy, timeoutMs)).version;

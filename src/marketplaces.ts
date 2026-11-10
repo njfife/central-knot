@@ -121,7 +121,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * (from this or an earlier session) is used until `fresh` (Refresh, Refresh all), and the network is used only then or
    * while there is no copy yet. A failed fetch keeps showing the copy, marked stale.
    */
-  async function catalogFor(ctx: engine.PluginContext, source: string, { fresh = false, counts = true } = {}): Promise<{ catalog?: Catalog; stale?: boolean; problem?: string }> {
+  async function catalogFor(ctx: engine.PluginContext, source: string, { fresh = false, counts = true, local = false } = {}): Promise<{ catalog?: Catalog; stale?: boolean; problem?: string }> {
     if (isFolder(source)) {
       const catalog = await engine.parseCatalog(source, source, 'folder', { counts });
       if (fresh && !catalog.problem) await dropRemoteCopies(ctx, catalog);
@@ -130,6 +130,8 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const known = fetched.get(source);
     if (known && !fresh && (known.catalog || Date.now() - (known.at ?? 0) < RETRY_MS)) return known;
     const onDisk = fresh ? undefined : await engine.cachedCatalog(ctx, source);
+    // `local`: only the copy on disk; with none, nothing (the Refresh rules decide when a Git marketplace is fetched).
+    if (!onDisk && local) return {};
     const result = onDisk ? { catalog: onDisk } : await fetchFresh(ctx, source, fresh);
     fetched.set(source, result.catalog ? result : { ...result, at: Date.now() });
     return result;
@@ -283,13 +285,15 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
 
   /**
    * A plugin's contents and README, from the marketplace's files or, when it lives elsewhere, its own repository; with
-   * each tool's installed copy, which may be another version.
+   * each tool's installed copy, which may be another version. `local` (the list's background read) reads only what is on
+   * disk: a plugin whose files would have to be fetched first is not read (null), as if never asked.
    */
-  async function detail(source: string, plugin: string): Promise<PluginDetail | null> {
+  async function detail(source: string, plugin: string, local = false): Promise<PluginDetail | null> {
     const ctx = await context();
-    const { catalog } = await catalogFor(ctx, source, { counts: false });
+    const { catalog } = await catalogFor(ctx, source, { counts: false, local });
     const item = catalog?.plugins.find(entry => entry.name === plugin);
     if (!catalog?.root || !item) return null;
+    if (local && item.remote && !(await access(engine.remoteCopyFolder(ctx, item.remote)).then(() => true, () => false))) return null;
     const [offered, installed] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item)]);
     if (offered) return { ...offered, installed };
     // Files the marketplace can't give (an npm or pip package) may still be read from a tool that installed it.
@@ -455,7 +459,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   const open = () => !!host.home();
   handle('plugins:view', async (fresh, readId) => (open() ? markets.view(fresh === true, typeof readId === 'number' ? readId : undefined) : null));
   handleNow('plugins:readme', async source => (open() && isText(source) ? markets.readme(source) : null));
-  handleNow('plugins:detail', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin) : null));
+  handleNow('plugins:detail', async (source, plugin, local) => (open() && isText(source) && isName(plugin) ? markets.detail(source, plugin, local === true) : null));
   // Links from READMEs and marketplaces open in the browser: https only, and never inside the app.
   handleNow('open:external', async url => { if (isHttps(url)) await host.openExternal(url); });
   handle('plugins:add', async source => { if (!open() || !isText(source)) throw new Error('Invalid marketplace.'); return markets.add(source); });

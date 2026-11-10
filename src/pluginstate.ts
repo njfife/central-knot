@@ -4,8 +4,8 @@ import { announce, busy, rerender, setHome, state as app, tell } from './app.ts'
 import { pageData, putPageData, readPageData, resetPageData } from './pagedata.ts';
 import { plural } from './model.ts';
 import { isParts, resultLines, forSource, pluginKey, prune, recordRun, resultSentence, reverse, runPlan, type LastRun, type PluginDraft, type PluginOp } from './pluginplan.ts';
-import { FIND_FROM, categoriesOf, marketTitle, matches, partsTools, pluginPlace } from './pluginstatus.ts';
-import { readInto, type Read } from './reads.ts';
+import { FIND_FROM, categoriesOf, copiesToCompare, marketTitle, matches, partsTools, pluginPlace } from './pluginstatus.ts';
+import { readInTurn, readInto, type Read } from './reads.ts';
 import type { HarnessId, MarketplaceView, PartPlan, PluginDetail, PluginsView } from './types.ts';
 
 const api = () => window.centralKnot;
@@ -95,6 +95,21 @@ export function shownPlugins(entry: MarketplaceView) {
   return listed.sort((first, second) => place.get(first.name)! - place.get(second.name)!);
 }
 
+/** How many installed plugins' files the list reads at once in the background (see readShown). */
+const COMPARE_AT_ONCE = 3;
+/**
+ * A redraw for a background read landing: it keeps the caret where the person is typing (the find box), since the redraw
+ * makes a new box.
+ */
+function redrawKeepingCaret(): void {
+  const box = document.activeElement instanceof HTMLInputElement ? document.activeElement : undefined;
+  const [start, end] = [box?.selectionStart, box?.selectionEnd];
+  rerender();
+  const now = box?.id ? document.getElementById(box.id) : null;
+  if (now instanceof HTMLInputElement && now !== box && start != null && end != null) now.setSelectionRange(start, end);
+}
+const comparing = readInTurn(market.details, COMPARE_AT_ONCE, redrawKeepingCaret);
+
 /** Reads, in the background, what the place on screen shows and hasn't been read yet: a README or a plugin's contents. */
 function readShown(): void {
   const entry = current()?.entry;
@@ -104,14 +119,24 @@ function readShown(): void {
   if (market.nav.plugin) {
     // Opening a plugin whose files couldn't be read tries again; only a read that worked is kept.
     const key = pluginKey(source, market.nav.plugin);
+    // A quiet read of it (below) gives way too: it may have left out files that need fetching.
     const last = market.details.get(key);
-    if (last && !last.reading && (!last.value || last.value.problem)) market.details.delete(key);
+    if (last && (last.reading ? last.quiet : !last.value || last.value.problem)) market.details.delete(key);
     readPlugin(market.nav.plugin);
     if (market.view?.tools.some(tool => partsTools.includes(tool))) readInto(market.partsPlans, key, () => api().partsPlan(source, market.nav.plugin!).catch(() => null), rerender);
   }
   else if (market.nav.tab === 'about') readInto(market.readmes, source, () => api().marketplaceReadme(source).catch(() => null).then(text => text ?? undefined), rerender);
   // Plugins kept in other repositories say what they hold once read; the first few rows on screen are read ahead.
-  else for (const plugin of shownPlugins(entry).filter(candidate => !candidate.components && candidate.from).slice(0, REMOTE_READ_AHEAD)) readPlugin(plugin.name);
+  else for (const plugin of shownPlugins(entry).filter(candidate => !candidate.components && candidate.from).slice(0, REMOTE_READ_AHEAD)) {
+    // Not read by a quiet read (below), whose copy wasn't on disk: this read may fetch it.
+    const last = market.details.get(pluginKey(source, plugin.name));
+    if (last && !last.reading && last.value === null) market.details.delete(pluginKey(source, plugin.name));
+    readPlugin(plugin.name);
+  }
+  // Then, while Plugins is open, the files of the plugins some tool has installed, a few at a time and only from disk, so
+  // a copy that differs from the marketplace's shows on the list without its page being opened (pluginstatus.copyStale).
+  const view = market.view;
+  comparing.set(app.page === 'plugins' && view ? copiesToCompare(view, entry).map(name => [pluginKey(source, name), () => api().pluginDetail(source, name, true).catch(() => null)]) : []);
 }
 
 /**
@@ -149,6 +174,7 @@ function markDetailsStale(): void {
 
 /** Forgets every plugin's contents, the ones shown while re-reading too: after a Refresh they may all have changed. */
 function forgetDetails(): void {
+  comparing.set([]);
   market.details.clear();
   market.previous.clear();
 }

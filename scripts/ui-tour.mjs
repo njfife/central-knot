@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
 import { serveReleases } from './update-fixture.mjs';
-import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -35,17 +35,18 @@ process.on('exit', () => { for (const child of launched) { try { child.kill('SIG
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
 async function launch(more = {}) {
-  const port = 9300 + Math.floor(Math.random() * 400);
   const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
-  const inspect = flag('--electron') ? port + 1000 : undefined;
-  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
+  // debugPorts). A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
+  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'ignore', 'pipe'] });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
+  const { port, inspect } = await debugPorts(child, flag('--electron'));
   let target;
-  for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
+  for (let attempt = 0; attempt < 150 && !target; attempt++) { try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } if (!target) await wait(200); }
+  if (!target) throw new Error('The app opened no window.');
   const page = await connect(target.webSocketDebuggerUrl);
   const { send, run } = page;
   // A page that never settles fails the tour instead of holding it open.
@@ -493,6 +494,12 @@ if (wanted('plugin-versions')) {
   // Codex's copy of document-tools changes by hand at the marketplace's version (1.2.0): its page says so and offers Update.
   edit(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0/skills/spreadsheet/SKILL.md'), text => `${text}\nAlso sort every sheet by its first column.\n`);
   await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000);
+  // Refresh forgot every plugin's files; the list reads the installed ones again by itself, with no page opened.
+  await waitFor(a, `/Codex differs from the marketplace’s copy/.test(document.querySelector('[data-plugin="document-tools"] .plugin-row-warning')?.textContent ?? '')`, 15000);
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await a.run(`document.querySelector('[data-plugin="document-tools"]').scrollIntoView({ block: 'center' })`); await a.settle();
+    await shot(a, `list-copy-differs-${width}`, `At ${width}×${height}, after Refresh and with no plugin page opened: the document-tools row says Codex's copy differs from the marketplace's (read in the background once the list was drawn) and offers Update.`);
+  }
   await a.click('#popen-0-document-tools'); await waitFor(a, `/differs from the marketplace’s copy/.test(document.querySelector('.plugin-panel')?.textContent ?? '')`, 15000);
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`); await a.settle();
@@ -1398,5 +1405,6 @@ if (wanted('repo')) {
 }
 
 a.quit();
-rmSync(scratch, { recursive: true, force: true });
+// The app was stopped just now and its helper processes may still be writing: the folder goes once they are done.
+rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);

@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
+import { debugPorts } from './cdp.mjs';
 
 const out = resolve(process.argv[2] ?? 'design-shots');
 const root = resolve(import.meta.dirname, '..');
@@ -13,9 +14,10 @@ const scratch = mkdtempSync(join(tmpdir(), 'ck-design-'));
 mkdirSync(join(scratch, 'home')); mkdirSync(out, { recursive: true });
 const env = { HOME: join(scratch, 'home'), PATH: '/usr/bin:/bin', TMPDIR: scratch };
 for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-const port = 9600 + Math.floor(Math.random() * 300);
 const option = process.env.VARIANT || 'a';
-const child = spawn(command, [...(electron ? [root] : []), `--design-preview=${option}`, `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+const child = spawn(command, [...(electron ? [root] : []), `--design-preview=${option}`, '--remote-debugging-port=0', `--user-data-dir=${join(scratch, 'data')}`, ...(process.argv.includes('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'ignore', 'pipe'] });
+// The app picks its own free debug port and says it (cdp.mjs debugPorts).
+const { port } = await debugPorts(child);
 let target;
 for (let i = 0; i < 150 && !target; i++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(t => t.type === 'page'); } catch {} }
 const ws = new WebSocket(target.webSocketDebuggerUrl);
@@ -41,5 +43,5 @@ for (const step of steps) {
   await shot(step.name);
   for (const action of step.reset ?? []) await click(action);
 }
-ws.close(); child.kill('SIGKILL'); rmSync(scratch, { recursive: true, force: true });
+ws.close(); child.kill('SIGKILL'); rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`shots in ${out}`);

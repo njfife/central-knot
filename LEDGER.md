@@ -759,6 +759,23 @@ The Mac app updates itself from the GitHub releases. `scripts/package-mac.mjs` r
 
 **Not proven.** A notarized build downloaded from GitHub itself (only the local fixture served zips); a real `/Applications` install by a standard (non-admin) account; the restart holding while a write is under way (by construction: it waits in the main queue); Windows and Linux (no releases, nothing shown).
 
+## Leftovers after preview 4, November 10, 2026
+
+What was left open after v0.5.0-preview.4, fixed or proven.
+
+- **A pulled base-instructions edit is in History**, with "Undo pull" (the base's own Undo, as a pulled deletion already had): once, and only while the base is still as that Pull left it. A base that arrives for the first time gets a row too. After an Undo the earlier text is a change made here, which the next Push sends.
+- **The Plugins list knows a copy differs from the marketplace's** without the plugin's page being opened: once the list is drawn, the files of plugins some tool has installed are read in the background, three at a time, from disk only (no Git fetch), into the cache the plugin page uses; again after Refresh and Apply all.
+- **Claude Code overrides:** a profile never turns on a skill the Skills page turned off, so the listed gap could not happen. A nearby one could: an override taken out by hand came back after a profile turned the skill off and the Skills page turned it on. A profile's Disable now counts as the latest Disable.
+- **Tests for two earlier fixes** (e2e): a home switch whose settings can't be saved stays on its home, still watched; Refresh on Harnesses asks for the marketplaces as last read. Each fails with its fix taken out.
+- **Test runs pick their own debug ports.** The e2e and the ui-tour each chose a debug port at random; with several runs on one Mac, a run could choose a port another run's app was listening on and then drove that app (seen: a tour clicking in another checkout's window). The app is now asked for port 0 and says its ports on stderr (`cdp.mjs debugPorts`). The tour's last step also waits for the stopped app's helpers before deleting its scratch folder.
+- **Desktop apps, real installs** (asked by Nathan): the GitHub Copilot app's Windows setup installs under `%LOCALAPPDATA%\Programs\GitHub Copilot`, not the folder guessed before, so it was not found; fixed. App 1.2.0 unpacks its runtime as `<version>/copilot` (1.1 on macOS: `copilot-sdk-runtime-<version>`); both are looked for, and with no CLI that runtime runs plugin commands on Windows and Linux too (run in throwaway homes on Ultra PC and Ubuntu 26.04). Claude desktop from its apt package on Ubuntu 26.04 is found; as an ordinary non-elevated process on Windows detection is as before. Details in `docs/capability-data.md` §3.
+
+**Proven without a code change.** A plugin installed with Claude desktop's own Claude Code (2.1.321) is used in a Code tab session of the signed-in app: the session ran the test plugin's skill and gave its answer (transcript entrypoint `claude-desktop`). macOS gives the running signed preview 4 build the new icon (`NSRunningApplication.icon`, regular activation policy), and the app never sets a Dock icon of its own.
+
+**Validation.** 367 unit tests. Mac packaged e2e 534/534. Linux e2e 441/441. UI tour `plugin-versions` (new list shots at 860 and 1728), `plugins`, `harnesses`, `settings` on the Mac; every section run alone, 17 of 18 first time (the 18th was the scratch-folder delete, fixed).
+
+**Not proven.** The icon as a picture of the Dock itself (no tool here can capture the Dock; needs a glance). Where Claude desktop on Linux keeps the Code tab's copy (appears only after sign-in). The Copilot app's `.msi` location (from the package's own tables, not installed).
+
 ## Instructions: a draft of the base written by one of your tools, November 10, 2026
 
 Nathan asked that a person be able to use one of their own tools, headless, to generate base instructions from the files they already have, with what each tool's file should become, and to have it installed in one step rather than editing files by hand; and to choose the tool when more than one can do it.
