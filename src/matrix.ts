@@ -822,7 +822,7 @@ function addFromButton(tool: Tool, list: SampleSkill[]) {
   // Its word drops at narrow widths (the plus stays, with the full name as its tooltip), so the toolbar keeps one line.
   return h('span.add-from', {},
     h('button.btn.outline.small', { type: 'button', id: 'harness-add-from', title: `Add to ${names[tool]} from another tool`, 'aria-label': `Add to ${names[tool]} from another tool`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog',
-      onclick: (event: Event) => toggleToolMenu(event, tool, true) }, icon('plus', 14), h('span.add-from-word', {}, 'Add from…')),
+      onclick: (event: Event) => toggleToolMenu(event, tool, true) }, icon('plus', 14), h('span.add-from-word', {}, 'Add', h('span.add-from-more', {}, ' from'), '…')),
     open ? toolMenu(tool, list) : null);
 }
 
@@ -907,8 +907,9 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
           : managing && after < list.length && !managedDrawn ? h('span.ov-section-after', {}, after === 0 ? `· ${list.length === 1 ? 'becomes' : list.length === 2 ? 'both become' : 'all become'} Managed on Apply all` : `· ${list.length - after} ${list.length - after === 1 ? 'becomes' : 'become'} Managed on Apply all`) : null,
         // Items only other tools have, turned on here: told on their own section, so the counts add up.
-        becoming ? h('span.ov-section-after', {}, `· ${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`)
-          : role === 'away' ? h('span.ov-section-after', {}, `· tick a ${names[focus!]} box to add one here`) : null,
+        // The dot stands apart (as on the copy-choice note above), so every note under a heading is spaced the same.
+        becoming ? h('span.ov-section-after', {}, '·', h('span', {}, `${becoming} ${becoming === 1 ? 'becomes' : 'become'} Managed on Apply all`))
+          : role === 'away' ? h('span.ov-section-after', {}, '·', h('span', {}, `tick a ${names[focus!]} box to add and manage it here`)) : null,
         // A bulk Manage leaves items with differing copies out: name them, with the way to choose.
         managing ? (() => {
           const waiting = sorted.filter(skill => !effective(skill).managed && syncOf(skill, toolList()) === 'attention' && !view.draft.get(skill.key)?.resolve);

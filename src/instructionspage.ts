@@ -11,9 +11,6 @@ import { folded, lineDiff } from './diff.ts';
 export { lineDiff } from './diff.ts';
 
 const names = toolNames as Record<string, string>;
-/** How many lines a file's text has, a final newline not counting as one more. */
-export const lineCount = (text: string) => text.replace(/\n$/, '').split('\n').length;
-
 export { fileName } from './model.ts';
 
 /** In a changed line (a removed line next to an added one), the words that differ get a stronger tint. */

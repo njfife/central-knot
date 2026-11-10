@@ -9,7 +9,7 @@ import { fullToolName, plural } from './model.ts';
 import { toolNames as names } from './words.ts';
 import type { HarnessId, HomeView, InstructionFile, SkillFacts, Snapshot } from './types.ts';
 import { brandMark, closeOpenRows, designOverview, differingIn, emptyKind, kindNoun, outcomeBand, showFiltered, type Kind } from './matrix.ts';
-import { fileName, instructionBands, instructionCard, instructionsNotRead, lineCount } from './instructionspage.ts';
+import { fileName, instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
 import { copyButton, fact, kindEmpty } from './pages.ts';
 import { realHomeName, titles } from './renderer.ts';
@@ -95,7 +95,8 @@ function instructionCount(tool: HarnessId): Count {
   const file = instructionOf(tool);
   if (!file) return { value: '—', faint: true };
   if (!file.exists) return { value: '', note: 'no file yet' };
-  return { value: '', note: `${fileName(file.path)} · ${file.text.trim() ? plural(lineCount(file.text), 'line') : 'empty'}` };
+  // Its name alone, so the note keeps to one line on a narrow card; an empty file says so.
+  return { value: '', note: file.text.trim() ? fileName(file.path) : `${fileName(file.path)} (empty)` };
 }
 
 function pluginCount(tool: HarnessId): Count {
@@ -187,11 +188,12 @@ function tabs(home: HomeView, tool: HarnessId) {
   return h('div.harness-tabs', { role: 'tablist', 'aria-label': `${names[tool]}` },
     TABS.map(tab => {
       const counted = count(tab);
-      return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}`, {
+      // A kind this tool cannot hold shows no count and a quieter tab; its tooltip and its page say why.
+      return h(`button.harness-tab${state.harnessTab === tab ? '.selected' : ''}${counted?.shown === '—' ? '.harness-tab-none' : ''}`, {
         type: 'button', role: 'tab', id: `harness-tab-${tab}`, 'aria-selected': String(state.harnessTab === tab), disabled: !!state.busy && state.harnessTab !== tab,
         title: !counted ? undefined : counted.shown === '—' ? `${names[tool]} has none of its own` : `${counted.shown} in ${names[tool]}${counted.elsewhere ? ` · ${counted.elsewhere} only in other tools` : ''}`,
         onclick: () => goHarness(tool, tab),
-      }, tabLabel(tab), counted ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
+      }, tabLabel(tab), counted && counted.shown !== '—' ? h('span.harness-tab-count', {}, String(counted.shown)) : null);
     }));
 }
 
