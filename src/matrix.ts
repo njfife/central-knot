@@ -54,7 +54,7 @@ function partNote(skill: SampleSkill) {
   return fromPlugins(skill, kind).map(({ install, tools }) => h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'),
     h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
-        : ['Update or remove its parts together on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
+        : ['Update or remove its parts on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
 }
 
 /** The one mark of a plugin's item on its row, a part's or one inside the installed plugin: the plugin's glyph and "from <plugin>"; its title says which. */
@@ -99,8 +99,9 @@ function handledNote(row: PluginRow, lead: string, id: string) {
     'Central Knot doesn’t sync it or change its files.'));
 }
 
-/** On a part's row: the same plugin installed whole, and where it is handled. */
-const wholeNote = (skill: SampleSkill) => wholeOf(skill).map(row => handledNote(row, `Also inside the plugin ${inWhere(row)}. `, `open-whole-${skill.key}-${row.plugin}`));
+/** On a part's row: the same plugin installed whole elsewhere (the part's own note links the plugin's page). */
+const wholeNote = (skill: SampleSkill) => wholeOf(skill).map(row => h('p.details-limits.details-note.details-part', {}, icon('puzzle', 12, 'tone-muted'),
+  h('span', {}, `Also inside the plugin ${inWhere(row)}: there it comes and goes with the plugin.`)));
 
 /** Plugin items whose file is shown, by row key, so a redraw keeps it open. */
 const filesShown = new Set<string>();
@@ -113,7 +114,7 @@ function pluginDetails(row: PluginRow, placement: 'row' | 'dock' = 'row') {
   const file = row.kind === 'skill' ? 'SKILL.md' : 'agent file';
   return h(`div.compare.details.details-plugin${placement === 'row' ? '' : '.details-bare'}`, { role: 'region', 'aria-label': `Details for ${row.name}` },
     h('div.details-head', {},
-      h('p.details-status', {}, `From the plugin ${row.plugin} · not managed by Central Knot`),
+      h('p.details-status', {}, `From the plugin ${row.plugin}`),
       kind === 'mcp' && row.description ? h('dl.details-definition', {}, h('dt', {}, 'Type'), h('dd', {}, type === 'Command' ? 'Command (stdio)' : type), h('dt', {}, type === 'Command' ? 'Command' : 'URL'), h('dd.mono', {}, rest.join(' · ')))
         : row.description ? h('p.details-description', {}, row.description) : null,
       handledNote(row, '', `open-whole-${row.key}`),
@@ -145,7 +146,7 @@ function pluginSection(list: PluginRow[]) {
   if (!list.length) return null;
   return h('div', { role: 'rowgroup' },
     h('div.ov-section.ov-section-plugins', { role: 'row' }, h('div.ov-section-label', { role: 'cell' }, h('strong', {}, 'From plugins'), h('span.ov-section-count', {}, String(list.length)),
-      sectionNote('not managed here; each plugin’s page handles them'))),
+      sectionNote('they come and go with their plugin, and aren’t managed here'))),
     list.flatMap(pluginRowEl));
 }
 
@@ -1234,7 +1235,7 @@ const pendingOwnCopy = () => { const mark = swatch('present', false); mark.class
 function pluginLegend(list: SampleSkill[], entry: (label: string, node: HTMLElement) => HTMLElement) {
   const offs = [...plugged().rows, ...list.flatMap(wholeOf)].flatMap(row => (toolList() as HarnessId[]).filter(tool => row.copies[tool]).map(tool => !!offIn(row, tool)));
   const mark = (off: boolean) => h(`span.legend-cell.cell-plugin.cell-on${off ? '.cell-disabled' : ''}`, { 'aria-hidden': 'true' }, icon('puzzle', 11), off ? h('span.cell-disabled-mark', {}, icon('circle-off', 8)) : null);
-  return offs.length ? [entry('In the plugin (its page handles it)', mark(false)), offs.some(Boolean) ? entry('Plugin’s, turned off there', mark(true)) : null] : [];
+  return offs.length ? [entry('Comes with a plugin', mark(false)), offs.some(Boolean) ? entry('Plugin’s, turned off there', mark(true)) : null] : [];
 }
 
 function legend(list: SampleSkill[]) {

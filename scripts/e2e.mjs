@@ -901,7 +901,7 @@ async function practiceFlow() {
     [/from outside-tools/.test(await a.text(outsideRow) ?? ''), await cellState(a, outside, 'claude-cli'), await cellState(a, outside, 'copilot-cli'), await a.exists(`${outsideRow} .switch`), await a.exists('.ov-section-plugins')],
     [true, 'plugin', 'plugin-none', false, true]);
   await a.click(`[id="open-${outside}"]`);
-  check('its details say it isn’t managed and where it is handled', /not managed by Central Knot[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
+  check('its details say which plugin it is from and where it is handled', /From the plugin[\s\S]*marketplace “ck-outside”, which isn’t added in Central Knot/.test(await a.text('main') ?? ''), await a.text('main'));
   await a.click('#nav-mcp');
   same('its MCP server too, on the MCP servers page', await cellState(a, 'outside-tools@ck-outside/outside-server', 'claude-cli'), 'plugin');
   rmSync(join(practice, '.claude/plugins'), { recursive: true, force: true });
@@ -1204,7 +1204,7 @@ async function practiceFlow() {
   same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
   await a.click(partSwitch('skill-triage'));
   check('a part’s switch chooses it alone, and the page says what Apply all will do', await standOf('skill-triage') === 'part-on true' && /Will add 1 part/.test(await a.text('.plugin-panel') ?? '') && /1 part to add/.test(await a.text('.toolbar') ?? '')
-    && /Goes into Pi as a separate item on Apply all/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
+    && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
   await a.click('#plugins-apply');
   check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
     && /Replaced a broken link named “triage”/.test(await a.text('.bands') ?? ''), await a.text('.bands'));

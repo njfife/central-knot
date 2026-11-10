@@ -115,7 +115,11 @@ function pluginCount(tool: HarnessId): Count {
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
   if (plugins.state === 'unsupported') return { value: '—', note: pluginsNotHandled(tool), faint: true };
   const unsure = plugins.unknown.length + plugins.unreadable.length > 0;
-  return { value: plugins.installed.length ? String(plugins.installed.length) : '', note: [plugins.installed.length ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !plugins.installed.length };
+  // Counted with the plugins the tool itself records (what its "from plugins" items come from), so one from a marketplace
+  // the Plugins page doesn't list is no "none installed" beside its own skills.
+  const recorded = (state.home?.pluginItems ?? []).filter(install => install.tool === tool).map(install => `${install.plugin}@${install.marketName}`);
+  const installed = new Set([...plugins.installed.map(({ entry, plugin }) => `${plugin.name}@${entry.name}`), ...recorded]).size;
+  return { value: installed ? String(installed) : '', note: [installed ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !installed };
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */

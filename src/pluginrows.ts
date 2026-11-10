@@ -92,7 +92,7 @@ export function inWhere(row: PluginRow): string {
 }
 
 /** A row's tag's hover text: it is inside the installed plugin. */
-export const insideTitle = (row: PluginRow) => `Inside the plugin ${inWhere(row)}. Handled on the plugin’s page, not managed here`;
+export const insideTitle = (row: PluginRow) => `Inside the plugin ${inWhere(row)}. It comes and goes with the plugin${handledWhere(row).listed ? ', on the plugin’s page' : ''}`;
 
 /** Why a tool has no copy of this item, as a sentence naming that tool: the plugin's files unread there, a kind it doesn't load, or not installed there. */
 function missingWhy(row: PluginRow, tool: HarnessId): string {
@@ -101,7 +101,7 @@ function missingWhy(row: PluginRow, tool: HarnessId): string {
   if (install?.problem) return `${name} has ${row.plugin} installed, but its files couldn’t be read.`;
   if (install && tool === 'codex-cli' && row.kind === 'agent') return `${name} has ${row.plugin} installed, but Codex doesn’t load a plugin’s agents.`;
   if (install) return `${name} has ${row.plugin} installed, but its copy doesn’t have this ${row.kind === 'mcp' ? 'MCP server' : row.kind}.`;
-  if (tool === 'pi-cli') return 'Pi takes no plugins. The plugin’s page can put its parts in Pi as separate items.';
+  if (tool === 'pi-cli') return `Pi takes no plugins.${handledWhere(row).listed ? ' The plugin’s page can put its parts in Pi as separate items.' : ''}`;
   return `Not installed in ${name}.${handledWhere(row).listed ? ' The plugin’s page on Plugins installs it there.' : ''}`;
 }
 

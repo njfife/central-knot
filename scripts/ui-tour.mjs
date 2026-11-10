@@ -6,7 +6,7 @@
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
 import { execFileSync, spawn } from 'node:child_process';
-import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
@@ -427,6 +427,17 @@ if (wanted('plugin-skills')) {
   await shot(a, 'skill-held', 'Turned every skill named “spreadsheet” off in Copilot CLI outside Central Knot (`copilot skill disable spreadsheet`), then reopened the page: it shows off there, locked, and can’t be turned on for this plugin alone (its row says why).');
   await at860('skill-held-860', 'The held state at 860×560, scrolled to the skills.');
   await a.theme('light'); await at860('skill-held-860-light', 'The held state at 860×560, light.'); await a.theme('dark');
+  // Pi joins the home: it takes no plugins, so its column's switches put single skills in as separate items, beside the
+  // installed plugin's own switches under Copilot CLI and Codex.
+  mkdirSync(join(practice, '.pi/agent'), { recursive: true });
+  await a.click('#plugin-back'); await a.click('#header-refresh'); await waitFor(a, `!!document.querySelector('#pcell-0-document-tools-pi-cli')`, 15000);
+  await a.click('#popen-0-document-tools'); await waitFor(a, `!!document.querySelector('#ppart-0-document-tools-skill-pdf-reader-pi-cli')`, 15000);
+  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
+  await a.run(`document.querySelector('.plugin-skills')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'mixed-switches', 'Pi was added to the home. One list now has both kinds of switch, each column saying which: the installed plugin’s skill switches under Copilot CLI and Codex, and under Pi a switch that puts one skill in as a separate item (pdf-reader chosen).');
+  await at860('mixed-switches-860', 'The same at 860×560.');
+  await a.theme('light'); await shot(a, 'mixed-switches-light', 'The same, in the light appearance.'); await a.theme('dark');
+  await a.click('#ppart-0-document-tools-skill-pdf-reader-pi-cli');
 }
 
 // ---------- Plugin versions and skill text ----------
@@ -535,6 +546,22 @@ if (wanted('parts')) {
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await shot(a, 'pick-applied', 'Clicked Apply all: Pi has the triage skill alone, Codex the issues server alone; each tool’s row says what was left out.');
   await atParts('pick-applied-switches', 'The switches after Apply all.');
+  await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  // What is in a part's place when it can't go in: a file there is named, with what to do; a link that leads nowhere is replaced.
+  mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
+  writeFileSync(join(practice, '.pi/agent/skills/triage'), 'not a folder');
+  await a.click('#header-refresh'); await waitFor(a, `/A file is in its place/.test(document.querySelector('.plugin-switched')?.textContent ?? '')`, 30000);
+  await atParts('place-file', 'A file named triage sits in Pi’s skills folder where the skill’s folder would go: its switch under Pi is locked, and its row says what is there and what to do.');
+  await a.run(`document.querySelector('.plugin-parts-section')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'place-file-parts', 'The same reason in "Its parts", Pi’s row.');
+  rmSync(join(practice, '.pi/agent/skills/triage'), { force: true });
+  symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
+  await a.click('#header-refresh'); await waitFor(a, `/replaces a broken link/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
+  await shot(a, 'broken-link', 'Replaced the file with a link that leads nowhere (what an uninstalled skills manager leaves behind): the skill can go in, and Pi’s row says it replaces the broken link.');
+  await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli');
+  await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
+  await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
+  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, and the result says the broken link was replaced.');
   await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
   // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.

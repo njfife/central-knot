@@ -1085,7 +1085,10 @@ span.ins-confirm { margin-top: 0; }
 .plugin-parts li.with-end { grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto; min-height: 28px; align-items: start; }
 .skill-switches { display: inline-flex; align-self: start; }
 .skill-switch, .skill-switch-head { width: 96px; display: inline-flex; justify-content: center; align-items: center; }
-.skill-switch-head { gap: 5px; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
+.skill-switch-head { flex-direction: column; font-size: 11.5px; color: var(--ink); white-space: nowrap; }
+.skill-switch-tool { display: inline-flex; align-items: center; gap: 5px; }
+/* Under a tool's name, where one list has both kinds of switch: a skill of the installed plugin, or a separate item. */
+.skill-switch-kind { font-size: 10.5px; color: var(--ink-soft); }
 .skill-switch { position: relative; height: 22px; }
 /* An off switch keeps a visible edge on the dark page; a held one stays readable (its row says why it can't change). */
 .skill-switch:not(.skill-switch-chosen) .switch[aria-checked="false"] { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 22%, transparent); }

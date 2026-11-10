@@ -434,15 +434,16 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const listing = (Array.isArray(listed) ? listed : []).map(record).find(item => item?.name === plugin && item.marketplace === marketplace);
       const cache = text(listing?.cache_path);
       if (cache) return (await hasFiles(cache)) ? installedCopy(cache, entry, { live: false, version: await copyVersion(listing?.version, cache), readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(await settingsOf(), plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but its files are not where it records them.' };
-      // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied.
+      // A plugin from a local folder marketplace is loaded live from that folder: nothing is copied. Its only record is
+      // enabledPlugins: true when installed, false once turned off (`copilot plugin list` shows it "(disabled)"), so either is installed.
       const settings = await settingsOf();
-      const enabled = record(settings?.enabledPlugins)?.[id] === true;
+      const enabled = typeof record(settings?.enabledPlugins)?.[id] === 'boolean';
       const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
       const folderPath = text(source?.path);
       if (enabled && source?.source === 'directory' && folderPath) {
         const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
-        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
+        return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI lists it, but the folder it loads from is gone.' };
       }
       return { state: 'not-installed' };
     }

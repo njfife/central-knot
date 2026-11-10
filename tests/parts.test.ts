@@ -259,7 +259,7 @@ test('Claude Code with no CLI takes a plugin’s skills and agents as they are, 
     assert.equal(await readFile(join(box.home, '.claude/skills/figma-design/SKILL.md'), 'utf8'), SKILL);
     assert.equal(await readFile(join(box.home, '.claude/agents/designer.md'), 'utf8'), AGENT);
     await assert.rejects(readFile(join(box.home, '.claude.json')));
-    assert.match(claude.message, /figma: Claude Code’s MCP servers are written only with Write to Claude Code/);
+    assert.match(claude.message, /figma: Claude Code’s MCP servers are added with “Write to Claude Code”/);
   } finally { await box.cleanup(); }
 });
 
@@ -292,7 +292,7 @@ test('A link that leads nowhere in a skill’s place is replaced and said; a fil
 
     const report = await installParts(box.context, box.to, await box.files());
     assert.equal(report.outcome, 'failed', report.message);
-    assert.match(report.message, /Couldn’t change the skill “grill-me”: a file is in its place in Pi \(.*grill-me\), where its folder would go\./);
+    assert.match(report.message, /Couldn’t change the skill “grill-me”: a file is in its place in Pi \(.*grill-me\), where its folder would go; move or delete it, then try again\./);
     assert.match(report.message, /Replaced a broken link named “tdd” in Pi’s skills folder \(it led to .*\.agents\/skills\/tdd, which isn’t there\)/);
     assert.deepEqual(await box.inPi(), ['figma-design', 'tdd']);
     assert.equal(await readFile(box.pi('grill-me'), 'utf8'), 'not a folder');

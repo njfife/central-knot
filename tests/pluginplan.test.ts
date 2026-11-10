@@ -191,7 +191,7 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
   setPick(draft, at, flipPick(pickOf(draft, at.source, 'pdf', 'pi-cli'), part('tdd'), true));
   setPick(draft, at, flipPick(pickOf(draft, at.source, 'pdf', 'pi-cli'), part('grill-me'), false));
   assert.deepEqual(pickOf(draft, at.source, 'pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
-  assert.deepEqual([summary(draft).partsOn, summary(draft).partsOff, summary(draft).plugins], [1, 1, 1]);
+  assert.deepEqual([summary(draft).partsOn, summary(draft).partsOff, summary(draft).plugins], [1, 1, 0]);
   assert.deepEqual(batches([...draft.values()]).map(step => [step.action, step.tools, step.pick]), [['pick-parts', ['pi-cli'], { on: [part('tdd')], off: [part('grill-me')], rest: false }]]);
   // With all the tool's parts installed too, it is one step: that install, with the pick as its exceptions.
   toggle(draft, op('pdf', 'pi-cli', 'install-parts'));

@@ -79,6 +79,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
         willOff ? `${plural(willOff, 'skill')} will turn off` : '', willOn ? `${plural(willOn, 'skill')} will turn on` : '']);
     }
     const mark = partsMark(view, entry, plugin.name, tool, components);
+    // Some of its parts left out by choice: said, so a few parts never read as all of them.
+    const out = plansFor(entry, plugin)?.[tool]?.filter(part => part.out).length ?? 0;
+    if (mark === 'installed' && parts && out) return `${parts.items.length} of ${parts.items.length + out} parts installed`;
     if (mark) return ({ changed: 'Parts out of date', installed: 'Parts installed', offer: 'Can take its parts' } as const)[mark];
     if (takesNoneOf(view, entry, plugin, tool)) return 'None of its parts fit';
     if (unavailable(view, entry, plugin.name, tool)) return 'Not available';
@@ -148,8 +151,9 @@ function partsLine(parts: PartsState | undefined, plan: PartPlan[] | undefined, 
   if (pending === 'remove-parts' && parts) return [h('span.plugin-outcome-item', {}, h('span.tone-danger', {}, 'Will remove on Apply all:'), ' ', ...partNames(parts.items))];
   if (pending === 'install-parts') return [h('span.plugin-outcome-item', {}, h('span.tone-accent', {}, `Will ${parts ? 'update' : 'install'} on Apply all:`), ' ',
     ...(going.length ? partNames(going) : ['nothing it can change: each part was changed, removed or managed since'])), ...picked];
-  const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), `Not the ${partWords[part.kind][0]} ${part.name}: ${part.why!.replace(/\.$/, '')}`));
-  const limited = going.filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), `The ${partWords[part.kind][0]} ${part.name}: ${part.limit}`));
+  const named = (part: PartPlan) => [`${partWords[part.kind][0]} `, h('code.plugin-name', {}, part.name)];
+  const missing = (plan ?? []).filter(part => part.why).map(part => h('span.plugin-outcome-item', {}, icon('circle-off', 12, 'tone-faint'), 'Not the ', ...named(part), `: ${part.why!.replace(/\.$/, '')}`));
+  const limited = going.filter(part => part.limit).map(part => h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-warning'), 'The ', ...named(part), `: ${part.limit}`));
   // Parts the person turned off or removed there: said once, since an update leaves them out; their switches turn them on.
   const outs = (plan ?? []).filter(part => part.out);
   const left = outs.length ? [h('span.plugin-outcome-item', {}, icon('circle-minus', 12, 'tone-faint'), 'Left out by you: ', ...partNames(outs))] : [];
@@ -211,7 +215,7 @@ function partsSection(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const behind = detail && !detail.problem ? pluginOnlyParts(detail) : [];
   return h('section.plugin-section.plugin-parts-section', { 'aria-label': 'Its parts' },
     h('div.plugin-section-head', {}, h('h3', {}, 'Its parts'), view.canWrite ? h('span.plugin-section-actions', {}, removal, next) : null),
-    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents can go in as separate items instead, and come out together. To choose them one by one, use the switches under What it holds.'),
+    h('p.plugin-parts-about', {}, 'Where a tool can’t take this plugin, its skills, MCP servers and agents can go in as separate items instead: all at once with the tool’s box or a button here, or one by one with the switches under What it holds.'),
     h('ul.plugin-outcome-list.plugin-parts-list', {}, [...groups.values()].map(group => h('li.plugin-outcome-row', {},
       h('span.plugin-parts-tool', {}, h('span.plugin-outcome-tools', {}, group.map(tool => brandMark(tool, 14)), h('strong', {}, andList(group.map(tool => names[tool])))),
         partsWhy(view, entry, group[0]!)[0] ? h('span.plugin-parts-why', {}, partsWhy(view, entry, group[0]!)[group.length > 1 ? 1 : 0]) : null),
@@ -310,7 +314,7 @@ function flipPart(entry: MarketplaceView, plugin: PluginView, tool: HarnessId, p
 
 /**
  * One part's switch in one tool that takes single parts: in there as a separate item, or not; chosen for Apply all, in
- * the position it will take, marked as waiting. One that can't go in (`partStand`) shows a lock; "Its parts" says why.
+ * the position it will take, marked as waiting. One that can't go in (`partStand`) shows a lock, and its row says why.
  */
 function partSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginView, tool: HarnessId, part: PartRef, plan: PartPlan[] | undefined, marketIndex: number) {
   const stand = partStand(view, entry, plugin, tool, part, plan);
@@ -326,20 +330,27 @@ function partSwitch(view: PluginsView, entry: MarketplaceView, plugin: PluginVie
 /**
  * What the rows of one kind of part add (see fileGroup): a switch per row under each tool that has one for it.
  * - Where the plugin is installed, each skill has a switch per tool that can turn one skill off (ENB-06).
- * - Where a tool takes single parts (`partsPickable`), each part that can go in there, or is in, has a switch that puts
- *   it in as a separate item or takes it out.
- * Every reason a skill's switch can't change is on the page, not only in hover text: once above the list when it holds for
- * a whole column (Claude Code, which has no such switch, with its mark; a missing CLI; a preview-only home), otherwise on
- * the skill's row, which also says what its chosen switches will do on Apply all. Why a part can't go in is said in "Its parts".
+ * - Where a tool takes single parts (`partsPickable`), each part has a switch that puts it in as a separate item or takes
+ *   it out; one that can't go in is locked.
+ * Every reason a switch can't change is on the page, not only in hover text: once above the list when it holds for a
+ * whole column (Claude Code, which has no switch for a plugin's skill, with its mark; a missing CLI; a preview-only home;
+ * a tool none of these parts can go into), otherwise on the row, which also says what its chosen switches will do.
  * `said` is shared by a page's lists, so what a part's switch does is explained once.
  */
 function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, kind: PartKind, rows: SwitchRow[], said: { parts: boolean }): RowExtras {
   const tools = kind === 'skill' ? view.tools.filter(tool => installed(entry, plugin.name, tool)) : [];
   const switchable = tools.filter(tool => !NO_SKILL_SWITCH[tool]);
   const plans = plansFor(entry, plugin);
-  // A tool has a column of part switches where at least one row's part can go in there or is in.
-  const usable = (tool: HarnessId, part: PartRef) => !!plans?.[tool]?.some(planned => samePart(planned, part) && !planned.why) || !!partsStill(entry, plugin.name, tool)?.items.some(item => samePart(item, part));
-  const picking = view.tools.filter(tool => !tools.includes(tool) && partsPickable(view, entry, plugin.name, tool) && rows.some(row => row.part && usable(tool, row.part)));
+  const partRows = rows.filter((row): row is SwitchRow & { part: PartRef } => !!row.part);
+  const stand = (tool: HarnessId, part: PartRef) => partStand(view, entry, plugin, tool, part, plans?.[tool]);
+  // Tools that take single parts, once their plan is read. One where no row's part can go in, each for the same reason
+  // (Pi has no agents), gets that reason said once above the list and no column of locks.
+  const pickable = view.tools.filter(tool => !tools.includes(tool) && partsPickable(view, entry, plugin.name, tool) && !!plans?.[tool] && partRows.length > 0);
+  const noneGoIn = (tool: HarnessId) => {
+    const reasons = partRows.map(row => plans![tool]!.find(planned => samePart(planned, row.part))?.why);
+    return reasons[0] && reasons.every(reason => reason === reasons[0]) && !partRows.some(row => stand(tool, row.part).there) ? reasons[0] : undefined;
+  };
+  const picking = pickable.filter(tool => !noneGoIn(tool));
   const columns = view.tools.filter(tool => switchable.includes(tool) || picking.includes(tool));
   const why = (tool: HarnessId, skill: string) => cantSwitchSkill(view, entry, plugin.name, tool, skill);
   // A reason every skill in a column shares (a missing CLI, a preview-only home) is said once above the list. A held
@@ -348,16 +359,21 @@ function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: Plugin
     const reasons = rows.filter(row => !skillOff(entry, plugin.name, tool, row.name)?.held).map(row => why(tool, row.name));
     return reasons[0] && reasons.every(reason => reason === reasons[0]) ? reasons[0] : undefined;
   };
-  const columnWide = new Set(switchable.map(sharedReason).filter((reason): reason is string => !!reason));
+  const columnWide = new Set([...switchable.map(sharedReason), picking.length && !view.canWrite ? PREVIEW_ONLY : undefined].filter((reason): reason is string => !!reason));
   const rowNote = (row: SwitchRow) => {
     const chosen = (action: PluginOp['action']) => switchable.filter(tool => queued(market.draft, entry.source, plugin.name, tool, row.name) === action).map(tool => names[tool]);
     const stuck = new Set(switchable.map(tool => why(tool, row.name)).filter((reason): reason is string => !!reason && !columnWide.has(reason)));
-    const moving = (to: 'on' | 'off') => picking.filter(tool => row.part && partStand(view, entry, plugin, tool, row.part, plans?.[tool]).chosen === to).map(tool => names[tool]);
+    const stands = row.part ? picking.map(tool => ({ tool, ...stand(tool, row.part!) })) : [];
+    const moving = (to: 'on' | 'off') => stands.filter(at => at.chosen === to).map(at => names[at.tool]);
+    // Why this part can't go into a tool whose other parts can, naming the tool where the reason doesn't.
+    const locked = stands.filter(at => at.why && !columnWide.has(at.why)).map(at => (at.why!.includes(names[at.tool]) ? at.why! : `${names[at.tool]}: ${at.why}`));
     const notes = [chosen('skill-off').length ? `Turns off in ${andList(chosen('skill-off'))} on Apply all.` : '', chosen('skill-on').length ? `Turns back on in ${andList(chosen('skill-on'))} on Apply all.` : '',
-      moving('on').length ? `Goes into ${andList(moving('on'))} as a separate item on Apply all.` : '', moving('off').length ? `Comes out of ${andList(moving('off'))} on Apply all.` : '', ...stuck];
+      moving('on').length ? `Goes into ${andList(moving('on'))} as a separate item.` : '', moving('off').length ? `Comes out of ${andList(moving('off'))}.` : '', ...stuck, ...locked];
     return notes.filter(Boolean).join(' ') || undefined;
   };
   const line = (text: string, mark?: HarnessId) => h('p.plugin-skills-note', {}, mark ? brandMark(mark, 13) : null, ...inlineMarkdown(text, openLink));
+  // Both kinds of switch in one list: each column says under its tool's name which kind it is.
+  const mixed = switchable.length > 0 && picking.length > 0;
   // What a part's switch does is said once, above the first list that has one.
   const explain = picking.length > 0 && !said.parts;
   if (explain) said.parts = true;
@@ -365,15 +381,17 @@ function switchColumns(view: PluginsView, entry: MarketplaceView, plugin: Plugin
     className: columns.length ? `plugin-switched${kind === 'skill' ? '.plugin-skills' : ''}` : kind === 'skill' ? 'plugin-skills' : '',
     head: [
       switchable.length ? line('Turn a skill off, or back on, without uninstalling the plugin; nothing changes until Apply all.') : null,
-      explain ? line(`${andList(picking.map(tool => names[tool]))} ${picking.length > 1 ? 'don’t' : 'doesn’t'} have the plugin itself: a switch there puts that one skill, MCP server or agent in as a separate item, or takes it out again${switchable.length ? '' : '; nothing changes until Apply all'}.`) : null,
+      explain ? line(`${andList(picking.map(tool => names[tool]))} ${picking.length > 1 ? 'don’t' : 'doesn’t'} have the plugin itself: a switch there puts that one skill, MCP server or agent in as a separate item, or takes it out again.`) : null,
       ...tools.filter(tool => NO_SKILL_SWITCH[tool]).map(tool => line(NO_SKILL_SWITCH[tool]!, tool)),
+      ...pickable.flatMap(tool => { const reason = noneGoIn(tool); return reason ? [line(reason, tool)] : []; }),
       ...[...columnWide].map(reason => line(reason)),
       // Disable is best effort: on a build older than the one exercised, or one whose version can't be read, only said.
       ...switchable.filter(tool => rows.some(row => !why(tool, row.name))).flatMap(tool => untestedBuild(tool, view.versions?.[tool]) ?? []).map(note => line(note)),
-      columns.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, columns.map(tool => h('span.skill-switch-head', { title: names[tool] }, brandMark(tool, 14), names[tool])))) : null,
+      columns.length ? h('div.skill-switch-cols', { 'aria-hidden': 'true' }, h('span.skill-switches', {}, columns.map(tool => h('span.skill-switch-head', { title: names[tool] },
+        h('span.skill-switch-tool', {}, brandMark(tool, 14), names[tool]), mixed ? h('span.skill-switch-kind', {}, switchable.includes(tool) ? 'in the plugin' : 'separate item') : null)))) : null,
     ],
     end: columns.length ? row => h('span.skill-switches', {}, columns.map(tool => (switchable.includes(tool) ? skillSwitch(view, entry, plugin, tool, row.name, marketIndex)
-      : row.part && usable(tool, row.part) ? partSwitch(view, entry, plugin, tool, row.part, plans?.[tool], marketIndex) : h('span.skill-switch.skill-switch-none', { title: `${row.name} can’t go into ${names[tool]} as a separate item. “Its parts” says why.` })))) : undefined,
+      : row.part ? partSwitch(view, entry, plugin, tool, row.part, plans?.[tool], marketIndex) : h('span.skill-switch.skill-switch-none', { title: `${row.name} is the plugin’s own folder, so it can’t go into ${names[tool]} as a separate item.` })))) : undefined,
     note: rowNote,
   };
 }

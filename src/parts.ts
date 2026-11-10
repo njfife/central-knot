@@ -112,7 +112,7 @@ async function partsFor(context: ShareContext, files: PluginFiles, tool: Harness
   }
   for (const [server, raw] of Object.entries(files.servers).sort(([first], [second]) => first.localeCompare(second))) {
     // Claude Code rewrites its MCP file while running, so its servers are written only with Write to Claude Code (MCP-02).
-    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are written only with Write to Claude Code on the MCP servers page, so parts leave them out.' }); continue; }
+    if (tool === 'claude-cli') { plan.push({ kind: 'mcp', name: server, why: 'Claude Code’s MCP servers are added with “Write to Claude Code” on the MCP servers page, so parts leave them out.' }); continue; }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { unread.add(unreadKey('mcp', server)); plan.push({ kind: 'mcp', name: server, why: 'It isn’t a server entry.' }); continue; }
     const why = await needsPlugin(raw as Record<string, unknown>, files.folder);
     if (why) { plan.push({ kind: 'mcp', name: server, why }); continue; }
@@ -238,13 +238,13 @@ async function onDisk(context: ShareContext, tool: HarnessId, item: Pick<PartIte
 }
 /** Whether a link's target is gone (and not merely out of reach: a target that can't be checked counts as there). */
 const leadsNowhere = async (link: string) => stat(link).then(() => false, error => errorCode(error) === 'ENOENT');
-/** Why a skill's place in a tool couldn't be read, naming what is there, where, and the system's own error code. */
+/** Why a skill's place in a tool couldn't be read, naming what is there, where, the system's own error code, and what to do about it. */
 function whyUnread(tool: string, dir: string, at: Stats, error: unknown): string {
   const code = errorCode(error) ?? 'unknown error';
-  if (at.isSymbolicLink()) return `a link is in its place in ${tool} (${dir}), and what it leads to couldn’t be read (${code})`;
-  if (!at.isDirectory()) return `a file is in its place in ${tool} (${dir}), where its folder would go`;
-  if (code === 'EACCES' || code === 'EPERM') return `this computer didn’t let Central Knot read its folder in ${tool} (${dir}: ${code})`;
-  return `its folder in ${tool} couldn’t be read (${dir}: ${code})`;
+  if (at.isSymbolicLink()) return `a link is in its place in ${tool} (${dir}), and what it leads to couldn’t be read (${code}); remove the link, then try again`;
+  if (!at.isDirectory()) return `a file is in its place in ${tool} (${dir}), where its folder would go; move or delete it, then try again`;
+  if (code === 'EACCES' || code === 'EPERM') return `this computer didn’t let Central Knot read its folder in ${tool} (${dir}: ${code}); allow that, then try again`;
+  return `its folder in ${tool} couldn’t be read (${dir}: ${code}); Refresh, then try again`;
 }
 type There = Extract<OnDisk, { state: 'there' }>;
 

@@ -173,7 +173,8 @@ export function summary(draft: PluginDraft, isUpdate: (op: PluginOp) => boolean 
     const mine = ops.filter(op => op.action === action);
     return { skills: new Set(mine.map(op => `${pluginKey(op.source, op.plugin)}\u0000${op.skill}`)).size, tools: new Set(mine.map(op => op.tool)).size };
   };
-  const plugins = new Set(ops.filter(op => !op.skill).map(op => pluginKey(op.source, op.plugin))).size;
+  // Plugins changed as a whole in some tool; a skill's switch and single parts are counted on their own.
+  const plugins = new Set(ops.filter(op => !op.skill && op.action !== 'pick-parts').map(op => pluginKey(op.source, op.plugin))).size;
   const partsUpdates = ops.filter(op => op.action === 'install-parts' && isUpdate(op)).length;
   const picked = (which: 'on' | 'off') => ops.reduce((sum, op) => sum + (op.pick?.[which].length ?? 0), 0);
   return { plugins, installs: count('install'), updates: count('update'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on'),
