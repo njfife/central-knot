@@ -998,10 +998,14 @@ span.ins-confirm { margin-top: 0; }
 .plugin-row-sep { flex: none; margin: 0 8px; color: var(--ink-faint); }
 .plugin-row-holds { flex: 0 0 auto; max-width: 100%; font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-go { display: grid; place-items: center; }
+/* A tool behind the marketplace: the note, then Update for every such tool, wrapping under it when the name column is narrow. */
+.plugin-row-update { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; min-width: 0; }
+.plugin-row-update > .btn { padding-inline: 0; }
 @container table (width >= 1100px) {
   .plugin-row-name { flex-direction: row; align-items: baseline; }
   .plugin-row-line { flex: 0 1 auto; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
+  .plugin-row-update { flex: none; margin-left: 14px; }
 }
 /* The header's hint keeps to whole lines: a narrow table says only that nothing runs until Apply all. */
 .hint-short { display: none; }

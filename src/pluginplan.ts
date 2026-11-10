@@ -1,15 +1,15 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
-import { cantSwitchSkill, cantUninstall, installed, partsOf, partsOffer, skillOff, unavailable } from './pluginstatus.ts';
+import { cantSwitchSkill, cantUninstall, installed, partsOf, partsOffer, skillOff, stateOf, unavailable } from './pluginstatus.ts';
 import type { ActionReport, HarnessId, MarketplaceView, PluginActionResult, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
- * Install or uninstall a plugin, or turn one of its skills off or back on (ENB-06), in one tool. install-parts: its parts
+ * Install, update or uninstall a plugin, or turn one of its skills off or back on (ENB-06), in one tool. install-parts: its parts
  * as separate items in a tool that can't take the plugin (installed, or brought up to date); remove-parts: those parts out
  * again; undo-parts: an Undo of a parts run (`run`), which only Undo makes.
  */
-export type PluginAction = 'install' | 'remove' | 'skill-off' | 'skill-on' | 'install-parts' | 'remove-parts' | 'undo-parts';
+export type PluginAction = 'install' | 'update' | 'remove' | 'skill-off' | 'skill-on' | 'install-parts' | 'remove-parts' | 'undo-parts';
 /** The parts engine's mode for a parts action (installing also brings parts up to date); undefined for any other action. */
 const PARTS_MODES: Partial<Record<PluginAction, 'install' | 'remove' | 'undo'>> = { 'install-parts': 'install', 'remove-parts': 'remove', 'undo-parts': 'undo' };
 export const partsMode = (action: PluginAction) => PARTS_MODES[action];
@@ -80,7 +80,8 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
 /**
  * Drops choices that no longer mean anything, so none is counted or run unseen: a plugin or marketplace no longer
  * listed, an install the tool can't take now (pluginstatus.unavailable) or already has, an uninstall of something
- * no longer installed or that can't be uninstalled now (pluginstatus.cantUninstall), and a skill switch where the plugin
+ * no longer installed or that can't be uninstalled now (pluginstatus.cantUninstall), an update of one no longer installed,
+ * loaded live from its folder or that can't be changed now (as for an uninstall), and a skill switch where the plugin
  * isn't installed, the tool can't switch it (pluginstatus.cantSwitchSkill), or it already is as chosen. Parts go stale where
  * they can't go in now or are there and up to date, and their removal where none are there.
  */
@@ -93,6 +94,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
     const stale = !view || !entry || !listed || entry.name !== op.marketName || (op.action === 'install'
       ? !!unavailable(view, entry, op.plugin, op.tool) || installed(entry, op.plugin, op.tool)
       : op.action === 'remove' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool)
+      : op.action === 'update' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool) || !!(stateOf(entry, op.plugin, op.tool) as { live?: boolean }).live
       : op.action === 'install-parts' ? !view.canWrite || !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
       : op.action === 'remove-parts' ? !parts || !view.canWrite
       : op.action === 'undo-parts' || skillChoiceStale(view, entry, op));
@@ -127,15 +129,15 @@ export function summary(draft: PluginDraft, isUpdate: (op: PluginOp) => boolean 
   };
   const plugins = new Set(ops.filter(op => !op.skill).map(op => pluginKey(op.source, op.plugin))).size;
   const partsUpdates = ops.filter(op => op.action === 'install-parts' && isUpdate(op)).length;
-  return { plugins, installs: count('install'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on'),
+  return { plugins, installs: count('install'), updates: count('update'), removals: count('remove'), skillsOff: switches('skill-off'), skillsOn: switches('skill-on'),
     partsInstalls: count('install-parts') - partsUpdates, partsUpdates, partsRemovals: count('remove-parts') };
 }
 
-/** One step of a run: one tool command, apart from an install, which runs for every tool chosen at once. */
+/** One step of a run: one tool command, apart from an install or update, which runs for every tool chosen at once. */
 export interface Step { source: string; marketName: string; plugin: string; action: PluginAction; tools: HarnessId[]; skill?: string; run?: string }
 
 /**
- * Runs in a fixed, readable order: per plugin, installs first (one command per tool set), then skill switches, then
+ * Runs in a fixed, readable order: per plugin, installs first, then updates (each one command per tool set), then skill switches, then
  * removals, tool by tool, then parts, tool by tool.
  */
 export function batches(ops: PluginOp[]): Step[] {
@@ -144,8 +146,10 @@ export function batches(ops: PluginOp[]): Step[] {
   const one = (op: PluginOp): Step => ({ source: op.source, marketName: op.marketName, plugin: op.plugin, action: op.action, tools: [op.tool], ...(op.skill ? { skill: op.skill } : {}), ...(op.run ? { run: op.run } : {}) });
   for (const first of plugins) {
     const mine = ops.filter(op => op.source === first.source && op.plugin === first.plugin);
-    const installs = mine.filter(op => op.action === 'install').map(op => op.tool);
-    if (installs.length) out.push({ source: first.source, marketName: first.marketName, plugin: first.plugin, action: 'install', tools: installs });
+    for (const action of ['install', 'update'] as const) {
+      const tools = mine.filter(op => op.action === action).map(op => op.tool);
+      if (tools.length) out.push({ source: first.source, marketName: first.marketName, plugin: first.plugin, action, tools });
+    }
     out.push(...mine.filter(op => op.action === 'skill-off' || op.action === 'skill-on').map(one), ...mine.filter(op => op.action === 'remove').map(one), ...mine.filter(op => isParts(op.action)).map(one));
   }
   return out;
@@ -157,20 +161,21 @@ const OPPOSITE: Partial<Record<PluginAction, PluginAction>> = { install: 'remove
  * The way back: only what this run really changed, reversed, last first (so each Codex skill switch is undone onto the
  * file it wrote, and its earlier bytes come back). "Already installed", failures and unknowns are left alone. A
  * parts run is undone by its own record (undo-parts), so a later step that took what an earlier one freed, such as a
- * skill name, is undone first.
+ * skill name, is undone first. An update has no way back (the tools keep no earlier copy to return to), so it is left out.
  */
 export const reverse = (done: PluginDone[]): PluginOp[] => done
-  .filter(entry => entry.report.changed && (!isParts(entry.action) || entry.report.partsRun))
+  .filter(entry => entry.report.changed && entry.action !== 'update' && (!isParts(entry.action) || entry.report.partsRun))
   .map(({ report, ...op }): PluginOp => (isParts(op.action) ? { ...op, action: 'undo-parts', run: report.partsRun } : { ...op, action: OPPOSITE[op.action]! }))
   .reverse();
 
-/** A tool did what was asked (installed, uninstalled, turned a skill off or on), whether this run changed it or it already was. */
-export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'uninstalled' || report.outcome === 'skill-off' || report.outcome === 'skill-on';
+/** A tool did what was asked (installed, updated, uninstalled, turned a skill off or on), whether this run changed it or it already was. */
+export const succeeded = (report: ActionReport) => report.outcome === 'installed' || report.outcome === 'updated' || report.outcome === 'uninstalled' || report.outcome === 'skill-off' || report.outcome === 'skill-on';
 
 /**
  * One line per plugin (or per skill of it) and outcome, e.g. "document-tools: installed in Claude Code and Codex" or
  * "document-tools: pdf-reader turned off in Codex". What a tool already had is said as such ("already in Codex"), never
- * as a change this run made. For an Undo, the verbs say what came back: "removed from" for an install reversed, "put back
+ * as a change this run made. An update names the version each tool records now and says plainly that it can't be undone.
+ * For an Undo, the verbs say what came back: "removed from" for an install reversed, "put back
  * in" for an uninstall reversed, "back on in" for a skill turned off.
  */
 export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
@@ -184,7 +189,7 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     const tools = (outcome: ActionReport['outcome'], changed: boolean, { parts = false, updated = false } = {}) => mine
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!parts || !changed || !!entry.report.partsUpdated === updated))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
-    const partsGroups: [string[], string][] = [
+    const partsGroups: Group[] = [
       [tools('installed', true, { parts: true }), undo ? 'parts put back in' : 'parts installed in'],
       [tools('installed', true, { parts: true, updated: true }), 'parts updated in'],
       [tools('uninstalled', true, { parts: true }), 'parts removed from'],
@@ -192,13 +197,13 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
         ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]
         : [[tools('installed', false, { parts: true }), 'parts already up to date in'], [tools('uninstalled', false, { parts: true }), 'had no parts in']] as [string[], string][]),
     ];
-    const groups: [string[], string][] = skill
+    const groups: Group[] = skill
       ? [[tools('skill-off', true), undo ? `${skill} off again in` : `${skill} turned off in`], [tools('skill-on', true), undo ? `${skill} back on in` : `${skill} turned on in`],
         [tools('skill-off', false), `${skill} already off in`], [tools('skill-on', false), `${skill} already on in`]]
-      : [[tools('installed', true), undo ? 'put back in' : 'installed in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
+      : [[tools('installed', true), undo ? 'put back in' : 'installed in'], ...updatedGroups(mine), [tools('updated', false), 'already up to date in'], [tools('uninstalled', true), undo ? 'removed from' : 'uninstalled from'],
         [tools('installed', false), 'already in'], [tools('uninstalled', false), 'wasn’t installed in'], ...partsGroups];
     // A skill switch only ever reaches the few tools that have one, so its tools are always named.
-    const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb]) => `${verb} ${counted && !skill && list.length > 2 ? `${list.length} tools` : andList(list)}`).join('; ');
+    const said = (counted: boolean) => groups.filter(([list]) => list.length).map(([list, verb, after = '']) => `${verb} ${counted && !skill && list.length > 2 ? `${list.length} tools` : andList(list)}${after}`).join('; ');
     if (said(false)) lines.push({ source, plugin, ...(skill ? { skill } : {}), ok: true, text: said(false), short: said(true) });
     for (const entry of mine.filter(candidate => !succeeded(candidate.report))) {
       const text = `${names[entry.tool]}${skill ? `, ${skill}` : ''}: ${entry.report.message}`;
@@ -211,6 +216,16 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     }
   }
   return lines;
+}
+
+/** A result group: its tools, the words before them, and any after. */
+type Group = [string[], string, string?];
+/** The tools an update changed, by the version each records now ("updated to 2.0.0 in Claude Code and Codex"), the last group saying it can't be undone. */
+function updatedGroups(mine: PluginDone[]): Group[] {
+  const changed = mine.filter(entry => entry.report.outcome === 'updated' && entry.report.changed).sort((first, second) => byToolOrder(first.tool, second.tool));
+  const versions = [...new Set(changed.map(entry => entry.report.version ?? ''))];
+  return versions.map((version, at): Group => [changed.filter(entry => (entry.report.version ?? '') === version).map(entry => names[entry.tool]),
+    `${at ? '' : 'updated '}${version ? `to ${version} ` : ''}in`, at === versions.length - 1 ? ', which can’t be undone' : undefined]);
 }
 
 /**
@@ -260,6 +275,7 @@ export interface PlanApi {
   install(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstall(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
   setSkill(source: string, marketName: string, plugin: string, skill: string, tool: HarnessId, on: boolean, home: string): Promise<PluginActionResult>;
+  update?(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   parts?(source: string, marketName: string, plugin: string, tool: HarnessId, mode: 'install' | 'remove' | 'undo', run: string | undefined, home: string): Promise<PluginActionResult>;
 }
 
@@ -275,6 +291,7 @@ export async function runPlan(ops: PluginOp[], api: PlanApi, home: string, onSte
     let result: PluginActionResult;
     try {
       result = step.action === 'install' ? await api.install(step.source, step.marketName, step.plugin, step.tools, home)
+        : step.action === 'update' ? (api.update ? await api.update(step.source, step.marketName, step.plugin, step.tools, home) : { reports: failedFor(step.tools, 'Plugins can’t be updated here.') })
         : step.action === 'remove' ? await api.uninstall(step.source, step.marketName, step.plugin, step.tools[0]!, home)
         : isParts(step.action) ? (api.parts ? await api.parts(step.source, step.marketName, step.plugin, step.tools[0]!, partsMode(step.action)!, step.run, home) : { reports: failedFor(step.tools, 'Parts can’t be installed here.') })
         : step.skill ? await api.setSkill(step.source, step.marketName, step.plugin, step.skill, step.tools[0]!, step.action === 'skill-on', home)

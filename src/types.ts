@@ -134,6 +134,7 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  updatePlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   /** The git repo the Managed set lives in, if any. `check` asks the repo for its latest commit first. */
   repo(check?: boolean): Promise<RepoView | null>;
   connectRepo(url: string, branch: string, home: string): Promise<RepoResult>;
@@ -387,7 +388,8 @@ export interface Outcome { component: string; result: 'works' | 'limited' | 'ign
 
 export interface NativeRun { tool: HarnessId; command: string; ok: boolean; output: string; changed: { path: string; before: string | null; after: string | null }[] }
 
-export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+export interface ActionReport { tool: HarnessId; outcome: 'installed' | 'uninstalled' | 'updated' | 'skill-off' | 'skill-on' | 'held' | 'failed' | 'not-known'; message: string; runs: NativeRun[]; /** This action changed what the tool has (Undo reverses only these). */ changed?: boolean;
+  /** An update: the version the tool records now. */ version?: string;
   /** Parts already there were brought up to date, not installed new. */ partsUpdated?: boolean; /** The parts run to undo, when it changed something. */ partsRun?: string;
   /** Parts left alone this run, each saying why (edited since, a same-named item already there): shown to be read. */ notes?: string[] }
 

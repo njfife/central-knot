@@ -5,7 +5,7 @@ import { afterLayout, button, fileBlocks, h, icon, toggle as switchToggle, withT
 import { brandMark } from './brand.ts';
 import { groupBy } from './model.ts';
 import { componentsFrom, outcomes } from './pluginoutcomes.ts';
-import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
+import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { cantSwitchSkill, comparableText, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partStillIn, partsWhy, partWords, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
@@ -56,8 +56,8 @@ function installedLine(version: string | undefined, offered: string | undefined,
 /**
  * Where to install it: a box per tool with a status line that is always there (a tool on another version than the
  * marketplace offers adds a second, "Marketplace has …"), and at the right of the heading row (always the same height)
- * one button: choose it for every tool still without it, or, once every tool has it, choose to uninstall it from all of
- * them. An installed tool's line names its version, compared with `compareTo` (see versionToCompare).
+ * one button: Update, where any tool's copy or parts are out of date; else choose it for every tool still without it,
+ * or, once every tool has it, choose to uninstall it from all of them. An installed tool's line names its version, compared with `compareTo` (see versionToCompare).
  */
 function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginView, marketIndex: number, compareTo: string | undefined, components?: Components) {
   const missing = toolsWithoutPlugin(view, entry, plugin.name);
@@ -67,7 +67,7 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   const status = (tool: HarnessId) => {
     const chosen = queued(market.draft, entry.source, plugin.name, tool);
     const parts = partsOf(entry, plugin.name, tool);
-    if (chosen) return ({ install: 'Will install', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts' } as Partial<Record<PluginAction, string>>)[chosen] ?? '';
+    if (chosen) return ({ install: 'Will install', update: compareTo ? `Will update to ${compareTo}` : 'Will update', remove: 'Will uninstall', 'install-parts': parts ? 'Will update its parts' : 'Will install its parts', 'remove-parts': 'Will remove its parts' } as Partial<Record<PluginAction, string>>)[chosen] ?? '';
     const state = stateOf(entry, plugin.name, tool);
     if (state.state === 'installed') {
       const switching = (action: PluginOp['action']) => skillChoices(market.draft, entry.source, plugin.name, { tool }).filter(op => op.action === action).length;
@@ -90,7 +90,8 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
   // Once no tool is missing it, the same button chooses its uninstall everywhere it can be uninstalled.
   const removals: PluginOp[] = removableTools(view, entry, plugin.name).map(tool => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action: 'remove' }));
   const batch = ops.length ? ops : removals;
-  const allButton = batch.length && view.canWrite ? button({
+  const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
+  const allButton = updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`) : batch.length && view.canWrite ? button({
     variant: 'outline', size: 'small', id: `pinstall-${marketIndex}-${plugin.name}`, disabled: !!app.busy,
     // An uninstall only chooses (the ellipsis says more is to come: Apply all); the boxes then read "Will uninstall".
     label: allQueued(market.draft, batch) ? 'Choose none'

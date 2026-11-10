@@ -33,6 +33,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
+    update: async (_context, _catalog, plugin, tool) => { calls.push(`update ${plugin} ${tool}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
   return { base, home, calls, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };

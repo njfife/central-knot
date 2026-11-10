@@ -21,7 +21,7 @@ test('Install in all queues every tool, and a second click clears them all', () 
   const ops = [op('pdf', 'claude-cli'), op('pdf', 'codex-cli')];
   toggle(draft, ops[0]!);
   toggleMany(draft, ops);
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, removals: 0, skillsOff: { skills: 0, tools: 0 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0 });
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 2, updates: 0, removals: 0, skillsOff: { skills: 0, tools: 0 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0 });
   toggleMany(draft, ops);
   assert.equal(draft.size, 0);
 });
@@ -33,6 +33,16 @@ test('Apply all runs each plugin’s installs as one command, then its removals 
     ['pdf', 'remove', ['copilot-cli']],
     ['docx', 'remove', ['codex-cli']],
   ]);
+});
+
+test('Updates run after a plugin’s installs as one command, are never undone, and the result names the new version and says so', () => {
+  assert.deepEqual(batches([op('pdf', 'claude-cli', 'update'), op('pdf', 'pi-cli', 'install-parts'), op('pdf', 'copilot-cli'), op('pdf', 'codex-cli', 'update')]).map(step => [step.action, step.tools]),
+    [['install', ['copilot-cli']], ['update', ['claude-cli', 'codex-cli']], ['install-parts', ['pi-cli']]]);
+  const updated = (tool: HarnessId, version: string, changed = true): PluginDone => ({ ...op('pdf', tool, 'update'), report: { tool, outcome: 'updated', message: '', runs: [], version, ...(changed ? { changed } : {}) } });
+  const done = [updated('codex-cli', '2.0.0'), updated('claude-cli', '2.0.0'), updated('copilot-cli', '2.0.0', false), { ...op('pdf', 'pi-cli', 'install-parts'), report: { tool: 'pi-cli' as const, outcome: 'installed' as const, message: '', runs: [], changed: true, partsUpdated: true, partsRun: 'run-1' } }];
+  assert.deepEqual(reverse(done).map(entry => [entry.tool, entry.action]), [['pi-cli', 'undo-parts']], 'only the parts come back out');
+  assert.equal(resultLines(done)[0]?.text, 'updated to 2.0.0 in Claude Code and Codex, which can’t be undone; already up to date in Copilot CLI; parts updated in Pi');
+  assert.equal(resultLines([updated('codex-cli', '2.0.0'), updated('claude-cli', '1.9.5')])[0]?.text, 'updated to 1.9.5 in Claude Code; to 2.0.0 in Codex, which can’t be undone');
 });
 
 test('Undo reverses only what really changed, and the report names each plugin once per marketplace', () => {
@@ -144,7 +154,7 @@ test('A skill’s switch is its own choice: it runs between installs and removal
   assert.equal(queued(draft, 'anthropics/skills', 'docs', 'codex-cli', 'pdf-reader'), 'skill-off');
   toggle(draft, off('codex-cli', 'spreadsheet'));
   toggle(draft, off('copilot-cli'));
-  assert.deepEqual(summary(draft), { plugins: 1, installs: 0, removals: 1, skillsOff: { skills: 1, tools: 2 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0 }, 'one skill in two tools counts once');
+  assert.deepEqual(summary(draft), { plugins: 1, installs: 0, updates: 0, removals: 1, skillsOff: { skills: 1, tools: 2 }, skillsOn: { skills: 0, tools: 0 }, partsInstalls: 0, partsUpdates: 0, partsRemovals: 0 }, 'one skill in two tools counts once');
   toggle(draft, off('copilot-cli'));
   assert.deepEqual(batches([...draft.values(), op('docs', 'claude-cli')]).map(step => [step.action, step.skill]), [['install', undefined], ['skill-off', 'pdf-reader'], ['remove', undefined]]);
   const done = (tool: HarnessId, outcome: 'skill-off' | 'skill-on', changed?: boolean): PluginDone => ({ ...off(tool), action: outcome, report: { tool, outcome, message: '', runs: [], changed } });

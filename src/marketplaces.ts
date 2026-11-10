@@ -43,6 +43,7 @@ export interface MarketplaceEngine {
   readRemotePlugin: typeof engine.readRemotePlugin;
   install: typeof engine.install;
   uninstall: typeof engine.uninstall;
+  update: typeof engine.update;
   setSkill: typeof engine.setSkill;
 }
 
@@ -60,7 +61,7 @@ async function findClis(): Promise<Partial<Record<HarnessId, string>>> {
   }
   return found;
 }
-const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, setSkill: engine.setSkill };
+const realEngine: MarketplaceEngine = { findClis, checkAccess: engine.checkAccess, readCatalog: engine.readCatalog, readRemotePlugin: engine.readRemotePlugin, install: engine.install, uninstall: engine.uninstall, update: engine.update, setSkill: engine.setSkill };
 
 /** Tools named by the page: only those that install plugins. */
 const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools);
@@ -340,10 +341,10 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   };
 
   /**
-   * Each tool's own install. A plugin gone from the marketplace, or a marketplace that now gives another name than the
-   * one chosen (`marketName`), fails for its tools instead of stopping the whole run.
+   * Each tool's own install (or with `run`, its update). A plugin gone from the marketplace, or a marketplace that now
+   * gives another name than the one chosen (`marketName`), fails for its tools instead of stopping the whole run.
    */
-  async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown): Promise<PluginActionResult> {
+  async function install(source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown, run = use.install): Promise<PluginActionResult> {
     const stopped = await guard(home);
     if (stopped) return { stopped, reports: [] };
     const ctx: engine.PluginContext = { ...(await context({ clis: true })), checked: new Map() };
@@ -353,11 +354,14 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     // One tool's error fails that tool only: what earlier tools did stays reported (and undoable), and later tools still run.
     const reports: ActionReport[] = [];
     for (const tool of tools) {
-      try { reports.push(await use.install(ctx, catalog, plugin, tool)); }
+      try { reports.push(await run(ctx, catalog, plugin, tool)); }
       catch (error) { reports.push(...failedFor([tool], `It stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)); }
     }
     return { reports: withoutFileBytes(reports) };
   }
+
+  /** Each tool's own update of an installed plugin, checked as install is. */
+  const update = (source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown) => install(source, marketName, plugin, tools, home, use.update);
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
@@ -411,7 +415,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
-  return { view, detail, readme, add, forget, install, uninstall, setSkill, partsPlan, parts };
+  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -437,6 +441,7 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
   // A malformed step fails for its tools, so it never stops (and then blocks) every later Apply all.
   const refused = (tools: unknown) => ({ reports: failedFor(toolIds(Array.isArray(tools) ? tools : [tools]), 'That request was malformed, so nothing ran.') });
   handle('plugins:install', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.install(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
+  handle('plugins:update', async (source, marketName, plugin, tools, home) => (open() && isText(source) && isName(marketName) && isName(plugin) ? markets.update(source, marketName, plugin, toolIds(tools), home) : refused(tools)));
   handleNow('plugins:parts-plan', async (source, plugin) => (open() && isText(source) && isName(plugin) ? markets.partsPlan(source, plugin) : null));
   handle('plugins:parts', async (source, marketName, plugin, tool, mode, run, home) => {
     const ids = onlyAllowed([tool], partsTools);

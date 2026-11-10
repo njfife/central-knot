@@ -7,9 +7,9 @@ import { button, closeButton, emptyState, h, icon, pendingCount, rereadBand, wit
 import { brandMark } from './brand.ts';
 import { clockTime, plural } from './model.ts';
 import { pluginPage } from './pluginpage.ts';
-import { componentsOf, dotted, pluginTitle, readme, toolBox, versionNote } from './pluginparts.ts';
-import { resultLines, pluginKey, queued, resultParts, resultSentence, summary, type ResultLine } from './pluginplan.ts';
-import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, versionToCompare } from './pluginstatus.ts';
+import { componentsOf, dotted, pluginTitle, readme, toolBox, updateButton, updateOps, versionNote } from './pluginparts.ts';
+import { allQueued, resultLines, pluginKey, queued, resultParts, resultSentence, summary, toggleMany, type ResultLine } from './pluginplan.ts';
+import { FIND_FROM, blocked, categoriesOf, installed, marketTitle, offeredVersion, otherVersions, otherVersionsLine, partsMark, partsOf, partsOffer, stateOf, summaryOf, unavailable, updateTools, versionToCompare } from './pluginstatus.ts';
 import { ACTIVITIES, addMarketplace, applyPluginOps, browse, clearNotice, current, dismissProblems, forgetMarketplace, market, openLink, pickMarketplaceFolder, shownDetail, shownPlugins, undoOps } from './pluginstate.ts';
 import { takesPlugins } from './presence.ts';
 import { componentsFrom } from './pluginoutcomes.ts';
@@ -65,6 +65,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
   const compareTo = versionToCompare(plugin, detail);
   const others = otherVersions(view, entry, plugin.name, compareTo);
+  const updates = view.canWrite ? updateOps(view, entry, plugin) : [];
+  const partsBehind = [...new Set(updates.filter(op => op.action === 'install-parts').map(op => names[op.tool]))];
   const open = () => browse({ plugin: plugin.name });
   return h('div.ov-row.plugin-row', { role: 'row', 'data-plugin': plugin.name, onclick: open },
     h('div.ov-name.plugin-row-name', { role: 'cell' },
@@ -77,8 +79,10 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
         plugin.description ? h('span.plugin-row-about', { title: plugin.description }, plugin.description) : null,
         plugin.description && holds ? h('span.plugin-row-sep', { 'aria-hidden': 'true' }, '·') : null,
         holds ? h('span.plugin-row-holds', { title: holds }, holds) : null) : null,
-      // A tool on another version, on its own line under that.
-      others.length ? versionNote(h('span', {}, otherVersionsLine(others)), '.plugin-row-warning') : null),
+      // A tool on another version, on its own line under that, with Update for every tool that is behind.
+      others.length || updates.length ? h('span.plugin-row-update', {},
+        others.length || partsBehind.length ? versionNote(h('span', {}, others.length ? [otherVersionsLine(others), partsBehind.length ? `parts out of date in ${andList(partsBehind)}` : ''].filter(Boolean).join(', ') : `Parts out of date in ${andList(partsBehind)}`), '.plugin-row-warning') : null,
+        updates.length ? updateButton(updates, `pupdate-${marketIndex}-${plugin.name}`, { row: true }) : null) : null),
     view.tools.map(tool => toolBox(view, entry, plugin, tool, marketIndex, compareTo)),
     h('div.ov-cell.plugin-row-go', { role: 'cell', 'aria-hidden': 'true' }, icon('chevron-right', 14, 'tone-faint')));
 }
@@ -123,10 +127,16 @@ function pluginsTab(view: PluginsView, entry: MarketplaceView, marketIndex: numb
   // Where a box offers a plugin's parts, the hint says so above the rows, where the choice is made.
   const partsColumns = view.tools.filter(tool => shown.some(plugin => partsOffer(view, entry, plugin.name, tool, componentsOf(entry, plugin)) && !partsOf(entry, plugin.name, tool)));
   const partsHint = partsColumns.length ? `A hatched box with a plus (${andList(partsColumns.map(tool => names[tool]))}) installs the plugin’s parts instead, as separate items.` : '';
+  // With more than one plugin behind, one button chooses every update in this marketplace.
+  const behind = view.canWrite ? entry.plugins.filter(plugin => updateOps(view, entry, plugin).length) : [];
+  const allUpdates = behind.flatMap(plugin => updateOps(view, entry, plugin));
+  const updateAll = behind.length > 1 ? h('p.market-hint', {}, icon('refresh-cw', 13, 'tone-warning'), h('span', {}, `${behind.length} plugins have an update. `,
+    button({ variant: 'link', size: 'micro', id: `market-update-all-${marketIndex}`, label: allQueued(market.draft, allUpdates) ? 'Don’t update them' : 'Update all', onclick: () => { toggleMany(market.draft, allUpdates); clearNotice(); rerender(); } }))) : null;
   return [
     reasons.length && someCan ? h('p.market-hint', {}, icon('circle-alert', 13, 'tone-warning'), h('span', {}, `${[...reasons, partsHint].filter(Boolean).join(' ')} `,
       button({ variant: 'link', size: 'micro', label: 'See Harnesses', id: `market-tools-${marketIndex}`, onclick: () => showPage('harnesses') })))
       : partsHint && view.canWrite ? h('p.market-hint', {}, icon('info', 13, 'tone-muted'), h('span', {}, partsHint)) : null,
+    updateAll,
     shown.length
       ? withToolCount(h('div.ov.plugin-table', { role: 'table', 'aria-label': `Plugins in ${entry.name}` }, head, shown.map(plugin => pluginRow(view, entry, marketIndex, plugin))), view.tools.length)
       : h('p.market-empty', {}, entry.plugins.length ? 'No plugin matches.' : entry.problem ? '' : 'This marketplace lists no plugins.'),
@@ -181,6 +191,7 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   const markOf = (plugin: PluginView, tool: Parameters<typeof unavailable>[3]) => {
     const mark = partsMark(view, entry, plugin.name, tool, componentsOf(entry, plugin));
     if (mark) return ({ changed: 'parts-changed', installed: 'parts', offer: 'parts-offer' } as const)[mark];
+    if (updateTools(view, entry, plugin.name, versionToCompare(plugin, shownDetail(pluginKey(entry.source, plugin.name)))).plugin.includes(tool)) return 'outdated';
     return unavailable(view, entry, plugin.name, tool) ? 'cannot' : stateOf(entry, plugin.name, tool).state;
   };
   const marks = new Set(entry.plugins.flatMap(plugin => view.tools.map(tool => markOf(plugin, tool))));
@@ -188,17 +199,20 @@ function legend(view: PluginsView, entry: MarketplaceView) {
   const unknown = marks.has('not-known');
   const cannot = marks.has('cannot');
   const parts = (['parts-offer', 'parts', 'parts-changed'] as const).filter(mark => marks.has(mark));
-  if (!unknown && !cannot && !parts.length && !chosen.size) return null;
+  const behind = marks.has('outdated') || marks.has('parts-changed');
+  if (!unknown && !cannot && !parts.length && !behind && !chosen.size) return null;
   const item = (label: string, node: HTMLElement) => h('span.legend-item', {}, node, label);
   return h('div.legend.plugin-legend', { 'aria-label': 'Key' },
     unknown ? item('Unknown: the tool didn’t confirm the install', h('span.legend-cell.cell-differs', {}, icon('circle-question-mark', 11))) : null,
     cannot ? item('Not available there', h('span.legend-cell.cell-cannot', {})) : null,
     marks.has('parts-offer') ? item('Install its parts instead', h('span.legend-cell.cell-parts-offer', {}, icon('plus', 9))) : null,
     marks.has('parts') ? item('Parts installed', h('span.legend-cell.cell-synced.cell-on', {}, icon('blocks', 10))) : null,
-    marks.has('parts-changed') ? item('Parts out of date: click to update', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
+    // A plugin and its parts out of date are one idea: the same box, the same words.
+    behind ? item('Out of date: click to update', h('span.legend-cell.cell-differs.cell-on', {}, icon('refresh-cw', 10))) : null,
     chosen.size ? h('span.legend-group', {}, h('span.legend-lead', {}, 'On Apply all:'),
       chosen.has('install') ? item('installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('check', 10))) : null,
       chosen.has('install-parts') ? item('parts installed', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('blocks', 10))) : null,
+      chosen.has('update') ? item('updated', h('span.legend-cell.cell-pending.cell-chosen.cell-on', {}, icon('refresh-cw', 10))) : null,
       chosen.has('remove') ? item('uninstalled', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null,
       chosen.has('remove-parts') ? item('parts removed', h('span.legend-cell.cell-pending.cell-pending-remove', {}, icon('x', 10))) : null) : null);
 }
@@ -224,7 +238,7 @@ function toolbarRight(lines: ResultLine[]): HTMLElement | null {
   if (market.draft.size) {
     // "1 skill to turn off in 2 tools": a skill is counted once, however many tools it changes in.
     const switches = ({ skills, tools }: { skills: number; tools: number }, verb: string) => (skills ? `${plural(skills, 'skill')} to turn ${verb}${tools > 1 ? ` in ${tools} tools` : ''}` : '');
-    const pending = [counts.plugins ? plural(counts.plugins, 'change') : '', counts.installs ? plural(counts.installs, 'install') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
+    const pending = [counts.plugins ? plural(counts.plugins, 'change') : '', counts.installs ? plural(counts.installs, 'install') : '', counts.updates ? plural(counts.updates, 'update') : '', counts.removals ? plural(counts.removals, 'uninstall') : '',
       counts.partsInstalls ? `install parts in ${plural(counts.partsInstalls, 'tool')}` : '', counts.partsUpdates ? `update parts in ${plural(counts.partsUpdates, 'tool')}` : '', counts.partsRemovals ? `remove parts from ${plural(counts.partsRemovals, 'tool')}` : '',
       switches(counts.skillsOff, 'off'), switches(counts.skillsOn, 'on')].filter(Boolean).join(' · ');
     return h('div.apply', {},

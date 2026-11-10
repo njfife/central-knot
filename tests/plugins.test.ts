@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { tomlValue } from '../src/textedit.ts';
 import { compareVersions } from '../src/values.ts';
 import { INLINE_SKILLS_CONFIG } from '../src/pluginstatus.ts';
-import { cachedCatalog, checkAccess, gitFailure, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, type PluginContext } from '../src/plugins.ts';
+import { cachedCatalog, checkAccess, gitFailure, whyGitFailed, install, installState, parseCatalog, readCatalog, registeredMarketplaces, sameSource, setSkill, uninstall, update, type PluginContext } from '../src/plugins.ts';
 
 const noPosix = process.platform === 'win32';
 
@@ -447,6 +447,56 @@ esac
     assert.deepEqual([removed.outcome, removed.changed], ['uninstalled', true], removed.message);
     const back = await install(context, catalog, 'marker', 'claude-cli');
     assert.deepEqual(back.runs.map(run => run.command), ['claude plugin install marker@ck-test-market --scope user'], 'the marketplace Claude Code recorded is found, so it isn’t added twice');
+  } finally { await box.cleanup(); }
+});
+
+test('Update refreshes the tool’s copy of a Git marketplace, then takes the new version, read back from the tool’s own record', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const url = 'https://example.test/team/market.git';
+    // Codex has full 1.0.0 from that marketplace. Its stand-in moves the copy to 2.0.0 only once its marketplace is upgraded.
+    await put(join(box.home, '.codex/plugins/cache/ck-test-market/full/1.0.0/skills/one/SKILL.md'), '---\nname: one\n---\n');
+    await put(join(box.home, '.codex/config.toml'), `[marketplaces.ck-test-market]\nsource = "${url}"\n\n[plugins."full@ck-test-market"]\nenabled = true\n`);
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'codex'), `#!/bin/sh
+echo "$*" >> "$HOME/calls.txt"
+case "$3" in
+  upgrade) touch "$HOME/upgraded" ;;
+  full@ck-test-market) [ -f "$HOME/upgraded" ] && mkdir -p "$HOME/.codex/plugins/cache/ck-test-market/full/2.0.0/skills/one" && cp "$HOME/.codex/plugins/cache/ck-test-market/full/1.0.0/skills/one/SKILL.md" "$HOME/.codex/plugins/cache/ck-test-market/full/2.0.0/skills/one/" ;;
+esac
+exit 0
+`, { mode: 0o755 });
+    const read = await parseCatalog(root, root, 'folder');
+    const catalog = { ...read, kind: 'git' as const, source: url, plugins: read.plugins.map(plugin => (plugin.name === 'full' ? { ...plugin, version: '2.0.0' } : plugin)) };
+    const context = { ...box.context, binaries: { 'codex-cli': join(bin, 'codex') } as PluginContext['binaries'] };
+    const report = await update(context, catalog, 'full', 'codex-cli');
+    assert.deepEqual([report.outcome, report.changed, report.version], ['updated', true, '2.0.0'], report.message);
+    assert.deepEqual(report.runs.map(run => run.command), ['codex plugin marketplace upgrade ck-test-market', 'codex plugin add full@ck-test-market --json']);
+    const again = await update(context, catalog, 'full', 'codex-cli');
+    assert.deepEqual([again.outcome, again.changed, again.runs.length], ['updated', undefined, 0], 'up to date already runs nothing and changes nothing');
+  } finally { await box.cleanup(); }
+});
+
+test('An update the tool says it ran but its record doesn’t show fails with what the tool said', { skip: noPosix }, async () => {
+  const box = await sandbox();
+  try {
+    const root = join(box.base, 'market');
+    await marketplace(root);
+    const copy = join(box.home, '.claude/plugins/cache/ck-test-market/full/0.9.0');
+    await put(join(copy, '.claude-plugin/plugin.json'), '{"name":"full","version":"0.9.0"}');
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ plugins: { 'full@ck-test-market': [{ scope: 'user', installPath: copy, version: '0.9.0' }] } }));
+    const bin = join(box.base, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, 'claude'), '#!/bin/sh\necho "$*" >> "$HOME/calls.txt"\necho "ck-marker is already at the latest version (0.9.0)."\n', { mode: 0o755 });
+    const context = { ...box.context, binaries: { 'claude-cli': join(bin, 'claude') } as PluginContext['binaries'] };
+    // A folder marketplace has no copy of its own to refresh in the tool: only the update runs.
+    const report = await update(context, await parseCatalog(root, root, 'folder'), 'full', 'claude-cli');
+    assert.equal(report.outcome, 'failed');
+    assert.match(report.message, /^Still 0\.9\.0 in Claude Code; the marketplace has 1\.0\.0\. .*already at the latest/);
+    assert.equal(await readFile(join(box.home, 'calls.txt'), 'utf8'), 'plugin update full@ck-test-market --scope user\n');
   } finally { await box.cleanup(); }
 });
 
