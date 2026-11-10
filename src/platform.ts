@@ -1,4 +1,10 @@
-import { isAbsolute, join } from 'node:path';
+import { delimiter, dirname, isAbsolute, join } from 'node:path';
+
+/**
+ * PATH for running a CLI: its own folder first. An app opened from Finder or a launcher gets a short PATH, and a CLI that
+ * is a script (Codex and Copilot CLI from npm run on Node) finds its interpreter beside itself.
+ */
+export const pathBeside = (binary: string) => [dirname(binary), process.env.PATH].filter(Boolean).join(delimiter);
 
 /** An app's own bundled copy of a CLI (ChatGPT desktop's Codex): it shows the app is there, but never counts as the CLI. */
 export const isBundledCli = (path: string) => path.includes('/ChatGPT.app/');

@@ -275,6 +275,9 @@ function blockNodes(blocks: Block[], open: (url: string) => void): HTMLElement[]
   });
 }
 
+/** One line of text as elements, its `code` spans (a command to type) and links rendered as in a README. */
+export const inlineMarkdown = (text: string, open: (url: string) => void) => inlineNodes(parseInline(text), open);
+
 /** A README as elements, built from text nodes only. */
 export function markdown(source: string, open: (url: string) => void, options: MarkdownOptions = {}): HTMLElement {
   return h('div.md', {}, blockNodes(trimRepeats(parseMarkdown(source), options), open));

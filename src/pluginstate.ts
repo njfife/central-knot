@@ -151,9 +151,13 @@ export async function loadPlugins(fresh = false, readId?: number): Promise<void>
     if (fresh) { market.readmes.clear(); market.details.clear(); }
     else for (const entry of market.view?.marketplaces ?? []) if (entry.kind === 'folder') dropReads(entry.source);
     settleView();
+    markReread();
   }
   rerender();
 }
+
+/** The tools were read again: the last run's result is only named from now on (its Undo stays), never restated over a page that may differ. */
+const markReread = () => { if (market.lastRun) market.lastRun = { ...market.lastRun, reread: true }; };
 
 /** Runs an action with the page saying what it is doing. */
 function act(activity: MarketActivity, work: () => Promise<void>) {
@@ -202,7 +206,7 @@ export const openLink = (url: string) => void api().openExternal(url);
 export const applyPluginOps = (ops: PluginOp[], undo = false) => act(undo ? 'undoing' : 'applying', async () => {
   const home = app.home!.home;
   market.problem = undefined;
-  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin };
+  const planApi = { install: api().installPlugin, uninstall: api().uninstallPlugin, setSkill: api().setPluginSkill };
   let result: Awaited<ReturnType<typeof runPlan>> = { done: [] };
   try {
     result = await runPlan(ops, planApi, home, step => { market.working = { source: step.source, plugin: step.plugin, tools: step.tools }; rerender(); });

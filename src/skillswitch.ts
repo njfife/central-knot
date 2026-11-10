@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { toolConfigRoot } from './harnesses.ts';
 import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
-import { appendTomlTable, eolOf, readTomlTables, removeTomlTables, setJsonMember, tableEnd, tomlValue, type TomlTable } from './textedit.ts';
+import { editTomlArray, readTomlTables, setJsonMember, tomlValue, type TomlTable } from './textedit.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
 export type { SwitchTarget };
 import { problemText, toolName } from './words.ts';
@@ -191,17 +191,14 @@ function withSwitch(context: ShareContext, file: SwitchFile, target: SwitchTarge
  * matching rule wins. A file with Windows line ends gets them in what is added too.
  */
 function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarget, disabled: boolean): string {
-  const eol = eolOf(text);
-  /** The rule Central Knot writes for this copy, saying `enabled`. */
-  const ruleSaying = (enabled: boolean) => ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${enabled}`].join(eol);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
   const wantEnabled = !disabled;
-  // Ours to take out: our own rule saying the opposite of what is wanted now.
-  const staleRule = ruleSaying(!wantEnabled);
-  const isOurs = (rule: CodexRule) => text.slice(rule.table.start, tableEnd(text, rule.table)).trimEnd() === staleRule;
-  const ours = codexRules(text).filter(rule => isPathOf(rule, target.skillFile) && isOurs(rule));
-  let out = removeTomlTables(text, ours.map(rule => rule.table));
-  // A removed rule at the end of the file takes the blank line before it too; one in the middle took its own after it.
-  if (ours.some(rule => tableEnd(text, rule.table) === text.length)) out = out.replace(/(\r?\n)\r?\n$/, '$1');
+  // Ours to take out: our own rule (as editTomlArray writes it) saying the opposite of what is wanted now. Comment lines
+  // at a table's end sit above the next header and belong to what follows.
+  const staleRule = ['[[skills.config]]', `path = ${tomlValue(target.skillFile)}`, `enabled = ${!wantEnabled}`].join(eol);
+  const ownText = (table: TomlTable) => text.slice(table.start, table.end).replace(/(?:\r?\n[ \t]*(?:#[^\n]*)?)+$/, '').trimEnd();
+  const ours = new Set(codexRules(text).filter(rule => isPathOf(rule, target.skillFile) && ownText(rule.table) === staleRule).map(rule => rule.table.start));
+  let out = ours.size ? editTomlArray(text, ['skills', 'config'], table => ours.has(table.start)) : text;
   // The person's own rules for this path, from the last, so earlier offsets stay right.
   for (const rule of codexRules(out).filter(candidate => isPathOf(candidate, target.skillFile)).reverse()) {
     const entry = rule.table.entries.find(candidate => candidate.key === 'enabled');
@@ -213,5 +210,5 @@ function codexWithSwitch(context: ShareContext, text: string, target: SwitchTarg
       : `${out.slice(0, headerEnd)}${value}${eol}${out.slice(headerEnd)}`;
   }
   if (stateIn(context, 'codex-cli', { rules: codexRules(out) }, target).disabled === disabled) return out;
-  return appendTomlTable(out, `${ruleSaying(wantEnabled)}${eol}`);
+  return editTomlArray(out, ['skills', 'config'], () => false, { path: target.skillFile, enabled: wantEnabled });
 }
