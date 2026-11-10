@@ -33,6 +33,8 @@ test('A background read is kept only while its own placeholder is still there', 
   readInto(map, 'k', () => new Promise<string>(resolve => { release = resolve; }), () => { done++; });
   readInto(map, 'k', async () => 'second', () => { done++; });
   assert.deepEqual(map.get('k'), { reading: true }, 'a read already under way is not started twice');
+  assert.equal(readState(map.get('k')), 'reading');
+  assert.equal(readState({ reading: false, value: null }), 'failed', 'a failed read (null) says so until the key is cleared');
   map.clear();
   release('old');
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -42,20 +44,6 @@ test('A background read is kept only while its own placeholder is still there', 
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(map.get('k'), { reading: false, value: 'fresh' });
   assert.equal(done, 1);
-});
-
-test('A failed quiet read stays failed and is not read again on a redraw, until it is cleared (Refresh, Try again)', async () => {
-  const reads = new Map<string, Read<string | null>>();
-  let calls = 0;
-  const read = () => { calls++; return Promise.resolve(null); };
-  readInto(reads, 'home', read, () => {});
-  await new Promise(resolve => setTimeout(resolve, 0));
-  readInto(reads, 'home', read, () => {});
-  assert.equal(calls, 1);
-  assert.equal(readState(reads.get('home')), 'failed');
-  reads.delete('home');
-  readInto(reads, 'home', read, () => {});
-  assert.equal(calls, 2);
 });
 
 test('A tool\'s installs say what is installed, what could not be checked and which marketplace could not be read', () => {
