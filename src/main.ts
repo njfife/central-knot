@@ -7,7 +7,7 @@ import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { discover } from './discovery.ts';
 import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
-import { CLAUDE_PROCESS, appCandidates, executableCandidates } from './platform.ts';
+import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
 import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
@@ -32,6 +32,8 @@ function log(line: string) {
   try { appendFileSync(logPath(), `${new Date().toISOString()} ${line}\n`); } catch { /* best effort */ }
 }
 if (smoke) app.setPath('userData', mkdtempSync(join(tmpdir(), 'central-knot-smoke-')));
+// Asked now, while the window is being made, so the first read of this computer's tools doesn't wait on a shell's startup.
+void searchPath();
 const BUILD = 'com.centralknot.firstlook';
 let window: BrowserWindow;
 let current: { mode: HomeMode; home: string; label: string } | undefined;
@@ -73,9 +75,10 @@ const overrideFor = (id: HarnessId) => (current?.mode === 'actual' ? process.env
 
 async function read(): Promise<Snapshot[]> {
   const { mode, home } = current!;
+  const path = mode === 'actual' ? await searchPath() : '';
   return Promise.all(harnessIds.map(id => discover({
     home, mode, harness: id, configOverride: overrideFor(id),
-    binaries: mode === 'actual' ? executableCandidates(home, process.env.PATH ?? '', harnesses[id].binary) : [],
+    binaries: mode === 'actual' ? executableCandidates(home, path, harnesses[id].binary) : [],
     apps: mode === 'actual' ? appCandidates(home, harnesses[id].binary) : [],
     runProbes: mode === 'actual',
   })));
@@ -393,7 +396,7 @@ interface PassResult { skills?: ApplyResult; mcpAndAgents?: McpAndAgentsResult }
  * `snapshots`: the caller's read of the home, which the pass uses instead of reading it again.
  */
 async function pass(snapshots: Snapshot[], explicit = false): Promise<PassResult> {
-  const shared: ShareContext = { ...context(), read: async () => snapshots };
+  const shared: ShareContext = { ...context(), read: async () => snapshots, reads: new Map() };
   if (!(await syncsHere(shared))) return {};
   const skills = await applyChanges(shared, [], false, { observeOnly: !syncOn && !explicit });
   // MCP servers catch up with the same switch: edits and deletions spread with Sync on (Claude Code still waits for Write now).
@@ -421,7 +424,7 @@ function keepMcpAndAgents(outcome: McpAndAgentsResult | undefined) {
 }
 
 async function syncThenView(explicit = false): Promise<HomeView> {
-  const shared = context();
+  const shared: ShareContext = { ...context(), reads: new Map() };
   const before = await read();
   const { skills, mcpAndAgents } = await pass(before, explicit);
   keepMcpAndAgents(mcpAndAgents);

@@ -12,7 +12,9 @@ import {
 } from './share.ts';
 import { parseSkill } from './discovery.ts';
 import { isDisabled, readKeptOverrides, readSwitchFile, setDisabled, switchFailure, unverifiedBuild, type SwitchTarget } from './skillswitch.ts';
-import { problemText, toolName } from './words.ts';
+import { problemText, throughPlugin, toolName } from './words.ts';
+import { throughPlugins } from './plugins.ts';
+import { comparableText } from './pluginstatus.ts';
 import { ALREADY_AS_IT_WAS, type SwitchRecord } from './types.ts';
 import type { ApplyResult, Change, DestinationResult, HarnessId, HistoryEvent, HistoryPrune, ManageView, Skill, SkillFacts, Snapshot, SyncNotice, ToolCopy } from './types.ts';
 
@@ -75,6 +77,22 @@ async function gather(context: ShareContext, snapshots: Snapshot[], record?: Syn
       catch (error) { if (errorCode(error) !== 'ENOENT') entry.facts.cannot[tool] = `${directory} could not be checked.`; }
     }
     for (const tool of Object.keys(entry.facts.copies) as HarnessId[]) entry.facts.choiceBlocks[tool] = blocksFor(entry, tool);
+  }
+  // A tool that has the skill through one of its plugins needs no copy of its own, and gets none: the row says where it
+  // comes from instead. The plugin's skill of that name (the skill's folder, or the name its SKILL.md gives) is this skill
+  // when Central Knot installed it elsewhere as that plugin's part, or when its SKILL.md is the same; another skill that
+  // only shares the name stays an ordinary skill.
+  for (const [tool, given] of await throughPlugins(context, tools, 'skill', itemKey)) {
+    for (const entry of map.values()) {
+      if (entry.facts.copies[tool]) continue;
+      const copies = Object.values(entry.skills).flat();
+      const same = (text?: string) => text !== undefined && copies.some(skill => comparableText(skill.content) === comparableText(text));
+      const found = [entry.facts.key, ...copies.map(skill => itemKey(skill.name))].map(name => given.get(name)).find(plugin => plugin && (plugin.asParts || same(plugin.text)));
+      if (!found) continue;
+      const { asParts: _asParts, text: _text, ...plugin } = found;
+      (entry.facts.plugin ??= {})[tool] = plugin;
+      entry.facts.cannot[tool] = throughPlugin(tool, plugin);
+    }
   }
   // Each tool's own switch (Disable): read and parsed once, then asked about every copy there. Why a tool can't take a new
   // Disable (its settings file) applies to a copy it is about to get, too; so does the note on an unverified build.

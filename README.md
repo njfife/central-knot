@@ -18,7 +18,7 @@ One card each for skills, MCP servers and agents, with counts and anything that 
 
 ### Harnesses
 
-One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
+One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. A settings folder with no CLI or app beside it (left behind by an uninstall, say) doesn't count, and a CLI is looked for wherever your terminal finds it, including folders that nvm, bun and the like add to your PATH. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
 
 ### Skills, MCP servers and Agents
 
@@ -62,6 +62,7 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 - Each plugin shows its parts (skills, MCP servers, agents and more), what each tool gets from them, its skill text, and each tool's installed version next to the marketplace's.
 - **Install and uninstall** run through each tool's own plugin commands, and count only when that tool's own record shows the result. Nothing runs until **Apply all**.
 - **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes.
+- **One item, however a tool has it**: on Skills, MCP servers and Agents, a tool that has an item through the plugin itself shows **Through a plugin** (the box opens the plugin's page) rather than "No copy", and sync never places a separate copy beside the plugin's. This applies to items Central Knot installed elsewhere as that plugin's parts and to skills whose SKILL.md is the same; another item that only shares the name stays an ordinary item.
 - **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
 - **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
