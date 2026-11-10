@@ -135,8 +135,8 @@ const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefi
  */
 const placeOf = (skill: SampleSkill) => standing(committedOf(skill.key), toolList());
 const placeNames = ['Managed', 'Unmanaged', 'Disabled everywhere'] as const;
-/** Whether some tool uses the item once pending changes apply: it has or gets a copy there that isn't disabled. */
-const usedAfter = (skill: SampleSkill) => toolList().some(tool => hasCopyAfterApply(skill, tool) && !skill.disabled?.includes(tool));
+/** Whether some tool uses the item once pending changes apply: it has or gets a copy there that isn't disabled, or has it through a plugin that is on. */
+const usedAfter = (skill: SampleSkill) => toolList().some(tool => (hasCopyAfterApply(skill, tool) && !skill.disabled?.includes(tool)) || (!!throughPluginHere(skill, tool) && !throughPluginHere(skill, tool)!.off));
 /** Copies differ and need a choice, among the items this page is about: on a harness's page, the ones it has. */
 const needsChoice = (skill: SampleSkill) => inFocus(skill) && syncOf(skill, toolList()) === 'attention';
 

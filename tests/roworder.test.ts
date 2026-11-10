@@ -25,3 +25,9 @@ test('a copy only counts in a tool that is shown', () => {
   assert.equal(standing(item('left-behind', false, ['pi']), tools), 2);
   assert.equal(standing(item('left-behind', false, ['pi']), [...tools, 'pi']), 1);
 });
+
+test('a tool that has the item through a plugin uses it, unless that plugin is turned off there', () => {
+  const own = item('pdf', false, ['claude-cli'], ['claude-cli']);
+  assert.equal(standing({ ...own, plugin: { 'codex-cli': {} } }, tools), 1);
+  assert.equal(standing({ ...own, plugin: { 'codex-cli': { off: true } } }, tools), 2);
+});
