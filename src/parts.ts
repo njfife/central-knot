@@ -172,7 +172,7 @@ export async function planParts(context: ShareContext, files: PluginFiles, tools
       if (why) part.why = sentence(why);
       // Out by the person's choice (turned off here, or removed from the tool by hand): it stays out until turned on.
       else if (own) part.out = true;
-      else if (now.state === 'absent' && now.brokenLink !== undefined) part.limit = [part.limit, `It replaces a broken link there${now.brokenLink ? `, which led to ${now.brokenLink}` : ''}`].filter(Boolean).join('. ');
+      else if (now.state === 'absent' && now.brokenLink !== undefined) part.limit = [part.limit, `it would replace a broken link there${now.brokenLink ? `, which led to ${now.brokenLink}` : ''}`].filter(Boolean).join('; ');
     }
     plans[tool] = plan;
   }
@@ -352,10 +352,10 @@ async function take(context: ShareContext, tool: HarnessId, item: PartItem, was:
 const plainReason = (error: unknown) => (errorCode(error) === 'CK_CHANGED' ? 'it changed just now, so it was left as it is' : error instanceof Error ? error.message.replace(/\.$/, '') : String(error));
 
 /**
- * What a move has done so far: the parts held, notes on what was left alone, writes made and changes that failed, and the
+ * What a move has done so far: the parts held, notes on what was left alone, what else it did, writes made and changes that failed, and the
  * parts already gone from the tool when it looked (`goneBefore`), so its Undo never puts back what the person had removed.
  */
-interface Moved { held: PartItem[]; notes: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
+interface Moved { held: PartItem[]; notes: string[]; /** What the run did that is worth telling but needs no attention (a broken link replaced). */ said: string[]; wrote: number; failed: number; goneBefore: PartItem[] }
 
 /**
  * Moves one tool from the parts it holds (`from`) to the parts wanted (`to`), part by part (see `settle`). `restoring`: an
@@ -364,7 +364,7 @@ interface Moved { held: PartItem[]; notes: string[]; wrote: number; failed: numb
  */
 async function move(context: ShareContext, tool: HarnessId, from: PartItem[], to: PartItem[], { restoring = false, on = [] as PartRef[] } = {}): Promise<Moved> {
   const holds = await namesInUse(context, tool);
-  const moved: Moved = { held: [], notes: [], wrote: 0, failed: 0, goneBefore: [] };
+  const moved: Moved = { held: [], notes: [], said: [], wrote: 0, failed: 0, goneBefore: [] };
   for (const each of [...from, ...to.filter(item => !from.some(old => samePart(old, item)))]) {
     const old = from.find(item => samePart(item, each));
     try { await settle(context, tool, holds, old, to.find(item => samePart(item, each)), moved, { restoring, asked: on.some(ref => samePart(ref, each)) }); }
@@ -384,12 +384,11 @@ const labelOf = (part: Pick<PartItem, 'kind' | 'name'>) => `the ${partWords[part
 
 /**
  * One part's move from what was put there (`old`) to what is wanted (`want`), the first rule that applies deciding:
- *  1. its place can't be read right now: a failure, nothing changes, it stays on record;
+ *  1. its place can't be read right now, and the run would write or take out there: a failure, nothing changes, it stays on record;
  *  2. it is wanted out (`want.removed`: turned off, or removed by the person before): a copy these parts put there and
- *     still theirs is taken out, and it stays on record as out; something of that name there again is the person's own,
- *     and the part is forgotten;
- *  3. it is out (`old.removed`): it stays out while the plugin still has it, unless the person just turned it on
- *     (`asked`) or an Undo puts it back;
+ *     still theirs is taken out, and it stays on record as out;
+ *  3. it is out (`old.removed`): it stays out, and on record, while the plugin still has it, whatever is in its place
+ *     since, unless the person just turned it on (`asked`) or an Undo puts it back;
  *  4. new, claimed by a run that stopped before writing it, or turned on and not there: written where nothing blocks it
  *     (`blocker`), over a link that leads nowhere if one is in its place;
  *  5. removed by hand since it went in: left out, and remembered as out;
@@ -401,6 +400,10 @@ const labelOf = (part: Pick<PartItem, 'kind' | 'name'>) => `the ${partWords[part
 async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse, old: PartItem | undefined, want: PartItem | undefined, moved: Moved, { restoring, asked }: { restoring: boolean; asked: boolean }) {
   const part = (old ?? want)!;
   const label = labelOf(part);
+  const ours = old && !old.removed ? old : undefined;
+  // Rules 2 and 3 where nothing of these parts is in the tool: its place is not even read, so what sits there (the
+  // person's own item, something unreadable) never fails the run or lets the part back in.
+  if (!ours && (!want || want.removed || (old?.removed && !restoring && !asked))) { if (want) moved.held.push(outOf(want)); return; }
   const now = await onDisk(context, tool, part);
   const writeIn = async (replacing: There | undefined) => {
     // A part read from the plugin brings its content to the store first; one from the record (an Undo) is there already.
@@ -412,22 +415,16 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
   };
   const throughSkillsFolder = () => { if (part.kind === 'skill' && holds.skillRootProblem) throw new Error(holds.skillRootProblem); };
   if (now.state === 'unreadable') throw new Error(now.why);
-  const ours = old && !old.removed ? old : undefined;
-  if (want?.removed) {
-    if (ours && now.state === 'there') {
+  if (ours && want?.removed) {
+    if (now.state === 'there') {
       const left = leftBecause(ours, now, holds);
       if (left) { moved.notes.push(`Left ${label} as it is: ${left}.`); return; }
       throughSkillsFolder();
       await take(context, tool, ours, now);
       moved.wrote++;
-    } else if (now.state === 'there') return;
     // Gone already when this run looked: its Undo leaves it out.
-    else if (ours?.seen) moved.goneBefore.push(ours);
-    moved.held.push({ ...want, removed: true });
-    return;
-  }
-  if (old?.removed && !restoring && !asked) {
-    if (want && now.state === 'absent') moved.held.push({ ...want, removed: true });
+    } else if (ours.seen) moved.goneBefore.push(ours);
+    moved.held.push(outOf(want));
     return;
   }
   if (!ours || (now.state === 'absent' && (!ours.seen || asked))) {
@@ -438,8 +435,8 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
     // An Undo putting a part back through a skills folder that became a link fails (retryable), never quietly skips it.
     if (restoring) throughSkillsFolder();
     const why = blocker(now, holds, part, tool);
-    if (why) { moved.notes.push(`Left ${label}: ${why}. Once that is sorted out, it can go in from the plugin’s page.`); return; }
-    if (now.state === 'absent' && now.brokenLink !== undefined) moved.notes.push(await clearBrokenLink(context, tool, part.name, now.brokenLink));
+    if (why) { moved.notes.push(`Didn’t put in ${label}: ${why}. Once that is sorted out, its switch on the plugin’s page, or Update parts there, adds it.`); return; }
+    if (now.state === 'absent' && now.brokenLink !== undefined) moved.said.push(await clearBrokenLink(context, tool, part.name, now.brokenLink));
     await writeIn(undefined);
     return;
   }
@@ -447,7 +444,7 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
     moved.goneBefore.push(ours);
     if (!want) return;
     moved.notes.push(`Left out ${label}: it was removed from ${toolNames[tool]} after it was installed.`);
-    moved.held.push({ ...want, removed: true });
+    moved.held.push(outOf(want));
     return;
   }
   const left = leftBecause(ours, now, holds);
@@ -459,6 +456,9 @@ async function settle(context: ShareContext, tool: HarnessId, holds: NamesInUse,
   await writeIn(now);
 }
 
+/** A part on record as out: by its kind, name and the hash it had, and nothing else of the item it was made from. */
+const outOf = (item: PartItem): PartItem => ({ kind: item.kind, name: item.name, hash: item.hash, removed: true });
+
 /**
  * Removes the link in a new skill's place whose target is gone, so the skill can go in, and says so. Only the link itself
  * goes, and only while it still leads nowhere.
@@ -467,7 +467,7 @@ async function clearBrokenLink(context: ShareContext, tool: HarnessId, name: str
   const link = skillDir(context, tool, name);
   if (!(await lstat(link)).isSymbolicLink() || !(await leadsNowhere(link))) throw changedWhileSyncing();
   await unlink(link);
-  return `Replaced a broken link named “${name}” in ${toolNames[tool]}’s skills folder${led ? ` (it led to ${led}, which isn’t there)` : ''}.`;
+  return `A broken link named “${name}” in ${toolNames[tool]}’s skills folder was replaced${led ? ` (it led to ${led}, which isn’t there)` : ''}.`;
 }
 
 // ---------- Runs ----------
@@ -516,7 +516,7 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const record = (items: PartItem[], version: string | undefined, contentDigest: string): PartsInstall | null => (items.length
     ? { source: target.source, marketName: target.marketName, plugin: target.plugin, version, tool, at: new Date().toISOString(), digest: contentDigest, items }
     : null);
-  const previous = { version: before?.version, digest: before?.digest ?? '' };
+  const previous = settledAs(before, undefined, undefined, { failed: true, only, current: false });
   // Claimed first: every part this run may write is on record (as the plugin was), so a run that stops halfway still owns it.
   const claimed = [...held, ...[...change.aside, ...change.to].filter(item => !held.some(old => samePart(old, item)))];
   await saveEntry(context.home, target, record(claimed, previous.version, previous.digest));
@@ -524,15 +524,9 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   moved.failed += change.cannot.length;
   moved.notes.push(...change.cannot);
   const items = stillHeld([...change.aside, ...moved.held]);
-  const digest = digestOf(ready, unread, files, items);
-  // Settled: what is there now. With failures it keeps the plugin's old version and digest, so it still shows as changed.
-  // A digest undefined (some source unread now) keeps the old one: once readable, the plugin may show as changed though
-  // nothing differs, and that update writes nothing and only brings the record up to date. A pick brings nothing else up
-  // to date, so parts already there keep their version, and their digest too unless they were up to date (then the
-  // digest follows what is out now, so a part just turned off is no change to the rest).
-  const wasCurrent = !!before && isCurrent(before, ready, unread, files) === true;
-  const after = moved.failed || (only && before && !wasCurrent) ? record(items, previous.version, previous.digest)
-    : record(items, only && before ? previous.version : target.version, digest ?? previous.digest);
+  const settled = settledAs(before, target.version, digestOf(ready, unread, files, items),
+    { failed: moved.failed > 0, only, current: !!before && (isCurrent(before, ready, unread, files) === true || holdsNow(items, ready)) });
+  const after = record(items, settled.version, settled.digest);
   await saveEntry(context.home, target, after);
   // A version change counts only while parts remain: a record that just went away is no change to undo.
   const changed = moved.wrote > 0 || (!!after && before?.version !== after.version);
@@ -541,8 +535,29 @@ export async function installParts(context: ShareContext, target: PartsTarget, f
   const left = skipped.length ? ` Not installed: ${skipped.join('; ')}` : '';
   const { outcome, message } = installOutcome(tool, moved, items, !!before, only);
   const notes = outcome === 'failed' ? [] : moved.notes;
-  return report(tool, outcome, `${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${left}`, { run, changed, notes, updated: outcome === 'installed' && !!before });
+  // A run that failed partway says what it did change too: what the tool has now.
+  const has = outcome === 'failed' && moved.wrote && items.some(item => !item.removed) ? ` ${toolNames[tool]} now has ${partsSummary(items.filter(item => !item.removed), ', ')}.` : '';
+  return report(tool, outcome, [`${message}${outcome === 'failed' && moved.notes.length ? ` ${moved.notes.join(' ')}` : ''}${has}`, ...moved.said].join(' ') + left, { run, changed, notes, updated: outcome === 'installed' && !!before });
 }
+
+/**
+ * The version and digest a run leaves on record (`digest`: of the parts as they are now, undefined while some source
+ * can't be read, which keeps the old one: once readable, the plugin may show as changed though nothing differs, and that
+ * update writes nothing and only brings the record up to date).
+ */
+function settledAs(before: PartsInstall | null, version: string | undefined, digest: string | undefined, run: { failed: boolean; only: boolean; current: boolean }): { version: string | undefined; digest: string } {
+  const previous = { version: before?.version, digest: before?.digest ?? '' };
+  // A run with failures keeps the old ones, so the plugin still shows as changed.
+  if (run.failed) return previous;
+  // A pick of single parts brings no other part up to date: unless what the tool holds is what the plugin has now
+  // (`current`), the parts stay at the version they have, still out of date.
+  if (run.only && before && !run.current) return previous;
+  return { version, digest: digest ?? previous.digest };
+}
+
+/** Whether a record's items are the plugin's parts as they are now: each one held has its current content, and each part it has is held or out. */
+const holdsNow = (items: PartItem[], ready: PartItem[]) => items.every(item => item.removed || ready.some(part => samePart(part, item) && part.hash === item.hash))
+  && ready.every(part => items.some(item => samePart(item, part)));
 
 /**
  * What one run moves: the parts it settles, from the state on record (`from`) to the state wanted (`to`); the record's
@@ -565,10 +580,9 @@ function wholeChange(held: PartItem[], ready: Ready[], unread: Set<string>, file
  */
 function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: PartsPick, rest: PartsChange | undefined): PartsChange {
   const picked = (item: Pick<PartItem, 'kind' | 'name'>) => [...pick.on, ...pick.off].some(ref => samePart(ref, item));
-  const out = (item: PartItem): PartItem => ({ kind: item.kind, name: item.name, hash: item.hash, removed: true });
   const others = <T extends PartItem>(items: T[]) => items.filter(item => !picked(item));
   const change: PartsChange = rest ? { ...rest, from: others(rest.from), to: others(rest.to) }
-    : { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(out))], cannot: [] };
+    : { from: [], to: [], aside: [...others(held), ...(held.length ? [] : others(ready).map(outOf))], cannot: [] };
   for (const ref of pick.on) {
     const want = ready.find(item => samePart(item, ref));
     const old = held.find(item => samePart(item, ref));
@@ -581,7 +595,7 @@ function pickedChange(held: PartItem[], ready: Ready[], plan: PartPlan[], pick: 
     const known = old ?? ready.find(item => samePart(item, ref));
     if (!known) continue;
     if (old) change.from.push(old);
-    change.to.push(out(known));
+    change.to.push(outOf(known));
   }
   return change;
 }
@@ -643,6 +657,7 @@ export async function undoParts(context: ShareContext, run: string): Promise<Act
     if (past.before?.version !== past.after?.version) message = `Its record is back to ${past.before?.version ? `version ${past.before.version}` : 'how it was'}; no file needed changing.`;
     return report(tool, past.before ? 'installed' : 'uninstalled', message, { notes: moved.notes });
   }
-  const done = past.before ? `Parts put back in ${toolNames[tool]}: ${partsSummary(moved.held.filter(item => !item.removed), ', ')}.` : `Parts removed from ${toolNames[tool]}.`;
+  const there = partsSummary(moved.held.filter(item => !item.removed), ', ');
+  const done = past.before ? `${toolNames[tool]}’s parts are back as they were${there ? `: ${there}` : ''}.` : `Parts removed from ${toolNames[tool]}.`;
   return report(tool, past.before ? 'installed' : 'uninstalled', done, { changed: true, notes: moved.notes });
 }

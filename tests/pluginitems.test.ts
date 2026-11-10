@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readPluginItems } from '../src/pluginitems.ts';
+import { readItemTexts, readPluginItems } from '../src/pluginitems.ts';
 import { cellWords, handledWhere, offIn, pageRows, pluginItemCount } from '../src/pluginrows.ts';
 import type { PluginContext } from '../src/plugins.ts';
 import type { HarnessId, HomeView, InstalledPlugin, PartsInstall, SkillFacts } from '../src/types.ts';
@@ -33,12 +33,13 @@ test('Claude Code: what an installed plugin brings, from its own record and copy
     await copy(cache);
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'demo@elsewhere': [{ scope: 'user', installPath: cache, version: '1.2.0' }], 'proj@elsewhere': [{ scope: 'project', installPath: cache }] } }));
     await put(join(box.home, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'demo@elsewhere': false } }));
-    const [found, ...rest] = await readPluginItems(box.context, ['claude-cli', 'pi-cli'], { texts: true });
-    assert.equal((await readPluginItems(box.context, ['claude-cli']))[0]!.items[0]!.text, undefined, 'the home’s own read carries no file text');
+    const [found, ...rest] = await readPluginItems(box.context, ['claude-cli', 'pi-cli']);
     assert.equal(rest.length, 0, 'a project-scope install is not this person’s everywhere');
     assert.deepEqual(brief([found!]), [{ tool: 'claude-cli', plugin: 'demo', marketName: 'elsewhere', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] }]);
     assert.equal(found!.version, '1.2.0');
-    assert.match(found!.items[0]!.text!, /Says hello/);
+    // Its file is read only when asked for, by name as the page keys it (case aside), from that plugin's copies alone.
+    const texts = await readItemTexts(box.context, ['claude-cli', 'pi-cli'], { plugin: 'demo', marketName: 'elsewhere', kind: 'skill', name: 'Hello' });
+    assert.deepEqual([texts.map(copy => copy.tool), /Says hello/.test(texts[0]!.text)], [['claude-cli'], true]);
     assert.equal(found!.items[1]!.runs, 'npx -y tracker');
   } finally { await box.cleanup(); }
 });
@@ -57,7 +58,7 @@ test('Claude Code reads the marketplace entry from its own copy of the marketpla
   } finally { await box.cleanup(); }
 });
 
-test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folder-marketplace plugin turned off that only enabledPlugins records', async () => {
+test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folder-marketplace plugin, which only enabledPlugins records and false means uninstalled', async () => {
   const box = await sandbox();
   try {
     const cached = join(box.home, '.copilot/installed-plugins/m/demo');
@@ -66,11 +67,15 @@ test('Copilot CLI: a cached plugin turned off, a skill switched off, and a folde
     await put(join(market, '.claude-plugin/marketplace.json'), JSON.stringify({ name: 'local', plugins: [{ name: 'live', source: './live' }] }));
     await put(join(market, 'live/skills/near/SKILL.md'), '---\nname: near\ndescription: Near.\n---\nX\n');
     await put(join(box.home, '.copilot/config.json'), `// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'demo', marketplace: 'm', version: '1.2.0', cache_path: cached, enabled: false }] })}`);
-    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['live:near'], enabledPlugins: { 'demo@m': false, 'live@local': false }, extraKnownMarketplaces: { local: { source: { source: 'directory', path: market } } } }));
+    await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ disabledSkills: ['live:near'], enabledPlugins: { 'demo@m': false, 'live@local': true }, extraKnownMarketplaces: { local: { source: { source: 'directory', path: market } } } }));
+    const settings = join(box.home, '.copilot/settings.json');
     assert.deepEqual(brief(await readPluginItems(box.context, ['copilot-cli'])), [
       { tool: 'copilot-cli', plugin: 'demo', marketName: 'm', off: true, skillsOff: undefined, listed: false, problem: undefined, items: ['skill:hello', 'mcp:tracker', 'agent:checker'] },
-      { tool: 'copilot-cli', plugin: 'live', marketName: 'local', off: true, skillsOff: ['near'], listed: true, problem: undefined, items: ['skill:near'] },
+      { tool: 'copilot-cli', plugin: 'live', marketName: 'local', off: undefined, skillsOff: ['near'], listed: true, problem: undefined, items: ['skill:near'] },
     ]);
+    // Copilot CLI's own uninstall of a folder marketplace's plugin leaves its record false: it brings nothing any more.
+    await put(settings, (await readFile(settings, 'utf8')).replace('"live@local":true', '"live@local":false'));
+    assert.deepEqual((await readPluginItems(box.context, ['copilot-cli'])).map(install => install.plugin), ['demo']);
   } finally { await box.cleanup(); }
 });
 

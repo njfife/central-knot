@@ -432,7 +432,7 @@ export interface PartsState { version?: string; at: string; items: Pick<PartItem
 
 // ---------- What a plugin installed whole brings (pluginitems.ts) ----------
 /** One skill, MCP server or agent inside a tool's installed copy of a plugin, by its real name (the tool calls it `plugin:name`). */
-export interface PluginItem { kind: PartKind; name: string; description: string; /** Skills and agents: the file as written, when it was asked for (DesktopApi.pluginItemTexts). */ text?: string; /** MCP servers: what it runs or connects to. */ runs?: string }
+export interface PluginItem { kind: PartKind; name: string; description: string; /** MCP servers: what it runs or connects to. */ runs?: string }
 /** A plugin installed whole in one tool, read from that tool's own records and its copy of the plugin. */
 export interface InstalledPlugin { tool: HarnessId; plugin: string; marketName: string; version?: string;
   /** The whole plugin is turned off in that tool. */ off?: boolean;

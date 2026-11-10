@@ -43,7 +43,7 @@ export type MarketPlugin = { entry: MarketplaceView; plugin: PluginView };
  * Null when the tool takes no marketplace plugins (Pi).
  */
 export function installsIn(view: PluginsView, tool: HarnessId): { installed: MarketPlugin[]; unknown: (MarketPlugin & { reason: string })[]; unreadable: string[] } | null {
-  if (!view.tools.includes(tool)) return null;
+  if (!view.tools.includes(tool) || !takesPlugins(tool)) return null;
   const each = view.marketplaces.flatMap(entry => entry.plugins.map(plugin => ({ entry, plugin, install: stateOf(entry, plugin.name, tool) })));
   return {
     installed: each.filter(({ install }) => install.state === 'installed').map(({ entry, plugin }) => ({ entry, plugin })),

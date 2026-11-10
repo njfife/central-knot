@@ -307,9 +307,9 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': true } }));
     const liveState = await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker');
     assert.ok(liveState.state === 'installed' && liveState.live, JSON.stringify(liveState));
-    // Turned off in Copilot CLI it is still installed there (its record says false), never offered to install again.
+    // Copilot CLI's uninstall of a folder marketplace's plugin only sets its record to false: that is not installed.
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': false } }));
-    assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker')).state, 'installed');
+    assert.equal((await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker')).state, 'not-installed');
     // Claude Code records a cache copy of a folder marketplace's plugin, and its version then, but loads the folder.
     await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'directory', path: live }, installLocation: live } }));
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'marker@ck-test-market': [{ scope: 'user', installPath: cache, version: '0.1.0' }] } }));

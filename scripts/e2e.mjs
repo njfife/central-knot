@@ -1204,7 +1204,7 @@ async function practiceFlow() {
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: Mine.\n---\nMine.\n');
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/Not the skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  for (let tries = 0; tries < 40 && !/Can’t go in: skill triage/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   await a.click('#pcell-0-issue-tracker-pi-cli');
   await a.click('#plugins-apply');
   check('a taken name leaves that part out', readFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), 'utf8').includes('Mine.') && readFileSync(piMcp, 'utf8').includes('issues'), readFileSync(piMcp, 'utf8'));
@@ -1222,8 +1222,8 @@ async function practiceFlow() {
   mkdirSync(join(practice, '.pi/agent/skills'), { recursive: true });
   symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
   await a.click('#header-refresh');
-  for (let tries = 0; tries < 40 && !/replaces a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
-  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: It replaces a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
+  for (let tries = 0; tries < 40 && !/would replace a broken link/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
+  check('a broken link in a part’s place is said, not a reason to leave the part out', /The skill triage: it would replace a broken link there, which led to .*gone\/triage/.test(await a.text('.plugin-parts-section') ?? ''), await a.text('.plugin-parts-section'));
   const partSwitch = part => `#ppart-0-issue-tracker-${part}-pi-cli`;
   const standOf = part => a.run(`(() => { const s = document.querySelector('${partSwitch(part)}'); return s ? s.closest('.skill-switch').dataset.state + ' ' + s.getAttribute('aria-checked') : 'missing'; })()`);
   same('each part has a switch under Pi, off', [await standOf('skill-triage'), await standOf('mcp-issues')], ['out false', 'out false']);
@@ -1232,7 +1232,10 @@ async function practiceFlow() {
     && /Goes into Pi as a separate item/.test(await a.text('.plugin-skills') ?? ''), `${await standOf('skill-triage')} | ${await a.text('.plugin-panel')} | ${await a.text('.toolbar')}`);
   await a.click('#plugins-apply');
   check('only that part goes in, in place of the broken link', existsSync(join(practice, '.pi/agent/skills/triage/SKILL.md')) && !lstatSync(join(practice, '.pi/agent/skills/triage')).isSymbolicLink() && !readFileSync(piMcp, 'utf8').includes('issues')
-    && /Replaced a broken link named “triage”/.test(await a.text('.bands') ?? ''), await a.text('.bands'));
+    && /skill triage put into Pi/.test(await a.text('.toolbar') ?? ''), await a.text('.toolbar'));
+  const logged = readFileSync(join(scratch, 'data', 'central-knot.log'), 'utf8');
+  check('the log file says what that change came to: the plugin, the parts picked, the tool, and the broken link replaced',
+    /plugins:parts issue-tracker@team-tools \(on: skill triage\) in pi-cli: installed: .*A broken link named “triage” in Pi’s skills folder was replaced/.test(logged), logged.split('\n').filter(line => line.includes('plugins:parts')).slice(-3).join('\n'));
   for (let tries = 0; tries < 40 && !/Left out by you/.test(await a.text('.plugin-parts-section') ?? ''); tries++) await wait(100);
   check('the part left out is said, with its switch off', /Installed[^:]*: skill triage/.test(await a.text('.plugin-parts-section') ?? '') && /Left out by you: MCP server issues/.test(await a.text('.plugin-parts-section') ?? '') && await standOf('mcp-issues') === 'out false' && await standOf('skill-triage') === 'in true', await a.text('.plugin-parts-section'));
   await a.click(partSwitch('skill-triage'));

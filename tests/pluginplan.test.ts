@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { batches, flipPick, pickOf, recordRun, resultLines, resultSentence, prune, reverse, setPick, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
+import { batches, clickPart, flipPick, partStand, pickOf, recordRun, resultLines, resultSentence, prune, reverse, setPick, summary, toggle, toggleMany, queued, type PluginDone, type PluginDraft, type PluginOp } from '../src/pluginplan.ts';
 import type { HarnessId } from '../src/types.ts';
 
 const op = (plugin: string, tool: HarnessId, action: PluginOp['action'] = 'install'): PluginOp => ({ source: 'anthropics/skills', marketName: 'anthropic-agent-skills', plugin, tool, action });
@@ -187,7 +187,7 @@ test('Single parts picked for a tool are one choice: beside an install of its pa
   const draft: PluginDraft = new Map();
   const at = op('pdf', 'pi-cli');
   const part = (name: string) => ({ kind: 'skill' as const, name });
-  // Flipping a part chooses it; flipping it the same way again takes that back.
+  // Flipping a part chooses it.
   setPick(draft, at, flipPick(pickOf(draft, at.source, 'pdf', 'pi-cli'), part('tdd'), true));
   setPick(draft, at, flipPick(pickOf(draft, at.source, 'pdf', 'pi-cli'), part('grill-me'), false));
   assert.deepEqual(pickOf(draft, at.source, 'pdf', 'pi-cli'), { on: [part('tdd')], off: [part('grill-me')] });
@@ -230,4 +230,40 @@ test('A new view keeps a pick: a part to put in stays even when the record still
   setPick(draft, op('pdf', 'pi-cli'), { on: [], off: [part('grill-me')] });
   prune(draft, view(['tdd']));
   assert.equal(pickOf(draft, 'anthropics/skills', 'pdf', 'pi-cli'), undefined);
+});
+
+test('Clicks on part switches: a second click takes the choice back, an install’s exception goes with the install, and a removal comes apart part by part', () => {
+  const part = (name: string) => ({ kind: 'skill' as const, name });
+  const at = op('pdf', 'pi-cli');
+  const plan = [{ ...part('tdd') }, { ...part('grill-me') }, { ...part('qa'), out: true as const }];
+  const draft: PluginDraft = new Map();
+  const click = (name: string, inTool: string[] = []) => clickPart(draft, at, part(name), { planned: plan.find(planned => planned.name === name), inTool: inTool.map(part) });
+  const stand = (name: string, inTool: string[] = []) => { const { chosen, on } = partStand(draft, at, part(name), { planned: plan.find(planned => planned.name === name), inTool: inTool.map(part), canWrite: true }); return [chosen, on]; };
+  // Not in the tool: on, then back to nothing chosen.
+  click('tdd');
+  assert.deepEqual([stand('tdd'), pickOf(draft, at.source, 'pdf', 'pi-cli')], [['on', true], { on: [part('tdd')], off: [] }]);
+  click('tdd');
+  assert.deepEqual([stand('tdd'), draft.size], [[undefined, false], 0]);
+  // In the tool: off, then back.
+  click('tdd', ['tdd']);
+  assert.deepEqual(stand('tdd', ['tdd']), ['off', false]);
+  click('tdd', ['tdd']);
+  assert.deepEqual([stand('tdd', ['tdd']), draft.size], [[undefined, true], 0]);
+  // All the tool's parts chosen for install: each that would go in waits on; one flipped is the install's exception, and
+  // one the person had left out is turned on by its own click. Taking the install back takes its exceptions with it.
+  toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
+  assert.deepEqual([stand('tdd'), stand('qa')], [['on', true], [undefined, false]]);
+  click('tdd');
+  click('qa');
+  assert.deepEqual([stand('tdd'), stand('qa'), pickOf(draft, at.source, 'pdf', 'pi-cli')], [['off', false], ['on', true], { on: [part('qa')], off: [part('tdd')] }]);
+  toggle(draft, op('pdf', 'pi-cli', 'install-parts'));
+  assert.equal(draft.size, 0);
+  // All its parts chosen for removal: keeping one makes it a choice part by part, without that one.
+  toggle(draft, op('pdf', 'pi-cli', 'remove-parts'));
+  assert.deepEqual(stand('tdd', ['tdd', 'grill-me']), ['off', false]);
+  click('tdd', ['tdd', 'grill-me']);
+  assert.deepEqual([queued(draft, at.source, 'pdf', 'pi-cli'), pickOf(draft, at.source, 'pdf', 'pi-cli'), stand('tdd', ['tdd', 'grill-me'])], [undefined, { on: [], off: [part('grill-me')] }, [undefined, true]]);
+  // The result names the parts: "skill tdd put into Pi".
+  const done: PluginDone[] = [{ ...at, action: 'pick-parts', pick: { on: [part('tdd')], off: [part('qa')] }, report: { tool: 'pi-cli', outcome: 'installed', message: '', runs: [], changed: true, partsRun: 'r' } }];
+  assert.equal(resultSentence(resultLines(done), false), 'pdf: skill tdd put into Pi; skill qa taken out of Pi.');
 });

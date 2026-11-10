@@ -5,7 +5,7 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { nameAndDescription } from './discovery.ts';
 import type { HarnessId, NamedPart, PluginContents, PluginDetail } from './types.ts';
-import { githubRepo, isFolder, isHttps, record, strings, text } from './values.ts';
+import { githubRepo, isFolder, isHttps, nameOfFile, record, strings, text } from './values.ts';
 
 const README_LIMIT = 60_000;
 /** No file from a repository is read past this; front matter and READMEs need far less. */
@@ -123,8 +123,8 @@ async function skillsIn(root: string, folder: string, paths: string[], subfolder
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
-/** A command's or agent's name from its file: without `.md`, and without Copilot's `.agent.md` (`reviewer.agent.md` is the agent `reviewer`). */
-const agentName = (file: string) => basename(file, '.md').replace(/\.agent$/, '');
+/** A command's or agent's name from its file (values.nameOfFile). */
+const agentName = (file: string) => nameOfFile(basename(file));
 
 /**
  * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders, NESTED_LEVELS down.

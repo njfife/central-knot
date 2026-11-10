@@ -1,7 +1,7 @@
 // Plugins: what the person has chosen but not applied yet, and what Apply all and its Undo run.
 // Pure functions over plain data, so the plan can be read, tested and changed without the page or the engine.
-import { cantSwitchSkill, cantUninstall, installed, partsOf, partsOffer, partsPickable, samePart, skillOff, stateOf, unavailable } from './pluginstatus.ts';
-import type { ActionReport, HarnessId, MarketplaceView, PartRef, PartsPick, PluginActionResult, PluginsView } from './types.ts';
+import { PREVIEW_ONLY, cantSwitchSkill, cantUninstall, installed, partWords, partsOf, partsOffer, partsPickable, samePart, skillOff, stateOf, unavailable } from './pluginstatus.ts';
+import type { ActionReport, HarnessId, MarketplaceView, PartPlan, PartRef, PartsPick, PluginActionResult, PluginsView } from './types.ts';
 import { andList, byToolOrder, toolNames as names } from './words.ts';
 
 /**
@@ -96,10 +96,15 @@ function choose(draft: PluginDraft, op: PluginOp): void {
   if (op.action === 'install' || op.action === 'remove-parts') draft.delete(opKey({ ...op, action: 'pick-parts' }));
 }
 
+/** Takes one chosen change back. Single parts picked beside an install or update of a tool's parts are that run's exceptions, and go with it. */
+function takeBack(draft: PluginDraft, op: PluginOp): void {
+  draft.delete(opKey(op));
+  if (op.action === 'install-parts') draft.delete(opKey({ ...op, action: 'pick-parts' }));
+}
+
 /** Choosing the same change again takes it back; a different one replaces it. */
 export function toggle(draft: PluginDraft, op: PluginOp): void {
-  const key = opKey(op);
-  if (draft.get(key)?.action === op.action) draft.delete(key);
+  if (draft.get(opKey(op))?.action === op.action) takeBack(draft, op);
   else choose(draft, op);
 }
 
@@ -109,7 +114,7 @@ export const allQueued = (draft: PluginDraft, ops: PluginOp[]) => ops.length > 0
 /** Queues or clears one action for several tools at once: all queued already means take them all back. */
 export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
   const all = allQueued(draft, ops);
-  for (const op of ops) { if (all) draft.delete(opKey(op)); else choose(draft, op); }
+  for (const op of ops) { if (all) takeBack(draft, op); else choose(draft, op); }
 }
 
 /**
@@ -119,11 +124,13 @@ export function toggleMany(draft: PluginDraft, ops: PluginOp[]): void {
  * loaded live from its folder or that can't be changed now (as for an uninstall), and a skill switch where the plugin
  * isn't installed, the tool can't switch it (pluginstatus.cantSwitchSkill), or it already is as chosen. Parts go stale where
  * they can't go in now or are there and up to date, and their removal where none are there. A pick loses the parts to
- * take out that are no longer there (see stillPicked), and goes once it names none.
+ * take out that are no longer there (see narrowed), and goes once it names none.
  */
 export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
   for (const [key, op] of draft) {
     const entry = view?.marketplaces.find(candidate => candidate.source === op.source);
+    // A pick keeps only what it would still change.
+    if (op.action === 'pick-parts' && entry) op.pick = narrowed(draft, op, partsOf(entry, op.plugin, op.tool)?.items ?? []);
     const listed = !!entry?.plugins.some(plugin => plugin.name === op.plugin);
     // A marketplace whose catalog now gives another name is another plugin@name to the tools: the choice no longer means it.
     const parts = entry && partsOf(entry, op.plugin, op.tool);
@@ -133,7 +140,7 @@ export function prune(draft: PluginDraft, view: PluginsView | undefined): void {
       : op.action === 'update' ? !installed(entry, op.plugin, op.tool) || !!cantUninstall(view, entry, op.plugin, op.tool) || !!(stateOf(entry, op.plugin, op.tool) as { live?: boolean }).live
       : op.action === 'install-parts' ? !view.canWrite || !partsOffer(view, entry, op.plugin, op.tool) || (!!parts && !parts.changed)
       : op.action === 'remove-parts' ? !parts || !view.canWrite
-      : op.action === 'pick-parts' ? !view.canWrite || !partsPickable(view, entry, op.plugin, op.tool) || !stillPicked(draft, op, parts?.items ?? [])
+      : op.action === 'pick-parts' ? !view.canWrite || !partsPickable(view, entry, op.plugin, op.tool) || !(op.pick!.on.length + op.pick!.off.length)
       : op.action === 'undo-parts' || skillChoiceStale(view, entry, op));
     if (stale) draft.delete(key);
   }
@@ -149,16 +156,44 @@ function skillChoiceStale(view: PluginsView, entry: MarketplaceView, op: PluginO
 }
 
 /**
- * Whether a pick still names a part, once the parts to take out that aren't on the tool's record (`there`) are dropped
- * from it; while an install or update of the tool's parts is chosen too, one to take out may be a part that run would
- * add, so it stays. Parts to put in all stay: one on record may have been removed from the tool by hand, which only the
- * run can tell, and putting in one that is there changes nothing.
+ * A pick without the parts to take out that aren't on the tool's record (`there`); while an install or update of the
+ * tool's parts is chosen too, one to take out may be a part that run would add, so it stays. Parts to put in all stay: one
+ * on record may have been removed from the tool by hand, which only the run can tell, and putting in one that is there
+ * changes nothing.
  */
-function stillPicked(draft: PluginDraft, op: PluginOp, there: PartRef[]): boolean {
+function narrowed(draft: PluginDraft, op: PluginOp, there: PartRef[]): PartsPick {
   const updating = queued(draft, op.source, op.plugin, op.tool) === 'install-parts';
   const pick = op.pick ?? { on: [], off: [] };
-  op.pick = { ...pick, off: pick.off.filter(part => updating || there.some(item => samePart(item, part))) };
-  return op.pick.on.length + op.pick.off.length > 0;
+  return { ...pick, off: pick.off.filter(part => updating || there.some(item => samePart(item, part))) };
+}
+
+/**
+ * Where one part stands in a tool that takes single parts: in there or not (`there`), what Apply all will make of it
+ * (`chosen`: from a pick, or from an install, update or removal of all the tool's parts), where its switch points (`on`),
+ * and why it can't change. `planned`: the part in the tool's plan, once that is read; `inTool`: the parts the tool has.
+ */
+export function partStand(draft: PluginDraft, at: Pick<PluginOp, 'source' | 'plugin' | 'tool'>, part: PartRef, { planned, inTool, canWrite }: { planned: PartPlan | undefined; inTool: PartRef[]; canWrite: boolean }) {
+  const same = (other: PartRef) => samePart(other, part);
+  const there = inTool.some(same);
+  const whole = queued(draft, at.source, at.plugin, at.tool);
+  const pick = pickOf(draft, at.source, at.plugin, at.tool);
+  const chosen = pick?.on.some(same) ? 'on' as const : pick?.off.some(same) ? 'off' as const
+    : whole === 'remove-parts' && there ? 'off' as const : whole === 'install-parts' && !there && !!planned && !planned.why && !planned.out ? 'on' as const : undefined;
+  // One that is in needs no plan to come out, unless its folder can't be written through (`fixed`).
+  const why = chosen ? undefined : !canWrite ? PREVIEW_ONLY : there ? planned?.why ?? planned?.fixed : planned ? planned.why : 'It can’t go in here as a separate item.';
+  return { there, chosen, on: chosen ? chosen === 'on' : there, why };
+}
+
+/**
+ * A click on one part's switch: the part joins, or leaves, what is picked for the tool, away from where its switch points
+ * now (beside an install or update of all its parts, the pick is that run's exceptions). A removal of all the tool's
+ * parts becomes the same choice part by part, without this one. `planned` and `inTool` as for partStand.
+ */
+export function clickPart(draft: PluginDraft, at: Pick<PluginOp, 'source' | 'marketName' | 'plugin' | 'tool'>, part: PartRef, { planned, inTool }: { planned: PartPlan | undefined; inTool: PartRef[] }): void {
+  const stand = partStand(draft, at, part, { planned, inTool, canWrite: true });
+  if (queued(draft, at.source, at.plugin, at.tool) !== 'remove-parts') { setPick(draft, at, flipPick(pickOf(draft, at.source, at.plugin, at.tool), part, !stand.on)); return; }
+  clear(draft, at);
+  setPick(draft, at, { on: stand.there ? [] : [part], off: inTool.filter(other => !samePart(other, part)).map(({ kind, name }) => ({ kind, name })) });
 }
 
 /** The skill switches chosen for one plugin, optionally only in one tool or for one skill. */
@@ -251,9 +286,9 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
       .filter(entry => entry.report.outcome === outcome && !!entry.report.changed === changed && isParts(entry.action) === parts && (!parts || !changed || (picked(entry) === single && (single || !!entry.report.partsUpdated === updated))))
       .sort((first, second) => byToolOrder(first.tool, second.tool)).map(entry => names[entry.tool]);
     const partsGroups: Group[] = [
-      [tools('installed', true, { parts: true }), undo ? 'parts put back in' : 'parts installed in'],
+      [tools('installed', true, { parts: true }), undo ? 'parts back as they were in' : 'parts installed in'],
       [tools('installed', true, { parts: true, updated: true }), 'parts updated in'],
-      [[...tools('installed', true, { parts: true, single: true }), ...tools('uninstalled', true, { parts: true, single: true })], 'single parts changed in'],
+      ...singleGroups(mine.filter(entry => picked(entry) && entry.report.changed && succeeded(entry.report)).sort((first, second) => byToolOrder(first.tool, second.tool))),
       [tools('uninstalled', true, { parts: true }), 'parts removed from'],
       ...(undo
         ? [[[...tools('installed', false, { parts: true }), ...tools('uninstalled', false, { parts: true })], 'nothing left to undo in'] as [string[], string]]
@@ -278,6 +313,16 @@ export function resultLines(done: PluginDone[], undo = false): ResultLine[] {
     }
   }
   return lines;
+}
+
+/**
+ * Single parts picked, tool by tool, in the parts' own names: "skill triage put into Pi", "MCP server issues taken out of
+ * Codex". A run that left a part alone (its note says which) only says its parts changed.
+ */
+function singleGroups(done: PluginDone[]): Group[] {
+  const named = (parts: PartRef[]) => andList(parts.map(part => `${partWords[part.kind][0]} ${part.name}`));
+  return done.flatMap((entry): Group[] => (entry.report.notes?.length ? [[[names[entry.tool]], 'parts changed in']]
+    : [[entry.pick!.on.length ? [names[entry.tool]] : [], `${named(entry.pick!.on)} put into`], [entry.pick!.off.length ? [names[entry.tool]] : [], `${named(entry.pick!.off)} taken out of`]]));
 }
 
 /** A result group: its tools, the words before them, and any after. */

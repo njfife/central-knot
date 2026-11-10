@@ -17,7 +17,7 @@ import { applyBase, baseView, instructionsView, instructionVersion, repoBase, sa
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
-import { readPluginItems } from './pluginitems.ts';
+import { readItemTexts, readPluginItems } from './pluginitems.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
@@ -687,6 +687,9 @@ const pluginItemsContext = (overrides: Partial<Record<HarnessId, string>> | unde
  * showed, and where they name one, the path and the system's error code; never an item's content.
  */
 function logOutcome(channel: string, args: unknown[], result: unknown) {
+  try { logged(channel, args, result); } catch (error) { logFailure(`${channel} (logging its outcome)`, error); }
+}
+function logged(channel: string, args: unknown[], result: unknown) {
   if (!result || typeof result !== 'object') return;
   const { stopped, reports, results } = result as { stopped?: unknown; reports?: unknown; results?: unknown };
   if (typeof stopped === 'string') log(`${channel} stopped: ${stopped}`);
@@ -859,12 +862,8 @@ app.whenReady().then(async () => {
     share: () => context(),
   });
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
-  handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => {
-    if (!current || ![plugin, marketName, kind, name].every(value => typeof value === 'string')) return [];
-    const installs = await readPluginItems(pluginItemsContext(context().overrides), harnessIds, { texts: true });
-    return installs.filter(install => install.plugin === plugin && install.marketName === marketName)
-      .flatMap(install => install.items.filter(item => item.kind === kind && item.name === name && item.text !== undefined).map(item => ({ tool: install.tool, text: item.text! })));
-  });
+  handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
+    ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));
   // The window is read in the same turn as the events, so History's caption always describes the events it shows.
   handle('history:list', async (): Promise<HistoryList> => ({ events: current ? await readHistory(context()) : [], days: historyDays() }));
   // Instruction files: read fresh each time; a save writes only the file the editor opened, for the home on screen.

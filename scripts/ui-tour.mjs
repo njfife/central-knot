@@ -556,18 +556,18 @@ if (wanted('parts')) {
   await shot(a, 'place-file-parts', 'The same reason in "Its parts", Pi’s row.');
   rmSync(join(practice, '.pi/agent/skills/triage'), { force: true });
   symlinkSync(join(practice, 'gone/triage'), join(practice, '.pi/agent/skills/triage'));
-  await a.click('#header-refresh'); await waitFor(a, `/replaces a broken link/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
+  await a.click('#header-refresh'); await waitFor(a, `/would replace a broken link/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`, 30000);
   await shot(a, 'broken-link', 'Replaced the file with a link that leads nowhere (what an uninstalled skills manager leaves behind): the skill can go in, and Pi’s row says it replaces the broken link.');
   await a.click('#ppart-0-issue-tracker-skill-triage-pi-cli');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
-  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, and the result says the broken link was replaced.');
+  await shot(a, 'broken-link-replaced', 'Turned triage on under Pi and clicked Apply all: the skill went in, in place of the broken link (the log file says it was replaced).');
   await a.click('#plugins-undo'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();
   await a.run(`document.querySelector('.plugin-head')?.scrollIntoView({ block: 'start' })`); await wait(150);
   // Pi has a skill of its own named triage, so the plugin's triage is left out of Pi at first.
   mkdirSync(join(practice, '.pi/agent/skills/triage'), { recursive: true });
   writeFileSync(join(practice, '.pi/agent/skills/triage/SKILL.md'), '---\nname: triage\ndescription: My own triage.\n---\nMine.\n');
-  await a.click('#header-refresh'); await waitFor(a, `/Not the skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
+  await a.click('#header-refresh'); await waitFor(a, `/Can’t go in: skill triage/.test(document.querySelector('.plugin-parts-section')?.textContent ?? '')`);
   await a.click('#pcell-0-issue-tracker-pi-cli'); await a.click('#pcell-0-issue-tracker-codex-cli');
   await shot(a, 'page-chosen', 'Clicked the Pi and Codex boxes: both wait for Apply all.');
   await a.click('#plugins-apply'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000); await a.settle();

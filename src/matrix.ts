@@ -64,7 +64,9 @@ function partNote(skill: SampleSkill) {
     h('span', {}, `From the plugin ${install.plugin}${install.version ? ` (${versionWord(install.version)})` : ''}, installed in ${andList(tools.map(tool => names[tool]))} as a separate item. `,
       throughPluginIn(skill, install.plugin).length ? `${andList(throughPluginIn(skill, install.plugin).map(tool => names[tool]))} ${throughPluginIn(skill, install.plugin).length > 1 ? 'have' : 'has'} it through the plugin itself. ` : '',
       ...(unlisted(install) ? ['Its marketplace no longer lists the plugin, so this is now an ordinary item.']
-        : ['Update or remove its parts on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'), '.']))));
+        : ['Update or remove its parts on ', h('button.inline-link', { type: 'button', id: `open-plugin-${skill.key}-${install.plugin}`, onclick: (event: Event) => { event.stopPropagation(); openPlugin(install); } }, 'the plugin’s page'),
+          // Managed and Delete here reach this separate item's copies only.
+          '. Managing or deleting it here acts on this separate item, never on the plugin itself.']))));
 }
 
 /** The one mark of a plugin's item on its row, a part's or one inside the installed plugin: the plugin's glyph and "from <plugin>"; its title says which. */
@@ -225,7 +227,7 @@ const toolList = (): Tool[] => {
   return focus && list.includes(focus) ? [focus, ...list.filter(tool => tool !== focus)] : list;
 };
 /** Whether the focused harness has its own copy; with no focus, every item counts. */
-const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefined;
+const inFocus = (skill: SampleSkill) => !focus || skill.copies[focus] !== undefined || !!skill.plugin?.[focus];
 /**
  * A row's place as things stand before pending changes, so it stays put until Apply all: 0 managed, 1 unmanaged, 2 no tool
  * uses it (roworder.ts). The bulk actions (Manage all, Add all) leave the last kind alone; each row's own controls still work.

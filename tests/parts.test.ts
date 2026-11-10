@@ -286,14 +286,15 @@ test('A link that leads nowhere in a skill’s place is replaced and said; a fil
     await writeFile(box.pi('grill-me'), 'not a folder');
     const plans = await planParts(box.context, await box.files(), ['pi-cli'], []);
     const plan = (name: string) => plans['pi-cli']!.find(part => part.name === name)!;
-    assert.match(plan('tdd').limit ?? '', /replaces a broken link there, which led to .*\.agents\/skills\/tdd/);
+    assert.match(plan('tdd').limit ?? '', /it would replace a broken link there, which led to .*\.agents\/skills\/tdd/);
     assert.equal(plan('tdd').why, undefined);
     assert.match(plan('grill-me').why ?? '', /A file is in its place in Pi \(.*\.pi\/agent\/skills\/grill-me\)/);
 
     const report = await installParts(box.context, box.to, await box.files());
     assert.equal(report.outcome, 'failed', report.message);
     assert.match(report.message, /Couldn’t change the skill “grill-me”: a file is in its place in Pi \(.*grill-me\), where its folder would go; move or delete it, then try again\./);
-    assert.match(report.message, /Replaced a broken link named “tdd” in Pi’s skills folder \(it led to .*\.agents\/skills\/tdd, which isn’t there\)/);
+    assert.match(report.message, /A broken link named “tdd” in Pi’s skills folder was replaced \(it led to .*\.agents\/skills\/tdd, which isn’t there\)/);
+    assert.match(report.message, /Pi now has 2 skills\./);
     assert.deepEqual(await box.inPi(), ['figma-design', 'tdd']);
     assert.equal(await readFile(box.pi('grill-me'), 'utf8'), 'not a folder');
 
@@ -304,7 +305,7 @@ test('A link that leads nowhere in a skill’s place is replaced and said; a fil
     await symlink(join(box.home, 'elsewhere/tdd'), box.pi('tdd'));
     await rm(box.pi('grill-me'));
     const again = await installParts(box.context, box.to, await box.files());
-    assert.match(again.notes?.join(' ') ?? '', /Left the skill “tdd”: Pi already has one of that name/);
+    assert.match(again.notes?.join(' ') ?? '', /Didn’t put in the skill “tdd”: Pi already has one of that name/);
     assert.equal(await readFile(join(box.home, 'elsewhere/tdd/SKILL.md'), 'utf8'), 'theirs');
   } finally { await box.cleanup(); }
 });
@@ -394,5 +395,35 @@ test('Turning back on a part removed by hand writes it, and Undo takes it out ag
     assert.equal(await current(), true, 'a part that is out can change without the rest going out of date');
     await writeFile(join(box.plugin, 'skills/figma-design/SKILL.md'), '---\nname: figma-design\ndescription: changed\n---\n\nchanged\n');
     assert.equal(await current(), false);
+  } finally { await box.cleanup(); }
+});
+
+test('A part that is out never fails a run or comes back: not with something unreadable in its place, nor after an item of the person’s comes and goes', async () => {
+  const box = await threeSkills();
+  try {
+    await installParts(box.context, box.to, await box.files(), { on: [skill('tdd')], off: [] });
+    // Something of the person's sits where a part that is out would go: a file, then a skill of their own.
+    await writeFile(box.pi('grill-me'), 'not a folder');
+    const changed = '---\nname: tdd\ndescription: tdd\n---\n\ntdd, changed\n';
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), changed);
+    const update = await installParts(box.context, box.to, await box.files());
+    assert.equal(update.outcome, 'installed', update.message);
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), true);
+    await rm(box.pi('grill-me'));
+    await mkdir(box.pi('figma-design'));
+    await writeFile(join(box.pi('figma-design'), 'SKILL.md'), 'mine');
+    await installParts(box.context, box.to, await box.files());
+    await rm(box.pi('figma-design'), { recursive: true });
+    // With their own gone again, an update still brings in only what was chosen.
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), `${changed}more\n`);
+    await installParts(box.context, box.to, await box.files());
+    assert.deepEqual(await box.inPi(), ['tdd']);
+
+    // Turning off the one part that had changed leaves nothing out of date.
+    await installParts(box.context, box.to, await box.files(), { on: [skill('grill-me')], off: [] });
+    await writeFile(join(box.plugin, 'skills/tdd/SKILL.md'), `${changed}again\n`);
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), false);
+    await installParts(box.context, box.to, await box.files(), { on: [], off: [skill('tdd')] });
+    assert.equal(await partsCurrent(box.context, await box.files(), (await readParts(box.home))[0]!), true);
   } finally { await box.cleanup(); }
 });
