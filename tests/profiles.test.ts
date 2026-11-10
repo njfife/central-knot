@@ -10,6 +10,7 @@ import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, itemKeyOf, planSwitch, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, offAfterFailures, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
+import { switchState, targetOf } from '../src/skillswitch.ts';
 import type { HarnessId, HistoryEvent } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
@@ -145,6 +146,9 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
     const pager = (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!;
     await switchProfile(box.context, dev);
     await switchProfile(box.context, pager);
+    // Codex's copy of dev is off by Codex's own skill switch, by its path.
+    const devInCodex = targetOf({ folder: 'dev', directory: join(box.home, '.codex/skills/dev') });
+    assert.equal(switchState(box.context, 'codex-cli', await readFile(join(box.home, '.codex/config.toml'), 'utf8'), devInCodex), true);
     // Then Development again: the profile in use was chosen by this last switch, not the first.
     await switchProfile(box.context, dev);
     const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
@@ -228,7 +232,7 @@ test('A managed MCP server a profile turned off keeps syncing, and stays off', a
   } finally { await box.cleanup(); }
 });
 
-test('A settings file that can’t be written fails only its own flips, and an Undo that put nothing back can be tried again', async () => {
+test('A settings file that can’t be written fails only its own flips, and an Undo that put nothing back can be tried again', { skip: process.getuid?.() === 0 || process.platform === 'win32' }, async () => {
   const box = await sandbox();
   const folders = [join(box.home, '.claude'), join(box.home, '.codex')];
   try {

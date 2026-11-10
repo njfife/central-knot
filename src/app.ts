@@ -185,10 +185,10 @@ export const readAgain = () => busy('Reading skills, MCP servers and agents…',
   announce(readSummary(view));
 });
 
-/** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
 /** Why the open home can't be written now, if so: preview only, or another Central Knot build owns its sync. */
 export const whyReadOnly = (home: HomeView) => (!home.manage.access.allowed ? home.manage.access.reason : home.manage.gate.state === 'stopped' ? home.manage.gate.reason : undefined);
 
+/** How many tools this home really has: a tool that was not found (Pi, often) never makes "all tools" false. */
 export const presentCount = () => state.home ? state.home.snapshots.filter(snapshot => snapshot.detection !== 'Not found' || snapshot.skills.length > 0).length || 3 : 3;
 
 export function showPage(page: Page) {
@@ -248,8 +248,10 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'profile') {
     // Said from the profiles as they are now: an undo of an older switch puts its switches back but leaves the profile a later switch chose.
     const inUse = (state.home && activeProfile(state.home.profiles)?.name) ?? NO_PROFILE;
-    const put = result.harnessWrites ? `${plural(result.harnessWrites, 'switch', 'switches')} put back` : 'no switch needed putting back';
-    if (!result.stopped) state.outcome = { page: state.page, text: `Undone: ${put}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: 'Redo switch' } : undefined };
+    const put = flipSummary(result.flips ?? []) || 'nothing needed putting back';
+    // Undoing an undo redoes the switch: its own Undo is an undo again.
+    const redo = state.history?.some(event => event.undoneBy === eventId);
+    if (!result.stopped) state.outcome = { page: state.page, text: `${redo ? 'Redone' : 'Undone'}: ${put}; ${inUse} is the profile in use. New sessions use it.${notChangedNote(result.results)}`, undo: undoneBy ? { id: undoneBy, label: redo ? 'Undo switch' : 'Redo switch' } : undefined };
     announce(result.stopped ?? state.outcome?.text ?? '', !result.stopped);
     return;
   }
@@ -554,14 +556,27 @@ const notChangedNote = (results: DestinationResult[]) => {
     + (stayed ? ` ${plural(stayed, 'switch', 'switches')} changed since, so ${stayed === 1 ? 'it was' : 'they were'} left as ${stayed === 1 ? 'it is' : 'they are'}.` : '');
 };
 
-/** The profile open on the Profiles page: one of the home's profiles, or 'none' for No profile. */
-export const profileState = { open: undefined as string | undefined, confirmDelete: undefined as string | undefined, renaming: undefined as string | undefined, /** The name as typed while renaming. */ draft: undefined as string | undefined };
+/** The Profiles page's id for No profile, in the list and in `profileState.open`. */
+export const NONE = 'none';
+
+/** What the Profiles page is doing with its profiles. */
+export const profileState = {
+  /** The profile open: a profile's id, or NONE for No profile; unset shows the one in use (one pane: the list). */
+  open: undefined as string | undefined,
+  /** The profile whose Delete is asking to be confirmed. */
+  confirmDelete: undefined as string | undefined,
+  /** The profile whose name is being edited. */
+  renaming: undefined as string | undefined,
+  /** The name as typed while renaming, kept across redraws. */
+  draft: undefined as string | undefined,
+};
 
 /** What a switch did, as the result band says it, with Undo switch (from the page or, next time the window shows, the menu bar). */
 function switchOutcome(result: ProfileSwitchResult) {
   const name = result.name ?? NO_PROFILE;
   const what = flipSummary(result.flips);
-  state.outcome = { page: state.page, item: name, text: `${name} is the profile now. ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
+  const said = result.again ? `Applied ${name} to tools again.` : `${name} is the profile now.`;
+  state.outcome = { page: state.page, item: name, text: `${said} ${what ? `${what.charAt(0).toUpperCase()}${what.slice(1)}; new sessions use it.` : 'Nothing needed switching.'}${notChangedNote(result.results)}`,
     act: result.event ? { label: 'Undo switch', id: 'outcome-undo', title: 'Switch back: each switch this changed goes back', run: () => void restoreEvent(result.event!) } : undefined };
   announce(state.outcome.text, true);
 }

@@ -206,7 +206,7 @@ export interface Change {
   remove?: HarnessId[];
 }
 
-export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
+export interface ApplyResult { stopped?: string; results: DestinationResult[]; harnessWrites: number; /** An Undo of a profile switch: the switches it flipped. */ flips?: ProfileFlip[]; /** Automatic resolutions to tell the person about (CON-02). */ notices?: SyncNotice[]; /** A copy went missing and is inside its settle window: look again shortly. */ settling?: boolean }
 
 /** What sync did on its own: an edit spread, competing edits resolved, or a deletion spread or overruled. */
 export interface SyncNotice {
@@ -408,7 +408,6 @@ export type Appearance = 'system' | 'light' | 'dark';
 /** Central Knot's own settings, shown on its Settings page. */
 export interface AppPreferences { appearance: Appearance }
 
-
 // ---------- Profiles ----------
 
 /**
@@ -437,4 +436,4 @@ export interface ProfileEdit { id?: string; name?: string; items?: string[]; res
 /** One switch a profile change flipped: an item in one tool, turned off (true) or back on. */
 export interface ProfileFlip { item: string; name: string; tool: HarnessId; disabled: boolean }
 
-export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }
+export interface ProfileSwitchResult { stopped?: string; /** The profile switched to, by name (No profile included). */ name?: string; /** It was already in use: its switches were applied again. */ again?: boolean; results: DestinationResult[]; flips: ProfileFlip[]; /** The History entry, for Undo. */ event?: string; view?: HomeView }

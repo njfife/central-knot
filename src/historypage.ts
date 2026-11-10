@@ -56,6 +56,9 @@ function profileSwitch(event: HistoryEvent): { glyph: IconName; text: string; ac
   const counts = flipSummary(switched.flips) || 'no switch needed changing';
   const undid = state.history?.find(other => other.undoneBy === event.id);
   const to = switched.toName ?? NO_PROFILE;
+  // A redo undoes an undo: it makes that switch again, and its own Undo undoes it once more.
+  const redid = undid && state.history?.some(other => other.undoneBy === undid.id);
+  if (undid?.kind === 'profile' && redid) return { glyph: 'sliders-horizontal', text: `Switched to ${to} again: ${counts}.`, action: 'Undo' };
   if (undid?.kind === 'profile') return { glyph: 'undo-2', text: `Undid the switch to ${undid.profile?.toName ?? NO_PROFILE}; back to ${to}: ${counts}.`, action: 'Redo' };
   // Apply to tools: the profile in use, made to match again.
   if ((switched.from ?? '') === (switched.to ?? '')) return { glyph: 'sliders-horizontal', text: `Applied ${to} to tools again: ${counts}.`, action: 'Undo' };

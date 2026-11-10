@@ -43,20 +43,15 @@ async function saveProfiles(home: string, view: ProfilesView) {
 }
 
 /**
- * Why nothing can be written here, if so: a preview-only home, or another build owning sync. Profiles change only Central Knot's
- * file and each tool's switches, never the sync record, so a record waiting for Resume does not stop them.
+ * The home's profiles, ready to change, or why they can't be changed here: a preview-only home, another build owning sync (the
+ * page's whyReadOnly in app.ts says the same), or a profiles file that can't be read. Profiles change only Central Knot's file and
+ * each tool's switches, never the sync record, so a record waiting for Resume does not stop them.
  */
-async function whyReadOnly(context: ShareContext): Promise<string | undefined> {
-  const access = await writeAccess(context);
-  if (!access.allowed) return access.reason;
-  const gate = await syncGate(context);
-  return gate.state === 'stopped' ? gate.reason : undefined;
-}
-
-/** The home's profiles, ready to change, or why they can't be changed here (preview only, another build syncing, unreadable). */
 async function openProfiles(context: ShareContext): Promise<{ view: ProfilesView } | { stop: string }> {
-  const stop = await whyReadOnly(context);
-  if (stop) return { stop };
+  const access = await writeAccess(context);
+  if (!access.allowed) return { stop: access.reason };
+  const gate = await syncGate(context);
+  if (gate.state === 'stopped') return { stop: gate.reason };
   const view = await readProfiles(context.home);
   return view.problem ? { stop: view.problem } : { view };
 }
@@ -140,7 +135,6 @@ export async function driftNow(context: ShareContext): Promise<number> {
   const view = await readProfiles(context.home);
   return view.problem ? 0 : driftOf((await readHome(context)).items, view);
 }
-
 
 /**
  * One flip's switch: the file it lives in, how to read whether the item is off there, and how to set it in that file's text.
@@ -231,7 +225,8 @@ function offAfterFlips(offByProfile: Record<string, HarnessId[]>, done: ProfileF
 
 /**
  * The plan's holds, which assume every flip was made, corrected for the flips that failed and left their switch as it was: a
- * failed turn-off isn't held, and a failed turn-on is still held.
+ * failed turn-off isn't held, and a failed turn-on is still held. Taking a failed flip back out of the plan is the same as making
+ * its opposite, so each one is applied reversed.
  */
 export function offAfterFailures(planned: Record<string, HarnessId[]>, failed: ProfileFlip[]): Record<string, HarnessId[]> {
   return offAfterFlips(planned, failed.map(flip => ({ ...flip, disabled: !flip.disabled })));
@@ -269,10 +264,37 @@ export async function switchProfile(context: ShareContext, id: string | null): P
   profiles.offByProfile = offAfterFailures(plan.offByProfile, plan.flips.filter(flip => !done.includes(flip)));
   await saveProfiles(context.home, profiles);
   const name = target?.name ?? NO_PROFILE;
-  if (!done.length && before === profiles.active) return { name, results, flips: done };
+  const again = before === profiles.active;
+  if (!done.length && again) return { name, again, results, flips: done };
   const event = switchEvent(context, profiles, before, done);
   await appendHistory(context, [event]);
-  return { name, results, flips: done, event: event.id };
+  return { name, again, results, flips: done, event: event.id };
+}
+
+/**
+ * What an Undo of `past` puts back: each switch it flipped that is still as it left it (`back`, reversed). The rest stay as they
+ * are, each with why in `results`: changed again since (by hand or a later switch), a tool whose file can't be read, or already
+ * back (turned back in the tool, or the copy is gone). A switch it turned off that is on again now is in `foundOn`: profiles no
+ * longer hold it.
+ */
+function whatGoesBack(history: HistoryEvent[], past: HistoryEvent, items: SwitchItem[]) {
+  const back: ProfileFlip[] = [];
+  const foundOn: ProfileFlip[] = [];
+  const results: DestinationResult[] = [];
+  const changedAgain = changedSince(history, past);
+  for (const flip of past.profile?.flips ?? []) {
+    const tool = harnesses[flip.tool].name;
+    const item = items.find(entry => entry.id === flip.item);
+    const now = item?.tools[flip.tool];
+    if (changedAgain(flip)) results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${tool} since, so it stays as it is.` });
+    else if (item?.blocked[flip.tool]) results.push({ item: flip.name, harness: flip.tool, outcome: 'held', message: item.blocked[flip.tool]! });
+    else if (now === (flip.disabled ? 'off' : 'on')) back.push({ ...flip, disabled: !flip.disabled });
+    else {
+      if (flip.disabled && now === 'on') foundOn.push(flip);
+      results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: now ? `Already ${now} in ${tool}.` : `${tool} has no copy of it now.` });
+    }
+  }
+  return { back, foundOn, results };
 }
 
 /**
@@ -289,24 +311,7 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   if (!past?.profile) return stopped('That switch can’t be undone.');
   if (past.undoneBy) return stopped('That switch was already undone.');
   const home = await readHome(context);
-  const results: DestinationResult[] = [];
-  const back: ProfileFlip[] = [];
-  // Turned off by the switch, but found on now (turned back on in the tool): profiles no longer hold it off.
-  const foundOn: ProfileFlip[] = [];
-  const changedAgain = changedSince(history, past);
-  for (const flip of past.profile.flips) {
-    if (changedAgain(flip)) { results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${harnesses[flip.tool].name} since, so it stays as it is.` }); continue; }
-    const item = home.items.find(entry => entry.id === flip.item);
-    if (item?.blocked[flip.tool]) { results.push({ item: flip.name, harness: flip.tool, outcome: 'held', message: item.blocked[flip.tool]! }); continue; }
-    const now = item?.tools[flip.tool];
-    // Changed since (turned back by hand, or the copy is gone): left as it is now.
-    if (now !== (flip.disabled ? 'off' : 'on')) {
-      if (flip.disabled && now === 'on') foundOn.push(flip);
-      results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: now ? `Already ${now} in ${harnesses[flip.tool].name}.` : `${harnesses[flip.tool].name} has no copy of it now.` });
-      continue;
-    }
-    back.push({ ...flip, disabled: !flip.disabled });
-  }
+  const { back, foundOn, results } = whatGoesBack(history, past, home.items);
   const { done, results: flipped } = await flipAll(context, home, back);
   results.push(...flipped);
   const before = profiles.active;

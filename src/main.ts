@@ -16,7 +16,7 @@ import { instructionsView, instructionVersion, saveInstruction } from './instruc
 import { registerMarketplaces } from './marketplaces.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
-import { activeProfile, driftOf, NO_PROFILE, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
+import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { plural } from './model.ts';
 import type { Appearance, ApplyResult, AppPreferences, Change, ClaudeWrite, HarnessId, HomeMode, HomeView, ProfilesView, Snapshot } from './types.ts';
 
@@ -172,7 +172,12 @@ const activeProfileName = () => activeProfile(lastProfiles)?.name;
  */
 function profileMenu(): Electron.MenuItemConstructorOptions {
   if (!profilesInUse(lastProfiles)) return { label: 'Profiles…', enabled: !!current, click: () => showPage('profiles') };
-  const choose = (id: string | null) => void fromTray(async () => {
+  const choose = (id: string | null) => {
+    // The profile in use, already matching: nothing to switch, and an empty switch's band would replace the last one's Undo.
+    if (id === (lastProfiles.active ?? null) && !lastDrift) { refreshTray(); return; }
+    void chooseProfile(id);
+  };
+  const chooseProfile = (id: string | null) => fromTray(async () => {
     if (!current) return;
     const result = await switchProfile(context(), id);
     const page = window && !window.isDestroyed();
@@ -181,15 +186,18 @@ function profileMenu(): Electron.MenuItemConstructorOptions {
     if (result.stopped) pendingResults.push({ item: 'Profile', outcome: 'failed', message: result.stopped });
     else if (page) window.webContents.send('profile:switched', result);
     else pendingResults.push(...result.results.filter(item => item.outcome === 'failed'));
-    // Menus: the profiles as saved, and what still differs (the page's read updates it when there is a window).
-    followProfiles(await readProfiles(current.home), page ? lastDrift : await driftNow(context()));
+    // Menus: the profiles as saved, and what still differs.
+    followProfiles(await readProfiles(current.home), await driftNow(context()));
   });
   const usable = homeWritable && !!current && !lastProfiles.problem;
   const drift = lastDrift ? ` (${plural(lastDrift, 'item')} to apply)` : '';
   return { label: `Profile: ${activeProfileName() ?? NO_PROFILE}${drift}`, submenu: [
     { label: NO_PROFILE, type: 'radio', checked: !lastProfiles.active, enabled: usable, click: () => choose(null) },
     // An empty profile would turn everything off: offered once something is in it, as on the Profiles page.
-    ...lastProfiles.profiles.map(profile => ({ label: profile.items.length ? profile.name : `${profile.name} (empty)`, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!!profile.items.length || profile.id === lastProfiles.active), click: () => choose(profile.id) })),
+    ...lastProfiles.profiles.map(profile => {
+      const empty = !presentItems(profile, lastItems).length;
+      return { label: empty ? `${profile.name} (empty)` : profile.name, type: 'radio' as const, checked: profile.id === lastProfiles.active, enabled: usable && (!empty || profile.id === lastProfiles.active), click: () => choose(profile.id) };
+    }),
     // The profile in use no longer matches the tools: applying it again is one click here too, as in the status bar menu.
     ...(lastDrift ? [{ type: 'separator' as const }, { label: `Apply ${activeProfileName() ?? NO_PROFILE} to tools (${plural(lastDrift, 'item')})`, enabled: usable, click: () => choose(lastProfiles.active ?? null) }] : []),
     { type: 'separator' },
@@ -636,7 +644,7 @@ app.whenReady().then(async () => {
       const past = (await readHistory(current!.home)).find(entry => entry.id === eventId);
       if (past?.kind === 'profile') {
         const undone = await undoProfileSwitch(context(), eventId);
-        return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length };
+        return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length, flips: undone.flips };
       }
       const key = past?.key ?? '';
       const tools = (await manageView(context())).tools;

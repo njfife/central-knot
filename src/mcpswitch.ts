@@ -44,9 +44,7 @@ export function mcpDisabled(tool: HarnessId, text: string, name: string): boolea
     case 'claude-cli': return list(parseJson(text).deniedMcpServers).some(entry => deniesByName(entry, name));
     case 'copilot-cli': return list(parseJson(text).disabledMcpServers).includes(name);
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
-    case 'pi-cli': {
-      return piEntry(text, name)?.enabled === false;
-    }
+    case 'pi-cli': return piEntry(text, name)?.enabled === false;
   }
 }
 

@@ -92,6 +92,9 @@ export function switchItems(manage: Pick<ManageView, 'skills'>, mcp: Pick<McpVie
   return [...manage.skills.map(facts => toItem('skill', facts)), ...mcp.servers.filter(facts => !facts.held).map(facts => toItem('mcp', facts))];
 }
 
+/** A profile's items that the home has now (it may name skills or servers since removed): what it would keep on. */
+export const presentItems = (profile: Pick<Profile, 'items'>, items: SwitchItem[]) => profile.items.filter(id => items.some(item => item.id === id));
+
 export interface SwitchPlan {
   flips: ProfileFlip[];
   /** What profiles hold off once the flips are made. */
