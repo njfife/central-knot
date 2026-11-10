@@ -502,6 +502,8 @@ function deleteAction(skill: SampleSkill) {
   if (designMode || kind !== 'skills') return null;
   const base = committedOf(skill.key);
   if (!base.managed && !removable(base).length) return null;
+  // Every copy already queued for removal: Apply all does it, and a second, immediate route would only confuse.
+  if (removable(base).length && removable(base).every(tool => skill.removing?.includes(tool))) return null;
   if (view.confirmDelete !== skill.key) return smallAction('Delete everywhere…', `delete-${skill.key}`, () => { view.confirmDelete = skill.key; rerender(); }, '.text-danger');
   // Armed: it runs at once (not on Apply all), so it says "now", with a plain way back beside it.
   return h('span.delete-armed', {},
@@ -631,12 +633,13 @@ function details(skill: SampleSkill, closable = true) {
   // What each tool row's two actions mean, said once under the rows, before the first click.
   // What the rows' controls mean, said once under them: only the terms the visible controls offer. Managed skills (as they will be
   // after Apply all) sync, so a tool's box in the table is told apart too.
-  const switchShown = toolList().some(tool => !skill.removing?.includes(tool) && !skill.cannot?.[tool] && !skill.switchProblem?.[tool] && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync'));
+  const switchShown = toolList().some(tool => !skill.removing?.includes(tool) && !skill.cannot?.[tool] && !skill.switchProblem?.[tool]
+    && !(skill.disableUnverified?.[tool] && !skill.disabled?.includes(tool)) && (skill.copies[tool] !== undefined || cellOf(skill, tool) === 'will-sync'));
   const removeShown = removable(skill).some(tool => !skill.removing?.includes(tool));
   const noteParts = [
     switchShown ? [h('strong', {}, 'Disabled'), `: the copy stays${skill.managed ? ' and keeps syncing' : ''}, but that tool stops loading it, starting with its next session. `] : null,
     removeShown ? [h('strong', {}, 'Remove'), skill.managed ? ': the copy is taken out and syncing there stops; History keeps it. ' : ': the copy is taken out; History keeps it. '] : null,
-    skill.managed ? [h('strong', {}, 'Unticking a tool’s box'), ' in the table: syncing there stops; the copy stays.'] : null,
+    skill.managed && state.skillsView !== 'files' ? [h('strong', {}, 'Unticking a tool’s box'), ' in the table: syncing there stops; the copy stays.'] : null,
   ].filter(Boolean);
   const switchNote = kind === 'skills' && !designMode && (switchShown || removeShown) ? h('p.details-limits.details-note.details-switch-note', {}, icon('info', 12, 'tone-muted'), h('span', {}, ...noteParts)) : null;
   // When every tool simply has the same synced copy, one line says so; per-tool rows are for when something differs.
@@ -1351,7 +1354,7 @@ const miniCell = (skill: SampleSkill, tool: Tool) => {
   // The same Disable and Remove marks as the table, so a switch changed in the details shows here too.
   if (skill.removing?.includes(tool)) return h('span.legend-cell.mini-cell.cell-removing', { title: `${names[tool]}: removed on Apply all` }, icon('minus', 11));
   const disabled = shownDisabled(skill, tool);
-  return h(`span.legend-cell.mini-cell.${look.tone}${on ? '.cell-on' : ''}${disabled ? '.cell-disabled' : ''}${switchQueued(skill.key, tool) ? '.cell-switch-queued' : ''}`, { title: `${names[tool]}: ${look.label}${disabled ? '; disabled there' : ''}` },
+  return h(`span.legend-cell.mini-cell.${look.tone}${on ? '.cell-on' : ''}${disabled ? '.cell-disabled' : ''}${switchQueued(skill.key, tool) ? '.cell-switch-queued' : ''}`, { title: `${names[tool]}: ${look.label}${switchQueued(skill.key, tool) ? (disabled ? '; disabled on Apply all' : '; enabled again on Apply all') : disabled ? '; disabled there' : ''}` },
     look.glyph ? icon(look.glyph, state === 'present' ? 9 : 11, state === 'present' ? 'glyph-fill' : '') : null,
     disabled ? h('span.cell-disabled-mark', {}, icon('circle-off', 8)) : null);
 };

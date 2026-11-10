@@ -236,6 +236,13 @@ export const loadHistory = () => busy('Reading History…', async () => {
 });
 
 /** Undo or Restore from History: a new revision that spreads to every tool the skill syncs to. */
+/** A restored copy keeps its tool's switch as it was: said when that leaves it disabled, so it doesn't seem not to load for no reason. */
+function stillDisabled(key: string, restored: DestinationResult[]) {
+  const disabled = state.home?.manage.skills.find(skill => skill.key === key)?.disabled ?? [];
+  const tools = [...new Set(restored.map(entry => entry.harness).filter((tool): tool is HarnessId => !!tool && disabled.includes(tool)))];
+  return tools.length ? `It is still disabled in ${andList(tools.map(tool => toolName(tool)))}.` : '';
+}
+
 export const restoreEvent = (eventId: string, choice?: string) => busy('Restoring…', async () => {
   const home = state.home!;
   const result = await api().restore(eventId, home.manage.gate.state === 'needs-resume', home.home, choice);
@@ -262,7 +269,7 @@ export const restoreEvent = (eventId: string, choice?: string) => busy('Restorin
   if (past?.kind === 'switched' || past?.kind === 'removed') {
     // Every tool's result is said, including one that was already as wanted ("has it back already") or still waits.
     const text = past.kind === 'removed'
-      ? [where.length ? `${past.item} is back in ${andList(where)}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message)].filter(Boolean).join(' ')
+      ? [where.length ? `${past.item} is back in ${andList(where)}.` : '', ...result.results.filter(entry => entry.outcome !== 'written').map(entry => entry.message), stillDisabled(past.key, restored)].filter(Boolean).join(' ')
       : result.results.map(entry => `${past.item}: ${entry.message}`).join(' ');
     // "Undo again" only for a switch Undo that recorded what it flipped.
     const again = past.kind === 'switched' && undoneBy && state.history?.some(event => event.id === undoneBy) ? { id: undoneBy, label: 'Undo again' } : undefined;

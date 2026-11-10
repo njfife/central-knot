@@ -138,6 +138,9 @@ if (wanted('disable')) {
   await a.theme('dark'); await a.click('#enable-notes-claude-cli'); await a.click('#remove-notes-copilot-cli');
   await shot(a, 'pending-860-dark', 'At 860×560: queued Disable in Claude Code and Remove in Copilot CLI for notes, not applied.');
   await a.click('#discard');
+  if (!(await a.has('.details'))) await a.click('#open-notes');
+  await a.click('#files-notes'); await shot(a, 'files-view-860-dark', 'At 860×560: clicked "Files and contents" for notes. The details pane is narrow here, so each tool\'s switch and Remove share the tool\'s line.');
+  await a.click('#skills-table');
   await a.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 2, mobile: false });
   await a.theme('dark');
 }

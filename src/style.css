@@ -1366,7 +1366,14 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .details-tool-head > .details-tool-actions { display: inline-flex; align-items: center; gap: 12px; justify-self: end; }
 /* In a narrow pane they drop under the line instead of squeezing it. */
 .details-tools { container-type: inline-size; }
-@container (max-width: 560px) { .details-skills .details-tool-head { grid-template-columns: 150px minmax(0, 1fr); } .details-tool-head > .details-tool-actions { grid-column: 2; justify-self: start; } }
+/* In a narrow pane (the Files view's details) the tool and its controls share the first line; the sentence, if any, goes under. */
+@container (max-width: 560px) {
+  .details-skills .details-tool-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .details-skills .details-tool-head > .details-tool-label { grid-row: 1; grid-column: 1; }
+  .details-skills .details-tool-head > .details-tool-actions { grid-row: 1; grid-column: 2; justify-self: end; }
+  .details-skills .details-tool-head > .details-tool-line { grid-row: 2; grid-column: 1 / -1; }
+  .details-skills .details-tool-head > .details-tool-line:empty { display: none; }
+}
 .tool-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-soft); }
 /* The app's switch, at its own size (the row's action-button height doesn't apply to it). */
 .details-tool-actions .tool-switch .switch { height: 18px; }
@@ -1378,7 +1385,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 /* A switch queued in a skill's details shows in its cell too: the queued dash around the cell, and the mark in accent. */
 .cell-switch-queued { outline: 1.5px dashed var(--accent); outline-offset: 1px; }
 .cell-switch-queued .cell-disabled-mark { color: var(--accent-ink); box-shadow: 0 0 0 1px var(--accent); }
-.tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-faint); }
+.tool-switch-na { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
 /* What Disabled and Remove mean, right under the rows they belong to. */
 .details-switch-note { margin: 0; }
 /* Remove is queued and restorable: quiet until pointed at. A row without it keeps the same space. */
@@ -1395,4 +1402,5 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .toolbar-end .apply-count { white-space: normal; min-width: 0; }
 .ov-page > .toolbar:has(.apply-count) > .toolbar-end { flex-shrink: 1; min-width: 0; }
 /* Keyboard focus on a queued switch shows as focus, not as the dashed queued mark. */
-.tool-switch-pending .switch:focus-visible, .managed-pending .switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Focus always shows as focus: outside the small switch, and over a queued cell's dash. */
+.tool-switch .switch:focus-visible, .managed-pending .switch:focus-visible, .cell-switch-queued:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
