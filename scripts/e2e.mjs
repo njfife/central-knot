@@ -1736,6 +1736,54 @@ async function updateFlow() {
     same('and the button offers it again', (await a.text('#update-button .update-long'))?.trim(), 'Update to 0.5.0 preview 6');
     same('no page errors after updating', a.pageErrors, []);
     await a.quit();
+    // The narrowest window with the status bar at its fullest: a folder home named as long as "This Mac’s home", a profile in
+    // use with a long name, and sync on with nothing managed yet. Nothing may run into its neighbour in any state of the button.
+    const narrowHome = join(scratch, 'this-macs-home'), narrowData = join(scratch, 'update-narrow-data');
+    cpSync(join(root, 'fixtures/home'), narrowHome, { recursive: true });
+    mkdirSync(narrowData, { recursive: true });
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ home: { mode: 'custom', path: narrowHome } }));
+    releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, bytesPerSecond: 1_000_000 });
+    // What in the status bar runs into what follows it, or past the window's edge; empty when everything fits.
+    const crowding = () => a.run(`(() => {
+      const named = node => node.id || String(node.className);
+      const parts = [...document.querySelectorAll('#status-facts > *'), ...['announcement', 'said-link', 'message-mark'].map(id => document.getElementById(id)), document.getElementById('status-end')]
+        .filter(node => node && !node.hidden && !node.classList.contains('visually-hidden') && node.getBoundingClientRect().width > 0);
+      const found = [];
+      parts.forEach((node, at) => {
+        const box = node.getBoundingClientRect(), next = parts[at + 1]?.getBoundingClientRect();
+        if (next && box.right > next.left + 0.5) found.push(named(node) + ' runs ' + Math.round(box.right - next.left) + 'px into ' + named(parts[at + 1]));
+        if (box.right > innerWidth + 0.5) found.push(named(node) + ' runs past the window');
+      });
+      const facts = document.getElementById('status-facts');
+      if (facts.scrollWidth > facts.clientWidth) found.push('the facts need ' + (facts.scrollWidth - facts.clientWidth) + 'px more than they have');
+      return found;
+    })()`);
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.5'));
+    await a.click('#nav-profiles');
+    await a.click('#profile-new');
+    await a.run(`(() => { const input = document.querySelector('#profile-name'); input.value = 'Incident response on call'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    await a.settle();
+    await a.click('#pf-skill\\:notes');
+    await a.click('#profile-switch');
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 80 && !(await a.exists('#update-button')); i++) await wait(250);
+    same('the narrow bar has the profile, idle sync and the short Update button', [await a.exists('#status-profile'), await a.text('#sync-switch .sync-state'), await a.run(`getComputedStyle(document.querySelector('#update-button .update-short')).display !== 'none'`)], [true, 'On · nothing managed', true]);
+    same('at 860 wide nothing in the status bar runs into its neighbour: Update', await crowding(), []);
+    await a.click('#nav-skills');
+    await a.click('#manage-all');
+    await a.click('#update-button');
+    for (let i = 0; i < 40 && !/^Downloading… \d+%$/.test((await a.text('#update-button'))?.trim() ?? ''); i++) await wait(100);
+    same('nor while downloading', await crowding(), []);
+    for (let i = 0; i < 80 && (await a.text('#update-button'))?.trim() !== 'Restart to update'; i++) await wait(250);
+    same('nor with the restart held and its reason as a mark', [await a.run(`getComputedStyle(document.getElementById('message-mark')).display !== 'none'`), await crowding()], [true, []]);
+    await a.quit();
+    writeFileSync(join(narrowData, 'app-settings.json'), JSON.stringify({ ...JSON.parse(readFileSync(join(narrowData, 'app-settings.json'), 'utf8')), update: { tag: 'v0.5.0-preview.6', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.6', from: 'v0.5.0-preview.5' } }));
+    a = await launch(narrowData, [], HOME, as('v0.5.0-preview.6'));
+    await sizeTo(a, 860, 560);
+    for (let i = 0; i < 40 && !/now on/.test(await a.text('#announcement') ?? ''); i++) await wait(250);
+    same('nor after the restart, where the note is its mark and the release notes link waits in Settings', [await a.exists('#status-profile'), await a.run(`getComputedStyle(document.getElementById('said-link')).display`), await crowding()], [true, 'none', []]);
+    same('no page errors in the narrow window', a.pageErrors, []);
+    await a.quit();
     // A build with no release tag never offers updates, and Settings says why (on macOS; elsewhere nothing is shown).
     a = await launch(join(scratch, 'update-untagged'), ['--practice-copy'], HOME, { CK_UPDATE_RELEASES: fixture.releasesUrl });
     await a.click('#nav-settings');
