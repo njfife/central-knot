@@ -18,7 +18,7 @@ One card each for skills, MCP servers and agents, with counts and anything that 
 
 ### Harnesses
 
-One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
+One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. A settings folder with no CLI or app beside it (left behind by an uninstall, say) doesn't count, and a CLI is looked for wherever your terminal finds it, including folders that nvm, bun and the like add to your PATH. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
 
 ### Skills, MCP servers and Agents
 
