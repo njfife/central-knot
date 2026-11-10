@@ -387,7 +387,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       try { reports.push(await run(ctx, catalog, plugin, tool)); }
       catch (error) { reports.push(...failedFor([tool], `It stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`)); }
       // An install from the build's own marketplace put it in that tool's list too: noted, so it is never added again by itself.
-      if (carried && reports.at(-1)?.outcome === 'installed') await noteAdded(catalog.name, ctx.home, tool);
+      if (carried && reports.at(-1)?.outcome === 'installed') await noteAdded(catalog.name, ctx.home, tool).catch(() => undefined);
     }
     return { reports: withoutFileBytes(reports) };
   }
@@ -513,10 +513,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     for (const tool of todo.filter(candidate => binaries[candidate])) {
       const key = `${open.home}\u0000${tool}`;
       tried.add(key);
-      // The home may have been switched while this waited its turn: then nothing is added, and the tool is tried again
-      // the next time this computer's home is read.
+      // The home may have been switched while this waited its turn: then nothing more is added, and the tools left are
+      // tried again the next time this computer's home is read.
       const report = await turn(async () => { const now = host.home(); return now?.actual && now.home === open.home ? addCarriedToTool(tool) : undefined; });
-      if (report) reports.push(report); else tried.delete(key);
+      if (report) reports.push(report);
+      else { tried.delete(key); break; }
     }
     return reports;
   }

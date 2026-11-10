@@ -281,7 +281,7 @@ export const forgetMarketplace = (source: string) => act('removing', async () =>
   tell({ page: 'plugins', item: name || undefined, text, act: { label: 'Add back', id: 'outcome-add-back', run: () => void addMarketplace(source) } });
 });
 
-/** Adds the marketplace this build carries to one tool's own list of marketplaces (its About tab's "Add to …"). */
+/** Adds the marketplace this build carries to one tool's own plugin list (its About tab's "List in …"). */
 export const addCarriedTo = (entry: MarketplaceView, tool: HarnessId) => act('listing', async () => {
   const result = await api().addCarriedTo(tool, market.view?.home ?? '');
   showView(result.view);
