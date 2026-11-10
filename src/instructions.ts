@@ -345,3 +345,20 @@ export async function instructionVersion(context: ShareContext, tool: Shelf, id:
   try { await stat(path); } catch { return undefined; }
   return readText(path);
 }
+
+/**
+ * The base as the git repo moves it (gitrepo.ts BaseInstructions): Push reads base.md; Pull sets it to the repo's text (none when
+ * the repo removed it), and the tools that get the base get it too, as an apply from Instructions would, leaving a copy edited in
+ * a tool's file as it is. What it replaces stays among the base's earlier versions. Says why, when nothing could be set.
+ */
+export function repoBase(context: ShareContext, snapshots: () => Promise<Snapshot[]>) {
+  return {
+    read: async () => (await readBase(context.home)).raw,
+    apply: async (text: string | undefined) => {
+      const tools = await snapshots();
+      const [base, files] = await Promise.all([baseView(context), instructionsView(context, tools)]);
+      const seen = Object.fromEntries(files.map(file => [file.tool, { path: file.path, hash: file.hash }]));
+      return (await applyBase(context, tools, { text: text ?? '', expected: base.hash, tools: base.tools, seen })).stopped;
+    },
+  };
+}

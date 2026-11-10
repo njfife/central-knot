@@ -13,6 +13,13 @@ const who = (tool?: string) => (tool ? toolName(tool) : 'Central Knot');
 
 function describe(event: HistoryEvent): { glyph: IconName; text: string; action?: string } {
   const order = event.orderProved ? '' : ' Order not proved; the fixed tool order decided.';
+  // Pull from the git repo: said as a pull, whichever way sync carried it.
+  if (event.via === 'repo' && !event.undoneBy) {
+    if (event.kind === 'deleted') return { glyph: 'git-branch', text: 'Removed in the git repo, so Pull deleted it from the tools it synced to.', action: 'Restore' };
+    if (event.kind === 'chosen') return { glyph: 'git-branch', text: `Pulled from the git repo; it replaced the copy in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo' };
+    if (event.kind === 'edit') return { glyph: 'git-branch', text: `Pulled from the git repo into ${who(event.winner?.tool)}${event.losers.length ? `, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}` : ''}.`, action: 'Undo' };
+    if (event.kind === 'added') return { glyph: 'git-branch', text: `Pulled from the git repo and added to ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}.`, action: 'Undo add' };
+  }
   switch (event.kind) {
     case 'edit': return { glyph: 'pencil-line', text: `Edited in ${who(event.winner?.tool)}, then copied to ${touchedToolsPhrase(event.losers.map(loser => loser.tool)) || 'the others'}.`, action: 'Undo' };
     case 'conflict': return { glyph: 'diff', text: `${who(event.winner?.tool)}’s edit won over ${andList(event.losers.filter(loser => loser.hash !== event.previous).map(loser => who(loser.tool)))}’s.${order}`, action: 'Undo' };
@@ -83,7 +90,7 @@ const day = (iso: string) => {
 const actionHelp = (event: HistoryEvent, action: string) => (event.kind === 'profile' ? `Each switch this changed goes back, where it is still as this left it; ${event.profile?.fromName ?? NO_PROFILE} is in use again if this switch is the one that chose the profile in use`
   : event.kind === 'switched' ? (event.switched ?? []).map(entry => `${entry.disabled ? 'Enable' : 'Disable'} it again in ${who(entry.tool)}`).join('; ')
   : event.kind === 'removed' ? `Put the removed copy back in ${touchedToolsPhrase(event.losers.map(loser => loser.tool))}`
-  : event.kind === 'added' ? `Remove the copies Apply all added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
+  : event.kind === 'added' ? `Remove the copies ${event.via === 'repo' ? 'Pull' : 'Apply all'} added (only while unchanged) and stop managing ${event.item}` : action === 'Restore' ? `Put ${event.item} back in every tool it synced to`
   : action === 'Redo edit' || action === 'Delete again' ? 'Undo the undo: put back the version that was replaced'
     : `Put ${event.item} back as it was before this change, in every tool it syncs to (including where it was edited)`);
 
@@ -96,12 +103,12 @@ function actions(event: HistoryEvent, action?: string) {
   if (!action) return h('span');
   // The scope is the tools the event touched, as the notices say it.
   // Undo and Restore write the earlier version to every tool the item syncs to (restoreFromHistory), so they say "in all tools".
-  // Only an 'added' undo is narrower: it removes the copies Apply all added, in those tools alone.
+  // Only an 'added' undo is narrower: it removes the copies Apply all (or Pull) added, in those tools alone.
   const touched = event.kind === 'added' || event.kind === 'removed' ? [...new Set(event.losers.map(loser => loser.tool))] : event.kind === 'switched' ? (event.switched ?? []).map(entry => entry.tool) : [];
   const scope = touched.length ? `in ${touchedToolsPhrase(touched)}` : 'in all tools';
   // A switch's Undo says what it does: Enable where it was disabled, Disable where it was enabled.
   const flips = new Set((event.switched ?? []).map(entry => entry.disabled));
-  const verb = action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
+  const verb = action === 'Undo' && event.via === 'repo' ? 'Undo pull' : action === 'Undo' && event.kind === 'edit' ? 'Undo edit' : action === 'Undo' && event.kind === 'chosen' ? 'Undo choice'
     : event.kind === 'switched' && flips.size === 1 ? (flips.has(true) ? 'Enable' : 'Disable') : action;
   const label = event.kind === 'profile' ? `${action} switch` : ['Undo', 'Undo edit', 'Restore', 'Delete again', 'Redo edit'].includes(action) ? `${verb} ${scope}` : action;
   const control = button({ variant: 'link', size: 'small', label, name: `${label} ${event.item}: ${actionHelp(event, action)}`, id: `history-${event.id}`, disabled: !!state.busy, onclick: () => void restoreEvent(event.id) });
@@ -122,7 +129,7 @@ export function historyPage() {
   if (!events.length) return h('div.page', {}, state.outcome?.page === 'history' ? h('div.bands', {}, outcomeBand()) : null, emptyState('history', 'No changes yet', 'When sync copies an edit, or Apply all adds or replaces a copy, it shows up here with Undo. Turn on Managed for a skill to begin.', button({ variant: 'outline', label: 'Start in Skills', id: 'history-go-skills', onclick: () => showPage('skills') })));
   const ordered = [...events].reverse();
   const reread = rereadBand(state.history);
-  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, Apply all and profile switches changed in your tools, newest first. Undo puts the earlier version back${ordered.some(event => event.kind === 'removed') ? '; Restore puts a removed copy back' : ''}.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
+  return h('div.page', {}, reread ? h('div.bands', {}, reread) : null, h('div.scroll', { id: 'history-scroll' }, h('p.history-intro', {}, `What sync, Apply all, Pull and profile switches changed in your tools, newest first. Undo puts the earlier version back${ordered.some(event => event.kind === 'removed') ? '; Restore puts a removed copy back' : ''}.`, ...keptFor()), h('ul.history-list', {}, ordered.flatMap((event, index) => {
     const about = describe(event);
     const heading = index === 0 || day(ordered[index - 1].at) !== day(event.at) ? h('li.history-day', { role: 'presentation' }, day(event.at)) : null;
     // The newest row, made by a click just now, gets the same brief highlight the tables use.

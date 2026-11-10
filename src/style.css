@@ -1561,3 +1561,108 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
 .harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
 .ov-section-after > .text-action { padding-left: 0; margin-left: 0; }
+
+/* Git repo: the Managed set kept in a git repo, with Pull and Push. */
+/* The state line wraps to a second row rather than clip; each part stays whole. */
+.repo-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-width: 0; font-weight: 500; }
+.toolbar.repo-toolbar { height: auto; min-height: 37px; padding-top: 4px; padding-bottom: 4px; }
+.repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+/* This page spans the window: its bands and empty state run to the edge, as Profiles' do. */
+.page.repo-page > .bands > .band { padding-right: 16px; }
+.repo-page > .scroll > .empty { max-width: none; }
+.repo-toolbar .btn { flex: none; }
+.repo-toolbar .toolbar-spacer { flex: 1 1 auto; }
+.repo-scroll { display: flex; flex-direction: column; gap: 24px; padding: 16px calc(16px + var(--overlay-gutter, 0px)) 24px 16px; }
+.repo-scroll > * { flex: none; }
+.repo-where { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.repo-address { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.repo-address > svg { margin-top: 2px; }
+.repo-address > svg { flex: none; }
+/* The address wraps rather than shortening: it is how a user knows which repo is in use. */
+.repo-address-text { min-width: 0; flex: 1 1 auto; line-height: 20px; }
+.repo-url { font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
+/* The branch follows the address's last line, as part of it. */
+.repo-address-text > .repo-branch { display: inline-block; margin-left: 8px; vertical-align: 1px; overflow-wrap: anywhere; }
+.repo-page .market-add-input[aria-invalid='true'], .repo-page .market-add-input[aria-invalid='true']:focus { border-color: var(--danger); outline-color: var(--danger); }
+/* Bands on this page pin their icon to the first line, as its notes do. */
+.repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
+.repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
+.repo-facts dd { min-width: 0; }
+/* A commit reads as one line of text that wraps where it must: id, subject, then when, never pinned apart. */
+.repo-commit, .repo-latest { display: inline; min-width: 0; overflow-wrap: anywhere; word-spacing: 4px; }
+.repo-commit > *, .repo-latest > :not(.repo-commit) { word-spacing: normal; }
+.repo-latest > .repo-new { margin-left: 8px; }
+.repo-sha { white-space: nowrap; }
+.repo-subject { overflow-wrap: anywhere; }
+.repo-when { white-space: nowrap; font-size: 12px; line-height: 16px; }
+.repo-new { white-space: nowrap; padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-soft); }
+.repo-sides { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 24px 32px; align-items: start; }
+.repo-side { display: flex; flex-direction: column; min-width: 0; }
+.repo-side-head { display: flex; align-items: center; justify-content: flex-start; gap: 16px; min-height: 36px; box-shadow: inset 0 -1px 0 var(--line); }
+.repo-list { list-style: none; margin: 0; padding: 0; }
+.repo-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 10px; align-items: start; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--line); }
+.repo-row-icon { display: flex; padding-top: 3px; }
+.repo-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* A long name wraps, and its kind and change follow it rather than stay at the far edge. */
+.repo-row-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; min-width: 0; }
+.repo-row-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.repo-row-meta { display: inline-flex; align-items: baseline; gap: 8px; flex: none; white-space: nowrap; }
+.repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
+.repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
+.repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
+.repo-row-change { flex: none; font-size: 12px; line-height: 16px; color: var(--ink); white-space: nowrap; }
+.repo-row-kind + .repo-row-change::before { content: '·'; margin-right: 8px; color: var(--ink-faint); }
+.repo-side-note { display: flex; align-items: baseline; gap: 6px; max-width: 76ch; margin: 0; padding: 8px 0 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-side-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
+.repo-activity { color: var(--ink); }
+.repo-activity-part { white-space: nowrap; }
+.repo-stuck-count { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 16px; color: var(--ink-soft); text-transform: none; letter-spacing: 0; }
+.repo-stale { display: flex; align-items: baseline; gap: 6px; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-stale > svg { flex: none; align-self: flex-start; margin-top: 2px; }
+/* The state line takes focus only so a keyboard user keeps their place; it isn't a control, so it doesn't look like one. */
+.repo-state:focus, .repo-state:focus-visible { outline: none; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--focus); }
+.repo-in-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin: 0; color: var(--ink-soft); }
+.repo-change-added { color: var(--success); }
+.repo-change-removed { color: var(--danger); }
+.repo-change-held { color: var(--ink-soft); }
+.repo-field-below { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-field-below .mono { font-size: 11.5px; white-space: nowrap; }
+.band-danger #repo-try-again { margin-left: auto; height: 26px; padding: 0 10px; flex: none; color: var(--ink); }
+.repo-row-held .repo-row-name { color: var(--ink-soft); }
+.repo-empty-side { margin: 0; padding: 10px 0; color: var(--ink-soft); }
+.repo-aside { max-width: 80ch; margin: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-confirm .btn { flex: none; height: 24px; padding: 0 10px; }
+#repo-disconnect-confirm { border-color: currentColor; }
+/* The result's "Undo … in History" reads in the sentence's own ink; only the link is blue. */
+.repo-page .band-done .tone-faint { color: inherit; opacity: 1; }
+/* The Undo sentence moves down whole rather than leave a word or two behind. */
+.repo-page .band-done .band-text > .tone-faint { white-space: nowrap; }
+/* Wide windows: the intro lines up with the form and "What goes where" below it. */
+/* The intro lines up with the form at every width, as the connected page does. */
+.repo-page > .scroll > .empty { align-items: flex-start; text-align: left; }
+.repo-page > .scroll > .empty .empty-body { max-width: 72ch; }
+/* The question and its buttons sit together at the right, under Disconnect…. */
+.band.repo-confirm { justify-content: flex-end; }
+.band.repo-confirm .band-text { flex: 0 1 auto; text-align: right; }
+/* The start page begins at the top, as the connected page does, not floating mid-window. */
+.repo-page > .scroll > .empty { justify-content: flex-start; padding-top: 40px; }
+.repo-page > .scroll { container-type: inline-size; }
+.repo-start { width: 100%; display: flex; flex-direction: column; gap: 16px; margin-top: 8px; text-align: left; }
+.repo-start-side { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; }
+/* Wide windows: the form and what goes where sit side by side, so the start page uses the room instead of a narrow column. */
+@container (min-width: 960px) { .repo-start { width: 100%; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; gap: 24px 40px; } .repo-start-side { padding-top: 16px; } }
+.repo-connect { container-type: inline-size; display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--lift); }
+.repo-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+/* The form's fields take their column's width (the Plugins page sizes its own add field at short heights). */
+.repo-connect .market-add-input { width: 100%; }
+.repo-fields { display: flex; flex-direction: column; gap: 12px; }
+@container (min-width: 540px) { .repo-fields { display: grid; grid-template-columns: minmax(0, 1fr) 160px; align-items: start; gap: 12px 16px; } }
+.repo-field-hint { margin-left: 6px; font-weight: 400; color: var(--ink-faint); }
+.repo-connect-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.repo-start .btn { margin-top: 0; }
+.repo-connect-note { font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+.repo-layout { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; line-height: 18px; }
+.repo-layout dt { color: var(--ink); }
+.repo-layout dd { margin: 0; color: var(--ink-soft); }
+.repo-start .empty-aside { max-width: 72ch; margin: 0; padding: 0; font-size: 12px; line-height: 16px; color: var(--ink-soft); }
+@container (max-width: 300px) { .repo-layout { grid-template-columns: minmax(0, 1fr); } .repo-layout dd { margin-bottom: 4px; } }

@@ -1,7 +1,7 @@
 import { onlyAllowed, record, strings } from './values.ts';
 import { execFile } from 'node:child_process';
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, shell, Tray, type MenuItemConstructorOptions } from 'electron';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, hostname, tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { appendFileSync, mkdtempSync, rmSync, watch, type FSWatcher } from 'node:fs';
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
@@ -13,8 +13,9 @@ import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, 
 import { noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
-import { applyBase, baseView, instructionsView, instructionVersion, saveInstruction, undoBase } from './instructions.ts';
+import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
 import { registerMarketplaces } from './marketplaces.ts';
+import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
 import { trayIconPng } from './trayicon.ts';
 import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from './profiles.ts';
@@ -842,6 +843,8 @@ app.whenReady().then(async () => {
         return { stopped: undone.stopped, results: undone.results, harnessWrites: undone.flips.length, flips: undone.flips };
       }
       const key = past?.key ?? '';
+      // A pull that changed only an agent's Claude Code settings has its own Undo (its earlier file, kept whole).
+      if (past?.settingsFile) return undoSettingsChange(context(), eventId);
       const tools = await presentNow();
       if (key.startsWith('mcp:')) return restoreMcp(context(), tools, eventId).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
       if (key.startsWith('agent:')) return restoreAgent(context(), tools, eventId, typeof choice === 'string' ? choice : undefined).then(result => ({ stopped: result.stopped, results: result.results, harnessWrites: result.writes }));
@@ -899,6 +902,17 @@ app.whenReady().then(async () => {
     await releaseProfileHolds(context(), switchedByHand(asked.filter(change => change.disable?.length || change.enable?.length), result.results));
     return result;
   });
+  // The git repo the Managed set lives in. Reading it, and asking the repo for its latest commit, waits for no sync pass;
+  // Connect, Pull, Push and Disconnect take their turn with every other change.
+  // Every repo call knows whether Automatic sync is on: while it is off, an MCP server's or agent's deletion waits for it.
+  // Base instructions travel as instructions/base.md (repoBase).
+  const repoOptions = () => ({ syncOn, base: repoBase(context(), read) });
+  const repoElsewhere = async () => ({ stopped: elsewhere, results: [], view: await repoView(context(), repoOptions()) });
+  handleNow('repo:view', async check => (current ? repoView(context(), { ...repoOptions(), check: check === true }) : null));
+  handle('repo:connect', async (url, branch, home) => (home === current?.home && typeof url === 'string' && typeof branch === 'string' ? connectRepo(context(), url, branch, repoOptions()) : repoElsewhere()));
+  handle('repo:pull', async home => (home === current?.home ? pullRepo(context(), repoOptions()) : repoElsewhere()));
+  handle('repo:push', async home => (home === current?.home ? pushRepo(context(), { ...repoOptions(), from: current!.mode === 'actual' ? hostname() : current!.label }) : repoElsewhere()));
+  handle('repo:disconnect', async home => (home === current?.home ? disconnectRepo(context(), repoOptions()) : repoElsewhere()));
   await loading;
   if (smoke) {
     try {

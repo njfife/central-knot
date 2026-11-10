@@ -9,7 +9,7 @@ import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, Syn
 
 export const FORMAT_VERSION = 1;
 /** A text's SHA-256, hex: what Central Knot names content by. */
-export const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+export const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const STAGE_PREFIX = '.ck-stage-';
 const STAGE_NAME = /^\.ck-stage-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** Finder drops these into any folder it opens; they are no change to a skill. */
@@ -74,6 +74,9 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
+/** Files no tool's copy keeps (Finder's .DS_Store, editor swap and backup files): left out of every copy and every identity. */
+export const notCopied = (name: string, isFile: boolean) => (NOISE.has(name) && isFile) || editorNoise(name);
+
 /** Whole-directory identity. Only the executable bit counts, so umask differences are no collision. */
 export async function readTree(directory: string, options: { includeGit?: boolean } = {}): Promise<Tree> {
   const files: Tree['files'] = new Map();
@@ -81,7 +84,7 @@ export async function readTree(directory: string, options: { includeGit?: boolea
   let held: string | undefined;
   async function visit(current: string) {
     for (const entry of await readdir(current, { withFileTypes: true })) {
-      if ((entry.name === '.git' && !options.includeGit) || (NOISE.has(entry.name) && entry.isFile()) || editorNoise(entry.name)) continue;
+      if ((entry.name === '.git' && !options.includeGit) || notCopied(entry.name, entry.isFile())) continue;
       const path = join(current, entry.name);
       const relativePath = relative(directory, path).split(sep).join('/');
       if (entry.isSymbolicLink()) { held ??= `It contains a link (${relativePath}), and Central Knot creates and follows no links here.`; files.set(relativePath, { sha256: 'link', mode: 0 }); }
@@ -328,6 +331,9 @@ export async function remember(context: ShareContext, generation: string) {
 }
 
 export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
+
+/** Why nothing may be written right now (another build owns syncing, or the record needs Resume), if so. */
+export const gateRefusal = (gate: SyncGate) => (gate.state === 'stopped' || gate.state === 'needs-resume' ? gate.reason : undefined);
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {

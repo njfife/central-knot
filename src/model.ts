@@ -30,6 +30,17 @@ export const DAY_MS = 86_400_000;
 /** How many days History can keep changes and deleted items (Settings), and how many it keeps unless told otherwise. */
 export const historyDayChoices: readonly HistoryDays[] = [7, 30, 90];
 export const defaultHistoryDays: HistoryDays = 30;
+/** 'today' or 'yesterday' for a time on one of those days, in the person's own time zone; undefined otherwise. */
+export function nearDay(iso: string): 'today' | 'yesterday' | undefined {
+  const day = new Date(iso).toDateString();
+  return day === new Date().toDateString() ? 'today' : day === new Date(Date.now() - DAY_MS).toDateString() ? 'yesterday' : undefined;
+}
+/** "today at 9:20 AM", "yesterday at 9:20 AM", else "Nov 8 at 9:20 AM" (with the year when it isn't this one). */
+export function dayAndTime(iso: string): string {
+  const date = new Date(iso);
+  const day = nearDay(iso) ?? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+  return `${day} at ${clockTime(iso)}`;
+}
 export const plural = (count: number, word: string, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 
 /** Distinct skills: the same folder name in two of a tool's folders is one skill to that tool. */

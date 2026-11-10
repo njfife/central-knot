@@ -167,13 +167,18 @@ export function writeEntry(text: string, tool: HarnessId, name: string, server: 
     return setTomlTable(text, ['mcp_servers'], name, body);
   }
   if (!server) return setJsonMember(text, ['mcpServers', name], undefined);
+  return setJsonMember(text, ['mcpServers', name], jsonEntry(tool, server, extras));
+}
+
+/** A server as a JSON tool writes it (Claude Code, Copilot CLI, Pi), with that tool's own fields kept. */
+export function jsonEntry(tool: HarnessId, server: NeutralServer, extras: Record<string, unknown> = {}): Record<string, unknown> {
   const entry: Record<string, unknown> = {
     type: tool === 'copilot-cli' && server.transport === 'stdio' ? 'local' : server.transport,
     command: server.command, args: server.args, env: server.env, cwd: server.cwd, url: server.url, headers: server.headers, ...extras,
   };
   // Copilot offers every tool of a server only when told to (CD §5): a new entry gets its documented default.
   if (tool === 'copilot-cli' && entry.tools === undefined) entry.tools = ['*'];
-  return setJsonMember(text, ['mcpServers', name], Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined)));
+  return Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined));
 }
 
 /**
@@ -315,8 +320,10 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
     const sample = (entries.find(entry => item?.state === 'shared' && entry.hash === item.hash) ?? entries[0]).server;
     for (const tool of present) { if (!slot[tool]) { const reason = cannotHold(tool, sample); if (reason) cannot[tool] = reason; } }
     if (claudeWaits(item, slot, present)) claudePending.push(name);
+    // Edits waiting to spread, as skills and agents mark them: a recorded copy now holding other content.
+    const edited = item?.state === 'shared' ? item.copies.filter(copy => !copy.status && slot[copy.tool] && slot[copy.tool]!.hash !== copy.hash).map(copy => copy.tool) : [];
     servers.push({ key: name, name, description: summary(sample), copies, extra: [], managed: item?.state === 'shared', off: item?.off ?? [], cannot, held, separate: item?.separate, choiceBlocks: {},
-      ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
+      edited: edited.length ? edited : undefined, ...mcpSwitchFacts(name, entries.map(entry => entry.tool), switches) });
   }
   return { tools: present, servers, claudePending, access: await writeAccess(context), gate: problem ? { state: 'stopped', reason: problem } : await syncGate(context), problems, notices };
 }
@@ -326,8 +333,10 @@ export async function mcpView(context: ShareContext, tools: HarnessId[], notices
 /**
  * Records Managed choices, then brings each managed server into line: a copy where a tool lacks it, a one-sided edit spread,
  * a deletion spread once it holds. Claude Code is written only when `claudeNow` (Write now, Claude closed) names that server.
+ * `decideNow`: servers whose missing copies count as deleted at once (a deletion the person asked for, as Pull's), never as a
+ * reset; the rest keep the settle window.
  */
-export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; resume?: boolean } = {}): Promise<McpResult> {
+export async function applyMcp(context: ShareContext, tools: HarnessId[], changes: Change[], options: { claudeNow?: string[]; settleMs?: number; now?: number; only?: Set<string>; resume?: boolean; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
@@ -351,7 +360,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   for (const tool of present) {
     if (missingFiles.has(tool) || unreadable.has(tool)) continue;
     const held = Object.entries(record.items).filter(([, item]) => item.state === 'shared' && !item.off.includes(tool) && item.copies.some(copy => copy.tool === tool && !copy.status && !copy.away));
-    const gone = held.filter(([name]) => !byName.get(name)?.[tool]);
+    // A server the person just removed (decideNow) is a deletion, even when it was the file's last one.
+    const gone = held.filter(([name]) => !byName.get(name)?.[tool] && !options.decideNow?.has(name));
     if (gone.length && (noSection.has(tool) || (held.length >= 2 && gone.length === held.length))) resetTools.add(tool);
   }
   const results: DestinationResult[] = [];
@@ -421,7 +431,7 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
     if (options.only && !chosenNow.has(name) && (edited.length || missing.length)) { results.push({ item: name, outcome: 'held', message: `An edit or deletion of ${name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); continue; }
     let raced: HarnessId[] | undefined;
     if (missing.length) {
-      if (missing.some(copy => now - missingSince[copy.tool] < (options.settleMs ?? 2000))) { settling = true; continue; }
+      if (missing.some(copy => now - missingSince[copy.tool] < (options.decideNow?.has(name) ? 0 : options.settleMs ?? 2000))) { settling = true; continue; }
       if (!edited.length) {
         const removed: HarnessId[] = [];
         const gone: { tool: HarnessId; hash: string; kept?: string }[] = [];

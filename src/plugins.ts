@@ -74,7 +74,7 @@ export function sameSource(first: string, second: string): boolean {
 /** The URL CK itself fetches; native commands get the text exactly as the person typed it. */
 const fetchUrl = (source: string) => { const repo = githubRepo(source); return repo ? `https://github.com/${repo}.git` : source.trim(); };
 
-const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
+export const gitEnv = () => ({ ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15' });
 
 function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; cwd?: string; timeoutMs: number }): Promise<{ code: number | 'timeout' | 'missing'; output: string }> {
   return new Promise(done => {
@@ -93,15 +93,17 @@ function run(file: string, args: string[], options: { env?: NodeJS.ProcessEnv; c
 
 /** Git run with hooks and prompts off: an SSH host, key or credential that would ask fails at once instead (MKT-05). */
 const git = (args: string[], timeoutMs: number) => run('git', ['-c', 'core.hooksPath=/dev/null', ...args], { env: gitEnv(), timeoutMs });
+/** The same Git, for other features (the git repo of the Managed set): hooks and prompts off, this computer's own sign-in. */
+export const runGit = (args: string[], timeoutMs = 60_000) => git(args, timeoutMs);
 
 /** What a Git source said when asked for access: ok, or one MKT-05 class with words a person can act on. */
 export type AccessResult = { state: 'ok' } | { state: 'sign-in' | 'no-access' | 'unknown-host' | 'passphrase' | 'network' | 'git-missing' | 'unclassified'; message: string };
 
 /** Why a Git command failed, in classes a person can act on (MKT-05). Where the server's answer fits more than one cause, the message names each. */
-export function gitFailure(code: number | 'timeout' | 'missing', output: string): Exclude<AccessResult, { state: 'ok' }> {
+export function gitFailure(code: number | 'timeout' | 'missing', output: string, place = 'marketplace'): Exclude<AccessResult, { state: 'ok' }> {
   const text = output.toLowerCase();
-  if (code === 'missing') return { state: 'git-missing', message: 'Git is not installed, so this marketplace cannot be read. Install Git, then try again.' };
-  if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: 'Can’t reach the marketplace. Check your connection; a company marketplace may need its network or VPN.' };
+  if (code === 'missing') return { state: 'git-missing', message: `Git is not installed, so this ${place} cannot be read. Install Git, then try again.` };
+  if (code === 'timeout' || /could not resolve host|timed out|connection refused|could not connect to server|network is unreachable|no route to host|failed to connect/.test(text)) return { state: 'network', message: `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.` };
   if (/host key verification failed/.test(text)) return { state: 'unknown-host', message: 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.' };
   if (/passphrase/.test(text)) return { state: 'passphrase', message: 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.' };
   if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return { state: 'sign-in', message: 'Sign-in needed, or no repository there: the server doesn’t say which. Check the address, and use credentials that already work for Git on this computer, then try again.' };
@@ -110,7 +112,7 @@ export function gitFailure(code: number | 'timeout' | 'missing', output: string)
 }
 
 /** Why a Git command failed, in words a person can act on (MKT-05). */
-export const whyGitFailed = (code: number | 'timeout' | 'missing', output: string): string => gitFailure(code, output).message;
+export const whyGitFailed = (code: number | 'timeout' | 'missing', output: string, place?: string): string => gitFailure(code, output, place).message;
 
 /**
  * Whether this computer can read a Git source, asked with `git ls-remote` before Add reads it and before a tool is told
@@ -126,6 +128,15 @@ export function checkAccess(context: PluginContext, source: string): Promise<Acc
   if (!context.checked) return ask();
   if (!context.checked.has(url)) context.checked.set(url, ask());
   return context.checked.get(url)!;
+}
+
+/** Why a push failed: the repo moved on, or this account can't write there; anything else as whyGitFailed says. */
+export function whyPushFailed(code: number | 'timeout' | 'missing', output: string, place = 'repo'): string {
+  const text = output.toLowerCase();
+  // Refusals first: a protected branch also says "rejected", and pulling again would not help.
+  if (/read-only|\b403\b|denied|not allowed|protected branch|pre-receive hook declined/.test(text)) return `The ${place} did not accept the push: your account may only be able to read it, or the branch is protected. Nothing changed here.`;
+  if (/non-fast-forward|fetch first|stale info/.test(text)) return `The ${place} changed just now. Pull, then push again.`;
+  return whyGitFailed(code, output, place);
 }
 
 // ---------- Catalog ----------

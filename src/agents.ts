@@ -186,6 +186,8 @@ async function keep(context: ShareContext, entry: AgentEntry) {
   await writeDurably(join(base, `${entry.tool}.txt`), entry.text);
   try { await stat(join(base, 'agent.json')); } catch { await writeDurably(join(base, 'agent.json'), `${JSON.stringify({ tool: entry.tool, name: entry.name, agent: entry.agent }, null, 2)}\n`); }
 }
+/** Keeps an agent file's content in Central Knot's store (by the agent's identity), so Restore can put that tool's own file back. */
+export const keepAgentVersion = (context: ShareContext, entry: AgentEntry) => keep(context, entry);
 async function kept(context: ShareContext, key: string, hash: string): Promise<{ tool: HarnessId; name: string; agent: NeutralAgent; texts: Partial<Record<HarnessId, string>> } | undefined> {
   const base = keptFolder(context, key, hash);
   try {
@@ -298,7 +300,7 @@ function originOnApply(item: AgentRecordItem | undefined, slot: AgentSlot, prese
 const firstSeenMissingAt = new Map<AgentCopy['file'], AgentPass['now']>();
 
 interface AgentPass { context: ShareContext; present: AgentTool[]; record: AgentRecord; onDisk: Awaited<ReturnType<typeof gatherAgents>>; folderIds: NonNullable<AgentRecord['roots']>;
-  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number }
+  resetTools: Set<HarnessId>; chosen: Set<string>; newlyManaged: Set<string>; deletedNow: Set<string>; limitedToKeys?: Set<string>; now: number; settleMs: number; decideNow?: Set<string> }
 interface PassLog { results: DestinationResult[]; events: HistoryEvent[]; notices: SyncNotice[]; writes: number } type Loser = { tool: HarnessId; hash: string };
 type Situation = 'rootMoved' | 'removalOwed' | 'folderRemade' | 'stopped' | 'away' | 'off' | 'oneWay' | 'oneWayChanged' | 'deleted' | 'unchanged' | 'edited';
 type StaysRecorded = Exclude<Situation, 'rootMoved' | 'folderRemade'>; interface CopyNow<Is = Exclude<StaysRecorded, 'oneWayChanged'>> { copy: AgentCopy; entry?: AgentEntry; is: Is }
@@ -307,7 +309,8 @@ interface Target { tool: AgentTool; entry?: AgentEntry; recorded?: CopyNow } typ
  * Records Managed choices and brings each managed agent into line. `only`: with Sync off, Apply all writes exactly the agents it
  * shows and nothing else spreads (SYN-03).
  */
-export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; resume?: boolean } = {}): Promise<McpResult> {
+/** `decideNow`: agents (by key) whose missing copies count as deleted at once (a deletion the person asked for, as Pull's); the rest keep the settle window. */
+export async function applyAgents(context: ShareContext, tools: HarnessId[], changes: Change[], options: { settleMs?: number; now?: number; only?: Set<string>; resume?: boolean; decideNow?: Set<string> } = {}): Promise<McpResult> {
   const refused = await prepareSyncRecord(context, changes.length > 0, options.resume);
   if (refused) return refused;
   const { present, onDisk } = await gatherAgentsAfterRecovery(context, tools);
@@ -316,7 +319,7 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const displacedByEarlierPass = Object.entries(record.items).flatMap(([key, item]) => (item.displaced ?? []).map(entry => ({ key, ...entry })));
   const { folderIds, resetTools } = await readFolderIds(context, present, record.roots);
   const { chosen, newlyManaged } = recordChoices(record, onDisk.byKey, changes, log);
-  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, deletedNow: new Set(), limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000 };
+  const pass: AgentPass = { context, present, record, onDisk, folderIds, resetTools, chosen, newlyManaged, deletedNow: new Set(), limitedToKeys: options.only, now: options.now ?? Date.now(), settleMs: options.settleMs ?? 2000, decideNow: options.decideNow };
   const outcomes: AgentOutcome[] = [];
   for (const [key, item] of Object.entries(record.items)) if (item.state === 'shared' && (!options.only || options.only.has(key))) outcomes.push(await syncAgent(pass, log, key, item));
   await finishPendingRemovals(pass, log);
@@ -375,7 +378,7 @@ async function syncAgent(pass: AgentPass, log: PassLog, key: string, item: Agent
   item.copies = copies.map(({ copy }) => copy);
   const edited = copies.some(({ is }) => is === 'edited'), deletedIn = copies.filter(({ is }) => is === 'deleted').map(({ copy }) => copy.tool);
   if (pass.limitedToKeys && !pass.chosen.has(key) && (edited || deletedIn.length)) { log.results.push({ item: item.name, outcome: 'held', message: `An edit or deletion of ${item.name} is waiting for sync. Turn automatic sync on, or use Sync once.` }); return 'done'; }
-  if (deletionStillSettling(pass, copies)) return 'settling';
+  if (deletionStillSettling(pass, copies, pass.decideNow?.has(key) ? 0 : pass.settleMs)) return 'settling';
   item.copies = copies.filter(({ is }) => is !== 'deleted').map(({ copy }) => copy);
   await (deletedIn.length && !edited ? spreadDeletion : spreadContent)(pass, log, key, item, copies, targetsOf(pass, copies, slot, syncing), deletedIn);
   return 'done';
@@ -407,11 +410,11 @@ function stopOneWayCopiesChangedInTheirTool(log: PassLog, item: AgentRecordItem,
 function targetsOf(pass: AgentPass, copies: CopyNow[], slot: AgentSlot, syncing: AgentTool[]): Target[] {
   return syncing.filter(tool => !copies.some(({ copy, is }) => copy.tool === tool && (is === 'stopped' || !pass.onDisk.folders.has(tool)))).map(tool => ({ tool, entry: slot[tool], recorded: copies.find(({ copy, is }) => copy.tool === tool && is !== 'removalOwed') }));
 }
-function deletionStillSettling(pass: AgentPass, copies: CopyNow[]): boolean {
+function deletionStillSettling(pass: AgentPass, copies: CopyNow[], settleMs: number): boolean {
   for (const { copy, entry, is } of copies) if (is !== 'removalOwed' && (entry || !pass.onDisk.folders.has(copy.tool))) firstSeenMissingAt.delete(copy.file);
   const deleted = copies.filter(({ is }) => is === 'deleted').map(({ copy }) => copy.file);
   for (const file of deleted) if (!firstSeenMissingAt.has(file)) firstSeenMissingAt.set(file, pass.now);
-  const settling = deleted.some(file => pass.now - firstSeenMissingAt.get(file)! < pass.settleMs);
+  const settling = deleted.some(file => pass.now - firstSeenMissingAt.get(file)! < settleMs);
   if (!settling) for (const file of deleted) firstSeenMissingAt.delete(file);
   return settling;
 }

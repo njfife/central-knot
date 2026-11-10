@@ -124,6 +124,12 @@ export interface DesktopApi {
   pickMarketplaceFolder(): Promise<string | null>;
   installPlugin(source: string, marketName: string, plugin: string, tools: HarnessId[], home: string): Promise<PluginActionResult>;
   uninstallPlugin(source: string, marketName: string, plugin: string, tool: HarnessId, home: string): Promise<PluginActionResult>;
+  /** The git repo the Managed set lives in, if any. `check` asks the repo for its latest commit first. */
+  repo(check?: boolean): Promise<RepoView | null>;
+  connectRepo(url: string, branch: string, home: string): Promise<RepoResult>;
+  pullRepo(home: string): Promise<RepoResult>;
+  pushRepo(home: string): Promise<RepoResult>;
+  disconnectRepo(home: string): Promise<RepoResult>;
   /** Adds or changes a profile's name and items (Central Knot's own file; no tool is written). */
   saveProfile(profile: ProfileEdit, home: string): Promise<{ problem?: string; id?: string; profiles?: ProfilesView }>;
   deleteProfile(id: string, home: string): Promise<{ problem?: string; profiles?: ProfilesView }>;
@@ -290,6 +296,13 @@ export interface HistoryEvent {
   orderProved: boolean;
   /** Set once undone or restored, naming the event that did it; ALREADY_AS_IT_WAS when nothing needed doing (no event made). */
   undoneBy?: string;
+  /** Made by Pull from the git repo. */
+  via?: 'repo';
+  /**
+   * A change to only an agent's Claude Code settings (by Pull, or by undoing one): that tool's file, the file it replaced (kept whole,
+   * what Undo puts back), and a hash of what it wrote (Undo goes ahead only while the file still holds that).
+   */
+  settingsFile?: { path: string; kept: string; wrote: string };
 }
 
 // ---------- Marketplaces and plugins ----------
@@ -570,6 +583,62 @@ export interface HistoryWindowSaved { settings: AppPreferences; pruned?: History
 /** What Show log file did: selected the log in the file manager, or opened its folder (and whether anything is logged yet). */
 export interface ShownLog { selected: boolean; logged: boolean }
 
+
+// ---------- Git repo ----------
+
+/** What one item of the Managed set is, in the repo's layout. */
+export type RepoKind = 'skill' | 'mcp' | 'agent' | 'base';
+
+/** One item that differs between the Managed set here and the repo. */
+export interface RepoChange {
+  /** History's key for the item (a skill's key, `mcp:<name>`, `agent:<key>`), or `instructions:base`. */
+  key: string;
+  kind: RepoKind;
+  name: string;
+  /** What happened to it on the side it comes from. */
+  change: 'added' | 'changed' | 'removed';
+  /** Incoming: it changed here too since the last pull (or was removed here, or is no longer Managed), or the repo adds one by the name of an item here that isn't Managed. The repo's version wins on Pull; History keeps yours. */
+  alsoHere?: 'changed' | 'removed' | 'unmanaged';
+  /** Incoming, an MCP server's or agent's deletion: 'waits' while Automatic sync is off (Pull can't spread it); 'ready' once sync is on after a Pull left it waiting. */
+  sync?: 'waits' | 'ready';
+  /** Incoming: what Pull does with it now: brings it in, tries it again (the last Pull left it), leaves it until Automatic sync is on, or can't take it. */
+  pull?: 'moves' | 'again' | 'waits' | 'stuck';
+  /** Outgoing: removed in the repo but changed here, so your change stays and goes back with the next Push. */
+  keptHere?: boolean;
+  /** Why it can't be brought across, if it can't. */
+  held?: string;
+  /** Held only because the last Pull couldn't finish it: the next Pull tries again. */
+  retry?: boolean;
+}
+
+export interface RepoCommit { id: string; subject: string; at: string }
+
+export type RepoView =
+  | { connected: false; access: WriteAccess }
+  | {
+    connected: true;
+    access: WriteAccess;
+    url: string;
+    branch: string;
+    /** The commit last pulled or pushed here, and the repo's latest commit as last checked. */
+    base?: RepoCommit;
+    latest?: RepoCommit;
+    pulledAt?: string;
+    pushedAt?: string;
+    checkedAt?: string;
+    /** Why the last check could not reach the repo. */
+    problem?: string;
+    incoming: RepoChange[];
+    outgoing: RepoChange[];
+    /** Why Push can't run now. */
+    pushBlocked?: string;
+    /** The repo no longer has this branch: Push puts it back. */
+    branchGone?: boolean;
+  };
+/** The page of a connected repo. */
+export type ConnectedRepoView = Extract<RepoView, { connected: true }>;
+
+export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the field the refusal concerns. */ field?: 'url' | 'branch'; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }
 // ---------- Profiles ----------
 
 /**

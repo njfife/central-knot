@@ -10,12 +10,13 @@ import { harnessesPage, harnessTitle } from './harnesspage.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
+import { repo, repoPage, waitingCounts, waitingWords } from './repopage.ts';
 import { profilesPage, profileStatus } from './profilespage.ts';
 import type { HomeMode, HomeView, ManageView } from './types.ts';
 
 const region = (id: string) => document.getElementById(id)!;
 /** Each page's title, in the header and the sidebar: a kind's page by its kind's title (presence.ts kindNouns). */
-const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
+const titles: Record<Page, string> = { overview: 'Overview', ...Object.fromEntries(Object.entries(kindNouns).map(([kind, nouns]) => [kind, nouns.title])) as Record<HomeKind, string>, profiles: 'Profiles', history: 'History', repo: 'Git repo', harnesses: 'Harnesses', settings: 'Settings' };
 /** Below this window width the sidebar folds to its icon rail, unless the person chose a shape with the toggle. */
 const RAIL_BELOW = 968;
 /** From this content width (laptop full screen and up), an open row's details dock beside its table instead of under the row. */
@@ -35,12 +36,13 @@ function applyLayout(): { rail: boolean; wide: boolean } {
 }
 
 /** A page's row: its name, how many it holds, and a dot while a change sync made on its own is unseen. */
-function navRow(page: Page, label: string, glyph: IconName, count?: number) {
+/** `countTitle` says the count in words (the tooltip and screen readers); `quiet` greys it (the Git repo's counts while unreachable). */
+function navRow(page: Page, label: string, glyph: IconName, count?: number | string, countTitle?: string, quiet = false) {
   const current = state.page === page;
   return h('button.nav-row', {
-    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': label, title: label,
+    type: 'button', id: `nav-${page}`, 'aria-current': current ? 'page' : undefined, 'aria-label': countTitle ? `${label}: ${countTitle}` : label, title: label,
     onclick: () => showPage(page),
-  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true' }, String(count)),
+  }, icon(glyph), h('span.nav-label', {}, label), count !== undefined && h(`span.nav-count${count === 0 || quiet ? '.nav-count-zero' : ''}`, { 'aria-hidden': 'true', title: countTitle }, String(count)),
     // A change sync made on its own shows as a dot on its page until that notice is seen or dismissed there.
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
@@ -66,6 +68,23 @@ function homeRow(mode: HomeMode, label: string, glyph: IconName) {
   }, icon(glyph, 14), h('span.nav-label.home-label', {}, h('span', {}, shown), h('span.home-sub', {}, { fixture: 'sample data, safe to try', actual: 'your real tools', custom: mode === 'custom' && current ? 'click to choose another' : 'a backup or another account' }[mode])));
 }
 
+/** Changes waiting to be pulled or pushed, once a repo is connected: a git client's count, shown only when there is one. */
+function repoRow() {
+  const view = repo.view;
+  if (!view?.connected) return navRow('repo', 'Git repo', 'git-branch');
+  const counts = waitingCounts(view);
+  const { pull, push, retry } = counts;
+  // A newer commit that changes nothing here still waits to be pulled: a bare arrow.
+  const newer = !pull && !retry && !!view.pushBlocked;
+  // Directions, not an item count: ↓ to pull (or pull again), ↑ to push.
+  const shown = [pull + retry ? `↓${pull + retry}` : newer ? '↓' : '', push ? `↑${push}` : ''].filter(Boolean).join(' ');
+  const unreachable = !!view.problem;
+  const words = waitingWords(counts);
+  const said = [unreachable ? 'Couldn’t reach the repo' : '', words.pull, words.retry, newer ? 'A newer commit to pull' : '', words.push].filter(Boolean).join(' · ');
+  // While the repo can't be reached, the counts are last seen: quiet, as on the page.
+  return navRow('repo', 'Git repo', 'git-branch', shown || undefined, said || undefined, unreachable);
+}
+
 function renderSidebar() {
   const home = state.home;
   // A kind no tool here can hold has no row (app.ts absentKinds).
@@ -83,6 +102,7 @@ function renderSidebar() {
     !noTools() ? navRow('profiles', titles.profiles, 'sliders-horizontal') : null,
     !noTools() ? h('div.nav-divider', { role: 'separator' }) : null,
     navRow('history', titles.history, 'history'),
+    repoRow(),
     navRow('settings', titles.settings, 'settings'),
   ].filter((entry): entry is HTMLElement => !!entry));
   // The homes: the Practice copy where this build offers it (dev builds and tests; a released build doesn't), then this
@@ -113,7 +133,7 @@ function renderHeader(rail: boolean) {
 
 function renderPage() {
   document.body.classList.toggle('page-harnesses', state.page === 'harnesses');
-  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
+  region('page').replaceChildren(state.page === 'overview' ? overviewPage() : state.page === 'skills' ? skillsPage() : state.page === 'mcp' ? mcpPage() : state.page === 'agents' ? agentsPage() : state.page === 'plugins' ? pluginsPage() : state.page === 'profiles' ? profilesPage() : state.page === 'history' ? historyPage() : state.page === 'repo' ? repoPage() : state.page === 'instructions' ? instructionsPage() : state.page === 'settings' ? settingsPage() : harnessesPage());
 }
 
 /** What the home lets Central Knot write, said in the status bar; `short` stands in when the bar is narrow (style.css). */

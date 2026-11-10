@@ -1,3 +1,4 @@
+import { forgetRepoPrompts, loadRepo, loadRepoSoon } from './repopage.ts';
 import { loadSettings, openSettings } from './settingspage.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
 import { caughtUpNames, plural, withSetAside } from './model.ts';
@@ -16,7 +17,7 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 /** Every page, in the sidebar's order. */
-export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'settings'] as const;
+export const pages = ['overview', 'harnesses', 'skills', 'mcp', 'agents', 'instructions', 'plugins', 'profiles', 'history', 'repo', 'settings'] as const;
 export type Page = typeof pages[number];
 
 /** This computer's names, and what its platform offers (machine.ts). */
@@ -201,6 +202,8 @@ export async function busy(message: string, work: () => Promise<void>) {
   focusById(document.getElementById(focusAfterBusy ?? '') ? focusAfterBusy : focused);
   focusAfterBusy = undefined;
   drainOwedRefresh();
+  // Any change may change what differs from the git repo: its page and sidebar count read again (no fetch).
+  if (state.home) loadRepoSoon();
 }
 
 /**
@@ -224,6 +227,8 @@ function accept(view: HomeView) {
   resetMarket();
   setHome(view, { reload: false });
   void loadPageData(state.page, { readId: view.readId });
+  // The sidebar counts what waits each way for the repo, so it is read with the home (no fetch: that waits for the page).
+  if (state.page !== 'repo') void loadRepo(false);
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -321,6 +326,7 @@ export function heldKindNames(count: 'all' | 'one' = 'all'): string {
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
+  if (view && view.home !== previous?.home) forgetRepoPrompts(true);
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
@@ -372,6 +378,7 @@ function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; 
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
   if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
+  if (page === 'repo') return loadRepo(true);
   return Promise.resolve();
 }
 
@@ -418,7 +425,7 @@ export function showPage(page: Page) {
   const leavingHarness = page === 'harnesses' && !state.busy && !!state.harness;
   // A new page starts clean: the last action's message and results belong to the page they happened on.
   if (page !== state.page || leavingHarness) leaveResults(page);
-  if (page !== state.page) state.skillsView = 'table';
+  if (page !== state.page) { state.skillsView = 'table'; forgetRepoPrompts(); }
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
   state.page = page;
@@ -553,6 +560,8 @@ export const convertAgent = (key: string, name: string) => busy('Converting…',
 export interface Outcome {
   page: Page;
   text: string;
+  /** Something was left undone: a warning icon, not a tick. */
+  warn?: boolean;
   note?: string;
   item?: string;
   items?: string[];
@@ -935,7 +944,8 @@ api().onNavigate(page => { if (isPage(page)) showPage(page); });
 // open Settings page reads them again, so it never shows (or writes back) a value that is no longer the saved one.
 api().onSettingsChanged(() => { if (state.page === 'settings') void loadSettings(); });
 
-api().onSyncChanged(() => void backgroundRefresh());
+// A background pass may change what differs from the git repo too: its page and sidebar count read again soon (no fetch).
+api().onSyncChanged(() => { loadRepoSoon(); void backgroundRefresh(); });
 
 /** Each page's sync notices in a view: what changed on its own, with its History event. */
 const noticesByPage = (view: HomeView): [Page, SyncNotice[]][] => [['skills', view.manage.notices], ['mcp', view.mcp.notices], ['agents', view.agents.notices]];

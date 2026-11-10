@@ -429,7 +429,7 @@ export async function removeChecked(context: ShareContext, directory: string, ex
 }
 
 /** Puts content about to be overwritten or removed on record first (see RecordItem.displaced). */
-function displace(item: RecordItem, tool: HarnessId, hash: string, removal?: { folder: string; stoppedSync: boolean }) {
+export function displace(item: RecordItem, tool: HarnessId, hash: string, removal?: { folder: string; stoppedSync: boolean }) {
   item.displaced ??= [];
   // A removal is per tool: two tools' identical copies are two removals, so each is on record.
   if (!item.displaced.some(entry => entry.hash === hash && (!removal || entry.tool === tool))) item.displaced.push({ tool, hash, ...(removal ? { removal } : {}) });

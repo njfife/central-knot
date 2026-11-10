@@ -319,3 +319,19 @@ test('With an intact record this app has no memory of, Apply stops until an expl
     assert.equal((await syncGate(box.context)).state, 'ready');
   } finally { await box.cleanup(); }
 });
+
+test('A deletion asked for now (decideNow) is a deletion even when it empties a tool’s servers section, never read as a reset', async () => {
+  const box = await sandbox();
+  try {
+    const plain = 'model = "gpt-6"\n';
+    await writeFile(join(box.home, '.copilot/mcp-config.json'), copilotOne('tool-server'));
+    await writeFile(join(box.home, '.codex/config.toml'), plain);
+    await applyMcp(box.context, tools, [{ key: 'tool', managed: true, off: [] }]);
+    assert.match(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), /\[mcp_servers\.tool\]/);
+    // Its table removed from Codex, as Pull removes a server the repo deleted: the file is left with no servers section.
+    await writeFile(join(box.home, '.codex/config.toml'), plain);
+    await applyMcp(box.context, tools, [], { decideNow: new Set(['tool']) });
+    assert.equal((await copilotOf(box.home)).tool, undefined, 'the deletion spread');
+    assert.equal(await readFile(join(box.home, '.codex/config.toml'), 'utf8'), plain, 'nothing written back');
+  } finally { await box.cleanup(); }
+});
