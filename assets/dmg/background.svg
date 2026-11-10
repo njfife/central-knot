@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 660 420" width="660" height="420">
+<defs>
+<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6a80a2"/><stop offset=".62" stop-color="#607698"/><stop offset="1" stop-color="#566c8e"/></linearGradient>
+<radialGradient id="glow" cx=".5" cy=".42" r=".6"><stop offset="0" stop-color="#ffffff" stop-opacity=".07"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="660" height="420" fill="url(#sky)"/>
+<rect width="660" height="420" fill="url(#glow)"/>
+<g fill="none" stroke="#e4e7eb" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M284 180 H374"/><path d="M352 157 L376 180 L352 203"/></g>
+<text x="330" y="342" text-anchor="middle" font-family="-apple-system, system-ui, 'Helvetica Neue', sans-serif" font-size="14" font-weight="500" fill="#ffffff" fill-opacity=".92">Drag Central Knot to Applications</text>
+</svg>
