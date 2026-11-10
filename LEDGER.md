@@ -889,8 +889,8 @@ Nathan asked for the features still open in the original plan, each in its own t
 - **Check.** `scripts/bundled-check.mjs` runs the documented command on the fixture marketplace (plus an npm plugin), deletes the marketplace, opens the build in a throwaway home and checks it. The Mac CI runs it on the packaged app after the end-to-end checks.
 
 **Validation.**
-- 437 unit tests.
-- Mac run 42923496940 on the branch: end-to-end 596 passed against the packaged standard app; `scripts/bundled-check.mjs` 44 of 44 against the packaged custom app (the archive is unpacked from inside `app.asar`). The same check passes on the Mac as Nathan's own account, and as a development run.
+- 438 unit tests.
+- Mac run 42925216159 on the branch with `next` merged in (after Cowork landed): end-to-end 595 passed against the packaged standard app; `scripts/bundled-check.mjs` 44 of 44 against the packaged custom app (the archive is unpacked from inside `app.asar`). The same check passes on the Mac as Nathan's own account, and as a development run.
 - Side by side on the Mac, both opened through macOS (`open`) from one folder, each with a throwaway home: `Central Knot` (`com.centralknot.firstlook`) and `Acme Knot` (`com.centralknot.custom.ck-bundled-check`) ran at once, each window under its own name, the custom build with its own settings folder and its marketplace unpacked in 32 ms. Nothing in the real `Application Support/central-knot` changed.
 - Reviews, Opus 5.5 and Fable 5.2 (Astra could not run: the ChatGPT usage limit was reached). Code: 7 and 7, then 8.5 and 8.5; every finding fixed, among them the base-instruction markers and commit text renamed with the app, a relative marketplace folder read as a Git source, app names that broke packaging at the end, an empty plugin folder counted as packed, and a settings folder that could have been another app's. Interface: 7.5, 8, 8.5; the last round's wording is in.
 
