@@ -48,6 +48,8 @@ export interface BaseEdit {
    *  replaces that tool's own text on saving, and the hash of each file the draft was written from. */
   own?: Partial<Record<HarnessId, string>>;
   read?: Partial<Record<HarnessId, string>>;
+  /** The hash of the base that draft was written from. */
+  readBase?: string;
   confirmDiscard?: boolean; fullDiff?: boolean;
   /** Why the review is shown again: the base or a file changed since it was last shown. */
   conflict?: string;
@@ -900,8 +902,12 @@ export const loadBaseVersion = (id: string) => askAboutOpenDraft() ? undefined :
  *  ones draftbase.ts gives the tool). */
 export const draftable = () => (state.instructions.data ?? []).filter(file => ownText(file).trim() && file.base?.state !== 'edited');
 
-/** The files a draft was written from that hold something else now: the draft knows nothing of what changed in them. */
-export const draftStale = (edit: BaseEdit) => (state.instructions.data ?? []).filter(file => edit.read?.[file.tool] !== undefined && edit.read[file.tool] !== file.hash);
+/** What a draft was written from that holds something else now (files by tool, and the base itself): the draft knows nothing
+ *  of what changed there, so saving it would lose that. */
+export const draftStale = (edit: BaseEdit) => ({
+  files: (state.instructions.data ?? []).filter(file => edit.read?.[file.tool] !== undefined && edit.read[file.tool] !== file.hash),
+  base: edit.readBase !== undefined && edit.readBase !== (state.base?.hash ?? ''),
+});
 
 /** Opens the question of which tool writes the draft; an editor holding typed work is asked about first. */
 export function openDraftPick() {
@@ -949,7 +955,7 @@ export const draftBaseWith = (tool: HarnessId) => {
       const absent = (base?.tools ?? []).filter(listed => !files.some(file => file.tool === listed));
       const tools = base?.text.trim() ? [...absent, ...files.map(file => file.tool).filter(each => base.tools.includes(each) || sorted.includes(each))] : files.map(file => file.tool);
       state.draftPick = undefined;
-      state.baseEdit = { text: draft.base, hash: base?.hash ?? '', tools, stage: 'review', source: { kind: 'draft', tool }, own: draft.own, read: draft.read };
+      state.baseEdit = { text: draft.base, hash: base?.hash ?? '', tools, stage: 'review', source: { kind: 'draft', tool }, own: draft.own, read: draft.read, readBase: draft.baseHash };
       focusAfterBusy = 'base-save';
       announce(`${namedTools[tool]} wrote a draft. Review it, then save to update the files.`, true);
     } finally { state.drafting = undefined; }

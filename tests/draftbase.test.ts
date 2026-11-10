@@ -40,6 +40,11 @@ test('A tool’s answer is read by its marker lines, whatever it says around the
   assert.deepEqual(parseDraft(answer('', { 'claude-cli': 'Mine.' }), ['claude-cli']), { problem: 'no base' });
   // A tool's part left out would save as "nothing of its own" and empty that file's own text: no draft instead.
   assert.deepEqual(parseDraft(answer('Shared.', { 'claude-cli': 'Mine.' }), ['claude-cli', 'codex-cli']), { problem: 'left out', tool: 'codex-cli' });
+  // A part said to be empty rather than left empty is empty, and a code fence put around a part is not the person's text.
+  assert.deepEqual(parseDraft(answer('```markdown\nShared.\n```', { 'claude-cli': '(nothing)', 'codex-cli': 'None.' }), ['claude-cli', 'codex-cli']), { base: 'Shared.\n', own: { 'claude-cli': '', 'codex-cli': '' } });
+  assert.deepEqual(parseDraft('```\n<<<CENTRAL KNOT: base>>>\n```\nShared.\n<<<CENTRAL KNOT: claude-cli>>>\nRun:\n```sh\nmake\n```\n<<<CENTRAL KNOT: end>>>', ['claude-cli']), { base: 'Shared.\n', own: { 'claude-cli': 'Run:\n```sh\nmake\n```\n' } });
+  // A part given twice: only one could be kept, so there is no draft.
+  assert.deepEqual(parseDraft(answer('Shared.', { 'claude-cli': 'First.' }).replace('<<<CENTRAL KNOT: end>>>', '<<<CENTRAL KNOT: claude-cli>>>\nSecond.\n<<<CENTRAL KNOT: end>>>'), ['claude-cli']), { problem: 'twice' });
   // A part for a tool that was never asked about comes from no file, so it is kept nowhere.
   assert.deepEqual(parseDraft(answer('Shared.', { 'pi-cli': 'Stray.', 'claude-cli': 'Mine.' }), ['claude-cli']), { base: 'Shared.\n', own: { 'claude-cli': 'Mine.\n' } });
 });
@@ -181,4 +186,38 @@ test('A file’s lines a draft carries nowhere word for word are found, whicheve
   assert.deepEqual(linesNotCarried('Be brief.\n', 'Be brief.\n', ''), []);
   // A heading the draft dropped or renamed is not an instruction lost.
   assert.deepEqual(linesNotCarried('# How I work\nBe brief.\n## Git\nNever push to main.\n', '# Style\nBe brief.\n', ''), ['Never push to main.']);
+});
+
+test('A file left holding the old base as plain text keeps what a draft kept for it, as the review shows', async () => {
+  const box = await sandbox();
+  const codex = box.file('.codex/AGENTS.md');
+  try {
+    await writeFile(box.file('.claude/CLAUDE.md'), 'Claude only.\n');
+    // Codex gets the base with nothing of its own, then is taken off: the base stays in its file as plain text.
+    await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nUse tabs.\n', expected: '', seen: await box.seen(), tools: ['claude-cli', 'codex-cli'] });
+    await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\nUse tabs.\n', expected: (await baseView(box.context)).hash, seen: await box.seen(), tools: ['claude-cli'] });
+    assert.equal(await readFile(codex, 'utf8'), 'Be brief.\nUse tabs.\n');
+    // A draft sorts that text too, and keeps one line for Codex: saving writes that line, then the base.
+    const sources = await draftSources(box.context, await box.snapshots());
+    assert.deepEqual(sources.files.map(file => [file.tool, file.own]), [['claude-cli', 'Claude only.\n'], ['codex-cli', 'Be brief.\nUse tabs.\n']]);
+    await applyBase(box.context, await box.snapshots(), { text: 'Be brief.\n', expected: sources.baseHash, seen: await box.seen(), tools: ['claude-cli', 'codex-cli'], own: { 'claude-cli': 'Claude only.\n', 'codex-cli': 'Use tabs.\n' } });
+    assert.deepEqual(splitBase(await readFile(codex, 'utf8')), { own: 'Use tabs.\n', copy: 'Be brief.\n' });
+  } finally { await box.cleanup(); }
+});
+
+test('A tool that ends leaving a helper running still gives its draft at once, and the helper ends with it', async () => {
+  const box = await sandbox();
+  try {
+    await writeFile(box.file('.claude/CLAUDE.md'), 'Be brief.\n');
+    const sources = await draftSources(box.context, await box.snapshots());
+    const pidFile = join(box.base, 'helper.pid');
+    // The helper keeps the tool's output open, as an MCP server started from the person's config would.
+    const binary = await box.cli('leaves-helper', `cat > /dev/null\n(sleep 60 & echo $! > '${pidFile}'; wait) &\ncat <<'EOF'\n${answer('Be brief.', { 'claude-cli': '' })}\nEOF\nexit 0`);
+    const started = Date.now();
+    assert.deepEqual((await writeDraft(sources, 'claude-cli', binary)).draft?.base, 'Be brief.\n');
+    assert.ok(Date.now() - started < 10_000);
+    const helper = Number((await readFile(pidFile, 'utf8')).trim());
+    await new Promise(done => setTimeout(done, 300));
+    assert.throws(() => process.kill(helper, 0), 'the helper is gone');
+  } finally { await box.cleanup(); }
 });

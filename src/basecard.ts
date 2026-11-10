@@ -148,10 +148,10 @@ function editView(files: InstructionFile[], edit: BaseEdit) {
 /** Said where a draft a tool wrote is shown, once a file it was written from holds something else: the draft can't be saved. */
 function staleNote(edit: BaseEdit) {
   const stale = draftStale(edit);
-  if (!stale.length) return null;
-  const names = toolList(stale.map(file => file.tool));
+  if (!stale.files.length && !stale.base) return null;
+  const what = [...(stale.base ? ['the base instructions'] : []), ...(stale.files.length ? [`${toolList(stale.files.map(file => file.tool))}’s ${stale.files.length === 1 ? 'file' : 'files'}`] : [])].join(' and ');
   return h('p.ins-note.ins-warn', { id: 'base-draft-stale' }, icon('triangle-alert', 13, 'tone-warning'),
-    h('span', {}, `${names}’s ${stale.length === 1 ? 'file' : 'files'} changed after this draft was written, so the draft knows nothing of what is new there and can’t be saved. Discard it and have it written again.`));
+    h('span', {}, `${what.charAt(0).toUpperCase()}${what.slice(1)} changed after this draft was written, so the draft knows nothing of what is new there and can’t be saved. Discard it and have it written again.`));
 }
 
 /** In a draft a tool wrote: what stays only in each tool's file, to change like the base above it. An unticked tool's file
@@ -164,7 +164,7 @@ function draftedOwnEditors(files: InstructionFile[], edit: BaseEdit) {
       const ticked = readers(file).some(tool => edit.tools.includes(tool));
       const key = readers(file).find(tool => edit.own?.[tool] !== undefined)!;
       const label = h('label.base-own-label', { for: `base-own-${file.tool}` }, readers(file).map(tool => brandMark(tool, 14)), h('strong', {}, readerNames(file)), h('span.base-file', {}, fileName(file.path)));
-      if (!ticked) return h('div.base-own', {}, label, h('p.base-explain', {}, `Not ticked below, so ${fileName(file.path)} stays as it is.`));
+      if (!ticked) return h('div.base-own', {}, label, h('p.base-explain', {}, `Not ticked below, so its own instructions stay as they are.`));
       const area = h('textarea.ins-text.base-own-text', { id: `base-own-${file.tool}`, spellcheck: 'false', placeholder: `Nothing only for ${readerNames(file)}: its file will hold only the base.`,
         oninput: (event: Event) => { edit.own = { ...edit.own, [key]: (event.target as HTMLTextAreaElement).value }; } }) as HTMLTextAreaElement;
       area.value = edit.own![key]!;
@@ -209,7 +209,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
   const plans = kind === 'update' ? writes : all;
   const putBackFile = kind === 'putBack' ? fileName(plans[0]?.file.path ?? '') : '';
   const { title, save, done } = reviewWords(edit, writes.map(entry => entry.file), putBackFile);
-  const stale = draftStale(edit).length > 0;
+  const stale = draftStale(edit).files.length > 0 || draftStale(edit).base;
   return h('div.ins-editor', {},
     h('p.ins-review-title', {}, title),
     edit.conflict ? h('p.ins-note.ins-warn', {}, icon('triangle-alert', 13, 'tone-warning'), h('span', {}, `${edit.conflict} This review now shows things as they are.`)) : null,
@@ -233,7 +233,7 @@ function reviewView(files: InstructionFile[], edit: BaseEdit) {
       ? h('div.ins-actions', {}, discardConfirm(draftedBy(edit) ? `${draftedBy(edit)}’s draft` : 'the base instructions', { discard: 'base-review-discard-yes', keep: 'base-review-keep' }, 'Keep reviewing',
         { run: () => { state.baseEdit = undefined; }, focus: restingFocus() }, { run: () => { edit.confirmDiscard = false; }, focus: 'base-save' }, !!draftedBy(edit)))
       : h('div.ins-actions', {},
-        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy || stale, attrs: lockAttrsFor(stale ? 'A file changed after this draft was written. Discard it and have it written again.' : undefined), onclick: () => {
+        button({ variant: 'primary', size: 'small', label: save, id: 'base-save', disabled: !!state.busy || stale, attrs: lockAttrsFor(stale ? 'Something changed after this draft was written. Discard it and have it written again.' : undefined), onclick: () => {
           // Exactly the files listed above, as they were when listed: anything else changed since stops the save.
           const seen = Object.fromEntries(plans.map(({ file }) => [file.tool, { path: file.path, hash: file.hash }]));
           void applyBaseChange({ text: edit.text, tools: edit.text.trim() ? edit.tools : [], seen, ...requestOf(edit), ...(draftedBy(edit) ? { own: edit.own } : {}) }, done);

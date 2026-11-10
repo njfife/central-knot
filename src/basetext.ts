@@ -76,8 +76,9 @@ export function fileWithBase(text: string, base: string, { chosen, held, action 
   const { copy } = splitBase(text);
   if (held?.state === 'edited' && !sameBase(copy, base) && action !== 'putBack') return { left: 'edited' };
   if (!chosen || !base.trim()) return { next: withoutBase(text) };
-  // Text that is (or was) the base moves into the block: what the file had outside the block becomes nothing of its own.
-  const ownAfter = action === 'adopt' || held?.leftPlain ? '' : own;
+  // A draft's own text for this file is what it keeps. Otherwise, text that is (or was) the base moves into the block: what
+  // the file had outside the block becomes nothing of its own.
+  const ownAfter = own !== undefined ? own : action === 'adopt' || held?.leftPlain ? '' : undefined;
   return { next: withBase(ownAfter === undefined ? text : withOwn(text, ownAfter), base) };
 }
 

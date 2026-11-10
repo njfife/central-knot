@@ -14,7 +14,7 @@ import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
-import { draftSources, draftTools, writeDraft } from './draftbase.ts';
+import { clearDraftFolders, draftSources, draftTools, writeDraft } from './draftbase.ts';
 import { registerMarketplaces } from './marketplaces.ts';
 import { connectRepo, disconnectRepo, pullRepo, pushRepo, repoView, undoPulledBase, undoSettingsChange } from './gitrepo.ts';
 import { readParts } from './parts.ts';
@@ -670,6 +670,8 @@ async function startHome(): Promise<HomeView | null> {
 
 const ids = (value: unknown) => onlyAllowed(value, harnessIds);
 
+/** The draft of the base a tool is writing now, to stop it (draftbase.ts). */
+let drafting: AbortController | undefined;
 /** What a write answers when the page shows another home than the one open here. */
 const elsewhere = 'The home on screen is not the one open. Nothing was written. Read it again.';
 
@@ -773,7 +775,8 @@ const primary = smoke || app.requestSingleInstanceLock();
 if (!primary) app.exit(0);
 app.on('second-instance', showWindow);
 app.on('activate', showWindow);
-app.on('before-quit', () => { quitting = true; });
+// A tool writing a draft is stopped with the app: it would otherwise keep working with nobody to read its answer.
+app.on('before-quit', () => { quitting = true; drafting?.abort(); });
 // A signal to stop is a Quit, not a window close: nothing waits in the menu bar.
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { quitting = true; app.quit(); });
 
@@ -781,6 +784,7 @@ app.whenReady().then(async () => {
   if (!primary) return;
   await loadSyncSetting();
   await loadAppSettings();
+  void clearDraftFolders();
   applyAppearance();
   await firstSignIn();
   makeTray();
@@ -867,7 +871,6 @@ app.whenReady().then(async () => {
   });
   // The files are read in turn with everything else; the tool then writes its draft outside the queue (it can take minutes,
   // and writes nothing), so sync never waits behind it.
-  let drafting: AbortController | undefined;
   handleNow('instructions:draft-base', async (tool, home): Promise<BaseDraft> => {
     if (home !== current?.home || !isTool(tool)) return { stopped: notOpenHome };
     const binary = drafters[tool];

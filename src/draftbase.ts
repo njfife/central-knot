@@ -3,7 +3,7 @@
 // those instructions into what every tool should get (the base) and what stays only in each tool's file. Nothing is written
 // here: the answer is a draft, which the Instructions page reviews and saves like any other base change.
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findBinary } from './discovery.ts';
@@ -75,7 +75,7 @@ export function draftPrompt(sources: DraftSources): string {
     '- Lose nothing and add nothing. Every instruction in the files ends up in the base or in the part of the tool it came from, in the person’s own words wherever they can be kept. Write no new instructions, advice, summaries or comments of your own.',
     ...(hasBase ? ['- The base instructions as they are now come first. Keep everything they say, and add what the files share.'] : []),
     '- Keep the Markdown as the person wrote it: headings, lists and code blocks. Put lines about one subject under one heading.',
-    '- A tool’s part is empty when everything in its file belongs in the base.',
+    '- When everything in a tool’s file belongs in the base, leave its part empty: write nothing between its marker and the next.',
     '',
     ...(hasBase ? [given('the base instructions as they are now', sources.base)] : []),
     ...sources.files.map(file => given(`${file.tool}, ${toolNames[file.tool]}’s ${fileName(file.path)}`, file.own)),
@@ -83,32 +83,51 @@ export function draftPrompt(sources: DraftSources): string {
     '',
     mark('base'),
     '(the base instructions)',
-    ...sources.files.flatMap(file => [mark(file.tool), `(what stays only in ${toolNames[file.tool]}’s file; nothing when it all belongs in the base)`]),
+    ...sources.files.flatMap(file => [mark(file.tool), `(what stays only in ${toolNames[file.tool]}’s file)`]),
     mark('end'),
     '',
   ].join('\n');
 }
 
-/** A part of the answer as a file holds it: no blank lines around it, and ending in a line break (empty stays empty). */
-const part = (lines: string[]) => { const text = lines.join('\n').replace(/^(?:[ \t]*\n)+/, '').trimEnd(); return text ? `${text}\n` : ''; };
+const FENCE = /^\s*```/;
+/** A line a tool writes to say a part is empty, rather than leaving it empty. */
+const NOTHING = /^[(\[]?\s*(nothing|none|empty|n\/a)\.?\s*[)\]]?$/i;
+
+/**
+ * A part of the answer as a file holds it: no blank lines around it, and ending in a line break (empty stays empty). A code
+ * fence the tool put around the part (one at its start and end, or one left open because its other half fell outside the
+ * part) is not the person's text, and neither is a lone "(nothing)".
+ */
+function part(lines: string[]): string {
+  let kept = lines.join('\n').replace(/^(?:[ \t]*\n)+/, '').trimEnd().split('\n');
+  const fences = kept.filter(line => FENCE.test(line)).length;
+  const wrapped = fences === 2 && /^\s*```(markdown|md|text)?\s*$/i.test(kept[0]) && /^\s*```\s*$/.test(kept.at(-1)!);
+  if (wrapped) kept = kept.slice(1, -1);
+  else if (fences % 2 && FENCE.test(kept[0])) kept = kept.slice(1);
+  else if (fences % 2 && FENCE.test(kept.at(-1)!)) kept = kept.slice(0, -1);
+  const text = kept.join('\n').replace(/^(?:[ \t]*\n)+/, '').trimEnd();
+  return text && !NOTHING.test(text.trim()) ? `${text}\n` : '';
+}
 
 /**
  * The base and each tool's part, read from the tool's answer by its marker lines; anything before the first marker or after
  * the end marker (a greeting, a code fence around it all) is not part of it. An answer that never reaches the end marker
  * was cut short, and one without the base or without a tool's part is no draft: saving it would empty that tool's file.
+ * Nor is one that gives a part twice: only one of the two could be kept.
  */
-export function parseDraft(answer: string, tools: HarnessId[]): { base: string; own: Partial<Record<HarnessId, string>> } | { problem: 'cut short' | 'no base' | 'left out'; tool?: HarnessId } {
+export function parseDraft(answer: string, tools: HarnessId[]): { base: string; own: Partial<Record<HarnessId, string>> } | { problem: 'cut short' | 'no base' | 'left out' | 'twice'; tool?: HarnessId } {
   const parts = new Map<string, string[]>();
-  let open: string[] | undefined, ended = false;
+  let open: string[] | undefined, ended = false, twice = false;
   for (const line of answer.replace(/\r\n/g, '\n').split('\n')) {
     const name = line.match(MARK)?.[1].toLowerCase();
     if (name === 'end') { ended = !!parts.size; if (ended) break; continue; }
-    if (name === 'base' || (name && tools.includes(name as HarnessId))) { open = []; parts.set(name, open); continue; }
+    if (name === 'base' || (name && tools.includes(name as HarnessId))) { twice ||= parts.has(name); open = []; parts.set(name, open); continue; }
     // A part for a tool that was never asked about comes from no file: it is not kept anywhere.
     if (name) { open = undefined; continue; }
     open?.push(line);
   }
   if (!ended) return { problem: 'cut short' };
+  if (twice) return { problem: 'twice' };
   const base = part(parts.get('base') ?? []);
   if (!base) return { problem: 'no base' };
   const missing = tools.find(tool => !parts.has(tool));
@@ -138,17 +157,32 @@ function run(binary: string, args: string[], prompt: string, { cwd, signal, time
       finished = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancel);
+      // The tool has ended: a helper it left running (an MCP server from the person's config) ends with it.
+      try { if (grouped && child.pid) process.kill(-child.pid, 'SIGKILL'); } catch { /* none left */ }
       done({ code: stoppedAs ?? code, output, said });
     };
     child.stdout.setEncoding('utf8').on('data', (text: string) => { output += text; if (output.length > MOST_OUTPUT) stop('timeout'); });
     child.stderr.setEncoding('utf8').on('data', (text: string) => { said = (said + text).slice(-8000); });
     child.on('error', error => finish((error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 1));
     child.on('close', code => finish(code ?? 1));
+    // A helper the tool left running can hold its output open, so its end is not waited for past the tool's own exit:
+    // what the tool said has arrived by then, give or take a moment.
+    child.on('exit', code => { setTimeout(() => finish(code ?? 1), 1500); });
     // A tool that exits before reading its input (not signed in) closes the pipe: that is its failure to report, not ours.
     child.stdin.on('error', () => {});
     child.stdin.end(prompt);
     if (signal?.aborted) cancel();
   });
+}
+
+/** Removes folders a draft left in the temp folder when the app quit while a tool was writing; one in use now is younger than any run lasts. */
+export async function clearDraftFolders(olderThanMs = 2 * DRAFT_TIMEOUT_MS): Promise<void> {
+  for (const name of await readdir(tmpdir()).catch(() => [] as string[])) {
+    if (!name.startsWith('central-knot-draft-')) continue;
+    const folder = join(tmpdir(), name);
+    const age = Date.now() - ((await stat(folder).catch(() => undefined))?.mtimeMs ?? Date.now());
+    if (age > olderThanMs) await rm(folder, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** The last thing a tool said when it failed, short enough for a sentence (its last few lines, from their start): its own
@@ -182,7 +216,8 @@ export async function writeDraft(sources: DraftSources, by: HarnessId, binary: s
     const tools = sources.files.map(file => file.tool);
     const sorted = parseDraft(answer, tools);
     if ('problem' in sorted) {
-      const why = sorted.problem === 'cut short' ? 'its answer stopped before the end' : sorted.problem === 'no base' ? 'its answer had no base instructions in it' : `its answer left out ${toolNames[sorted.tool!]}’s part`;
+      const why = sorted.problem === 'cut short' ? 'its answer stopped before the end' : sorted.problem === 'no base' ? 'its answer had no base instructions in it'
+        : sorted.problem === 'twice' ? 'its answer gave one part twice' : `its answer left out ${toolNames[sorted.tool!]}’s part`;
       return { stopped: `${name} answered, but ${why}, so there is no draft. Nothing was changed. Try again, or have another tool write it.` };
     }
     return { draft: { by, base: sorted.base, own: sorted.own, read: Object.fromEntries(sources.files.map(file => [file.tool, file.hash])), baseHash: sources.baseHash } };
