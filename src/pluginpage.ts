@@ -9,11 +9,11 @@ import { changedWords, componentsOf, dotted, pluginTitle, readme, toolBox, updat
 import { inlineMarkdown } from './markdown.ts';
 import { allQueued, clickPart, partStand, pickOf, pluginKey, queued, skillChoices, toggle, toggleMany, type PluginAction, type PluginOp } from './pluginplan.ts';
 import { cantSwitchSkill, comparableText, copyStale, installed, limitNote, marketplaceVersionNote, NO_SKILL_SWITCH, offeredVersion, pageOfPart, partsEligible, partsFit, partsMark, partsOf, partsOffer, partsPickable, partStillIn, partsWhy, partWords, pickWords, PREVIEW_ONLY, removableTools, samePart, skillOff, stateOf, toolsWithoutPlugin, unavailable, untestedBuild, versionToCompare, versionWord } from './pluginstatus.ts';
-import { takesPlugins } from './presence.ts';
+import { hasCowork, takesPlugins } from './presence.ts';
 import { clearNotice, market, openLink, shownDetail, toggleOpened } from './pluginstate.ts';
 import type { Components, HarnessId, MarketplaceView, Outcome, PartKind, PartPlan, PartRef, PartsPick, PartsState, PluginDetail, PluginView, PluginsView } from './types.ts';
 import { plural } from './model.ts';
-import { andList, byToolOrder, toolNames as names } from './words.ts';
+import { andList, byToolOrder, coworkWords, toolNames as names } from './words.ts';
 import { openItem } from './matrix.ts';
 import { nameOfFile } from './values.ts';
 
@@ -114,7 +114,9 @@ function installPanel(view: PluginsView, entry: MarketplaceView, plugin: PluginV
     withToolCount(h('div.plugin-tool-rows', {}, view.tools.map(tool => h('div.plugin-tool', {}, toolBox(view, entry, plugin, tool, marketIndex, compareTo),
       h('span.plugin-tool-text', {}, h('span.plugin-tool-name', {}, brandMark(tool, 14), names[tool]), h('span.plugin-tool-state', { title: why(tool) }, status(tool)),
         // With no CLI, its plugin commands run through the copy its desktop app carries: said so, never as the CLI.
-        view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null))), allButton), view.tools.length));
+        view.via?.[tool] ? h('span.plugin-tool-state.plugin-tool-via', { title: `${names[tool]}’s command-line tool wasn’t found, so its plugin commands run through ${view.via[tool]}.` }, `Through ${view.via[tool]}`) : null))), allButton), view.tools.length),
+    // Cowork has no box: with Claude desktop here, one line says where its plugins are kept instead.
+    hasCowork(app.home?.snapshots ?? []) ? h('p.plugin-panel-note', { id: 'plugin-cowork-note' }, coworkWords.plugin) : null);
 }
 
 /** What stays with the plugin in any tool without it: the parts that are never installed on their own. */

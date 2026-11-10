@@ -12,6 +12,14 @@ import type { HarnessId, Snapshot } from './types.ts';
 export const isPresent = (snapshot: Snapshot): boolean =>
   (snapshot.detection === 'Config found but app not detected' ? snapshot.probe.state === 'not-run' : snapshot.detection !== 'Not found');
 
+/**
+ * Whether Cowork is here: it comes with Claude desktop, found on this computer beside Claude Code. Cowork is no tool on
+ * any page, because it takes its plugins from the person's Claude account and not from files here (capability-data
+ * section 7: a plugin put in its local folder is listed by Claude desktop, and a new Cowork session still doesn't load it).
+ * Where it is here, Claude Code's card and each plugin's page say so once (words.ts, coworkWords).
+ */
+export const hasCowork = (snapshots: Snapshot[]): boolean => snapshots.some(snapshot => snapshot.harness === 'claude-cli' && !!snapshot.app);
+
 /** The tools in this home, in discovery order: the columns, boxes, menus and sentences every page draws from. */
 export const presentTools = (snapshots: Snapshot[]): HarnessId[] => snapshots.filter(isPresent).map(snapshot => snapshot.harness);
 

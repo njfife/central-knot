@@ -68,6 +68,7 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 - **What plugins bring, on the pages**: Skills, MCP servers and Agents also list every skill, server and agent an installed plugin brings, in a **From plugins** section, each marked with the plugin's icon and "from <plugin>". They are read from each tool's own records, so a plugin installed with the tool's own command counts too. They are never managed or synced there; their row says where they are handled. A **From plugins** filter shows only these.
 - **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
 - **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
+- **Cowork**: where Claude desktop is installed, Claude Code's card and each plugin's page say that Cowork takes its plugins from your Claude account, not from this computer, so Central Knot doesn't install there; a plugin is added in Claude desktop under Customize › Plugins. (A plugin put into Cowork's folder on the computer is listed by Claude desktop, but a new Cowork session doesn't load it: `docs/capability-data.md`, section 7.)
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
 
 ### Profiles
@@ -110,7 +111,7 @@ Central Knot's state lives in one folder, `.central-knot/` inside the selected h
 
 ## Not here yet
 
-Windows and Linux real-home writes and desktop app locations, Cowork, OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows and Linux real-home writes and desktop app locations, installing a plugin into Cowork (it takes plugins from the Claude account only, see Plugins), OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
 ## For developers
 

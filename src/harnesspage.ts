@@ -7,7 +7,8 @@ import { inTool, pluginItemCount } from './pluginrows.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { fileName, fullToolName, plural } from './model.ts';
-import { andList, kindNouns, toolNames as names } from './words.ts';
+import { andList, coworkWords, kindNouns, toolNames as names } from './words.ts';
+import { hasCowork } from './presence.ts';
 import { brandMark } from './brand.ts';
 import { shortBuild } from './values.ts';
 import type { DesktopApp, HarnessId, HomeView, InstructionFile, Snapshot } from './types.ts';
@@ -156,7 +157,9 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   // Two groups (the three kinds, then its file and plugins), which sit side by side on a wide card.
   const body = [head, status, h('span.harness-counts', {},
     h('span.harness-count-group', {}, kinds.map(entry => countRow(tabLabel(entry.kind), kindCount(entry, tool)))),
-    h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool))))];
+    h('span.harness-count-group', {}, countRow(tabLabel('instructions'), instructionCount(tool)), countRow(tabLabel('plugins'), pluginCount(tool)),
+      // Cowork comes with Claude desktop and is no tool here: its plugins live in the Claude account, said once on Claude Code's card.
+      tool === 'claude-cli' && hasCowork(home.snapshots) ? countRow('Cowork', { value: '—', note: coworkWords.card, faint: true }) : null))];
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
     h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
