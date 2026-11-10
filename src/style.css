@@ -1344,7 +1344,7 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .harness-scroll { container-type: inline-size; padding: 12px calc(16px + var(--overlay-gutter)) 16px 16px; display: flex; flex-direction: column; gap: 12px; }
 .harness-scroll > * { flex: none; }
 .harness-scroll > .tools-note { margin: 0; }
-.harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.harness-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; }
 .harness-card { container-type: inline-size; display: flex; flex-direction: column; color: var(--ink); }
 .harness-card-main { all: unset; box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 16px; border-radius: 12px; color: inherit; font: inherit; text-align: left; }
 button.harness-card-main { cursor: pointer; }
@@ -1395,8 +1395,8 @@ button.harness-card-main:disabled { cursor: default; }
 .harness-plugin-version { font-weight: 400; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .harness-plugin-note { font-size: 12px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Its groups sit side by side at a readable distance; past two groups' width the card keeps its edge and the rest stays empty on purpose. */
-.harness-about { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 640px)); gap: 16px 48px; }
-.harness-about-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.harness-about { padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: 16px 48px; }
+.harness-about-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 640px; }
 .harness-path { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .harness-path .middle { min-width: 0; }
 /* Narrow: the switcher keeps only the marks (names stay in their tooltips). */
@@ -1405,19 +1405,19 @@ button.harness-card-main:disabled { cursor: default; }
    free space (with the description), and the tool columns keep a steady width. */
 .page-harnesses #header { padding-right: 16px; }
 .harness-page .ov, .harness-page .legend, .harness-page .details { max-width: none; }
-.harness-page .ov { --ov-columns: minmax(170px, 240px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr); }
+.harness-page .ov { --ov-columns: minmax(170px, 300px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr); }
 /* Rows grow to hold the whole description, which sits beside the tool columns so a row's name, state and boxes stay together. */
 .harness-page .ov-row:not(.ov-head) { height: auto; min-height: 40px; }
 .ov-desc { display: block; padding: 8px 16px 8px 12px; font-size: 12px; line-height: 16px; color: var(--ink-faint); overflow-wrap: anywhere; }
 .harness-page .ov-page > .toolbar, .harness-page .ov-page .bands > .band, .harness-page > .bands > .band, .harness-page .harness-tab-body > .bands > .band { padding-right: 16px; }
-/* The description shows only when its column has room; otherwise it stays in the row's details. Measured on the table's own
-   width, per number of tool columns n: name 240 + Managed 76 + 132 per tool + 260 for the description = 576 + 132n
-   (keep in step with .harness-page .ov's --ov-columns). */
-@container (max-width: 708px) { .ov[data-tools="1"] .ov-desc { display: none; } }
-@container (max-width: 840px) { .ov[data-tools="2"] .ov-desc { display: none; } }
-@container (max-width: 972px) { .ov[data-tools="3"] .ov-desc { display: none; } }
-@container (max-width: 1104px) { .ov[data-tools="4"] .ov-desc { display: none; } }
-@container (max-width: 1236px) { .ov[data-tools="5"] .ov-desc { display: none; } }
+/* The description shows only when its column has room; otherwise it stays in the row's details and the name column takes the
+   free width instead, so names are not cut short beside empty space. Measured on the table's own width, per number of tool
+   columns n: name 300 + Managed 76 + 132 per tool + 260 for the description = 636 + 132n (keep in step with --ov-columns above). */
+@container (max-width: 768px) { .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] { --ov-columns: minmax(170px, 1fr) 76px repeat(1, minmax(92px, 132px)) 16px; } }
+@container (max-width: 900px) { .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] { --ov-columns: minmax(170px, 1fr) 76px repeat(2, minmax(92px, 132px)) 16px; } }
+@container (max-width: 1032px) { .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] { --ov-columns: minmax(170px, 1fr) 76px repeat(3, minmax(92px, 132px)) 16px; } }
+@container (max-width: 1164px) { .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] { --ov-columns: minmax(170px, 1fr) 76px repeat(4, minmax(92px, 132px)) 16px; } }
+@container (max-width: 1296px) { .ov[data-tools="5"] .ov-desc { display: none; } .harness-page .ov[data-tools="5"] { --ov-columns: minmax(170px, 1fr) 76px repeat(5, minmax(92px, 132px)) 16px; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
@@ -1442,10 +1442,31 @@ button.harness-card-main:focus-visible { outline: 0; }
 .harness-page .ins-card pre, .harness-page .ins-card textarea { max-width: 110ch; }
 .harness-page .ov-page .toolbar > .find { flex: 0 1 200px; min-width: 120px; }
 .tool-menu-empty { margin: 4px 0 8px; color: var(--ink-soft); }
-/* Four harnesses sit 2 × 2, or four across once each card can be 300px wide; never three and one. */
+/* Three harnesses fit across from the minimum window; four sit 2 × 2, or four across once each card can be 240px wide; never
+   three and one. */
 .harness-cards[data-count="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-@container (min-width: 1260px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container (min-width: 1000px) { .harness-cards[data-count="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @container (max-width: 600px) { .harness-cards[data-count="4"] { grid-template-columns: minmax(0, 1fr); } }
-/* A long name gives way with an ellipsis (its full text in the tooltip) before the copy-choice pill does. */
-.harness-page .ov-name-text { flex: 0 1 auto; min-width: 0; }
+/* A long name wraps onto more lines rather than being cut, and never pushes the copy-choice pill out. */
+/* A long name shrinks and wraps inside its line (the cell does not wrap), so its pill stays right after it. */
+.harness-page .ov-name-text { flex: 0 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .harness-page .ov-name > .decide, .harness-page .ov-name > .held-pill { flex: none; }
+/* "Not in <harness>" is an offer, not this harness's count: its heading is quieter than Managed and Unmanaged. */
+.ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
+/* Add from… keeps its plus and drops its word when the toolbar is narrow. */
+@container (max-width: 940px) { .add-from-word { display: none; } .harness-page .ov-page .toolbar > .find { flex-basis: 140px; } }
+/* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
+@container (min-width: 1300px) {
+  .harness-page .ins-card { display: grid; grid-template-columns: minmax(0, 110ch) minmax(260px, 1fr); grid-auto-flow: row dense; column-gap: 32px; row-gap: 0; align-content: start; }
+  .harness-page .ins-card > * { grid-column: 2; margin-bottom: 8px; }
+  .harness-page .ins-card > .ins-head { grid-column: 1 / -1; }
+  .harness-page .ins-card > .ins-body, .harness-page .ins-card > .ins-editor { grid-column: 1; grid-row: 2 / span 6; }
+}
+/* The tool's mark keeps its size on a card. */
+.harness-card-head > :first-child { flex: none; }
+/* An agent's "one-way from …" tag sits on its own line under the name, so the name is not cut for it: only that cell wraps,
+   and its name takes the rest of the first line (basis 0) so the whole name never drops below the chevron. */
+.harness-page .ov-row:not(.ov-head) .ov-name { padding-top: 6px; padding-bottom: 6px; }
+.harness-page .ov-name:has(> .row-tag) { flex-wrap: wrap; row-gap: 0; }
+.harness-page .ov-name:has(> .row-tag) > .ov-name-text { flex: 1 1 0%; }
+.harness-page .ov-name > .row-tag { flex-basis: 100%; margin-left: 26px; }

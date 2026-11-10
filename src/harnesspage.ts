@@ -84,7 +84,8 @@ function countRow(label: string, { value, note, faint = false }: Count) {
 
 function kindCount({ supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
   if (!supported) return { value: '—', note: `${names[tool]} has none of its own`, faint: true };
-  return { value: String(total), note: !total ? undefined : managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
+  if (!total) return { value: '0', note: 'none yet', faint: true };
+  return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
 }
 
 function instructionCount(tool: HarnessId): Count {
@@ -101,9 +102,9 @@ function pluginCount(tool: HarnessId): Count {
   const plugins = pluginsIn(tool);
   if (plugins.state === 'reading') return { value: '…', faint: true };
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
-  if (plugins.state === 'unsupported') return { value: '—', note: 'not handled here', faint: true };
+  if (plugins.state === 'unsupported') return { value: '—', note: `Central Knot doesn’t move ${names[tool]}’s plugins`, faint: true };
   const unsure = plugins.unknown.length + plugins.unreadable.length > 0;
-  return { value: String(plugins.installed.length), note: [plugins.installed.length ? 'installed' : '', unsure ? 'some not known' : ''].filter(Boolean).join(' · ') || undefined };
+  return { value: String(plugins.installed.length), note: [plugins.installed.length ? 'installed' : 'none installed', unsure ? 'some not known' : ''].join(' · ').replace(/ · $/, ''), faint: !plugins.installed.length };
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -270,7 +271,7 @@ function aboutTab(snapshot: Snapshot, home: HomeView) {
   return h('div.page', {}, h('div.scroll.harness-scroll', { id: 'harness-body' }, h('div.card.harness-about', {},
     h('div.harness-about-column', {},
       section('This harness', h('dl.facts', {},
-        ...fact('Status', detectionLine(snapshot, home)),
+        ...fact('Found as', detectionLine(snapshot, home)),
         ...(home.mode === 'actual' && snapshot.detection !== 'Installed' ? fact('Version', snapshot.probe.version ?? snapshot.probe.detail) : []),
         ...fact('Read by', h('span', {}, [fullToolName(snapshot), ...(disclosed?.alsoReadBy ?? [])].join(', '))),
         ...fact('Config folder', path(snapshot.root)))),
@@ -299,7 +300,7 @@ const openSnapshot = (home: HomeView): Snapshot | undefined =>
   state.harness && found(home, state.harness) ? home.snapshots.find(entry => entry.harness === state.harness) : undefined;
 
 /** The header title on a harness's page: "Harnesses" as the way back, then the harness and how it was found. Undefined on the list. */
-export function harnessTitle(): Node[] | undefined {
+export function harnessTitle(): (Node | null)[] | undefined {
   const snapshot = state.home && openSnapshot(state.home);
   if (!snapshot || !state.home) return undefined;
   const tool = snapshot.harness;
@@ -307,7 +308,8 @@ export function harnessTitle(): Node[] | undefined {
     h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: () => goHarness(undefined) }, icon('arrow-left', 14), 'Harnesses'),
     h('span.crumb-sep', { 'aria-hidden': 'true' }, '/'),
     brandMark(tool, 16), h('span.title-harness', {}, names[tool]),
-    h('span.title-note', { title: snapshot.root }, detectionLine(snapshot, state.home)),
+    // A sample or chosen folder is said once, on the list's note; the header names installed state on this computer only.
+    state.home.mode === 'actual' ? h('span.title-note', { title: snapshot.root }, detectionLine(snapshot, state.home)) : null,
   ];
 }
 

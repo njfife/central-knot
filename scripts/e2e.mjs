@@ -227,11 +227,11 @@ async function practiceFlow() {
   await a.click('#tool-copilot-cli');
   const groups = await a.run(`[...document.querySelectorAll('.add-target[data-target="claude-cli"] [data-group]')].map(group => group.dataset.group + ':' + (group.dataset.count ?? '1'))`);
   same('Add all groups for Claude Code', groups, ['new: will be copied:1', 'identical: starts syncing:1', 'different:1']);
-  same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2', false]);
+  same('Add leaves differing copies out at first', [await a.text('#menu-add-copilot-cli-claude-cli'), await a.exists('#menu-conflicts-note-copilot-cli-claude-cli')], ['Add 2 (1 new)', false]);
   await a.click('#menu-conflicts-copilot-cli-claude-cli');
   const note = await a.text('#menu-conflicts-note-copilot-cli-claude-cli') ?? '';
   check('opting in says whose copy is accepted and that the replaced one is kept', note.includes('You accept Copilot CLI’s copy') && note.includes('Claude Code') && note.includes('store keeps'), note);
-  same('and counts it', await a.text('#menu-add-copilot-cli-claude-cli'), 'Add 3');
+  same('and counts it', await a.text('#menu-add-copilot-cli-claude-cli'), 'Add 3 (1 new)');
   await a.click('#menu-add-copilot-cli-claude-cli');
   same('Add all queues all three as managed', await Promise.all(['notes', 'standup', 'review'].map(key => switchOn(a, key))), [true, true, true]);
   check('the differing copy is chosen from Copilot CLI, as a choice you can undo', (await a.exists('#undo-review')) && (await a.text('.ov-row[data-key="review"] .decided') ?? '').includes('Copilot CLI'));

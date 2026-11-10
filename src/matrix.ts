@@ -748,7 +748,9 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
   const unavailable = [...plan.skip, ...plan.blocked];
   const showWhy = view.addReasons.has(key);
   const idle = !count && !plan.differ.length;
-  const label = count ? `${copies ? 'Add' : 'Manage'} ${count}` : 'Add';
+  // Mixed new and already-there items say both, so the button matches the pending bar's "new copies" afterwards.
+  const fresh = plan.fresh.length + (conflicts && plan.differ.some(entry => !entry.here) ? plan.differ.filter(entry => !entry.here).length : 0);
+  const label = !count ? 'Add' : !copies ? `Manage ${count}` : fresh && fresh < count ? `Add ${count} (${fresh} new)` : `Add ${count}`;
   return h(`div.add-target${conflicts ? '.add-target-conflicts' : ''}`, { 'data-target': to },
     h('div.tool-menu-row', {},
       brandMark(shown, 16), h('span.tool-menu-name', {}, names[shown]),
@@ -775,15 +777,21 @@ function addRow(from: Tool, to: Tool, list: SampleSkill[], shown: Tool = to) {
 }
 
 /**
- * The Add part of a tool's menu: one row per from → to pair that has something to add or explain. On a harness's own page
+ * The from → to pairs a tool's menu offers: those with something to add or explain. On a harness's own page
  * its menu brings things in (each other tool's items, added here), and another tool's menu offers only its row into that
- * harness, so every Add on the page points one way. With nothing anywhere, one plain line.
+ * harness, so every Add on the page points one way.
  */
-function menuRows(tool: Tool, list: SampleSkill[]) {
+function menuPairs(tool: Tool, list: SampleSkill[]) {
   const pairs = tool === focus ? others(tool).map(source => [source, tool] as const)
     : others(tool).filter(target => !focus || target === focus).map(target => [tool, target] as const);
   // A pair counts if adding would do something, or would say why it can't; one where everything already syncs does not.
-  const live = pairs.filter(([from, to]) => { const { synced: _, ...rest } = planAdd(from, to, list); return Object.values(rest).some(group => group.length); });
+  return pairs.filter(([from, to]) => { const { synced: _, ...rest } = planAdd(from, to, list); return Object.values(rest).some(group => group.length); });
+}
+const menuHasRows = (tool: Tool, list: SampleSkill[]) => menuPairs(tool, list).length > 0;
+
+/** The menu's Add rows under one label, or one plain line when there is nothing to add. */
+function menuRows(tool: Tool, list: SampleSkill[]) {
+  const live = menuPairs(tool, list);
   const what = kindNoun[kind][1];
   if (!live.length) return [h('p.tool-menu-empty', {}, tool === focus ? `The other tools have no ${what} that ${names[tool]} doesn’t already have.` : `${names[tool]} has no ${what} to add${focus ? ` to ${names[focus]}` : ''}.`)];
   const label = tool === focus ? `Add to ${names[tool]} from…` : focus ? `Add ${names[tool]}’s ${what} to ${names[focus]}` : `Add ${names[tool]}’s ${what} to…`;
@@ -797,9 +805,11 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   const syncingHere = list.filter(skill => { const now = effective(skill); return now.managed && !now.off.includes(tool) && !now.cannot?.[tool]; });
   const noun = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
-    h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
+    // On a harness's own page the page already names it and counts what it has: the menu starts at its first action.
+    tool === focus ? null : h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
     ...menuRows(tool, list),
-    h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.'),
+    // Only when there is something to queue: a menu that says there is nothing to add needs no note about Apply all.
+    menuHasRows(tool, list) ? h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.') : null,
     // Stopping only exists once something syncs to this tool; before that, the foot would be a dead control.
     !syncingHere.length ? null : h('div.tool-menu-stop', {},
       h('span.tool-menu-note', {}, syncingHere.length ? `${syncingHere.length} managed ${syncingHere.length === 1 ? `${noun(1)} syncs` : `${noun(2)} sync`} here. Stopping keeps their copies here but stops updating them.` : `Nothing syncs to ${names[tool]} yet.`),
@@ -809,9 +819,10 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
 /** A harness's page: the same menu as its column header, from the toolbar and opening under it, so bringing items in is never hidden. */
 function addFromButton(tool: Tool, list: SampleSkill[]) {
   const open = view.toolMenu === tool && view.toolMenuFromToolbar;
+  // Its word drops at narrow widths (the plus stays, with the full name as its tooltip), so the toolbar keeps one line.
   return h('span.add-from', {},
-    button({ variant: 'outline', size: 'small', icon: 'plus', label: 'Add from…', name: `Add to ${names[tool]} from another tool`, id: 'harness-add-from', attrs: { 'aria-expanded': String(open), 'aria-haspopup': 'dialog' },
-      onclick: event => toggleToolMenu(event, tool, true) }),
+    h('button.btn.outline.small', { type: 'button', id: 'harness-add-from', title: `Add to ${names[tool]} from another tool`, 'aria-label': `Add to ${names[tool]} from another tool`, 'aria-expanded': String(open), 'aria-haspopup': 'dialog',
+      onclick: (event: Event) => toggleToolMenu(event, tool, true) }, icon('plus', 14), h('span.add-from-word', {}, 'Add from…')),
     open ? toolMenu(tool, list) : null);
 }
 
@@ -890,7 +901,7 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
   const becoming = role === 'away' ? list.filter(skill => skill.managed && !committedOf(skill.key).managed).length : 0;
   const target = managing ? sorted.filter(skill => !skill.managed && !skill.separate && syncOf(skill, toolList()) !== 'attention') : sorted.filter(skill => skill.managed);
   return h('div', { role: 'rowgroup' },
-    h('div.ov-section', { role: 'row' },
+    h(`div.ov-section${role === 'away' ? '.ov-section-away' : ''}`, { role: 'row' },
       h('div.ov-section-label', { role: 'cell' }, h('strong', {}, label), h('span.ov-section-count', {}, String(list.length)),
         // A move is told once: on the section it joins, or on Unmanaged when everything there joins Managed.
         after > list.length ? h('span.ov-section-after', {}, `· ${after - list.length} ${after - list.length === 1 ? 'joins' : 'join'} on Apply all`)
