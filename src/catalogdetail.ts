@@ -91,12 +91,17 @@ const skillPart = (body: string, dir: string): Pick<NamedPart, 'name' | 'descrip
 export const skillName = (body: string, dir: string) => skillPart(body, dir).name;
 
 
+/** How many folder levels down Codex looks for a plugin's skills (MAX_SCAN_DEPTH: SKILL.md at most six below the root), and agents and commands are read. */
+const NESTED_LEVELS = 6;
+
 /**
  * Skills from the given paths: each one a skill folder (with SKILL.md) or, with `subfolders`, a folder of skill folders.
+ * Read `asCodex`, every SKILL.md up to NESTED_LEVELS down counts, in skills nested inside skills too, and hidden folders
+ * are skipped, as Codex walks a plugin's skills.
  * Each part's `path` is its folder relative to the plugin's `folder` ("." for the folder itself), the same in every copy.
  * A skill whose SKILL.md is there but can't be read, or a folder that can't be listed ('*'), is named in `unread`, when given.
  */
-async function skillsIn(root: string, folder: string, paths: string[], subfolders = true, unread?: string[]): Promise<NamedPart[]> {
+async function skillsIn(root: string, folder: string, paths: string[], subfolders = true, unread?: string[], asCodex = false): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
   const add = async (dir: string) => {
     const path = relative(folder, dir) || '.';
@@ -107,21 +112,31 @@ async function skillsIn(root: string, folder: string, paths: string[], subfolder
     found.push({ ...skillPart(body, dir), text: body, path });
     return true;
   };
-  for (const path of paths) if (!(await add(path)) && subfolders) for (const name of await listOrNote(root, path, unread)) await add(join(path, name));
+  const walk = async (dir: string, level: number): Promise<void> => {
+    await add(dir);
+    if (level < NESTED_LEVELS - 1) for (const name of await listOrNote(root, dir, unread)) if (!name.startsWith('.')) await walk(join(dir, name), level + 1);
+  };
+  for (const path of paths) {
+    if (asCodex) await walk(path, 0);
+    else if (!(await add(path)) && subfolders) for (const name of await listOrNote(root, path, unread)) await add(join(path, name));
+  }
   return found.sort((first, second) => first.name.localeCompare(second.name));
 }
 
 /**
- * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders one level down.
+ * Markdown files (commands, agents) in the given files and folders, and in those folders' subfolders, NESTED_LEVELS down.
  * Each part's `path` is its file relative to the plugin's `folder`. A file listed there that can't be read, or a folder
  * that can't be listed ('*'), is named in `unread`, when given.
  */
 async function markdownIn(root: string, folder: string, paths: string[], unread?: string[]): Promise<NamedPart[]> {
   const found: NamedPart[] = [];
-  const filesIn = async (folder: string) => (await listOrNote(root, folder, unread)).filter(name => name.endsWith('.md')).map(name => join(folder, name));
+  const filesIn = async (dir: string, level: number): Promise<string[]> => {
+    const names = await listOrNote(root, dir, unread);
+    const deeper = level < NESTED_LEVELS - 1 ? await Promise.all(names.filter(name => !name.endsWith('.md')).map(name => filesIn(join(dir, name), level + 1))) : [];
+    return [...names.filter(name => name.endsWith('.md')).map(name => join(dir, name)), ...deeper.flat()];
+  };
   for (const path of paths) {
-    const files = path.endsWith('.md') ? [path]
-      : [...(await filesIn(path)), ...(await Promise.all((await listOrNote(root, path, unread)).filter(name => !name.endsWith('.md')).map(name => filesIn(join(path, name))))).flat()];
+    const files = path.endsWith('.md') ? [path] : await filesIn(path, 0);
     for (const file of files) {
       if (found.some(part => part.path === relative(folder, file))) continue;
       const body = await partFile(root, file);
@@ -199,7 +214,7 @@ async function skillsOf(folder: string, entry: Record<string, unknown>, root: st
     // Otherwise skills/ is always read, with every listed folder added.
     return listedPaths(folder, skillsFolder, own.skills, added.skills);
   };
-  const listed = await skillsIn(root, folder, skillPaths(), true, unread);
+  const listed = await skillsIn(root, folder, skillPaths(), true, unread, !!readAs.codex);
   // Claude Code: a plugin with no skills/ (an empty one counts as none) and no list may be one skill, SKILL.md at its root.
   return listed.length || readAs.codex || isListed ? listed : skillsIn(root, folder, [folder], false, unread);
 }

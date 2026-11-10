@@ -288,6 +288,9 @@ test('Installed means files where the tool records them; a record with no files 
     // So does a commit hash, which Claude Code records for a plugin without a version.
     await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'a1b2c3d4e5f6' }] } }));
     assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
+    // And hashes joined by "-", as a git-subdir plugin records its commit and the hash of its path.
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'p@m': [{ scope: 'user', installPath: cache, version: 'a1b2c3d4e5f6-9f8e7d6c' }] } }));
+    assert.equal((await installState(box.context, 'claude-cli', 'm', 'p') as { version?: string }).version, '0.9.1');
 
     const copied = join(box.home, '.copilot/installed-plugins/m/p');
     await put(join(box.home, '.copilot/config.json'), `// User settings belong in settings.json.\n// This file is managed automatically.\n${JSON.stringify({ installedPlugins: [{ name: 'p', marketplace: 'm', version: '2.1.0', cache_path: copied, enabled: true }] })}`);
@@ -300,6 +303,10 @@ test('Installed means files where the tool records them; a record with no files 
     await put(join(box.home, '.copilot/settings.json'), JSON.stringify({ extraKnownMarketplaces: { 'ck-test-market': { source: { source: 'directory', path: live } } }, enabledPlugins: { 'marker@ck-test-market': true } }));
     const liveState = await installState(box.context, 'copilot-cli', 'ck-test-market', 'marker');
     assert.ok(liveState.state === 'installed' && liveState.live, JSON.stringify(liveState));
+    // Claude Code records a cache copy of a folder marketplace's plugin, and its version then, but loads the folder.
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ 'ck-test-market': { source: { source: 'directory', path: live }, installLocation: live } }));
+    await put(join(box.home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'marker@ck-test-market': [{ scope: 'user', installPath: cache, version: '0.1.0' }] } }));
+    assert.partialDeepStrictEqual(await installState(box.context, 'claude-cli', 'ck-test-market', 'marker'), { state: 'installed', path: join(live, 'plugins/marker'), live: true, version: '0.3.0' });
 
     await put(join(box.home, '.codex/config.toml'), '[plugins."p@m"]\nenabled = true\n');
     assert.equal((await installState(box.context, 'codex-cli', 'm', 'p')).state, 'not-known');

@@ -374,12 +374,19 @@ export async function heldBy(context: PluginContext, tool: PluginTool, marketpla
  * The version of a tool's installed copy: what the tool recorded, else what the copy's own manifest says (for a Codex
  * copy, `codex`, the one manifest Codex reads). Claude Code records "unknown" or a commit hash for a plugin without a
  * version, and Codex names such a copy's folder "local" or for a commit, so a commit hash is taken as no version (a real
- * version that looks like one, such as "deadbeef", is then read from the manifest instead).
+ * version that looks like one, such as "deadbeef", is then read from the manifest instead). So are hashes joined by "-"
+ * (a git-subdir plugin's commit and the hash of its path).
  */
 async function copyVersion(recorded: unknown, path: string, codex = false): Promise<string | undefined> {
   const said = text(recorded);
-  if (said && said !== 'unknown' && !isCommitHash(said)) return said;
+  if (said && said !== 'unknown' && !said.split('-').every(isCommitHash)) return said;
   return text((codex ? await codexManifest(path) : await pluginManifest(path))?.version) || undefined;
+}
+
+/** A plugin as the folder marketplace at `folderPath` lists it, read once per request; `folder` is set when its files are kept there. */
+async function folderItem(context: PluginContext, folderPath: string, plugin: string): Promise<CatalogPlugin | undefined> {
+  const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
+  return catalog.plugins.find(candidate => candidate.name === plugin);
 }
 
 /**
@@ -397,6 +404,12 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const user = (Array.isArray(listed) ? listed : []).map(record).find(entry => entry?.scope === 'user');
       const path = text(user?.installPath);
       if (!path) return { state: 'not-installed' };
+      // A plugin kept in a local folder marketplace is loaded from that folder at each start, whatever its record says
+      // (Claude Code 2.1.321 records a cache copy and its version then, but reads the folder): the catalog's version counts.
+      const lists = [await recordJson(context, join(root, 'plugins/known_marketplaces.json')), record((await recordJson(context, join(root, 'settings.json')))?.extraKnownMarketplaces)];
+      const source = lists.map(list => record(record(list?.[marketplace])?.source)).find(Boolean);
+      const live = source?.source === 'directory' && text(source.path) ? await folderItem(context, text(source.path), plugin) : undefined;
+      if (live?.folder && (await hasFiles(live.folder))) return { state: 'installed', path: live.folder, live: true, ...(live.version ? { version: live.version } : {}) };
       return (await hasFiles(path)) ? { state: 'installed', path, version: await copyVersion(user?.version, path) } : { state: 'not-known', reason: 'Claude Code lists it, but its files are not where it records them.' };
     }
     case 'copilot-cli': {
@@ -411,8 +424,7 @@ export async function installState(context: PluginContext, tool: PluginTool, mar
       const source = record(record(record(settings?.extraKnownMarketplaces)?.[marketplace])?.source);
       const folderPath = text(source?.path);
       if (enabled && source?.source === 'directory' && folderPath) {
-        const catalog = await once(context, `catalog:${folderPath}`, () => parseCatalog(folderPath, folderPath, 'folder', { counts: false }));
-        const item = catalog.plugins.find(candidate => candidate.name === plugin);
+        const item = await folderItem(context, folderPath, plugin);
         const folder = item?.folder;
         return folder && (await hasFiles(folder)) ? installedCopy(folder, item.entry ?? entry, { live: true, version: item.version, readAs: { skillsListReplaces: true } }, async skills => copilotSkillsOff(settings, plugin, skills)) : { state: 'not-known', reason: 'Copilot CLI has it turned on, but the folder it loads from is gone.' };
       }
@@ -644,7 +656,7 @@ export async function install(context: PluginContext, catalog: Catalog, plugin: 
   const installed = await native(context, tool, args);
   runs.push(installed);
   const state = await installState(context, tool, catalog.name, plugin);
-  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder (nothing copied)' : ''}. ${nextStepFor(tool)}`.trim(), runs };
+  if (state.state === 'installed') return { tool, outcome: 'installed', changed: true, message: `${installed.ok ? 'Installed' : 'The command reported a problem, but it is installed'}${state.live ? ', loaded live from the marketplace folder' : ''}. ${nextStepFor(tool)}`.trim(), runs };
   if (state.state === 'not-known') return { tool, outcome: 'not-known', message: state.reason, runs };
   // A marketplace the tool already had is used as the tool last fetched it, which may predate what this page shows.
   const older = registered ? ` ${name} uses its own copy of this marketplace, which may be older than the one shown here: update it in ${name}, then try again.` : '';
