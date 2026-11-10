@@ -7,8 +7,9 @@
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
 import { readFile } from 'node:fs/promises';
 import { mcpFile } from './mcp.ts';
-import { errorCode, type ShareContext } from './share.ts';
+import { errorCode, writeFileChecked, type ShareContext } from './share.ts';
 import { switchPath, type SwitchFile } from './skillswitch.ts';
+import { problemText, toolName } from './words.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
 import { record, withoutBom } from './values.ts';
 import type { HarnessId, SkillFacts } from './types.ts';
@@ -108,4 +109,23 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
       return setJsonMember(text, ['mcpServers', name, 'enabled'], disabled ? false : undefined);
     }
   }
+}
+
+const failure = (message: string) => Object.assign(new Error(message), { code: 'CK_SWITCH' });
+
+/**
+ * Turns a server off or on in one tool, by hand (a server's Enabled switch, or its Undo): one checked write, only over the text
+ * read, then read back, so what is reported is what the tool will see. False when the tool already has it that way. Throws, with
+ * the reason to show, when it can't: the file isn't the tool's format, or Codex or Pi has no entry for the server to switch.
+ */
+export async function setMcpDisabled(context: ShareContext, tool: HarnessId, name: string, disabled: boolean): Promise<boolean> {
+  const file = await readMcpSwitchFile(context, tool);
+  if (file.problem) throw failure(problemText(file.problem));
+  if (mcpDisabled(tool, file.text, name) === disabled) return false;
+  let text: string;
+  try { text = withMcpSwitch(tool, file.text, name, disabled); } catch (error) { throw failure(error instanceof Error ? error.message : String(error)); }
+  await writeFileChecked(file.path, text, file.exists ? file.text : undefined);
+  const after = await readMcpSwitchFile(context, tool);
+  if (after.problem || mcpDisabled(tool, after.text, name) !== disabled) throw failure(`${toolName(tool)}’s settings did not take the change.`);
+  return true;
 }
