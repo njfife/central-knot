@@ -1416,10 +1416,10 @@ button.harness-card-main:disabled { cursor: default; }
   --ov-columns: minmax(170px, 300px) 76px repeat(var(--tool-count, 3), minmax(92px, 132px)) minmax(0, 1fr);
   --narrow-columns: minmax(170px, 1fr) 76px repeat(var(--tool-count, 3), minmax(92px, 124px)) 16px;
 }
-@container (max-width: 768px) { .harness-page .ov[data-tools="1"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
-@container (max-width: 900px) { .harness-page .ov[data-tools="2"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
-@container (max-width: 1032px) { .harness-page .ov[data-tools="3"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
-@container (max-width: 1164px) { .harness-page .ov[data-tools="4"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; } }
+@container (max-width: 768px) { .harness-page .ov[data-tools="1"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="1"] .ov-desc { display: none; } .harness-page .ov[data-tools="1"] .ov-name-sub { display: block; } }
+@container (max-width: 900px) { .harness-page .ov[data-tools="2"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="2"] .ov-desc { display: none; } .harness-page .ov[data-tools="2"] .ov-name-sub { display: block; } }
+@container (max-width: 1032px) { .harness-page .ov[data-tools="3"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="3"] .ov-desc { display: none; } .harness-page .ov[data-tools="3"] .ov-name-sub { display: block; } }
+@container (max-width: 1164px) { .harness-page .ov[data-tools="4"] { --ov-columns: var(--narrow-columns); } .harness-page .ov[data-tools="4"] .ov-desc { display: none; } .harness-page .ov[data-tools="4"] .ov-name-sub { display: block; } }
 .ov-desc-head { padding-top: 0; padding-bottom: 0; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 /* The harness's own column header: a quiet fill across the whole column's width. */
 .ov-tool-head.tool-head-focus { background: var(--hover); border-radius: 8px 8px 0 0; align-self: stretch; display: flex; align-items: center; justify-content: center; }
@@ -1463,6 +1463,8 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-section-away .ov-section-label > strong { font-weight: 500; color: var(--ink-soft); }
 /* Add from… becomes "Add…" when the toolbar is narrow (the full name stays in its tooltip). */
 @container (max-width: 700px) { .add-from-more { display: none; } }
+/* While changes wait, the count, Discard and Apply all need the room: below 900px Add from… keeps only its plus (named in its tooltip). */
+@container (max-width: 900px) { .toolbar:has(.apply-count) .add-from-word { display: none; } }
 /* Wide: the file sits at a reading measure on the left, with who reads it, notes and earlier versions beside it. */
 @container (min-width: 1300px) {
   .harness-page .ins-card { display: grid; grid-template-columns: minmax(0, max-content) minmax(260px, 1fr); grid-auto-flow: row dense; column-gap: 32px; row-gap: 0; align-content: start; }
@@ -1499,6 +1501,5 @@ button.harness-card-main:focus-visible { outline: 0; }
 /* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
 .harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
 /* A short window: the description under a name keeps to two lines (the full text is in the row's details). */
-@media (max-height: 700px) { .ov-name-sub { -webkit-line-clamp: 2; overflow: hidden; } }
 @container (max-width: 860px) { .manage-noun { display: none; } .harness-page .ov-page .toolbar > .find { flex-basis: 130px; min-width: 110px; } }
 .ov-section-after > .text-action { padding-left: 0; margin-left: 0; }

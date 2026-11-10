@@ -79,7 +79,8 @@ function countRow(label: string, { value, note, faint = false }: Count) {
 
 function kindCount({ kind, supported, total, managed }: ReturnType<typeof tally>, tool: HarnessId): Count {
   if (!supported) return { value: '—', note: kindNotUsed(tool, kind), faint: true };
-  if (!total) return { value: '0', note: 'none yet', faint: true };
+  // None: the words say it, without a 0 beside them.
+  if (!total) return { value: '', note: 'none yet', faint: true };
   return { value: String(total), note: managed === total ? 'all managed' : !managed ? 'none managed' : `${managed} managed · ${total - managed} unmanaged` };
 }
 
@@ -100,7 +101,7 @@ function pluginCount(tool: HarnessId): Count {
   if (plugins.state === 'failed') return { value: '—', note: 'couldn’t be read', faint: true };
   if (plugins.state === 'unsupported') return { value: '—', note: pluginsNotHandled(tool), faint: true };
   const unsure = plugins.unknown.length + plugins.unreadable.length > 0;
-  return { value: String(plugins.installed.length), note: [plugins.installed.length ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !plugins.installed.length };
+  return { value: plugins.installed.length ? String(plugins.installed.length) : '', note: [plugins.installed.length ? 'installed' : 'none installed', unsure ? 'some not known' : ''].filter(Boolean).join(' · '), faint: !plugins.installed.length };
 }
 
 /** What needs a look on a card, each a link: differing copies (to that kind's tab, showing only those) and read problems (to About). */
@@ -146,7 +147,7 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  * The one way to move within Harnesses: to a harness's page (on `tab` if given, else the tab last used) or, with no harness,
  * back to the list. The last action's result and what the last page showed stay behind; another harness starts with its
  * tables closed and Copies differ filters off. `showOnly`: open that kind's tab showing only items whose copies differ.
- * `fromKeyboard`: going back to the list shows the focus ring on the card only when the way back was taken from the keyboard.
+ * `fromKeyboard`: going back to the list from the keyboard puts focus (and its ring) on the harness's card; a mouse return leaves it alone.
  */
 export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromKeyboard = true, showOnly }: { fromKeyboard?: boolean; showOnly?: Kind } = {}) {
   const from = state.harness;
@@ -158,7 +159,7 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, { fromK
   leaveResults();
   rerender();
   if (tool) document.getElementById('harness-body')?.scrollTo(0, 0);
-  else if (from) document.getElementById(`harness-${from}`)?.focus({ focusVisible: fromKeyboard } as FocusOptions);
+  else if (from && fromKeyboard) document.getElementById(`harness-${from}`)?.focus();
 }
 
 function everyHarness(home: HomeView) {

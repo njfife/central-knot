@@ -238,7 +238,8 @@ if (wanted('harnesses')) {
   await sizes('claude-about', 'The About tab.');
   await a.click('#harness-switch-copilot-cli'); await a.click('#harness-tab-skills'); await shot(a, 'copilot-skills', 'Clicked Copilot CLI in the switcher at the top right, then the Skills tab.');
   await a.theme('light'); await shot(a, 'copilot-skills-light', 'The same, light appearance.'); await a.theme('dark');
-  await a.click('#harness-back'); await shot(a, 'back', 'Clicked "Harnesses" in the header’s breadcrumb.');
+  // A mouse click (detail 1), as a person makes it; a scripted click() reads as the keyboard.
+  await a.run(`document.querySelector('#harness-back').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }))`); await a.settle(); await shot(a, 'back', 'Clicked "Harnesses" in the header’s breadcrumb with the mouse.');
   // A fourth harness: Pi, with one skill of its own, so the table has four tool columns.
   const piSkill = join(practice, '.pi/agent/skills/pi-notes');
   mkdirSync(piSkill, { recursive: true });
