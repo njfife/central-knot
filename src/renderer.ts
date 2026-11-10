@@ -1,7 +1,7 @@
 import { settingsPage } from './settingspage.ts';
 import { designMode, sample } from './design.ts';
 import packageInfo from '../package.json' with { type: 'json' };
-import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, setPracticeNote, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
+import { absentKinds, noTools, loadHome, paintStatusMessage, readAgain, realHomeName, startHome, rerender, setRenderer, setSync, showPage, showSkillsTable, state, type Page } from './app.ts';
 import { button, fitBars, h, icon, runAfterLayout } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { kindNouns, type HomeKind } from './presence.ts';
@@ -121,10 +121,7 @@ function renderHeader(rail: boolean) {
       variant: 'ghost', icon: 'panel-left', name: rail ? 'Expand the sidebar' : 'Collapse the sidebar', id: 'sidebar-toggle',
       onclick: () => { state.sidebar = rail ? 'open' : 'rail'; rerender(); },
     }),
-    // While the practice copy is open, the title says so on every page; clicking brings the practice note back.
-    // The tag reopens the practice note, so it is hidden while that note is open on the Overview.
-    h('h1.page-title', {}, (state.page === 'harnesses' && harnessTitle()) || titles[state.page], state.home?.mode === 'fixture' && state.page === 'overview' && !practiceNoteOpen() ? h('button.title-tag', { type: 'button', id: 'practice-tag', title: 'What is the practice copy? Click to show the note again.',
-      onclick: () => { setPracticeNote(true); showPage('overview'); } }, icon('flask-conical', 12), 'Practice copy') : ''),
+    h('h1.page-title', {}, (state.page === 'harnesses' && harnessTitle()) || titles[state.page]),
     // The same Refresh on every page: it reads the home again, then the page's own data (on Plugins, every marketplace).
     h('div.header-end', {}, button({ icon: 'refresh-cw', label: 'Refresh', name: state.page === 'plugins' ? 'Read this home and every marketplace again' : 'Read this home again', id: 'header-refresh', disabled: !!state.busy || !state.home,
       onclick: () => void readAgain() })),

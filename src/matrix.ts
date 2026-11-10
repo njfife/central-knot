@@ -1899,18 +1899,19 @@ const listWatcher = new ResizeObserver(entries => {
   listSize = size;
 });
 
-/** The least room a description gets beside its name before every row leaves it out: about eight characters. */
-const ABOUT_MIN = 60;
+/** The least room a description gets beside its name before every row leaves it out: about twelve characters. */
+const ABOUT_MIN = 90;
 
 /**
  * A table's descriptions are all shown or all left out, so rows never differ: when the narrowest one has room for fewer
- * than about eight characters, every row leaves its description out (.no-about); its name's tooltip still has it.
+ * than about twelve characters, every row leaves its description out (.no-about); its name's tooltip still has it.
+ * A description pushed onto the cell's hidden second line, after a tag or pill that took the room, has none.
  * Run after layout (dom.ts afterLayout).
  */
 function settleDescriptions(): void {
   for (const table of document.querySelectorAll<HTMLElement>('.ov')) {
     table.classList.remove('no-about');
-    const widths = [...table.querySelectorAll<HTMLElement>('.ov-name-about')].map(about => about.clientWidth);
+    const widths = [...table.querySelectorAll<HTMLElement>('.ov-name-about')].map(about => (about.offsetTop >= about.offsetHeight ? 0 : about.clientWidth));
     table.classList.toggle('no-about', widths.length > 0 && Math.min(...widths) < ABOUT_MIN);
   }
 }
@@ -1963,6 +1964,9 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
   });
   const { where, contents } = more(skill.key);
   const layout = filesLayout(skill, where);
+  // Its whole text on hover too, for a pane too narrow to show it.
+  const paneStatus = draft ? 'Waits for Apply all'
+    : skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : skill.managed ? 'Managed' : 'Unmanaged';
   return h('div.page.split', {},
     h('div.list-column', {},
       h('div.toolbar.list-toolbar.fit-bar', {}, button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Table', name: 'Back to the skills table', id: 'skills-table', collapse: true, onclick: showSkillsTable }), h('div.find', {}, icon('search', 16, 'find-glyph'), find)),
@@ -1972,8 +1976,7 @@ export function skillsBrowser(more: (key: string) => { where: Node[]; contents: 
         list)),
     h('section.detail-column', { id: 'skill-detail', 'aria-label': 'Skill details' },
       h('div.pane-header.fit-bar', {},
-        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), draft ? h('p', {}, 'Waits for Apply all')
-          : h('p', {}, skill.managed && toolList().every(tool => cellOf(skill, tool) === 'synced') ? `Synced · same copy in ${toolsPhrase(toolList(), toolList())}` : skill.managed ? 'Managed' : 'Unmanaged')),
+        h('div.pane-title', {}, h('h2', {}, middle(skill.name ?? skill.key)), h('p', { title: paneStatus }, paneStatus)),
         // The skill's own controls sit beside its name; the changes waiting for Apply all keep the bar's far end.
         h('div.detail-actions', {},
           h('span.detail-switch-label', { 'aria-hidden': 'true' }, 'Managed'),
