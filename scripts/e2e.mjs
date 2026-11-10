@@ -1128,6 +1128,10 @@ async function practiceFlow() {
   await a.click('#header-refresh');
   for (let tries = 0; tries < 40 && !(await a.exists('#base-restore-codex-cli')); tries++) await wait(100);
   check('an edit inside Codex’s copy shows, with both choices', await a.exists('#base-usecopy-codex-cli') && await a.exists('#base-restore-codex-cli'), await a.text('#base-card'));
+  // On Codex's harness page the strip's "Choose what to do…" goes to that choice on Instructions (its target isn't on a harness tab).
+  await a.click('#nav-harnesses'); await a.click('#harness-codex-cli'); await a.click('#harness-tab-instructions');
+  await a.click('#ins-base-go-codex-cli');
+  check('“Choose what to do…” on a harness’s Instructions tab opens the choice on Instructions', await a.exists('#base-card') && await a.run(`document.activeElement?.id?.startsWith('base-diff-')`), await a.run(`[document.activeElement?.id, !!document.querySelector('#base-card')]`));
   await a.click('#base-usecopy-codex-cli');
   await a.click('#base-save');
   check('Use it as the base spreads Codex’s edit to Claude Code', readFileSync(join(practice, '.claude/CLAUDE.md'), 'utf8').includes('- Shared, edited in Codex.'));
