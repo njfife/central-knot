@@ -407,8 +407,8 @@ export interface RepoChange {
   name: string;
   /** What happened to it on the side it comes from. */
   change: 'added' | 'changed' | 'removed';
-  /** Incoming: it changed here too since the last pull (or was removed here, or is no longer Managed). The repo's version wins on Pull; History keeps yours. */
-  alsoHere?: 'changed' | 'removed';
+  /** Incoming: it changed here too since the last pull (or was removed here, or is no longer Managed), or the repo adds one by the name of an item here that isn't Managed. The repo's version wins on Pull; History keeps yours. */
+  alsoHere?: 'changed' | 'removed' | 'unmanaged';
   /** Outgoing: removed in the repo but changed here, so your change stays and goes back with the next Push. */
   keptHere?: boolean;
   /** Why it can't be brought across, if it can't. */
@@ -442,5 +442,7 @@ export type RepoView =
     /** The repo no longer has this branch: Push puts it back. */
     branchGone?: boolean;
   };
+/** The page of a connected repo. */
+export type ConnectedRepoView = Extract<RepoView, { connected: true }>;
 
 export interface RepoResult { view: RepoView; stopped?: string; /** Connect: the field the refusal concerns. */ field?: 'url' | 'branch'; results: DestinationResult[]; /** Push: the commit made. */ pushed?: RepoCommit; /** Pull: how many items came in. */ pulled?: number; /** Pull: MCP servers that reach Claude Code only with Write to Claude Code. */ waitsForClaude?: string[] }

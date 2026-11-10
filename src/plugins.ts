@@ -96,7 +96,7 @@ export function whyGitFailed(code: number | 'timeout' | 'missing', output: strin
   if (code === 'timeout' || /could not resolve host|timed out|connection refused|network is unreachable|no route to host|failed to connect/.test(text)) return `Can’t reach the ${place}. Check your connection; a company ${place} may need its network or VPN.`;
   if (/host key verification failed/.test(text)) return 'This SSH host is not known on this computer yet. Connect to it once in a terminal (for example `ssh -T git@host`) and compare its fingerprint; Central Knot never changes known_hosts.';
   if (/passphrase/.test(text)) return 'Your SSH key needs its passphrase. Add it to your SSH agent, then try again.';
-  if (/authentication failed|could not read username|terminal prompts disabled|403|401|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';
+  if (/authentication failed|could not read username|terminal prompts disabled|\b40[13]\b|permission denied \(publickey/.test(text)) return 'Sign-in needed. Use credentials that already work for Git on this computer, then try again.';
   if (/repository not found|not found|404|does not appear to be a git repository|does not exist|access denied/.test(text)) return NO_REPO_THERE;
   return output.split('\n').slice(-3).join(' ').slice(0, 400) || 'Git failed without saying why.';
 }
@@ -105,7 +105,7 @@ export function whyGitFailed(code: number | 'timeout' | 'missing', output: strin
 export function whyPushFailed(code: number | 'timeout' | 'missing', output: string, place = 'repo'): string {
   const text = output.toLowerCase();
   // Refusals first: a protected branch also says "rejected", and pulling again would not help.
-  if (/read-only|403|denied|not allowed|protected branch|pre-receive hook declined/.test(text)) return `The ${place} did not accept the push: your account may only be able to read it, or the branch is protected. Nothing changed here.`;
+  if (/read-only|\b403\b|denied|not allowed|protected branch|pre-receive hook declined/.test(text)) return `The ${place} did not accept the push: your account may only be able to read it, or the branch is protected. Nothing changed here.`;
   if (/non-fast-forward|fetch first|stale info/.test(text)) return `The ${place} changed just now. Pull, then push again.`;
   return whyGitFailed(code, output, place);
 }

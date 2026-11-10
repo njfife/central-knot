@@ -7,7 +7,7 @@ import type { IconName } from './icons.ts';
 import { outcomeBand } from './matrix.ts';
 import { dayAndTime, plural } from './model.ts';
 import { andList, toolName } from './words.ts';
-import type { RepoChange, RepoCommit, RepoResult, RepoView } from './types.ts';
+import type { ConnectedRepoView, RepoChange, RepoCommit, RepoResult, RepoView } from './types.ts';
 
 const api = () => window.centralKnot;
 
@@ -38,19 +38,21 @@ export function loadRepoSoon(): void {
 
 /** The check (fetch) in flight, if any: a load that overtakes it waits for this one rather than starting another. */
 let inFlight: Promise<RepoView | null> | undefined;
-/** A check asked for by a load that a newer one overtook before its fetch began: the newer load does it instead. */
+/** Whether any load since the last check asked for one: whichever load ends up newest does it, so an overtaken load's ask isn't lost. */
 let wantCheck = false;
 
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
   const turn = ++loads;
-  check ||= wantCheck;
-  wantCheck = false;
+  wantCheck ||= check;
   // A check already in flight is joined, never started again: once it ends, this load reads the page as it then is.
-  if (inFlight) { check = false; await inFlight.catch(() => undefined); }
+  const joined = inFlight;
+  if (joined) await joined.catch(() => undefined);
   let view: RepoView | undefined;
   try { view = (await api().repo(false)) ?? undefined; } catch { view = undefined; }
-  if (turn !== loads) { wantCheck ||= check; return; }
+  if (turn !== loads) return;
+  check = wantCheck && !joined;
+  wantCheck = false;
   repo.view = view;
   if (!inFlight) repo.checking = false;
   rerender();
@@ -160,6 +162,7 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
   // Held from the repo: Push never touches it there (unless it was only waiting on the last Pull, which Pull retries).
   const note = change.held ? (side === 'in' ? `Can’t come in. ${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}` : `Stays out of the repo. ${change.held}`)
     : change.alsoHere === 'removed' ? 'Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.'
+    : change.alsoHere === 'unmanaged' ? 'One of this name is in your tools but not Managed. Pull replaces it; yours stays in History.'
     : change.alsoHere ? `Changed here too. Pull uses the repo’s version; yours stays in History.`
     : change.keptHere ? 'Removed in the repo but changed here, so it stays, and Push puts it back.'
     : side === 'in' && change.change === 'removed' ? 'Pull deletes it from your tools. History can restore it.'
@@ -188,26 +191,26 @@ function changeList(id: string, title: string, changes: RepoChange[], side: 'in'
 }
 
 /** Changes waiting each way, leaving out items that can't move. */
-export const waitingCounts = (view: Extract<RepoView, { connected: true }>) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
+export const waitingCounts = (view: ConnectedRepoView) => ({ pull: view.incoming.filter(change => !change.held).length, push: view.outgoing.filter(change => !change.held).length });
 
 /** "The same commit", and what of it hasn't come in, so the facts stay true when an item is held. */
-function sameCommitText(view: Extract<RepoView, { connected: true }>): string {
+function sameCommitText(view: ConnectedRepoView): string {
   const held = view.incoming.filter(change => change.held && !change.retry).length;
   return held ? `The same commit, except ${plural(held, 'item')} that can’t come in` : 'The same commit';
 }
 
 /** Push's count as the toolbar and status bar say it: waiting on Pull when Push can't run yet. */
-const pushCountText = (view: Extract<RepoView, { connected: true }>, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
+const pushCountText = (view: ConnectedRepoView, count: number) => (view.pushBlocked ? `${count} to push after Pull` : `${count} to push`);
 
 /** Items that can't move, in the same words as their list: "can't come in" from the repo, "can't go" from here. */
-function stuckText(view: Extract<RepoView, { connected: true }>): string {
+function stuckText(view: ConnectedRepoView): string {
   const cantCome = view.incoming.filter(change => change.held && !change.retry).length;
   const cantGo = view.outgoing.filter(change => change.held).length;
   return [cantCome ? `${cantCome} can’t come in` : '', cantGo ? `${cantGo} can’t go` : ''].filter(Boolean).join(', ');
 }
 
 /** The state in one line: up to date, what waits each way, or that the repo couldn't be reached. */
-function summary(view: Extract<RepoView, { connected: true }>): HTMLElement {
+function summary(view: ConnectedRepoView): HTMLElement {
   const part = (glyph: IconName, tone: string, text: string, muted = false) => h(`span.repo-state-part${muted ? '.tone-muted' : ''}`, {}, icon(glyph, 14, tone), h('span', {}, text));
   const { pull: incoming, push: outgoing } = waitingCounts(view);
   const stuckNote = stuckText(view);
@@ -230,7 +233,7 @@ const WAITING_ID = 'repo-waiting';
  * Pull: shown when something can come in, an unfinished item can be tried again, or a newer commit changes nothing here (Pull then
  * just moves to it). Items whose fault is in the repo can't be pulled at all.
  */
-function pullButton(view: Extract<RepoView, { connected: true }>, pullable: number, moving: boolean) {
+function pullButton(view: ConnectedRepoView, pullable: number, moving: boolean) {
   const retryable = view.incoming.filter(change => change.retry).length;
   if (!pullable && !retryable && !view.pushBlocked) return null;
   return button({
@@ -243,7 +246,7 @@ function pullButton(view: Extract<RepoView, { connected: true }>, pullable: numb
 }
 
 /** Push: shown when something here can go, or the branch is gone from the repo (Push puts it back with nothing else to send). */
-function pushButton(view: Extract<RepoView, { connected: true }>, pushable: number, moving: boolean) {
+function pushButton(view: ConnectedRepoView, pushable: number, moving: boolean) {
   if (!pushable && !view.branchGone) return null;
   const describedBy = view.problem ? WAITING_ID : view.pushBlocked ? 'repo-outgoing-blocked' : undefined;
   return button({
@@ -254,7 +257,7 @@ function pushButton(view: Extract<RepoView, { connected: true }>, pushable: numb
   });
 }
 
-function connectedPage(view: Extract<RepoView, { connected: true }>) {
+function connectedPage(view: ConnectedRepoView) {
   const { pull: pullable, push: pushable } = waitingCounts(view);
   const locked = !!state.busy || !view.access.allowed;
   // While the repo can't be reached, Pull and Push wait for Try again (in the band) rather than fail the same way.

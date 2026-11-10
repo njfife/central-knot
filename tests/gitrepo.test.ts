@@ -206,6 +206,26 @@ test('A skill only one tool has: Pull replaces that copy, and Undo in History pu
   } finally { await box.cleanup(); }
 });
 
+test('A skill of the repo’s name that this computer never Managed: the row says so, and Undo of the Pull brings that skill back', async () => {
+  const box = await world();
+  try {
+    const first = await box.home('first');
+    await skill(first, '.claude/skills', 'review', skillText('review', 'Shared.'));
+    await applyChanges(first, [{ key: 'review', managed: true, off: [] }]);
+    await connectRepo(first, box.remote, '');
+    await pushRepo(first);
+    const second = await box.home('second');
+    await skill(second, '.claude/skills', 'review', skillText('review', 'Mine.'));
+    const view = live((await connectRepo(second, box.remote, '')).view);
+    assert.deepEqual(view.incoming.map(row => [row.name, row.change, row.alsoHere]), [['review', 'added', 'unmanaged']]);
+    await pullRepo(second);
+    for (const root of ['.claude/skills', '.copilot/skills']) assert.match(await readFile(join(second.home, root, 'review/SKILL.md'), 'utf8'), /Shared/);
+    const replaced = (await readHistory(second.home)).find(event => event.key === 'review' && event.kind === 'edit' && event.via === 'repo')!;
+    assert.equal((await restoreFromHistory(second, replaced.id)).stopped, undefined, 'the replaced copy is still in the store');
+    assert.match(await readFile(join(second.home, '.claude/skills/review/SKILL.md'), 'utf8'), /Mine/);
+  } finally { await box.cleanup(); }
+});
+
 test('Edits cross both ways; when both sides changed, the repo’s edit wins on Pull and Undo in History brings this computer’s back', async () => {
   const box = await world();
   try {

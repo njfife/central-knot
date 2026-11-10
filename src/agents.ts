@@ -13,7 +13,7 @@ import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { mkdir } from 'node:fs/promises';
 import { harnesses, writeRoot } from './harnesses.ts';
 import { appendHistory, readConverted, readHistory, recordConverted, replaceHistory } from './manage.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, removeFileChecked, saveRecord, storeDirectory, gateRefusal, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, tomlValue } from './textedit.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy } from './types.ts';
 
@@ -274,7 +274,8 @@ export async function applyAgents(context: ShareContext, tools: HarnessId[], cha
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const gated = gateRefusal(gate);
+  if (gated) return { stopped: gated, results: [], writes: 0 };
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
   if (!owner) { owner = { formatVersion: FORMAT_VERSION, generation: randomUUID(), owner: context.build, items: Object.create(null) }; await saveRecord(context.home, owner); }
@@ -577,7 +578,8 @@ export async function restoreAgent(context: ShareContext, tools: HarnessId[], ev
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const gated = gateRefusal(gate);
+  if (gated) return { stopped: gated, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedAgent(context, tools, history, past);

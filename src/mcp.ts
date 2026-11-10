@@ -8,7 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { harnesses } from './harnesses.ts';
-import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
+import { FORMAT_VERSION, errorCode, readRecord, recoverParked, remember, saveRecord, storeDirectory, gateRefusal, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { readTomlTables, setJsonMember, setTomlTable, tomlHeader, tomlValue, type TomlValue } from './textedit.ts';
 import { appendHistory, readHistory, replaceHistory } from './manage.ts';
 import type { Change, DestinationResult, HarnessId, HistoryEvent, McpResult, McpView, SkillFacts, SyncNotice, ToolCopy, ClaudeWrite } from './types.ts';
@@ -313,7 +313,8 @@ export async function applyMcp(context: ShareContext, tools: HarnessId[], change
   const access = await writeAccess(context);
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const gated = gateRefusal(gate);
+  if (gated) return { stopped: gated, results: [], writes: 0 };
   // The sync record is the one place ownership lives: make it now if this is the first thing Central Knot manages.
   let { record: owner } = await readRecord(context.home);
   if (!owner && !changes.length) return { results: [], writes: 0 };
@@ -631,7 +632,8 @@ export async function restoreMcp(context: ShareContext, tools: HarnessId[], even
   if (!access.allowed) return { stopped: access.reason, results: [], writes: 0 };
   // Restore is a write like any other: never while another build owns syncing or the record needs a resume.
   const gate = await syncGate(context);
-  if (gate.state === 'stopped' || gate.state === 'needs-resume') return { stopped: gate.reason, results: [], writes: 0 };
+  const gated = gateRefusal(gate);
+  if (gated) return { stopped: gated, results: [], writes: 0 };
   const history = await readHistory(context.home);
   const past = history.find(entry => entry.id === eventId);
   if (past?.kind === 'added') return undoAddedMcp(context, history, past);
