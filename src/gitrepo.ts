@@ -633,13 +633,13 @@ const notIn = (item: string, message: string): DestinationResult => ({ item, out
 /** A write into the first tool that didn't happen: changed just now (left as it is), or any other failure, in plain words. */
 const writeProblem = (change: RepoChange, tool: HarnessId, noun: string, error: unknown) => notIn(change.name, errorCode(error) === 'CK_CHANGED'
   ? `${harnesses[tool].name}’s ${noun} changed just now, so it was left as it is. Pull again.` : `Could not write ${harnesses[tool].name}’s ${noun}: ${plainError(error)}`);
+/** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
+const CLAUDE_ONLY = 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
+const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
 /**
  * With Sync off, an MCP server's or agent's deletion can't spread past the one tool Pull would remove it from (sync spreads
  * deletions; skills have Delete everywhere), so Pull leaves every copy as it is and tries again once Sync can carry it.
  */
-/** Said of an MCP server only Claude Code could take here (its settings are written only with Write to Claude Code). */
-const CLAUDE_ONLY = 'Copilot CLI, Codex or Pi (one that can hold this server) is needed to bring it in: Claude Code’s settings are written only with Write to Claude Code.';
-const CLAUDE_ONLY_REMOVAL = 'Remove it in Claude Code’s settings, or use Write to Claude Code on MCP servers.';
 const DELETION_WAITS = 'Its deletion from the repo waits for Automatic sync: turn it on, then Pull again.';
 /** Said when sync would not take the repo's version on (the reason is in the results beside it): Pull tries again next time. */
 const notManaged = (change: RepoChange, tool: HarnessId) => notIn(change.name, `It is in ${harnesses[tool].name} now, but sync couldn’t make it Managed yet.`);
@@ -913,7 +913,8 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
     if ('refused' in ready) return ready.refused;
     const { dir, state, sides } = ready;
     if (!sides.latestId) return { results: [], view: await buildView(context, options), pulled: 0 };
-    const todo = classify(sides, state.unfinished, options.syncOn !== false).incoming.filter(change => change.pull !== 'stuck');
+    const incoming = classify(sides, state.unfinished, options.syncOn !== false).incoming;
+    const todo = incoming.filter(change => change.pull !== 'stuck');
     // The repo's latest commit, exactly, is what each item is copied from.
     await forgetWritten(dir);
     await gitOrThrow(dir, ['checkout', '--quiet', '--force', '-B', state.branch, sides.latestId]);
@@ -927,34 +928,39 @@ export function pullRepo(context: ShareContext, options: RepoOptions = {}): Prom
     // A repo change to an item this computer can't read right now isn't taken, and isn't lost: once the copy here reads again, it
     // comes in like any change the last Pull couldn't finish (and the repo's version wins over this computer's, as it would have).
     for (const [key, { reason }] of sides.unsent) if (repoChangeWaits(sides, state.unfinished ?? {}, key)) unfinish(key, reason);
+    // So is a change held for a reason here (no tool to take it): once the base moves on, only this keeps it from reading as a
+    // change made here, which the next Push would send. A fault in the repo's own file keeps its row by itself.
+    for (const change of incoming) if (change.pull === 'stuck' && !sides.latest.get(change.key)?.problem && !unfinished[change.key]) unfinish(change.key, change.held!);
     const firstWrites: FirstWrite[] = [];
     const waitsForClaude: string[] = [];
     const made = new Set<string>();
-    for (const change of todo) {
-      const item = sides.latest.get(change.key);
-      const wrote: Wrote = write => firstWrites.push({ change, ...write });
-      const before = new Set((await readHistory(context.home)).map(event => event.id));
-      let outcome: DestinationResult[];
-      try {
-        // A deletion that waits for Automatic sync (classify says which) leaves every copy, and the row says why.
-        outcome = change.pull === 'waits' ? [notIn(change.name, DELETION_WAITS)]
-          : change.kind === 'skill' ? await pullSkill(context, dir, change, item, wrote)
-          : change.kind === 'mcp' ? await pullServer(context, dir, change, item, wrote)
-          : change.kind === 'agent' ? await pullAgent(context, dir, change, item, wrote)
-          : await pullBase(dir, change, item, options.base);
-      } catch (error) { outcome = [notIn(change.name, `It could not finish. ${plainError(error)}`)]; }
-      // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
-      for (const event of await readHistory(context.home)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
-      // Claude Code's MCP settings are written only by Write to Claude Code (MCP-02): that wait is said apart, not as a failure.
-      if (change.kind === 'mcp' && outcome.some(result => result.harness === 'claude-cli' && result.outcome === 'held')) {
-        waitsForClaude.push(change.name);
-        outcome = outcome.filter(result => !(result.harness === 'claude-cli' && result.outcome === 'held'));
+    // History is told what Pull made even if an item fails partway, so Undo covers every copy it wrote.
+    try {
+      for (const change of todo) {
+        const item = sides.latest.get(change.key);
+        const wrote: Wrote = write => firstWrites.push({ change, ...write });
+        const before = new Set((await readHistory(context.home)).map(event => event.id));
+        let outcome: DestinationResult[];
+        try {
+          // A deletion that waits for Automatic sync (classify says which) leaves every copy, and the row says why.
+          outcome = change.pull === 'waits' ? [notIn(change.name, DELETION_WAITS)]
+            : change.kind === 'skill' ? await pullSkill(context, dir, change, item, wrote)
+            : change.kind === 'mcp' ? await pullServer(context, dir, change, item, wrote)
+            : change.kind === 'agent' ? await pullAgent(context, dir, change, item, wrote)
+            : await pullBase(dir, change, item, options.base);
+        } catch (error) { outcome = [notIn(change.name, `It could not finish. ${plainError(error)}`)]; }
+        // This item's own events: a full sync pass may also record another item's edit, which stays said as sync.
+        for (const event of await readHistory(context.home)) if (!before.has(event.id) && event.key === change.key) made.add(event.id);
+        // Claude Code's MCP settings are written only by Write to Claude Code (MCP-02): that wait is said apart, not as a failure.
+        if (change.kind === 'mcp' && outcome.some(result => result.harness === 'claude-cli' && result.outcome === 'held')) {
+          waitsForClaude.push(change.name);
+          outcome = outcome.filter(result => !(result.harness === 'claude-cli' && result.outcome === 'held'));
+        }
+        const stuck = outcome.find(result => result.outcome === 'held' && !result.harness) ?? outcome.find(result => result.outcome === 'failed');
+        if (stuck) unfinish(change.key, stuck.message, change.pull === 'waits' || undefined);
+        results.push(...outcome);
       }
-      const stuck = outcome.find(result => result.outcome === 'held' && !result.harness) ?? outcome.find(result => result.outcome === 'failed');
-      if (stuck) unfinish(change.key, stuck.message, change.pull === 'waits' || undefined);
-      results.push(...outcome);
-    }
-    await tellHistory(context, made, firstWrites);
+    } finally { await tellHistory(context, made, firstWrites); }
     await saveState(context.home, { ...state, base: sides.latestId, pulledAt: new Date().toISOString(), unfinished: Object.keys(unfinished).length ? unfinished : undefined });
     return { results, view: await buildView(context, options), pulled: todo.filter(change => !unfinished[change.key]).length, waitsForClaude };
   }));

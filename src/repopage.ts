@@ -50,6 +50,9 @@ let wantCheck = false;
 /** An error from the main process in plain words (Electron prefixes the method it came through). */
 const errorText = (error: unknown) => String(error instanceof Error ? error.message : error).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 
+/** What the last failed read said, so a good read clears only that. */
+let lastReadFailure: string | undefined;
+
 /** Reads the repo's view; `check` then asks the repo for its latest commit, showing the view meanwhile. */
 export async function loadRepo(check = false): Promise<void> {
   const turn = ++loads;
@@ -58,9 +61,13 @@ export async function loadRepo(check = false): Promise<void> {
   const joined = inFlight;
   if (joined) await joined.catch(() => undefined);
   let view: RepoView | undefined;
-  // A read that fails keeps the last view on screen and says why, rather than leave a blank page.
-  try { view = (await api().repo(false)) ?? undefined; } catch (error) { view = repo.view; repo.problem = `Couldn’t read the repo’s state: ${errorText(error)}`; }
+  let failed: string | undefined;
+  try { view = (await api().repo(false)) ?? undefined; } catch (error) { failed = `Couldn’t read the repo’s state: ${errorText(error)}`; }
   if (turn !== loads) return;
+  // A read that fails keeps the last view on screen and says why, rather than leave a blank page; the next good read takes the
+  // reason away (a refused action's reason stays until it is dismissed or the page is left).
+  if (failed) { view = repo.view; repo.problem = failed; } else if (repo.problem === lastReadFailure) repo.problem = undefined;
+  lastReadFailure = failed;
   check = wantCheck && !joined;
   wantCheck = false;
   repo.view = view;

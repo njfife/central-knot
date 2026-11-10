@@ -120,7 +120,7 @@ test('An MCP server’s edit and an agent setting only Claude Code has arrive th
   try {
     const { first, second, firstPlanner, secondPlanner } = await serverAndAgentOnTwo(box);
     await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { docs: { type: 'local', command: 'docs-server', args: ['--port', '8'], env: { TOKEN: 'abc' }, tools: ['*'] } } }));
-    await applyMcp({ ...first, settleMs: 0 }, tools, []);
+    await applyMcp(first, tools, [], { settleMs: 0 });
     await edit(firstPlanner, 'model: opus', 'model: sonnet');
     assert.deepEqual(rows(live(await repoView(first)).outgoing), ['docs:changed', 'planner:changed']);
     await pushRepo(first);
@@ -196,25 +196,18 @@ test('Deletions of an MCP server and an agent wait while Automatic sync is off, 
   } finally { await box.cleanup(); }
 });
 
-test('A server deleted in the repo leaves Codex for good, even when it was the last one in Codex’s settings', async () => {
+test('Where only Claude Code takes MCP servers, the repo’s server waits, said before Pull, and Push never removes it from the repo', async () => {
   const box = await world();
   try {
     const first = await box.home('first');
     await seedServerAndAgent(first);
     await connectRepo(first, box.remote, '');
     await pushRepo(first);
-    const codexOnly: HarnessId[] = ['claude-cli', 'codex-cli'];
-    const second = await box.home('second', codexOnly);
-    await connectRepo(second, box.remote, '');
-    await pullRepo(second);
-    const codexSettings = join(second.home, '.codex/config.toml');
-    assert.match(await readFile(codexSettings, 'utf8'), /\[mcp_servers\.docs\]/);
-    await writeFile(join(first.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: {} }));
-    await applyMcp(first, tools, [], { settleMs: 0, now: Date.now() + 86_400_000 });
-    await pushRepo(first);
-    const view = live((await pullRepo(second)).view);
-    assert.doesNotMatch(await readFile(codexSettings, 'utf8'), /\[mcp_servers\.docs\]/);
-    assert.deepEqual([rows(view.incoming), rows(view.outgoing)], [[], []]);
+    const claudeOnly = await box.home('claude-only', ['claude-cli']);
+    const before = live((await connectRepo(claudeOnly, box.remote, '')).view);
+    assert.deepEqual(before.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), [['docs', 'stuck']]);
+    const after = live((await pullRepo(claudeOnly)).view);
+    assert.deepEqual([after.incoming.filter(row => row.kind === 'mcp').map(row => [row.name, row.pull]), rows(after.outgoing)], [[['docs', 'stuck']], []], 'not read as removed here');
   } finally { await box.cleanup(); }
 });
 
@@ -417,7 +410,7 @@ test('Only the layout is Central Knot’s: other files stay, a file the repo ign
     assert.equal(git(box.remote, 'show', 'main:mcp/notes.json'), '{ "command": "notes-server", "note": "ask Sam before changing" }');
     // Changed here, it goes over the repo's file: the hand-written key stays.
     await writeFile(join(here.home, '.copilot/mcp-config.json'), JSON.stringify({ mcpServers: { notes: { type: 'local', command: 'notes-server', args: ['--v2'], tools: ['*'] } } }));
-    await applyMcp({ ...here, settleMs: 0 }, tools, []);
+    await applyMcp(here, tools, [], { settleMs: 0 });
     assert.equal((await pushRepo(here)).stopped, undefined);
     assert.deepEqual(JSON.parse(git(box.remote, 'show', 'main:mcp/notes.json')), { type: 'stdio', command: 'notes-server', args: ['--v2'], note: 'ask Sam before changing' });
   } finally { await box.cleanup(); }
