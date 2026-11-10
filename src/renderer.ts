@@ -5,7 +5,7 @@ import { absentKinds, noTools, loadHome, paintStatusMessage, practiceNoteOpen, s
 import { button, fitBars, h, icon } from './dom.ts';
 import type { IconName } from './icons.ts';
 import type { HomeKind } from './presence.ts';
-import { agentsPage, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
+import { agentsPage, markWrappedStatus, mcpPage, overviewPage, skillsPage, toolsPage } from './pages.ts';
 import { pluginsPage } from './pluginspage.ts';
 import { historyPage } from './historypage.ts';
 import { instructionsPage } from './instructionspage.ts';
@@ -172,6 +172,7 @@ function render() {
   // Columns that depend on a pane's width are decided now, before the page is painted, and drawn again if they changed.
   if (settleFilesColumns()) renderPage();
   settlePluginTools();
+  markWrappedStatus();
   renderStatus();
   fitBars();
   for (const [id, top] of scrolled) { const node = document.getElementById(id); if (node) node.scrollTop = top; }
@@ -200,8 +201,8 @@ window.addEventListener('resize', () => {
 });
 
 // Bars refit whenever the content area changes width (a resize, the sidebar's shape) and once the fonts have loaded.
-new ResizeObserver(fitBars).observe(document.getElementById('main')!);
-void document.fonts.ready.then(fitBars);
+new ResizeObserver(() => { fitBars(); markWrappedStatus(); }).observe(document.getElementById('main')!);
+void document.fonts.ready.then(() => { fitBars(); markWrappedStatus(); });
 
 document.addEventListener('keydown', event => {
   const typing = event.target instanceof HTMLInputElement && event.target.type === 'text';

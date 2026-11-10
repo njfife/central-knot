@@ -121,9 +121,22 @@ function kindCard(page: 'skills' | 'mcp' | 'agents', glyph: Parameters<typeof ic
     h('button.kind-card-main', { type: 'button', id: `overview-${page}`, onclick: () => showPage(page) },
       h('span.kind-card-head', {}, icon(glyph, 16), h('strong', {}, title), icon('arrow-right', 14, 'tone-faint'))),
     h('div.kind-card-summary', {}, h('span', {}, total ? `${plural(total, noun[0], noun[1])} · ${managed ? `${managed} managed` : 'none managed'}` : `No ${noun[1]}`),
-      // The "·" goes with the status, so a narrow card moves both to the next line and never ends a line on it.
+      // The "·" goes with the status; a narrow card puts the status on a line of its own, without it (markWrappedStatus).
       status ? h('span.kind-card-status', {}, h('span.kind-card-dot', { 'aria-hidden': 'true' }, '·'), status) : null),
     total ? h('div.kind-card-tools', {}, tools) : null);
+}
+
+/**
+ * After layout: a kind card's status that wrapped onto a line of its own drops its "·", which only separates it from
+ * the counts on the same line (style.css .kind-card-status.wrapped). The renderer calls it before the page is painted
+ * and whenever the content area changes width.
+ */
+export function markWrappedStatus(): void {
+  for (const status of document.querySelectorAll<HTMLElement>('.kind-card-status')) {
+    status.classList.remove('wrapped');
+    const counts = status.previousElementSibling as HTMLElement | null;
+    status.classList.toggle('wrapped', !!counts && status.offsetTop > counts.offsetTop + counts.offsetHeight / 2);
+  }
 }
 
 /**
