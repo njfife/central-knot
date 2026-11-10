@@ -45,8 +45,8 @@ function navRow(page: Page, label: string, glyph: IconName, count?: number) {
     !current && unseen(page) ? h('span.nav-unseen', { title: unseenText(page) }) : null);
 }
 
-const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents?.servers ?? [])].some(fact => fact.managed);
-const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents?.notices ?? [] : [];
+const anyManaged = () => !!state.home && [...state.home.manage.skills, ...state.home.mcp.servers, ...(state.home.agents.servers)].some(fact => fact.managed);
+const noticesFor = (page: Page) => !state.home ? [] : page === 'skills' ? state.home.manage.notices : page === 'mcp' ? state.home.mcp.notices : page === 'agents' ? state.home.agents.notices : [];
 const unseen = (page: Page) => noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item) && !state.seenNotices.has(notice.history || notice.item)).length;
 const unseenText = (page: Page) => { const list = noticesFor(page).filter(notice => !state.dismissed.has(notice.history || notice.item)); return `${list.length} automatic ${list.length === 1 ? 'change' : 'changes'}: ${list.slice(0, 3).map(notice => notice.item).join(', ')}`; };
 
@@ -76,7 +76,7 @@ function renderSidebar() {
     navRow('harnesses', titles.harnesses, 'boxes'),
     row('skills', 'wand-sparkles', designMode ? sample.length : home?.manage.skills.length),
     row('mcp', 'plug', designMode ? undefined : home?.mcp.servers.length),
-    row('agents', 'bot', designMode ? undefined : home?.agents?.servers.length),
+    row('agents', 'bot', designMode ? undefined : home?.agents.servers.length),
     row('instructions', 'pencil-line'),
     row('plugins', 'puzzle'),
     // Profiles switch skills and MCP servers, so like the kinds' rows it needs a tool to switch them in.

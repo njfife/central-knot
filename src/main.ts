@@ -10,7 +10,7 @@ import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { executableCandidates } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
-import { presentTools } from './presence.ts';
+import { noteTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpTools, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentTools, agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, saveInstruction, undoBase } from './instructions.ts';
@@ -520,18 +520,12 @@ async function readFor(readId?: number): Promise<Snapshot[]> {
 /** The tools in the open home as last noted (presence.ts), with the home they were noted in, so a change is acted on once. */
 let lastPresent = { home: '', tools: '' };
 
-/**
- * Notes which tools are in the open home and says whether they changed while that home stayed open. Then the folders
- * are watched again, so a tool that appeared is watched like the rest. A home just opened is only noted (false): opening
- * it starts watching (selectHome), and the page reads it anyway.
- */
+/** Notes the open home's tools (noteTools); when they changed, the folders are watched again, so a new tool is watched like the rest. */
 function toolsChangedHere(snapshots: Snapshot[]): boolean {
-  const tools = presentTools(snapshots).join(), home = current?.home ?? '';
-  if (home === lastPresent.home && tools === lastPresent.tools) return false;
-  const sameHome = home === lastPresent.home;
-  lastPresent = { home, tools };
-  if (sameHome) void startWatching();
-  return sameHome;
+  const { noted, changed } = noteTools(lastPresent, current?.home ?? '', snapshots);
+  lastPresent = noted;
+  if (changed) void startWatching();
+  return changed;
 }
 
 function queueBackgroundPass() { if (current && !smoke) void queued(backgroundPass).catch(() => undefined); }
@@ -628,18 +622,18 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
   } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform).home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
-  // A switch that fails changes nothing: the home on screen stays the home open here.
-  const previous = current;
+  // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
+  const previous = { current, handoff, lastPresent };
   current = next;
   try {
     const shown = await syncThenView();
+    // Saving the settings rebuilds the menus with the new home.
+    await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
     stopWatching();
     void startWatching();
-    // Saving the settings rebuilds the menus with the new home.
-    await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     return shown;
-  } catch (error) { current = previous; throw error; }
+  } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
 }
 
 /**
@@ -651,7 +645,7 @@ const practiceAvailable = () => smoke || process.argv.includes('--practice-copy'
 
 /**
  * At launch: the home last opened, else this computer's home. A remembered folder that is gone falls back the same way.
- * Dev builds and tests start on the Practice copy instead, so a development run never syncs this machine's real tools.
+ * Dev builds and tests fall back to the Practice copy instead, so a development run doesn't sync this machine's real tools unasked.
  */
 async function startHome(): Promise<HomeView | null> {
   // A window made while a home is already open (reopened from the menu bar or the Dock) shows that home; nothing is read anew.
@@ -831,7 +825,7 @@ app.whenReady().then(async () => {
   handle('agents:convert', async (key, home) => (home === current?.home && typeof key === 'string'
     ? convertAgentToSkill(context(), await presentNow(), key)
     : { stopped: 'The home on screen is not the one open. Nothing was written. Read it again.' }));
-  handle('instructions:view', async () => (current ? instructionsView(context(), await read()) : null));
+  handle('instructions:view', async readId => (current ? instructionsView(context(), await readFor(readId as number | undefined)) : null));
   handle('instructions:save', async (tool, text, expected, home, restoring) => (home === current?.home && isTool(tool) && typeof text === 'string' && typeof expected === 'string'
     ? saveInstruction(context(), await read(), tool, text, expected, restoring === true)
     : { stopped: notOpenHome }));

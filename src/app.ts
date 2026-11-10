@@ -1,6 +1,6 @@
 import { loadSettings, openSettings } from './settingspage.ts';
 import type { ApplyResult, ProfileEdit, ProfileFlip, ProfileSwitchResult, BaseApply, BaseResult, BaseUndo, BaseView, Change, DesktopApi, DestinationResult, HarnessId, InstructionFile, HistoryEvent, HistoryDays, HomeMode, HomeView, McpResult, ClaudeWrite, SyncNotice } from './types.ts';
-import { caughtUpNames, plural } from './model.ts';
+import { caughtUpNames, plural, withSetAside } from './model.ts';
 import { h } from './dom.ts';
 import { keptEditFlag, readFlag, writeFlag } from './flags.ts';
 import { andList, fileName, noToolsSentence, orList, sentence, toolList, toolName, toolNames as namedTools, toolsPhrase } from './words.ts';
@@ -168,7 +168,7 @@ export function setHome(view: HomeView | null | undefined, { reload = true } = {
   forgetLostHarness();
   if (before !== undefined && homeTools().join() === before) return;
   leaveAbsentPage();
-  if (reload) void loadPageData(state.page);
+  if (reload) void loadPageData(state.page, { readId: view.readId });
 }
 
 /** Where focus goes when the running work ends, when its result replaced the control that started it (a review opening). */
@@ -205,8 +205,8 @@ export async function busy(message: string, work: () => Promise<void>) {
 
 /**
  * Opens a home (a switch, or the first at launch), where setHome only takes a newer view of the same one. Everything
- * read or chosen for the home before is let go: its pages' data (each starts over at reading, and is read for this home
- * at once), the marketplace choices and the open skill. An unsaved Instructions draft is kept: the Instructions page
+ * read or chosen for the home before is let go: its pages' data (each starts over at reading; the open page's is read for
+ * this home at once, the others as they open), the marketplace choices and the open skill. An unsaved Instructions draft is kept: the Instructions page
  * offers to copy or discard it.
  */
 function accept(view: HomeView) {
@@ -223,10 +223,7 @@ function accept(view: HomeView) {
   resetPageData(state.history);
   resetMarket();
   setHome(view, { reload: false });
-  void loadInstructions();
-  void loadHistory();
-  if (!absentKinds().includes('plugins')) void loadPlugins(false, view.readId);
-  if (state.page === 'settings') void loadSettings();
+  void loadPageData(state.page, { readId: view.readId });
 }
 
 /** A row to flash on its next draw (set by Undo and Restore; the matrix reads it). */
@@ -306,6 +303,9 @@ function readFound(view: HomeView, from?: string): string {
   return `Read ${andList(counts)}${from ? ` from ${from}` : ''}.${stopped || caught ? '' : ' Nothing changed.'}`;
 }
 
+/** A home just opened, as its band says it: an empty one (no tools, or nothing in them) says only that it opened; the page says the rest. */
+const openedText = (view: HomeView) => (!view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`);
+
 /** A read said in the status bar: what it found, and in which home. */
 const readSummary = (view: HomeView) => readFound(view, view.label);
 
@@ -321,14 +321,12 @@ export function heldKindNames(count: 'all' | 'one' = 'all'): string {
 export const loadHome = (mode: HomeMode) => (state.lastMode = mode, busy(`Reading ${mode === 'fixture' ? 'the practice copy' : mode === 'actual' ? 'your real tools' : 'that folder'}…`, async () => {
   const previous = state.home;
   const view = await api().selectHome(mode);
-  const nothing = view && !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   // Sync follows the open home: leaving one with managed items stops its syncing, so the band says so and offers the way back.
   const left = previous && view && previous.home !== view.home && [...previous.manage.skills, ...previous.mcp.servers, ...previous.agents.servers].some(fact => fact.managed) ? previous : undefined;
   const leftText = left ? ` ${left.label} is not syncing while another home is open.` : '';
   if (!view) { announce(''); return; }
   accept(view);
-  // An empty home (no tools, or nothing in them) says only that it opened; the page says the rest.
-  tell({ page: state.page, carry: true, text: (nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}`) + leftText,
+  tell({ page: state.page, carry: true, text: openedText(view) + leftText,
     act: left && left.mode !== 'custom' ? { label: `Go back to ${left.label}`, id: 'outcome-go-back', run: () => void loadHome(left.mode) } : undefined });
 }));
 
@@ -339,9 +337,8 @@ export const startHome = () => busy('Reading skills, MCP servers and agents…',
   const practiceNote = view?.mode === 'fixture' && practiceNoteOpen();
   if (!view) { announce(''); return; }
   accept(view);
-  const nothing = !view.manage.skills.length && !view.mcp.servers.length && !view.agents.servers.length;
   if (practiceNote) announce(readSummary(view), true);
-  else tell({ page: state.page, carry: true, text: nothing ? `Opened ${view.label}.` : `Opened ${view.label}. ${readFound(view)}` });
+  else tell({ page: state.page, carry: true, text: openedText(view) });
 });
 
 /** Refresh: reads the home again, then the open page's own data (marketplaces anew), so all it shows is from this read. */
@@ -371,9 +368,9 @@ export const whyReadOnly = (home: HomeView) => (!home.manage.access.allowed ? ho
 function loadPageData(page: Page, { fresh = false, readId }: { fresh?: boolean; readId?: number } = {}): Promise<void> {
   if (page === 'history') return loadHistory();
   if (page === 'settings') return loadSettings().then(() => undefined);
-  if (page === 'instructions') return loadInstructions();
+  if (page === 'instructions') return loadInstructions(readId);
   // Harnesses sums up each tool's instruction file and installs, as Instructions and Plugins read them.
-  if (page === 'harnesses') return Promise.all([loadInstructions(), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
+  if (page === 'harnesses') return Promise.all([loadInstructions(readId), absentKinds().includes('plugins') ? undefined : loadPlugins(fresh, readId)]).then(() => undefined);
   if (page === 'plugins') return loadPlugins(fresh, readId);
   return Promise.resolve();
 }
@@ -424,9 +421,9 @@ export function showPage(page: Page) {
   if (page !== state.page) state.skillsView = 'table';
   if (leavingHarness) state.harness = undefined;
   // Settings opens fresh (what its rows said last visit belongs to that visit); every other page reads its own data.
+  state.page = page;
   if (page === 'settings') openSettings();
   else if (!stays) void loadPageData(page);
-  state.page = page;
   state.find = '';
   state.item = undefined;
   rerender();
@@ -596,12 +593,23 @@ function openDraft(file: InstructionFile, text: string, stage: InstructionDraft[
   return !next.refused;
 }
 
-/** A draft whose file is gone (its tool left the home) is dropped once the files are read, unless it holds something unsaved. */
-const settleDraft = () => { if (state.instructionEdit && !draftFile() && !draftUnsaved()) state.instructionEdit = undefined; };
+/**
+ * Once the files are read, a draft with nothing unsaved follows them: dropped when its file is gone (its tool left the home),
+ * and moved on to the file as it is now when it changed outside, so it never offers to put the old text back.
+ */
+const settleDraft = () => {
+  const edit = state.instructionEdit;
+  if (!edit || draftUnsaved()) return;
+  const file = draftFile();
+  if (!file) { state.instructionEdit = undefined; return; }
+  if (file.hash === edit.hash) return;
+  const text = edit.restoring ? file.text : ownText(file);
+  Object.assign(edit, { from: { ...edit.from, path: file.path, text }, text, hash: file.hash });
+};
 
 /** Reads each tool's instruction file into its slot; the page redraws once the answer is the newest. */
-export const loadInstructions = async (): Promise<void> => {
-  const reading = readPageData(state.instructions, readInstructionsAndBase);
+export const loadInstructions = async (readId?: number): Promise<void> => {
+  const reading = readPageData(state.instructions, () => readInstructionsAndBase(readId));
   rerender();
   const result = await reading;
   if (result === 'dropped') return;
@@ -613,8 +621,8 @@ export const loadInstructions = async (): Promise<void> => {
 const rereadInstructions = async () => { const files = await readInstructionsAndBase(); if (files) { putPageData(state.instructions, files); settleDraft(); } };
 
 /** Each tool's instruction file, with the base read beside it (state.base). */
-async function readInstructionsAndBase() {
-  const [files, base] = await Promise.all([api().instructions(), api().instructionBase()]);
+async function readInstructionsAndBase(readId?: number) {
+  const [files, base] = await Promise.all([api().instructions(readId), api().instructionBase()]);
   state.base = base ?? undefined;
   return files;
 }
@@ -918,6 +926,8 @@ export const syncNow = () => busy('Syncing…', async () => {
 /** A background read is running, or one arrived while the page was busy and runs when it is done (busy). */
 let refreshing = false;
 let refreshOwed = false;
+/** A background view that arrived while an action ran: its notices and caught-up results go into the next one (withSetAside). */
+let setAside: HomeView | undefined;
 // The Settings… menu item (and any later page the main process asks for) opens that page.
 const isPage = (page: string): page is Page => (pages as readonly string[]).includes(page);
 api().onNavigate(page => { if (isPage(page)) showPage(page); });
@@ -941,9 +951,11 @@ async function backgroundRefresh() {
   if (state.busy || refreshing) { refreshOwed = true; return; }
   refreshing = true;
   try {
-    const view = await api().refresh();
-    if (state.busy) { refreshOwed = true; return; }
+    const read = await api().refresh();
+    const view = read ? withSetAside(setAside, read) : undefined;
+    if (state.busy) { refreshOwed = true; if (view) setAside = view; return; }
     if (!view) return;
+    setAside = undefined;
     const known = new Set(state.home ? noticesByPage(state.home).flatMap(([, notices]) => notices.map(notice => notice.history)) : []);
     const fresh = noticesByPage(view).map(([page, notices]) => [page, notices.filter(notice => !known.has(notice.history))] as const).filter(([, notices]) => notices.length);
     if (fresh.length) {
