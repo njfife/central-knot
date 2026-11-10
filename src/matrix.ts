@@ -937,11 +937,11 @@ function section(role: 'managed' | 'unmanaged' | 'away', list: SampleSkill[], af
 /** What the last action did, where it was done, with History when there is something to undo. */
 export { brandMark };
 
-export function outcomeBand(withAction = true): HTMLElement | null {
+export function outcomeBand(table = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown()): HTMLElement | null {
   const outcome = state.outcome;
   // A result stands until something new is queued, the page changes, or it is dismissed.
-  // A table is on screen: its pending changes or open choice hide an older result. Harnesses shows one only on a kind's tab.
-  const matrixPage = state.page === 'skills' || state.page === 'mcp' || state.page === 'agents' || !!harnessKindShown();
+  // With a table on screen (the default guess; a harness tab without one says so), its pending changes or open choice hide an older result.
+  const matrixPage = table;
   if (!outcome || outcome.page !== state.page || (matrixPage && (view.draft.size || (view.comparing && committedList().some(skill => skill.key === view.comparing && syncOf(skill, toolList()) === 'attention' && [outcome.item, ...(outcome.items ?? [])].some(name => name && (name === skill.name || name.toLowerCase() === skill.key)))))) || (state.skillsView === 'files' && state.item && ![outcome.item, ...(outcome.items ?? [])].some(name => name && name.toLowerCase() === state.item))) return null;
   // Item names are tokens in result text too, so "files" does not read as a word.
   const names = [...new Set([...(outcome.item ? [outcome.item] : []), ...(outcome.items ?? [])])].filter(Boolean).sort((a, b) => b.length - a.length);
@@ -955,7 +955,7 @@ export function outcomeBand(withAction = true): HTMLElement | null {
   }
   return h('div.band.band-done', { role: 'status' }, icon('check', 14, 'tone-success'), h('span.band-text', {}, ...text,
     outcome.note ? h('span.tone-faint', {}, ' ', outcome.note.replace(/ History\.$/, ' '), h('button.inline-link', { type: 'button', id: 'outcome-note-history', onclick: (event: Event) => { event.stopPropagation(); showPage('history'); } }, 'History'), '.') : null),
-    !withAction ? null : outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
+    outcome.act ? button({ variant: 'outline', size: 'small', label: outcome.act.label, id: outcome.act.id, attrs: outcome.act.title ? { title: outcome.act.title } : undefined, onclick: (event: Event) => { event.stopPropagation(); outcome.act!.run(); } })
       : outcome.undo ? smallAction(outcome.undo.label, 'outcome-undo', () => void restoreEvent(outcome.undo!.id), undefined)
       : outcome.history ? smallAction('Undo in History', 'outcome-history', () => showPage('history')) : null,
     closeButton(() => { state.outcome = undefined; rerender(); }, { id: 'outcome-dismiss' }));

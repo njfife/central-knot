@@ -1,7 +1,7 @@
 // Harnesses: one place per tool. The list sums up what each one has; a harness's own page manages its items with the same
 // tables, switches and Apply all as the Skills, MCP servers and Agents pages, narrowed to that tool, plus its instruction
 // file and its plugins. Nothing here has its own engine: every change goes through the pages it mirrors.
-import { KINDS, dropActionResults, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
+import { KINDS, dropActionResults, realHomeName, titles, instructionReadState, isKind, loadHome, readInstructionsQuietly, rerender, shownPath, showPage, state, type HarnessTab, type Kind } from './app.ts';
 import { installsIn, type MarketPlugin } from './pluginstatus.ts';
 import { pluginTitle } from './pluginparts.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
@@ -11,11 +11,10 @@ import type { HarnessId, HomeView, InstructionFile, SkillFacts, Snapshot } from 
 import { brandMark, caughtUpBand, closeOpenRows, designOverview, differingIn, emptyKind, kindNoun, outcomeBand, showFiltered } from './matrix.ts';
 import { instructionBands, instructionCard, instructionsNotRead } from './instructionspage.ts';
 import { browse, market, peekPlugins, peekState } from './pluginstate.ts';
-import { copyButton, fact, kindEmpty } from './pages.ts';
-import { realHomeName, titles } from './renderer.ts';
+import { copyButton, fact, kindEmpty, notRead } from './pages.ts';
 
 const TABS: HarnessTab[] = ['skills', 'mcp', 'agents', 'instructions', 'plugins', 'about'];
-/** A tab's name: the page of the same name's title. Looked up when drawn: renderer.ts, which holds the titles, imports this module. */
+/** A tab's name: the page of the same name's title. */
 const tabLabel = (tab: HarnessTab) => (tab === 'about' ? 'About' : titles[tab]);
 
 /** A backslash separates folders only on Windows; elsewhere it can be part of a skill's name. */
@@ -308,7 +307,7 @@ function oneHarness(snapshot: Snapshot, home: HomeView) {
   // Tabs without bands of their own (Plugins, About, a kind the tool doesn't use) still show the last result, such as a home switch.
   // (Kind tabs draw the table's bands; Instructions draws instructionBands, which keeps a save's result on its card.)
   const bandless = tab === 'plugins' || tab === 'about' || (isKind(tab) && !supports(home, tab, tool));
-  const done = bandless ? outcomeBand() : null;
+  const done = bandless ? outcomeBand(false) : null;
   if (done) body.prepend(h('div.bands', {}, done));
   // The window's header names the harness (harnessTitle); its tabs and the switcher to the others share one row below it.
   return h('div.page.harness-page', {}, h('div.harness-bar', {}, tabs(home, tool), switcher(home, tool)), body);
@@ -334,11 +333,11 @@ export function harnessTitle(): (Node | null)[] | undefined {
 
 export function harnessesPage() {
   const home = state.home;
-  if (!home) return h('div.page', {}, h('div.scroll', {}, h('p.empty', {}, state.busy ? 'Reading…' : 'No home read.')));
+  if (!home) return notRead();
   // The summary's instruction files and installs, read quietly once per home (each read checks what it already has).
   readInstructionsQuietly();
   peekPlugins();
-  // A harness no longer found (after a Refresh) falls back to the list; a home switch already closed any open harness (accept()).
+  // A harness no longer found (after a Refresh) falls back to the list (harnessTabShown agrees); a home switch already closed any open harness (accept()).
   const snapshot = openSnapshot(home);
   return snapshot ? oneHarness(snapshot, home) : everyHarness(home);
 }

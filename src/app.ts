@@ -9,14 +9,18 @@ declare global { interface Window { centralKnot: DesktopApi } }
 const api = () => window.centralKnot;
 
 export type Page = 'overview' | 'harnesses' | 'skills' | 'mcp' | 'agents' | 'instructions' | 'plugins' | 'history' | 'settings';
+/** The real home is named for the machine it is on. */
+export const realHomeName = navigator.userAgent.includes('Mac') ? 'This Mac’s home' : 'This computer’s home';
+/** Each page's title in the header; a harness's page also names its tabs from these. */
+export const titles: Record<Page, string> = { overview: 'Overview', skills: 'Skills', mcp: 'MCP servers', agents: 'Agents', instructions: 'Instructions', plugins: 'Plugins', history: 'History', harnesses: 'Harnesses', settings: 'Settings' };
 /** The kinds of item the tables manage. */
 export type Kind = 'skills' | 'mcp' | 'agents';
 export const KINDS: Kind[] = ['skills', 'mcp', 'agents'];
 export const isKind = (tab: string | undefined): tab is Kind => (KINDS as (string | undefined)[]).includes(tab);
 /** What a harness's page shows: one kind of item, its instruction file, its plugins, or where its files are. */
 export type HarnessTab = Kind | 'instructions' | 'plugins' | 'about';
-/** The tab of the harness page on screen, if one is (Harnesses with a harness open). */
-export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness ? state.harnessTab : undefined);
+/** The tab of the harness page on screen, if one is: Harnesses with a harness open that this home still finds. */
+export const harnessTabShown = (): HarnessTab | undefined => (state.page === 'harnesses' && state.harness && state.home?.manage.tools.includes(state.harness) ? state.harnessTab : undefined);
 /** The kind whose table is on screen on a harness's page, if one is. */
 export const harnessKindShown = (): Kind | undefined => { const tab = harnessTabShown(); return isKind(tab) ? tab : undefined; };
 

@@ -1,9 +1,8 @@
-import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow } from './app.ts';
+import { announce, loadHome, rerender, selectItem, shownPath, showPage, state, syncNow, realHomeName } from './app.ts';
 import { button, emptyState, h, icon, pathText, section } from './dom.ts';
 import { plural, toolName } from './model.ts';
 import type { HarnessId, HomeView, Skill } from './types.ts';
 import { designMode } from './design.ts';
-import { realHomeName } from './renderer.ts';
 import { brandMark, designOverview, outcomeBand, showFiltered, skillsBrowser } from './matrix.ts';
 import type { Kind } from './app.ts';
 
@@ -35,7 +34,7 @@ const emptyKindPage = (which: Kind, id: string) => nothingHere(kindEmpty[which].
 const noSkills = (id: string) => emptyKindPage('skills', id);
 
 /** Shown before any home has been read, or when reading failed. */
-function notRead() {
+export function notRead() {
   if (state.busy) return reading();
   return h('div.page', {}, emptyBands(), emptyState('circle-alert', 'Could not read this home', 'Nothing changed.', button({ label: 'Try again', id: 'first-retry', onclick: () => void loadHome(state.lastMode ?? 'fixture') })));
 }
