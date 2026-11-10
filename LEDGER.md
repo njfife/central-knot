@@ -848,6 +848,36 @@ Nathan asked that closing the app on a Mac leave it running in the top right (th
 
 **Lesson.** Computer Use asks macOS to open the app each time it looks at it, which rightly brings a closed window back. The log's "opened again" line shows it. A test of "stays closed" must read the state with the shell before Computer Use looks again.
 
+## Cowork: tried on the real app, and what the app says instead, November 10, 2026
+
+Nathan asked for the features still open in the original plan, each in its own thread. This one was Cowork (COW-01): a plugin picked in Central Knot should install and load in a Cowork session of Claude desktop, if a local route exists; if none does, say so with evidence and show Cowork honestly.
+
+**What was found** (the full record: `docs/capability-data.md`, section 7, "Cowork on the real app"). Nathan's Mac, Claude desktop 5.1231.0 with its Claude Code 2.1.321, an ordinary claude.ai account.
+- Cowork has a plugin folder on the computer, per account, in Claude Code's own format, and Claude Code writes it with a `--cowork` flag that its help doesn't list. A test plugin installed that way was listed by Claude desktop under Customize › Plugins as "Installed locally", switched on, with its skill.
+- A new Cowork session did not load it. The one message sent (with Nathan's go-ahead) got "Unknown skill". The session ran in the cloud with the Mac attached as a device, and the logs show no Cowork session started on the Mac itself since at least July 2026. Claude desktop's code hands that folder's plugins only to a session that runs on the computer, and it moved locally added marketplaces into the Claude account.
+- No command was found that puts a plugin into the account.
+
+**What was built.**
+- First, the whole route: Cowork as a tool on the Plugins pages, installed into through Claude desktop's own Claude Code with `--cowork`. It worked as far as Claude desktop's list, with unit and end-to-end checks. Once the session showed that nothing loads from there, it was taken out: an install that doesn't load would mislead. It is kept on the branch `cowork-local-route` (commit 69edf16) in case a later Claude desktop loads from the folder.
+- What is in the app: where Claude desktop is installed, Claude Code's card on Harnesses has a row "Cowork — uses the plugins in your Claude account", and each plugin's page says under Your tools: "Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn't install there. Plugins for Cowork are added in Claude desktop, under Customize › Plugins." A home where apps aren't looked for (a chosen folder) says nothing. Cowork is no tool, column or destination anywhere (`hasCowork` in `src/presence.ts`, `coworkWords` in `src/words.ts`).
+- README and SPEC COW-01 now say this; capability-data section 7 has the evidence and what is not established.
+
+**On the Mac.** `~/.claude` and Claude desktop's data folder were backed up before the first write, to `~/agent-builds/central-knot/cowork/backup-2026-11-10/`. The writes were to Cowork's folder only (`cowork_plugins/`, `cowork_settings.json`, and Claude Code's own `.claude.json` and `backups/` beside them); `~/.claude` was not touched.
+Afterwards the test plugin and its marketplace were removed with the same commands and the folder was put back to what the backup holds (compared file by file).
+
+**Validation (macOS 26.6.2).**
+- `npm test`: 425 pass, with a new test of when Cowork counts as here (Claude desktop found; never in a home that wasn't searched).
+- Mac packaged e2e passes in CI (run 42922849554: 597 passed, 0 failed), with a check on the runner's real-home pass that Claude Code's card speaks of Cowork exactly when Claude desktop was found. The checks of the plugin page's line and of a home with the CLI alone are in the few-tools pass, which the Mac runner skips because tools are installed for everyone there; they pass in a local run (33 passed).
+- Judges, two rounds: Opus 5.5 gave interface 8 and code 8.5, then 8.5 and 8.5; Fable 5.2 (in Astra's seat: Astra was out of quota) gave 8.5 and 8.5. Both ranked the plain statement above saying nothing and above an install column with a warning. Their findings were wording that claimed more than was seen, a contradiction left in COW-01, a line too wide on a large window, and two checks that could not fail; all were fixed after the last round, and not judged again.
+- An ad hoc packaged build with its own empty home, real clicks through Computer Use: the Claude Code card showed the Cowork row whole and no other card mentioned Cowork; a folder marketplace added through the page showed no Cowork column; the plugin's page showed three tool boxes, no box for Cowork, and the line under them on two lines, whole at the smallest and at a large window.
+
+**Not proven.**
+- Whether any Cowork session still runs on the computer itself for an ordinary account and loads from the folder (a task given a folder, or the plugin page's own "Try in chat"). Nathan was asked for two more tries; no answer by the time this landed. The Mac's Cowork VM files had been deleted in the disk cleanup the day before, though the logs show no session on the Mac since July.
+- Adding a plugin through Customize › Plugins was not done here; the line names that place from Claude's documentation and from seeing the page.
+- Other Claude desktop builds, Team and Enterprise accounts, third-party-provider deployments, Windows and Linux.
+
+**Lesson.** "The app lists it" is not "a session loads it": Claude desktop showed the test plugin as installed and switched on while the session could not find it. Only the session's own answer settled it.
+
 ## Bundled build, step 1: a custom build that carries a marketplace, November 10, 2026
 
 Nathan asked for the features still open in the original plan, each in its own thread. This is the first of four steps of the bundled build (plan Phase 6a; SPEC ORG-01, ORG-02, ORG-06, ORG-07 and the open-and-browse part of ORG-03).
@@ -858,11 +888,24 @@ Nathan asked for the features still open in the original plan, each in its own t
 - **The app's name.** `scripts/build.mjs` writes the build's name wherever the app says "Central Knot" (in the built code and the page), so the source has no second set of words. What is written outside the app keeps the product's name in every build (`PRODUCT` in `src/values.ts`): the markers around base instructions in a tool's file, and a Git repo commit's author and message. Without that a custom build and the standard app would not recognise each other's base block (found by the code review).
 - **Check.** `scripts/bundled-check.mjs` runs the documented command on the fixture marketplace (plus an npm plugin), deletes the marketplace, opens the build in a throwaway home and checks it. The Mac CI runs it on the packaged app after the end-to-end checks.
 
+**Validation.**
+- 437 unit tests.
+- Mac run 42923496940 on the branch: end-to-end 596 passed against the packaged standard app; `scripts/bundled-check.mjs` 44 of 44 against the packaged custom app (the archive is unpacked from inside `app.asar`). The same check passes on the Mac as Nathan's own account, and as a development run.
+- Side by side on the Mac, both opened through macOS (`open`) from one folder, each with a throwaway home: `Central Knot` (`com.centralknot.firstlook`) and `Acme Knot` (`com.centralknot.custom.ck-bundled-check`) ran at once, each window under its own name, the custom build with its own settings folder and its marketplace unpacked in 32 ms. Nothing in the real `Application Support/central-knot` changed.
+- Reviews, Opus 5.5 and Fable 5.2 (Astra could not run: the ChatGPT usage limit was reached). Code: 7 and 7, then 8.5 and 8.5; every finding fixed, among them the base-instruction markers and commit text renamed with the app, a relative marketplace folder read as a Git source, app names that broke packaging at the end, an empty plugin folder counted as packed, and a settings folder that could have been another app's. Interface: 7.5, 8, 8.5; the last round's wording is in.
+
+**Not done or not proven.**
+- No click-through in a real window: Computer Use runs on the same ChatGPT account. The pages were driven over the debug port on the packaged app, and looked at in pictures.
+- A custom build signed with a Developer ID, and a disk image for one. The menu bar icon stays the standard one.
+- A plugin kept in another repository only in a Codex-format manifest, when the marketplace has both manifests, is not fetched.
+- At 860 wide the app's name shows nowhere on a page (the sidebar is a rail, the status bar shows only the version), as for the standard app.
+- Registering the marketplace with each tool (step 2), a content feed (step 3) and one build taking over syncing (step 4) are the next steps.
+
 ## Bundled build, step 2: the marketplace in each tool's own list, and installs from the bundle, November 10, 2026
 
 Second of four steps (plan Phase 6b; SPEC ORG-03, ORG-04, REC-01).
 
 - **Decision.** Which tools get the bundled marketplace added at first open was left open by the plan. Two judges (Opus 5.5 and Fable 5.2; Astra could not run, the ChatGPT usage limit was reached) both ranked "every installed tool that takes plugins, automatically" first, ahead of asking once and of adding only at the first install. Built that way, with the conditions both attached; Nathan was told and can switch it to asking once.
-- **Adding.** `plugins.addMarketplace` is the step `install` already took before installing, now on its own: the tool's own `plugin marketplace add <folder>`, counted only when the tool's record then lists it, never over a different marketplace of the same name. After each read of this Mac's home (`addCarriedSoon` in `src/main.ts`, `addCarried` in `src/marketplaces.ts`), a bundled build adds its marketplace to each plugin tool it has not added it to yet: only in this computer's own home, only where writing is allowed, only for a tool whose commands can run, one tool per turn of the app's queue. `bundled/added-to-tools.json` in the build's data folder records each tool once added, so a marketplace taken out in a tool is not put back by itself; a failed add is tried again at the next open. The status bar says once what was added.
-- **By hand.** The marketplace's About tab says which tools have it in their own list and has **Add to <tool>** for one that doesn't and could.
+- **Adding.** `plugins.addMarketplace` is the step `install` already took before installing, now on its own: the tool's own `plugin marketplace add <folder>`, counted only when the tool's record then lists it, never over a different marketplace of the same name. After each read of this Mac's home (`addCarriedSoon` in `src/main.ts`, `addCarried` in `src/marketplaces.ts`), a bundled build adds its marketplace to each plugin tool it has not added it to yet: only in this computer's own home, only where writing is allowed, only for a tool whose commands can run, one tool per turn of the app's queue. `bundled/added-to-tools.json` in the build's data folder records each tool once added (an install from the build's marketplace into a tool counts too), so a marketplace taken out in a tool is not put back by itself; a failed add is tried again at the next open. The status bar says once that nothing was installed and which tools now list it.
+- **By hand.** The marketplace's About tab says which tools list it, that the app added it, and that taking it out in a tool is respected; it has **List in <tool>** for one that doesn't and could.
 - **Installing** needed no new code: the unpacked folder is a folder marketplace, and the Plugins page installs, updates and uninstalls from it as from any other.

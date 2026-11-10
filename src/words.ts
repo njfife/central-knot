@@ -4,6 +4,12 @@ import type { HarnessId, SwitchProblem } from './types.ts';
 
 export const toolNames: Record<HarnessId, string> = { 'claude-cli': 'Claude Code', 'copilot-cli': 'Copilot CLI', 'codex-cli': 'Codex', 'pi-cli': 'Pi' };
 
+/** What is said about Cowork where Claude desktop is here (presence.ts, hasCowork): on Claude Code's card, and on a plugin's page. */
+export const coworkWords = {
+  card: 'uses the plugins in your Claude account',
+  plugin: 'Cowork in Claude desktop uses the plugins in your Claude account, so Central Knot doesn’t install there. Plugins for Cowork are added in Claude desktop, under Customize › Plugins.',
+};
+
 /** Sorts tool ids into the order the app lists tools everywhere (columns, notes, results). */
 const TOOL_ORDER = Object.keys(toolNames);
 export const byToolOrder = (first: HarnessId, second: HarnessId) => TOOL_ORDER.indexOf(first) - TOOL_ORDER.indexOf(second);

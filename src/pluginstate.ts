@@ -290,7 +290,7 @@ export const checkCarriedFeed = (entry: MarketplaceView) => act('checking', asyn
   tell({ page: 'plugins', item: marketTitle(entry), warn: now?.outcome === 'failed' || now?.outcome === 'held', text: now?.outcome === 'updated' ? `${marketTitle(entry)} ${now.message!.charAt(0).toLowerCase()}${now.message!.slice(1)}` : now?.message ?? 'No newer plugins are published.' });
 });
 
-/** Adds the marketplace this build carries to one tool's own list of marketplaces (its About tab's "Add to …"). */
+/** Adds the marketplace this build carries to one tool's own plugin list (its About tab's "List in …"). */
 export const addCarriedTo = (entry: MarketplaceView, tool: HarnessId) => act('listing', async () => {
   const result = await api().addCarriedTo(tool, market.view?.home ?? '');
   showView(result.view);
