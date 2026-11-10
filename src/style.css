@@ -236,6 +236,16 @@ ul { list-style: none; }
 }
 #status-end { flex: none; margin-left: auto; }
 #status-version { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; margin-left: 2px; }
+/* A newer release to install: the version becomes a calm button in its place, the status bar's height. */
+.status-update { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border: 1px solid color-mix(in oklab, var(--accent-ink) 40%, transparent); border-radius: 999px; background: none; font: inherit; font-weight: 500; color: var(--accent-ink); cursor: pointer; font-variant-numeric: tabular-nums; }
+.status-update:hover:not(:disabled) { background: var(--hover); }
+.status-update:disabled { cursor: default; color: var(--ink-soft); border-color: var(--line); }
+#said-link { flex: none; margin-left: 4px; padding: 0 4px; line-height: 16px; }
+/* A narrow status bar: the version alone, the Update button's short label (its tooltip has it all), and no link where the message is only its mark. */
+.update-short { display: none; }
+@container status (width < 1000px) { .status-name { display: none; } .update-long { display: none; } .update-short { display: inline; } }
+@container message (width < 160px) { #said-link { display: none; } }
+#setting-update { font-variant-numeric: tabular-nums; }
 .sync-switch { border: 0; background: none; font: inherit; color: inherit; cursor: pointer; padding: 0 6px; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; }
 .sync-switch:hover { background: var(--hover); }
 .sync-switch:hover .sync-label, .sync-switch:focus-visible .sync-label { color: var(--ink); }
@@ -1012,7 +1022,8 @@ span.ins-confirm { margin-top: 0; }
   .plugin-row-name { flex-direction: row; align-items: baseline; }
   .plugin-row-line { flex: 0 1 auto; }
   .plugin-row-open { flex: none; max-width: 50%; margin-right: 14px; }
-  .plugin-row-update { flex: none; margin-left: 14px; }
+  /* A long note (a copy that differs, several versions) wraps beside the line rather than pushing what it holds out of view. */
+  .plugin-row-update { flex: 0 1 auto; margin-left: 14px; }
 }
 /* The header's hint keeps to whole lines: a narrow table says only that nothing runs until Apply all. */
 .hint-short { display: none; }
@@ -1218,6 +1229,7 @@ span.ins-confirm { margin-top: 0; }
 .setting-attention { color: var(--ink); }
 .setting-attention .icon { color: var(--warning); }
 .setting-message .text-action { flex: none; margin: -2px 0; padding: 2px 4px; line-height: 16px; }
+.setting-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 /* A setting that can't be changed here dims its switch, as disabled buttons dim, with an outline so the pale light-theme track
    still reads as an Off switch; the row says why in the hint's place. */
 .setting-control .switch:disabled { opacity: 0.6; cursor: default; box-shadow: inset 0 0 0 1px var(--ink-faint); }

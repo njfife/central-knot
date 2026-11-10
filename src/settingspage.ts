@@ -5,6 +5,8 @@ import { button, h, icon, toggle } from './dom.ts';
 import type { IconName } from './icons.ts';
 import { DAY_MS, defaultHistoryDays, historyDayChoices } from './model.ts';
 import type { AppPreferences, Appearance, HistoryDays, HistoryPrune, HistoryWindowSaved, SignInPlace } from './types.ts';
+import { buildWords, releasesPage, tagWords, updateStatus } from './updates.ts';
+import { checkNow, unsavedWork, updateControl, updates } from './updateview.ts';
 
 /** The settings as last read from the main process; undefined until the page has loaded them. */
 let current: AppPreferences | undefined;
@@ -291,7 +293,30 @@ function settingRow(id: string, title: string, hint: string, control: HTMLElemen
     question);
 }
 
-const settingsSection = (id: string, title: string, ...rows: HTMLElement[]) =>
+/**
+ * Updates: the build in use, Check now and the Update button, what the last check or update found, and why this copy can't
+ * update itself, with the release page instead. Not shown where there are no releases (only Macs have them).
+ */
+function updatesRow(): HTMLElement | null {
+  const view = updates.view;
+  if (!view?.shown) return null;
+  const checks = !!view.tag && view.reason?.key !== 'dev' && view.reason?.key !== 'untagged';
+  const hint = `This is Central Knot ${buildWords(view)}.${checks ? ' It checks GitHub for a newer release every few hours.' : ''}`;
+  // A restart held for unsaved work says so here too, not only on the button.
+  const held = view.step === 'ready' && view.available ? unsavedWork() : undefined;
+  const status = held ? { text: `${tagWords(view.available!.tag)} is ready. ${held}`, tone: 'info' as const } : updateStatus(view);
+  const page = view.available?.page;
+  const notice: RowMessage | undefined = status && { ...status, action: page && !view.reason ? { label: status.tone === 'failure' ? 'Open the release page' : 'Release notes', run: () => void window.centralKnot.openExternal(page) } : undefined };
+  const why = view.reason && messageLine({ text: view.reason.text, tone: 'attention', action: { label: page ? `Open ${tagWords(view.available!.tag)}’s page` : 'Open the releases page', run: () => void window.centralKnot.openExternal(page ?? releasesPage) } },
+    { id: 'setting-updates-reason', announce: false });
+  return settingRow('updates', 'Updates', hint,
+    h('div.setting-actions', {},
+      updateControl('setting-update', 'setting'),
+      checks ? button({ variant: 'outline', size: 'small', label: 'Check now', id: 'check-updates', disabled: updates.checking || view.checking || !!view.step, onclick: () => void checkNow(), attrs: { 'aria-describedby': 'setting-updates-hint' } }) : null),
+    notice, why || undefined);
+}
+
+const settingsSection = (id: string, title: string, ...rows: (HTMLElement | null)[]) =>
   h('section.settings-section', { 'aria-labelledby': `settings-${id}` }, h('h2.eyebrow', { id: `settings-${id}` }, title), ...rows);
 
 export function settingsPage(): HTMLElement {
@@ -313,7 +338,8 @@ export function settingsPage(): HTMLElement {
           appearances.map(choice => h(`button.appearance-choice${chosen === choice.value ? '.selected' : ''}`, {
             type: 'button', role: 'radio', id: `appearance-${choice.value}`, 'aria-checked': String(chosen === choice.value),
             tabindex: (chosen ?? 'system') === choice.value ? '0' : '-1', onclick: () => void chooseAppearance(choice.value),
-          }, icon(choice.glyph, 20), h('span', {}, choice.label)))))),
+          }, icon(choice.glyph, 20), h('span', {}, choice.label))))),
+      updatesRow()),
     settingsSection('history', 'History',
       settingRow('history', 'Keep history for', 'Changes and deleted items stay in History, ready to restore, for this long.',
         // Unchangeable until main has said, so a shorter choice is never mistaken for a longer one, and while a change is under way.

@@ -747,6 +747,35 @@ Nathan asked that what is managed come first, then what some tool has, and that 
 
 **Not done.** A whole plugin turned off in every tool still counts as installed on the Plugins page: its switch is read (`installedPlugins`) but not yet carried to that page. The marketplaces list keeps its order. Mac packaged e2e was not run on this branch.
 
+## Self-update on macOS (PLT-02a), November 10, 2026
+
+The Mac app updates itself from the GitHub releases. `scripts/package-mac.mjs` records the build's release tag in `dist/build-info.json` inside the app (the commit's version tag, or `CK_RELEASE_TAG`; `--release` refuses to package without one). The app asks `api.github.com/repos/njfife/central-knot/releases` 10 s after launch and every 4 hours (30 min after a failed check), picks the newest newer tag with the Mac zip (previews and finals for a preview build, finals only for a final one), and shows it as the status bar's Update button. One click: the app downloads the zip itself (progress, a byte-count check, 60 s stall limit), then hands it to Electron's `autoUpdater` (Squirrel.Mac) through a loopback-only feed under a random path. Squirrel checks the new app against the running app's designated requirement (same bundle id and Developer ID team), unpacks it aside, and ShipIt swaps it in at the restart and opens the new app. Unsaved instruction drafts and changes waiting for Apply all hold the restart; the restart waits in the main queue, so never during a write. New app state: `update` in `app-settings.json` (the tag being installed), cleared at the next launch, which says once "Central Knot is now on …" with Release notes, or that the update didn't finish.
+
+**Real signed builds** (`scripts/update-proof.mjs`, throwaway `/private/tmp/ck-update-proof`, nothing published): v0.5.0-preview.98 and .99, Developer ID signed (team 4K96M39DLN), not notarized; v0.5.0-preview.100 ad hoc. With .98 installed in the throwaway `~/Applications`: a download cut at 40 % was refused ("The download didn't finish. Central Knot wasn't changed."), and the ad hoc zip was refused by Squirrel ("code failed to satisfy specified code requirement(s)"). After both, every byte of the installed bundle was unchanged. Then one click on "Update to 0.5.0 preview 99": progress 0–99 %, "Preparing update…", the old process quit, and ShipIt logged "Installation completed successfully" and relaunched it. The relaunched app reported tag v0.5.0-preview.99 from its own page, said "is now on" with Release notes, and was still signed by the same team (`codesign --verify --deep --strict` passes). Its settings (Dark) and its data folder survived. 16/16 checks.
+
+**Test hooks** (read only when set): `CK_UPDATE_RELEASES` (the releases list URL); `CK_UPDATE_STUB` (e2e: acts as that tag, and its install only records and quits); `CK_TEST_HOME`, `CK_TEST_USER_DATA`, `CK_TEST_DEBUG_PORT` (ShipIt relaunches through LaunchServices with no arguments and the login's HOME, so test builds carry these in `LSEnvironment` via `CK_TEST_ENVIRONMENT`, never on a release). The first proof run had no `CK_TEST_HOME`: the relaunched test app read the real home once, wrote nothing to it (no `.central-knot/sync.json` there, so nothing could sync), and was quit within minutes. Squirrel keeps its own state in `~/Library/Caches/com.centralknot.firstlook.ShipIt` and a launchd job of that name; the test copies were removed afterwards.
+
+**Validation.** 354 unit tests (6 new). Mac packaged e2e passes, including the new update flow (stubbed install: background check, button, progress, Apply-all hold, restart, after-restart message, interrupted download, update that didn't finish, untagged build). UI tour `updates`: 23 screenshots at 1280×800, 860×560 and 1728×1117; the `settings` and `sizes` sections were re-run.
+
+**Not proven.** A notarized build downloaded from GitHub itself (only the local fixture served zips); a real `/Applications` install by a standard (non-admin) account; the restart holding while a write is under way (by construction: it waits in the main queue); Windows and Linux (no releases, nothing shown).
+
+## Leftovers after preview 4, November 10, 2026
+
+What was left open after v0.5.0-preview.4, fixed or proven.
+
+- **A pulled base-instructions edit is in History**, with "Undo pull" (the base's own Undo, as a pulled deletion already had): once, and only while the base is still as that Pull left it. A base that arrives for the first time gets a row too. After an Undo the earlier text is a change made here, which the next Push sends.
+- **The Plugins list knows a copy differs from the marketplace's** without the plugin's page being opened: once the list is drawn, the files of plugins some tool has installed are read in the background, three at a time, from disk only (no Git fetch), into the cache the plugin page uses; again after Refresh and Apply all.
+- **Claude Code overrides:** a profile never turns on a skill the Skills page turned off, so the listed gap could not happen. A nearby one could: an override taken out by hand came back after a profile turned the skill off and the Skills page turned it on. A profile's Disable now counts as the latest Disable.
+- **Tests for two earlier fixes** (e2e): a home switch whose settings can't be saved stays on its home, still watched; Refresh on Harnesses asks for the marketplaces as last read. Each fails with its fix taken out.
+- **Test runs pick their own debug ports.** The e2e and the ui-tour each chose a debug port at random; with several runs on one Mac, a run could choose a port another run's app was listening on and then drove that app (seen: a tour clicking in another checkout's window). The app is now asked for port 0 and says its ports on stderr (`cdp.mjs debugPorts`). The tour's last step also waits for the stopped app's helpers before deleting its scratch folder.
+- **Desktop apps, real installs** (asked by Nathan): the GitHub Copilot app's Windows setup installs under `%LOCALAPPDATA%\Programs\GitHub Copilot`, not the folder guessed before, so it was not found; fixed. App 1.2.0 unpacks its runtime as `<version>/copilot` (1.1 on macOS: `copilot-sdk-runtime-<version>`); both are looked for, and with no CLI that runtime runs plugin commands on Windows and Linux too (run in throwaway homes on Ultra PC and Ubuntu 26.04). Claude desktop from its apt package on Ubuntu 26.04 is found; as an ordinary non-elevated process on Windows detection is as before. Details in `docs/capability-data.md` §3.
+
+**Proven without a code change.** A plugin installed with Claude desktop's own Claude Code (2.1.321) is used in a Code tab session of the signed-in app: the session ran the test plugin's skill and gave its answer (transcript entrypoint `claude-desktop`). macOS gives the running signed preview 4 build the new icon (`NSRunningApplication.icon`, regular activation policy), and the app never sets a Dock icon of its own.
+
+**Validation.** 367 unit tests. Mac packaged e2e 534/534. Linux e2e 441/441. UI tour `plugin-versions` (new list shots at 860 and 1728), `plugins`, `harnesses`, `settings` on the Mac; every section run alone, 17 of 18 first time (the 18th was the scratch-folder delete, fixed).
+
+**Not proven.** The icon as a picture of the Dock itself (no tool here can capture the Dock; needs a glance). Where Claude desktop on Linux keeps the Code tab's copy (appears only after sign-in). The Copilot app's `.msi` location (from the package's own tables, not installed).
+
 ## Mac: a closed window leaves the Dock, November 10, 2026
 
 Nathan asked that closing the app on a Mac leave it running in the top right (the menu bar), not in the Dock as well.
@@ -758,5 +787,11 @@ Nathan asked that closing the app on a Mac leave it running in the top right (th
 - The log now has a line, "opened again", each time the system asks a running Central Knot to open.
 - Windows and Linux are unchanged.
 
-**Validation.** 358 unit tests. Linux e2e 409/409. On macOS 26.6.2, an ad hoc packaged build with its own home: the system reports the app as a Dock app with its window open and as a menu-bar-only app after the window is gone, and as a Dock app, frontmost and focused, after it is opened again. In a development run, with a real window close asked from the main process: the same, plus a close within a second of reopening (the Dock icon left within a second), minimise and ⌘H (the icon stayed). The Mac e2e checks the Dock state before and after its window goes.
+**Validation (macOS 26.6.2).**
+- Mac packaged e2e passes in CI (run 42895096593), with a new check of the system's view of the app (`lsappinfo`) before and after its window goes.
+- An ad hoc packaged build with its own home, real clicks through Computer Use: the red close button showed the first-close dialog with the Dock icon still there; after OK the system reported a menu-bar-only app, and still did three seconds later. A second close went straight there with no dialog.
+- A development run, with a real window close asked from the main process: the same, plus reopening (a Dock app again, frontmost and focused), a close 0.3 s after reopening (the icon left within a second), minimise and ⌘H (the icon stayed, also when done 0.3 s after reopening).
 
+**Not proven.** A real click on the menu bar icon's Open Central Knot: Computer Use could not reach the menu bar icon. The same code runs when the app is opened again, which was checked.
+
+**Lesson.** Computer Use asks macOS to open the app each time it looks at it, which rightly brings a closed window back. The log's "opened again" line shows it. A test of "stays closed" must read the state with the shell before Computer Use looks again.

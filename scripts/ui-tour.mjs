@@ -1,7 +1,7 @@
 // A screenshot tour of the real app on the Practice copy, feature by feature, for user-interface judging.
 // Clicks are sent as pointer clicks (detail 1), as a mouse makes them; keyboard steps use real Tab presses.
 // Usage: node scripts/ui-tour.mjs <outDir> [--electron] [--no-sandbox] [--only shell,skills,…]
-// Features: shell, skills, sync, mcp, agents, plugins, instructions, sizes (four tools; every page at 860×560 with the
+// Features: shell, skills, sync, mcp, agents, plugins, instructions, updates, sizes (four tools; every page at 860×560 with the
 // sidebar as a rail and open, then 1280×800, 1728×1117 and 2560×1440, each in dark and in light) and missing
 // (a folder home with only Claude Code and Codex, so Copilot CLI and Pi appear nowhere as options).
 // Each feature gets its own folder with NN-name.png (2x), NN-name.txt (the page's visible text) and tour.md (what each step did).
@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { writeClaudeInstall, writeMarket } from './fixture-market.mjs';
-import { connect, DAY, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
+import { serveReleases } from './update-fixture.mjs';
+import { connect, DAY, debugPorts, holdQueue, keepFor, mainProcess, refocus, standIn } from './cdp.mjs';
 
 const args = process.argv.slice(2);
 const out = resolve(args.find(arg => !arg.startsWith('--')) ?? 'ui-tour');
@@ -33,18 +34,19 @@ const launched = new Set();
 process.on('exit', () => { for (const child of launched) { try { child.kill('SIGKILL'); } catch { /* already gone */ } } });
 for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(130));
 
-async function launch() {
-  const port = 9300 + Math.floor(Math.random() * 400);
-  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp') };
+async function launch(more = {}) {
+  const env = { HOME, PATH: `${join(scratch, 'bin')}:/usr/bin:/bin`, TMPDIR: join(scratch, 'tmp'), ...more };
   mkdirSync(env.TMPDIR, { recursive: true });
   for (const name of ['DISPLAY', 'XAUTHORITY']) if (process.env[name]) env[name] = process.env[name];
-  // A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
-  const inspect = flag('--electron') ? port + 1000 : undefined;
-  const child = spawn(command, [...(flag('--electron') ? [root, `--inspect=${inspect}`] : []), `--remote-debugging-port=${port}`, `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: 'ignore' });
+  // The app picks its own free debug ports (port 0) and says them, so no other run on this machine can be on them (cdp.mjs
+  // debugPorts). A dev run also opens its main process, so the tour can show states only an installed app reaches (see Settings).
+  const child = spawn(command, [...(flag('--electron') ? [root, '--inspect=0'] : []), '--remote-debugging-port=0', `--user-data-dir=${join(scratch, 'data')}`, ...(flag('--no-sandbox') ? ['--no-sandbox'] : [])], { env, stdio: ['ignore', 'ignore', 'pipe'] });
   launched.add(child);
   child.once('exit', () => launched.delete(child));
+  const { port, inspect } = await debugPorts(child, flag('--electron'));
   let target;
-  for (let attempt = 0; attempt < 150 && !target; attempt++) { await wait(200); try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } }
+  for (let attempt = 0; attempt < 150 && !target; attempt++) { try { target = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()).find(item => item.type === 'page'); } catch { /* starting */ } if (!target) await wait(200); }
+  if (!target) throw new Error('The app opened no window.');
   const page = await connect(target.webSocketDebuggerUrl);
   const { send, run } = page;
   // A page that never settles fails the tour instead of holding it open.
@@ -120,13 +122,13 @@ let practice = await a.run(`document.querySelector('.status-home').title`);
  * Starts the app again on a clean slate for a section that needs one: new app data, an empty HOME (no stand-in CLIs) and,
  * with the new launch, a new Practice copy. Before any section has run, the first launch is already clean.
  */
-async function fresh() {
-  if (!feature) return;
+async function fresh(more = {}, keepData = false) {
+  if (!feature && !Object.keys(more).length) return;
   a.quit();
   await wait(500);
-  for (const folder of [join(scratch, 'data'), HOME]) rmSync(folder, { recursive: true, force: true });
+  for (const folder of keepData ? [] : [join(scratch, 'data'), HOME]) rmSync(folder, { recursive: true, force: true });
   mkdirSync(HOME, { recursive: true });
-  a = await launch();
+  a = await launch(more);
   practice = await a.run(`document.querySelector('.status-home').title`);
 }
 
@@ -492,6 +494,12 @@ if (wanted('plugin-versions')) {
   // Codex's copy of document-tools changes by hand at the marketplace's version (1.2.0): its page says so and offers Update.
   edit(join(practice, '.codex/plugins/cache/team-tools/document-tools/1.2.0/skills/spreadsheet/SKILL.md'), text => `${text}\nAlso sort every sheet by its first column.\n`);
   await a.click('#header-refresh'); await waitFor(a, `document.body.dataset.busy !== 'true'`, 60000);
+  // Refresh forgot every plugin's files; the list reads the installed ones again by itself, with no page opened.
+  await waitFor(a, `/Codex differs from the marketplace’s copy/.test(document.querySelector('[data-plugin="document-tools"] .plugin-row-warning')?.textContent ?? '')`, 15000);
+  for (const [width, height] of [[860, 560], [1728, 1117]]) {
+    await size(width, height); await a.run(`document.querySelector('[data-plugin="document-tools"]').scrollIntoView({ block: 'center' })`); await a.settle();
+    await shot(a, `list-copy-differs-${width}`, `At ${width}×${height}, after Refresh and with no plugin page opened: the document-tools row says Codex's copy differs from the marketplace's (read in the background once the list was drawn) and offers Update.`);
+  }
   await a.click('#popen-0-document-tools'); await waitFor(a, `/differs from the marketplace’s copy/.test(document.querySelector('.plugin-panel')?.textContent ?? '')`, 15000);
   for (const [width, height] of [[860, 560], [1728, 1117]]) {
     await size(width, height); await a.run(`document.querySelector('.plugin-page')?.closest('.scroll')?.scrollTo(0, 0)`); await a.settle();
@@ -839,6 +847,65 @@ if (wanted('missing')) {
   await a.size(860, 560); await a.click('#nav-overview'); await shot(a, 'no-tools-860-overview', 'The Overview at 860×560.');
   await a.click('#nav-harnesses'); await shot(a, 'no-tools-860-harnesses', 'Its Harnesses page at 860×560.');
   await a.size(1280, 800);
+}
+
+// ---------- Updates ----------
+// A stand-in for GitHub's releases, and the app acting as an installed copy of v0.5.0-preview.4 (CK_UPDATE_STUB): the status
+// bar's Update button at each step and the Settings row, at 860×560 and 1728×1117.
+if (wanted('updates')) {
+  const zip = join(scratch, 'update.zip');
+  writeFileSync(zip, Buffer.alloc(4_000_000, 7));
+  const releases = [{ tag: 'v0.5.0-preview.5', zip, bytesPerSecond: 400_000 }];
+  const fixture = await serveReleases(releases);
+  const as = tag => ({ CK_UPDATE_STUB: tag, CK_UPDATE_RELEASES: fixture.releasesUrl });
+  await fresh(as('v0.5.0-preview.4'));
+  begin('updates');
+  const size = async (width, height) => { await a.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 2, mobile: false }); await a.settle(); };
+  await shot(a, 'version', 'The app as it opens: the status bar names the build, "Central Knot 0.5.0 preview 4", at the bottom right.');
+  await waitFor(a, `!!document.querySelector('#update-button')`, 20000);
+  await shot(a, 'update-button', 'Shortly after launch it checked GitHub: a newer release, so the version became a button, "Update to 0.5.0 preview 5".');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `update-button-${width}`, `The same at ${width}×${height}.`); }
+  await size(1280, 800);
+  await a.click('#nav-settings');
+  await shot(a, 'settings-available', 'Settings › General › Updates: the build in use and its tag, Update and Check now, and what the last check found, with the release notes.');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-available-${width}`, `The same at ${width}×${height}.`); }
+  await size(1280, 800);
+  // Something waiting for Apply all holds the restart.
+  await a.click('#nav-skills'); await a.click('#manage-all');
+  await a.click('#update-button');
+  await waitFor(a, `/Downloading… [1-9]/.test(document.querySelector('#update-button')?.textContent ?? '')`, 10000);
+  await shot(a, 'downloading', 'Managed every skill (not applied yet), then clicked "Update to 0.5.0 preview 5": the button shows the download.');
+  await size(860, 560); await shot(a, 'downloading-860', 'The same at 860×560.'); await size(1280, 800);
+  await waitFor(a, `document.querySelector('#update-button')?.textContent.trim() === 'Restart to update'`, 30000);
+  await shot(a, 'held', 'Downloaded and prepared. Changes wait for Apply all, so it doesn’t restart by itself: the button says "Restart to update" and the status bar says why.');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `held-${width}`, `The same at ${width}×${height}.`); }
+  await size(1280, 800);
+  await a.click('#nav-settings'); await shot(a, 'settings-held', 'Settings while the update waits for the restart.');
+  // The next launch, as the new version: it says so once.
+  const settings = join(scratch, 'data', 'app-settings.json');
+  writeFileSync(settings, JSON.stringify({ ...JSON.parse(readFileSync(settings, 'utf8')), update: { tag: 'v0.5.0-preview.5', page: 'https://github.com/njfife/central-knot/releases/tag/v0.5.0-preview.5', from: 'v0.5.0-preview.4' } }));
+  await fresh(as('v0.5.0-preview.5'), true);
+  await waitFor(a, `/now on/.test(document.getElementById('announcement').textContent)`, 10000);
+  await shot(a, 'updated', 'Opened again as 0.5.0 preview 5: the status bar says once that it is on the new version, with "Release notes".');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `updated-${width}`, `The same at ${width}×${height}.`); }
+  await size(1280, 800);
+  await a.click('#nav-settings'); await a.click('#check-updates'); await waitFor(a, `/Up to date/.test(document.getElementById('setting-updates').textContent)`, 10000);
+  await shot(a, 'settings-up-to-date', 'Clicked "Check now": up to date.');
+  // A failed check, and a failed download.
+  releases.splice(0, 1, { tag: 'v0.5.0-preview.6', zip, cut: 0.3 });
+  await a.click('#check-updates'); await waitFor(a, `!!document.querySelector('#setting-update')`, 10000);
+  await a.click('#setting-update'); await waitFor(a, `/didn’t finish/.test(document.getElementById('setting-updates').textContent)`, 20000);
+  await shot(a, 'settings-download-failed', 'A newer release, and its download was cut off: the row says nothing changed, and offers it again.');
+  await size(860, 560); await shot(a, 'settings-download-failed-860', 'The same at 860×560.'); await size(1280, 800);
+  await fixture.close();
+  await a.click('#check-updates'); await waitFor(a, `/Couldn’t check/.test(document.getElementById('setting-updates').textContent)`, 40000);
+  await shot(a, 'settings-check-failed', 'Clicked "Check now" with GitHub unreachable: the row says so; Central Knot tries again later.');
+  // A build that can't update itself (here: not made from a release) says why and offers the release page.
+  await fresh({}, false);
+  await a.click('#nav-settings');
+  await shot(a, 'settings-cannot', 'A build not made from a release (a development or local build): the row says why it doesn’t update itself and offers the releases page.');
+  for (const [width, height] of [[860, 560], [1728, 1117]]) { await size(width, height); await shot(a, `settings-cannot-${width}`, `The same at ${width}×${height}.`); }
+  await size(1280, 800);
 }
 
 // ---------- Settings ----------
@@ -1338,5 +1405,6 @@ if (wanted('repo')) {
 }
 
 a.quit();
-rmSync(scratch, { recursive: true, force: true });
+// The app was stopped just now and its helper processes may still be writing: the folder goes once they are done.
+rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);

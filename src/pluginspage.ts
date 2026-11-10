@@ -59,7 +59,8 @@ function pluginRow(view: PluginsView, entry: MarketplaceView, marketIndex: numbe
   // A plugin kept elsewhere says what it holds once its files have been read; while reading, that; else where it lives.
   const key = pluginKey(entry.source, plugin.name);
   const detail = shownDetail(key);
-  const readContents = detail === undefined && market.details.get(key)?.reading ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
+  const reading = market.details.get(key);
+  const readContents = detail === undefined && reading?.reading && !reading.quiet ? 'Reading what it holds…' : detail?.offered ? summaryOf(componentsFrom(detail)) : '';
   const offered = offeredVersion(plugin, detail);
   const holds = plugin.components ? summaryOf(plugin.components) : readContents || (plugin.from ? `From ${plugin.from.label}` : '');
   // A tool on another version than the marketplace offers is named on the row, so it shows without opening the plugin.
