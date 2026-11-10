@@ -142,7 +142,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
   ];
   const path = h('span.harness-card-path', { title: snapshot.root }, h('span.mono', {}, shownPath(snapshot.root)));
   if (!found(home, tool)) return h('div.card.harness-card.harness-card-missing', { id: `harness-${tool}`, 'aria-label': `${names[tool]}: not found` },
-    h('div.harness-card-main', {}, body, h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`)), path);
+    // When no tool at all was found, the note above already says to install one; each card need not repeat it.
+    h('div.harness-card-main', {}, body, home.manage.tools.length ? h('span.harness-card-next', {}, `Install ${names[tool]}, then Refresh.`) : null), path);
   // While an action runs, its result belongs to the harness it started on: the cards wait.
   return h('div.card.harness-card', {},
     h('button.harness-card-main', { type: 'button', id: `harness-${tool}`, disabled: !!state.busy, 'aria-label': `${names[tool]}: ${detectionLine(snapshot, home)}. Open its page.`, onclick: () => goHarness(tool) }, body),
@@ -154,7 +155,8 @@ function summaryCard(snapshot: Snapshot, home: HomeView) {
  * back to the list. The last action's result and what the last page showed stay behind; another harness starts with its
  * tables closed and Copies differ filters off.
  */
-export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab) {
+/** `fromKeyboard`: going back to the list shows the focus ring on the card only when the way back was taken from the keyboard. */
+export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab, fromKeyboard = true) {
   const from = state.harness;
   if (tool !== from) closeOpenRows();
   state.harness = tool;
@@ -165,7 +167,7 @@ export function goHarness(tool: HarnessId | undefined, tab?: HarnessTab) {
   state.outcome = carried;
   rerender();
   if (tool) document.getElementById('harness-body')?.scrollTo(0, 0);
-  else if (from) document.getElementById(`harness-${from}`)?.focus();
+  else if (from) document.getElementById(`harness-${from}`)?.focus({ focusVisible: fromKeyboard } as FocusOptions);
 }
 
 function everyHarness(home: HomeView) {
@@ -177,8 +179,8 @@ function everyHarness(home: HomeView) {
       h('p.tools-note', {}, icon('info', 14, 'tone-muted'),
         h('span', {}, home.manage.tools.length ? 'Each AI coding tool and what it has. Open one to manage its skills, MCP servers, agents, instructions and plugins.'
           : 'None of the AI coding tools Central Knot knows was found here. Install one, then Refresh.',
-          home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' This is the practice copy, so installed apps aren’t looked for; ' : ' This is a folder, not this computer, so installed apps aren’t looked for; ',
-            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows them with their versions.'])),
+          home.mode === 'actual' ? null : [home.mode === 'fixture' ? ' Practice copy: installed apps aren’t checked; ' : ' A folder: installed apps aren’t checked; ',
+            button({ variant: 'link', size: 'micro', label: realHomeName, id: 'tools-open-real', onclick: () => void loadHome('actual') }), ' shows their versions.'])),
       h('div.harness-cards', { 'data-count': String(listed(home).length) }, listed(home).map(snapshot => summaryCard(snapshot, home)))));
 }
 
@@ -320,7 +322,7 @@ export function harnessTitle(): (Node | null)[] | undefined {
   if (!snapshot || !state.home) return undefined;
   const tool = snapshot.harness;
   return [
-    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: () => goHarness(undefined) }, icon('arrow-left', 14), 'Harnesses'),
+    h('button.crumb-link.title-crumb', { type: 'button', id: 'harness-back', title: 'Back to every harness', disabled: !!state.busy, onclick: (event: MouseEvent) => goHarness(undefined, undefined, event.detail === 0) }, icon('arrow-left', 14), 'Harnesses'),
     h('span.crumb-sep', { 'aria-hidden': 'true' }, '/'),
     brandMark(tool, 16), h('span.title-harness', {}, names[tool]),
     // A sample or chosen folder is said once, on the list's note; the header names installed state on this computer only.

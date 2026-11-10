@@ -1441,7 +1441,7 @@ button.harness-card-main:disabled { cursor: default; }
 button.harness-card-main:focus-visible { outline: 0; }
 .harness-card:has(> .harness-card-main:disabled) { opacity: 0.6; }
 /* A wide card lays its counts in two groups side by side: the three kinds, then its instruction file and plugins. */
-@container (min-width: 520px) {
+@container (min-width: 460px) {
   .harness-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; align-items: start; }
   .harness-count-group { display: grid; grid-template-columns: max-content minmax(2ch, max-content) minmax(0, 1fr); column-gap: 12px; row-gap: 4px; align-items: baseline; }
 }
@@ -1490,13 +1490,15 @@ button.harness-card-main:focus-visible { outline: 0; }
 .ov-section-dot { margin: 0 6px; color: var(--ink-faint); }
 /* A tool not found on this computer: its card is its name, how to fix it and its folder; no rows of dashes. */
 .harness-card-missing .harness-counts { display: none; }
-/* While editing, the card spans the pane and the editor takes the file's reading measure, so lines that fit in view still fit. */
-.harness-page .ins-card:has(.ins-editor) { width: auto; }
-.harness-page .ins-card .ins-text { max-width: calc(110ch + 26px); }
+/* In view and while editing, the file sits at one reading measure, so the card is the same width either way and Edit swaps in place. */
+.harness-page .ins-card .ins-text, .harness-page .ins-card .ins-preview { width: calc(110ch + 26px); max-width: 100%; box-sizing: border-box; }
 /* The list's note keeps a reading measure. */
 .harness-scroll > .tools-note { max-width: 80ch; }
-.legend-left-out { border: 1px solid var(--control-line); border-radius: 5px; }
+.legend-left-out { border: 1px solid var(--ink-faint); border-radius: 5px; }
 /* The Harnesses list's bands reach the window edge, like its cards and every band on a harness page. */
 .page-harnesses .page > .bands > .band { padding-right: 16px; }
 /* One or two harnesses don't stretch across a wide window: each card is at most about 560px wide. */
 .harness-cards[data-count="1"], .harness-cards[data-count="2"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 560px)); }
+/* A short window: the description under a name keeps to two lines (the full text is in the row's details). */
+@media (max-height: 700px) { .ov-name-sub { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
+@container (max-width: 860px) { .manage-noun { display: none; } }

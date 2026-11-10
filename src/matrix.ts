@@ -245,7 +245,8 @@ function changeBar(bulk = true) {
   const needChoice = committedList().filter(skill => !skill.held && inFocus(skill) && !effective(skill).managed && !effective(skill).separate && syncOf(effective(skill), toolList()) === 'attention').length;
   const word = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   // On a harness's page the count names what it covers: only what that harness has.
-  const manageLabel = focus ? (ready.length === 1 ? `Manage ${ready[0].name ?? ready[0].key}` : `Manage ${ready.length} ${word(ready.length)}`) : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
+  // On a harness's page the noun drops on a narrow toolbar ("Manage 2"), so the bar keeps one line; its name says it in full.
+  const manageLabel: string | Node = focus ? (ready.length === 1 ? `Manage “${ready[0].name ?? ready[0].key}”` : h('span', {}, `Manage ${ready.length}`, h('span.manage-noun', {}, ` ${word(ready.length)}`))) : ready.length === 1 ? 'Manage 1' : ready.length === 2 ? 'Manage both' : needChoice ? `Manage ${ready.length} of ${ready.length + needChoice}` : `Manage all ${ready.length}`;
   // On a harness's page Manage steps aside (1) under the Copies differ filter, where every row shown needs a copy choice that
   // Manage leaves out, so it would act only on rows not shown; and (2) while changes are queued, so the toolbar keeps one line
   // for the count, Discard and Apply all and the table does not move. It comes back after Apply all or Discard.
