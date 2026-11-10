@@ -1293,6 +1293,7 @@ span.ins-confirm { margin-top: 0; }
 .base-not-carried { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--ink); max-width: none; }
 .base-not-carried > span { flex: 1 1 260px; min-width: 0; }
 #base-draft-problem:focus { outline: none; }
+.base-writing { display: flex; align-items: center; gap: 8px; }
 /* A wide base card puts the tools beside the text. */
 @container ins-card (width >= 1100px) { .base-columns { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
 /* Marker comments and code read as typed: no ligatures turning <!-- into an arrow. */

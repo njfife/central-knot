@@ -1921,7 +1921,7 @@ async function draftFlow() {
   check('and ran in a folder of its own, gone afterwards', readNow(`${got}.cwd`).includes('central-knot-draft-') && !existsSync(readNow(`${got}.cwd`).trim()), readNow(`${got}.cwd`));
   const plan = await says('.base-plan');
   same('the review shows the base as it will be', await a.all('#base-card .ins-editor > pre.ins-preview', 'e.textContent'), ['# Style\nBe brief.']);
-  check('and says what each file becomes', plan.includes('Keeps 2 lines of its own, then the base:') && plan.includes('Keeps 1 line of its own, then the base:') && plan.includes('copilot-instructions.md is created, holding only the base instructions.'), plan);
+  check('and says what each file becomes', plan.includes('Its own instructions become 2 lines, then the base:') && plan.includes('Its own instructions become 1 line, then the base:') && plan.includes('copilot-instructions.md is created, holding only the base instructions.'), plan);
   same('with the lines each file keeps in view', await a.all('.base-plan pre.ins-preview', 'e.textContent'), ['# Claude\nUse the Task tool.', 'Run codex review before pushing.']);
   check('a line the draft carried nowhere is pointed out under its file', plan.includes('1 line of CLAUDE.md isn’t in the draft as written. It may be reworded or left out.'), plan);
   await a.click('#base-lost-claude-cli');
@@ -1938,6 +1938,9 @@ async function draftFlow() {
   for (const width of [860, 1180, 1728]) { await sizeTo(a, width, 800); same(`nothing cut off editing a draft at ${width}×800`, await a.run(CUT_OFF), []); }
   await fullSize(a);
   await a.shot('draft-edit');
+  await a.click('#base-cancel');
+  check('leaving the editor asks about the draft by name, since it took minutes to get', (await says('#base-card')).includes('Discard Codex’s draft?'), await says('#base-card'));
+  await a.click('#base-keep');
   await a.click('#base-review');
   check('a line put back by hand is no longer pointed out', !(await says('.base-plan')).includes('in the draft as written'), await says('.base-plan'));
   await a.click('#base-save');
