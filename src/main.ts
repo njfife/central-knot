@@ -628,18 +628,18 @@ async function selectHome(mode: HomeMode, remembered?: string): Promise<HomeView
     next = { mode, home: folder, label: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Folder' };
   } else if (mode === 'actual') next = { mode, home: homedir(), label: machineNames(process.platform).home };
   else next = { mode, home: await ensurePracticeHome(), label: 'Practice copy' };
-  // A switch that fails changes nothing: the home on screen stays the home open here.
-  const previous = current;
+  // A switch that fails changes nothing: the home on screen stays the home open here, with its hand-off and watchers.
+  const previous = { current, handoff, lastPresent };
   current = next;
   try {
     const shown = await syncThenView();
+    // Saving the settings rebuilds the menus with the new home.
+    await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     // Only once the switch has succeeded: passes due on the home before are dropped, and the new home is watched.
     stopWatching();
     void startWatching();
-    // Saving the settings rebuilds the menus with the new home.
-    await saveAppSettings({ home: { mode: next.mode, path: next.mode === 'custom' ? next.home : undefined } });
     return shown;
-  } catch (error) { current = previous; throw error; }
+  } catch (error) { ({ current, handoff, lastPresent } = previous); throw error; }
 }
 
 /**
