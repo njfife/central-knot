@@ -322,29 +322,37 @@ export function tableEnd(text: string, table: TomlTable): number {
   return table.start + lines.slice(0, cut).join('').length;
 }
 
+/** A file's line end: Windows' when it has any, else a plain newline. */
+export const eolOf = (text: string) => (text.includes('\r\n') ? '\r\n' : '\n');
+
+/** The text with `body` added as a new table at the end, after one blank line, in the file's own line ends. */
+export function appendTomlTable(text: string, body: string): string {
+  const eol = eolOf(text);
+  return `${text}${text && !text.endsWith('\n') ? eol : ''}${text.trim() ? eol : ''}${body.replace(/\r?\n/g, eol)}`;
+}
+
+/** The text without these tables' own lines (see tableEnd); `replacement` goes where the first of them was. */
+export function removeTomlTables(text: string, tables: TomlTable[], replacement?: string): string {
+  let out = '';
+  let cursor = 0;
+  tables.forEach((table, index) => {
+    out += text.slice(cursor, table.start);
+    if (index === 0 && replacement !== undefined) out += replacement.endsWith('\n') ? replacement : `${replacement}\n`;
+    cursor = tableEnd(text, table);
+  });
+  return out + text.slice(cursor);
+}
+
 /**
  * Replaces the table `[prefix.name]` and its subtables `[prefix.name.*]` with `body` (or removes them when `body` is
  * undefined). Everything else, including comments and other tables, stays byte for byte. A new table goes at the end.
  */
 export function setTomlTable(text: string, prefix: string[], name: string, body: string | undefined): string {
-  const tables = readTomlTables(text);
   const owns = (table: TomlTable) => table.path.length > prefix.length && prefix.every((part, index) => table.path[index] === part) && table.path[prefix.length] === name;
-  const mine = tables.filter(owns);
-  if (!mine.length) {
-    if (body === undefined) return text;
-    return `${text}${text && !text.endsWith('\n') ? '\n' : ''}${text.trim() ? '\n' : ''}${body}`;
-  }
-  const ownEnd = (table: TomlTable) => tableEnd(text, table);
-  // Rebuild in place of the first of its tables; drop its other tables wherever they are.
-  let out = '';
-  let cursor = 0;
-  mine.forEach((table, index) => {
-    out += text.slice(cursor, table.start);
-    if (index === 0 && body !== undefined) out += body.endsWith('\n') ? body : `${body}\n`;
-    cursor = ownEnd(table);
-  });
-  out += text.slice(cursor);
-  return out;
+  const mine = readTomlTables(text).filter(owns);
+  if (!mine.length) return body === undefined ? text : appendTomlTable(text, body);
+  // Rebuilt in place of the first of its tables; its other tables go wherever they are.
+  return removeTomlTables(text, mine, body);
 }
 
 /** The header for `[prefix.name]` and its subtables, quoting a name that needs it. */

@@ -2,8 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { access, chmod, constants, copyFile, link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from 'node:path';
-import { harnesses, writeRoot } from './harnesses.ts';
-import type { HarnessId, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
+import { configRoot, harnessIds, harnesses, writeRoot } from './harnesses.ts';
+import { instructionFiles } from './instructions.ts';
+import { mcpFile } from './mcp.ts';
+import type { HarnessId, HistoryDays, HomeMode, PlanTarget, Skill, Snapshot, SyncGate, WriteAccess } from './types.ts';
 
 export const FORMAT_VERSION = 1;
 const STAGE_PREFIX = '.ck-stage-';
@@ -30,6 +32,8 @@ export interface ShareContext {
   fault?: (step: 'before-rename' | 'after-rename' | 'before-replace' | 'mid-replace' | 'before-remove') => void;
   /** The clock for observation intervals (CON-04); tests pass their own. */
   now?: () => number;
+  /** How many days History keeps events, and deleted items' content (STO-04); the default unless Settings says otherwise. */
+  historyDays?: HistoryDays;
   /** How long a copy must stay missing before it counts as deleted, so an atomic save is not a deletion (SYN-04). Default 2 s. */
   settleMs?: number;
 }
@@ -37,7 +41,7 @@ export interface ShareContext {
 export interface RecordCopy { harness: HarnessId; directory: string; hash: string; created: boolean; /** `removing`: a deletion could not remove this copy yet; it is retried while it still holds `hash`. */ status: 'pending' | 'written' | 'removing' }
 export interface RecordItem { name: string; hash: string; state: 'shared' | 'dont-share'; startId: string; observedAt: string; copies: RecordCopy[]; /** Tools this managed skill does not sync to. */ off?: HarnessId[]; /** Differing copies kept as they are on purpose. */ separate?: boolean; /** A chosen copy not yet in every tool: the tool whose copy wins, and that copy's content ID. */ use?: { tool: HarnessId; hash: string }; /** Deleted everywhere it synced: when, from which tool, and the content it had. A copy turning up later is new input, never a revival (D-37). */ deleted?: { at: string; tool: HarnessId; hash: string };
   /** Content about to be overwritten or removed, put on record before the disk changes, so a crash or a partial failure never lets it be pruned. Cleared once History names it. */
-  displaced?: { tool: HarnessId; hash: string }[] }
+  displaced?: { tool: HarnessId; hash: string; /** A per-tool Remove (its folder, and whether it stopped syncing there), recovered as one if History never named it. */ removal?: { folder: string; stoppedSync: boolean } }[] }
 export interface SyncRecord { formatVersion: number; generation: string; owner: string; /** Each skills folder's identity at the last pass, so a folder made again reads as a reset, not as deletions. */ roots?: Record<string, { ino: number; birth: number }>; lastStartId?: string; /** Set while a Start is copying, so a crash and retry stay one Start. */ activeStartId?: string; items: Record<string, RecordItem> }
 
 export function storeDirectory(home: string): string { return join(home, '.central-knot'); }
@@ -125,23 +129,23 @@ const copilotLosses: Record<string, string> = {
 };
 
 export function targetFor(harness: HarnessId, directory: string, source: Skill): PlanTarget {
-  if (harness === 'copilot-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
-    if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
-    if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
-    return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+  switch (harness) {
+    case 'copilot-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Copilot CLI does not load a skill in a folder starting with a dot.' };
+      if (!source.hasFrontmatter) return { harness, directory, limits: [], skipped: 'Copilot CLI will not load a skill with no YAML frontmatter.' };
+      if (source.copilotProblem) return { harness, directory, limits: [], skipped: `Copilot CLI will not load it: ${source.copilotProblem}.` };
+      return { harness, directory, limits: source.metadataKeys.map(key => copilotLosses[key]) };
+    case 'codex-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
+      if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'pi-cli':
+      if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
+      if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
+      return { harness, directory, limits: [] };
+    case 'claude-cli':
+      return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
   }
-  if (harness === 'codex-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Codex does not load a skill in a folder starting with a dot.' };
-    if (source.codexProblem) return { harness, directory, limits: [], skipped: `Codex will not load it: ${source.codexProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  if (harness === 'pi-cli') {
-    if (source.folder.startsWith('.')) return { harness, directory, limits: [], skipped: 'Pi does not load a skill in a folder starting with a dot.' };
-    if (source.piProblem) return { harness, directory, limits: [], skipped: `Pi will not load it: ${source.piProblem}.` };
-    return { harness, directory, limits: [] };
-  }
-  return { harness, directory, limits: [], note: source.metadataKeys.length ? `${source.metadataKeys.join(', ')}: effect not tested in Claude Code.` : undefined };
 }
 
 // ---------- State ----------
@@ -220,38 +224,36 @@ export async function writeFileChecked(path: string, text: string, expected: str
   try { mode = (await stat(path)).mode & 0o777; } catch { /* new file */ }
   const temporary = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.tmp`);
   const parked = join(dirname(path), `.${basename(path)}.ck-${randomUUID()}.old`);
-  let parkedThere = false;
+  let replaced = false;
   await writeFile(temporary, text, { mode });
   try {
     if (expected !== undefined) {
-      try { await rename(path, parked); parkedThere = true; } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
+      try { await rename(path, parked); } catch (error) { if (errorCode(error) === 'ENOENT') throw changedWhileSyncing(); throw error; }
       let held: string | undefined;
       try { held = await readFile(parked, 'utf8'); } catch { /* checked below */ }
-      if (held !== expected) { if (await putBack(parked, path)) parkedThere = false; throw changedWhileSyncing(); }
+      if (held !== expected) { await putBack(parked, path); throw changedWhileSyncing(); }
     }
-    try { await link(temporary, path); }
+    try { await link(temporary, path); replaced = true; }
     catch (error) {
       // Something was saved there after the old file was moved aside: that save stays, and the old file (as read) is kept beside
       // it under a plain backup name, never deleted, since only this entry was kept in the store.
-      if (errorCode(error) === 'EEXIST') {
-        // Even if no backup can be placed, the original is never deleted here: it stays moved aside for the next pass to find.
-        if (parkedThere) { await keepAsBackup(parked, path); parkedThere = false; }
-        throw expected === undefined ? occupiedError() : changedWhileSyncing();
-      }
+      if (errorCode(error) === 'EEXIST') throw expected === undefined ? occupiedError() : changedWhileSyncing();
       // No hard links on this disk: the old file goes back first, then the new one replaces it the ordinary way.
-      if (parkedThere && await putBack(parked, path)) parkedThere = false;
+      if (expected !== undefined) await putBack(parked, path);
       if (errorCode(error) === 'EPERM' || errorCode(error) === 'ENOTSUP' || errorCode(error) === 'EXDEV') {
         if (expected === undefined) { try { await lstat(path); throw occupiedError(); } catch (missing) { if (errorCode(missing) !== 'ENOENT') throw missing; } }
         else if ((await readFile(path, 'utf8').catch(() => undefined)) !== expected) throw changedWhileSyncing();
         await rename(temporary, path);
+        replaced = true;
         return;
       }
       throw error;
     }
   } finally {
     await unlink(temporary).catch(() => undefined);
-    // Moved aside and not put back: its replacement is in place (or a newer save is), and its content was kept before the write.
-    if (parkedThere) await unlink(parked).catch(() => undefined);
+    // Once its replacement is in place, the moved-aside original goes: its content was kept before the write. Otherwise, if it could
+    // not go back, it is kept beside it as a backup, never deleted; even if no backup can be placed, it stays for the next pass to find.
+    if (expected !== undefined) await (replaced ? unlink(parked).catch(() => undefined) : keepAsBackup(parked, path));
   }
 }
 
@@ -323,7 +325,7 @@ export async function remember(context: ShareContext, generation: string) {
   await writeDurably(context.settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
+export const NOTHING_CHANGED = 'Nothing was written or deleted. Put the record back, then try again.';
 
 /** Section 3's stops: none of these turns into first setup or adopts a stale record. */
 export async function syncGate(context: ShareContext): Promise<SyncGate> {
@@ -335,6 +337,11 @@ export async function syncGate(context: ShareContext): Promise<SyncGate> {
   if (!remembered) return { state: 'needs-resume', reason: 'This app has an intact sync record but no memory of it. Resuming keeps every recorded choice.' };
   if (remembered !== record.generation) return { state: 'stopped', reason: `The sync record is not the one this app last used. ${NOTHING_CHANGED}` };
   return { state: 'ready' };
+}
+
+/** Whether this build syncs this home and may write it: History is kept tidy, and passes run, only where both hold. */
+export async function syncsHere(context: ShareContext): Promise<boolean> {
+  return (await writeAccess(context)).allowed && (await syncGate(context)).state === 'ready';
 }
 
 /** The real home is written only by explicitly choosing it. A simulated home that reaches it stays read-only. */
@@ -350,14 +357,19 @@ export async function writeAccess(context: ShareContext): Promise<WriteAccess> {
   const refused = { allowed: false, reason: 'Preview only: this folder reaches your real configuration. To write there, choose your real home instead.' };
   const real = async (path: string) => { try { return await realpath(path); } catch { return undefined; } };
   const realHome = (await real(context.realHome)) ?? context.realHome;
-  const protectedRoots = await Promise.all(['.claude', '.copilot', '.agents'].map(async name => (await real(join(realHome, name))) ?? join(realHome, name)));
+  const realContext = { ...context, home: realHome, overrides: undefined };
+  const reached = [join(realHome, '.agents'), ...harnessIds.flatMap(id => [join(realHome, harnesses[id].defaultConfig), mcpFile(realContext, id)])];
+  const protectedRoots = await Promise.all(reached.map(async path => (await real(path)) ?? path));
   const inside = (path: string, root: string) => path === root || path.startsWith(root + sep);
   const home = (await real(context.home)) ?? context.home;
   if (home === realHome || inside(realHome, home)) return refused;
-  // Every folder this home would write, followed through links, even where it does not exist yet.
+  // Every folder and file this home would write, followed through links, even where it does not exist yet.
   const fold = (path: string) => (process.platform === 'linux' ? path : path.toLowerCase());
   const guarded = [...protectedRoots, join(realHome, '.central-knot')].map(fold);
-  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...(Object.keys(harnesses) as HarnessId[]).flatMap(id => [join(context.home, harnesses[id].defaultConfig), writeRoot(harnesses[id], context.home)])];
+  const writes = [storeDirectory(context.home), join(context.home, '.agents'), ...harnessIds.flatMap(id => {
+    const root = configRoot(harnesses[id], context.home, context.overrides?.[id]);
+    return [root, writeRoot(harnesses[id], context.home, context.overrides?.[id]), join(root, 'agents'), mcpFile(context, id), ...instructionFiles[id].map(name => join(root, name))];
+  })];
   for (const path of writes) {
     const resolved = await landingOf(path);
     if (!resolved || guarded.some(root => inside(resolved, root))) return refused;

@@ -5,14 +5,15 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { harnessIds, harnesses } from './harnesses.ts';
+import { harnessIds } from './harnesses.ts';
 import { appendHistory, clock, manageView, readHistory, replaceHistory } from './manage.ts';
 import { mcpView } from './mcp.ts';
 import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from './mcpswitch.ts';
 import { changedSince, choseProfileInUse, driftOf, itemId, itemKeyOf, itemKind, NO_PROFILE, planSwitch, releaseHolds, offAfterFlips, offAfterFailures, holdsOnWhatIsHere, switchItems, type SwitchItem } from './profileplan.ts';
 import { errorCode, itemKey, storeDirectory, syncGate, writeAccess, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
-import { notTaken, switchPath, switchState, targetOf, withSwitch, type SwitchTarget } from './skillswitch.ts';
+import { switchedText, switchPath, switchState, type SwitchTarget } from './skillswitch.ts';
 import { onlyAllowed, record, strings } from './values.ts';
+import { toolName } from './words.ts';
 import type { DestinationResult, HarnessId, HistoryEvent, Profile, ProfileEdit, ProfileFlip, ProfileSwitchResult, ProfilesView } from './types.ts';
 
 // ---------- The profiles file ----------
@@ -125,7 +126,7 @@ export async function releaseProfileHolds(context: ShareContext, released: { ite
 /** How each tool's skill switch names its copy of a skill: the folder, the name the tool reads, and the copy's SKILL.md. */
 function skillTarget(manage: Awaited<ReturnType<typeof manageView>>, key: string, tool: HarnessId): SwitchTarget | undefined {
   const copy = manage.skills.find(skill => skill.key === key)?.copies[tool];
-  return copy && targetOf(copy);
+  return copy && { folder: copy.folder, name: copy.name ?? copy.folder, skillFile: join(copy.directory, 'SKILL.md') };
 }
 
 /** What a switch reads once: each skill's copies (to name one for its switch), and every item with its switches now. */
@@ -160,8 +161,8 @@ function switchOf(context: ShareContext, home: HomeRead, flip: ProfileFlip): Swi
   const target = skillTarget(home.manage, key, flip.tool);
   // A tool with no copy now fails this one flip when it is made (editText reports it), not here: throwing here would stop flipAll
   // before the other flips.
-  const missing = () => { throw new Error(`${harnesses[flip.tool].name} has no copy of it now.`); };
-  return { file: switchPath(context, flip.tool), isOff: text => (target ? switchState(context, flip.tool, text, target) : missing()), set: text => (target ? withSwitch(context, flip.tool, text, target, flip.disabled) : missing()) };
+  const missing = () => { throw new Error(`${toolName(flip.tool)} has no copy of it now.`); };
+  return { file: switchPath(context, flip.tool), isOff: text => (target ? switchState(context, flip.tool, text, target) : missing()), set: text => (target ? switchedText(context, flip.tool, text, target, flip.disabled) : missing()) };
 }
 
 /** One file's text with every flip of `group` made in it; a flip that can't be made there is in `failed` with why. */
@@ -196,7 +197,7 @@ async function writeFlips(file: string, group: [ProfileFlip, Switch][]): Promise
 /** Why a flip didn't take, read back from its file as the tool will see it; undefined when it did. */
 function whyNotTaken(flip: ProfileFlip, at: Switch, after: string | undefined): string | undefined {
   if (after === undefined) return `${at.file} could not be read back.`;
-  try { return at.isOff(after) === flip.disabled ? undefined : notTaken(flip.tool); }
+  try { return at.isOff(after) === flip.disabled ? undefined : `${toolName(flip.tool)}’s settings did not take the change.`; }
   catch { return `${at.file} could not be read back.`; }
 }
 
@@ -215,9 +216,9 @@ async function flipAll(context: ShareContext, home: HomeRead, flips: ProfileFlip
     try { after = await readFile(file, 'utf8'); } catch { /* every flip below fails: what the tool sees can't be confirmed */ }
     for (const [flip, at] of group) {
       const reason = failed.get(flip) ?? whyNotTaken(flip, at, after);
-      if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${harnesses[flip.tool].name}: ${reason}` }); continue; }
+      if (reason) { results.push({ item: flip.name, harness: flip.tool, outcome: 'failed', message: `Could not turn it ${flip.disabled ? 'off' : 'on'} in ${toolName(flip.tool)}: ${reason}` }); continue; }
       done.push(flip);
-      results.push({ item: flip.name, harness: flip.tool, outcome: 'switched', message: `${flip.disabled ? 'Off' : 'On'} in ${harnesses[flip.tool].name} from its next session.` });
+      results.push({ item: flip.name, harness: flip.tool, outcome: 'switched', message: `${flip.disabled ? 'Off' : 'On'} in ${toolName(flip.tool)} from its next session.` });
     }
   }
   return { done, results };
@@ -274,7 +275,7 @@ function whatGoesBack(history: HistoryEvent[], past: HistoryEvent, items: Switch
   const results: DestinationResult[] = [];
   const changedAgain = changedSince(history, past);
   for (const flip of past.profile?.flips ?? []) {
-    const tool = harnesses[flip.tool].name;
+    const tool = toolName(flip.tool);
     const item = items.find(entry => entry.id === flip.item);
     const now = item?.tools[flip.tool];
     if (changedAgain(flip)) results.push({ item: flip.name, harness: flip.tool, outcome: 'stayed', message: `Changed again in ${tool} since, so it stays as it is.` });
@@ -297,7 +298,7 @@ export async function undoProfileSwitch(context: ShareContext, eventId: string):
   const opened = await openProfiles(context);
   if ('stop' in opened) return stopped(opened.stop);
   const profiles = opened.view;
-  const history = await readHistory(context.home);
+  const history = await readHistory(context);
   const past = history.find(entry => entry.id === eventId);
   if (!past?.profile) return stopped('That switch can’t be undone.');
   if (past.undoneBy) return stopped('That switch was already undone.');

@@ -30,7 +30,7 @@ test('B: Restore of a deletion is refused because a stopped one-way copy exists'
     await rm(join(b.home, '.claude/agents/reviewer.md'));
     await applyAgents(b.context, tools, [], { now: 1, settleMs: 2000 });
     const d = await applyAgents(b.context, tools, [], { now: 5000, settleMs: 2000 });
-    const ev = (await readHistory(b.home)).find(e => e.kind === 'deleted')!;
+    const ev = (await readHistory(b.context)).find(e => e.kind === 'deleted')!;
     const r = await restoreAgent(b.context, tools, ev.id);
     assert.equal(r.stopped, undefined, 'Restore refused');
   } finally { await b.cleanup(); }

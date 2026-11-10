@@ -3,7 +3,7 @@
 // per tool, whether it is on now and what a switch would change. Ticking only edits the profile; tools change on Switch.
 import { deleteProfileDef, NONE, profileState, rerender, saveProfileDef, showPage, shownPath, state, switchToProfile, whyReadOnly } from './app.ts';
 import { brandMark, outcomeBand, problemsBand } from './matrix.ts';
-import { button, checkbox, emptyState, findInput, h, icon } from './dom.ts';
+import { button, checkbox, emptyState, eyebrow, findInput, h, icon } from './dom.ts';
 import { activeProfile, driftOf, flipCounts, flipWords, NO_PROFILE, offByHand, presentItems, profilesInUse, planSwitch, switchItems, type ItemKind, type SwitchItem, type SwitchPlan } from './profileplan.ts';
 import { andList, toolName } from './words.ts';
 import { plural } from './model.ts';
@@ -13,20 +13,19 @@ let find = '';
 /** Whether the status bar's profile menu is open. */
 let menuOpen = false;
 
-const onePane = () => document.body.classList.contains('one-pane');
 /** A column per tool with skills or MCP servers: a tool that has only MCP servers still has switches to show. */
 const tools = (): HarnessId[] => { const home = state.home!; return [...new Set([...home.manage.tools, ...home.mcp.tools])]; };
 const items = (): SwitchItem[] => switchItems(state.home!.manage, state.home!.mcp);
 const profiles = () => state.home!.profiles;
 /** Whether profiles can be changed now: nothing busy, the home writable, and its profiles file readable. */
 const canEditProfiles = () => !state.busy && !whyReadOnly(state.home!) && !profiles().problem;
-const danger = (control: HTMLElement) => { control.classList.add('text-danger'); return control; };
+const withClass = (element: HTMLElement, name: string) => { element.classList.add(name); return element; };
+const danger = (control: HTMLElement) => withClass(control, 'text-danger');
 
-/** The profile shown: the one opened, else (two panes) the one in use or No profile; one pane shows the list instead. */
-function openId(): string | undefined {
+/** The profile shown: the one opened, else the one in use, or No profile. */
+function openId(): string {
   const view = profiles();
   if (profileState.open && (profileState.open === NONE || view.profiles.some(profile => profile.id === profileState.open))) return profileState.open;
-  if (onePane()) return undefined;
   return view.active ?? NONE;
 }
 
@@ -48,7 +47,7 @@ function listRow({ id, name, count, active, selected }: { id: string; name: stri
     icon(id === NONE ? 'circle-dashed' : 'sliders-horizontal', 14, 'tone-muted'),
     h('span.list-name.profile-row-name', { title: name }, name),
     count ? h('span.list-fraction', {}, count) : null,
-    active ? h('span.badge.badge-picked', { title: `${name} is in use` }, icon('check', 12), 'In use') : null);
+    active ? h('span.profile-in-use', { title: `${name} is in use` }, icon('check', 12), 'In use') : null);
 }
 
 /** The list column: New profile, then No profile and each profile, with `open` shown as selected. */
@@ -58,7 +57,8 @@ function listColumn(open: string | undefined) {
   return h('div.list-column.profiles-list', {},
     h('div.toolbar.list-toolbar', {}, h('span.toolbar-title', {}, 'Profiles'),
       h('div.toolbar-end', {}, button({ variant: 'outline', size: 'small', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile }))),
-    h('div.scroll', { id: 'profiles-list-scroll' },
+    // Stacked under a narrow window, the list keeps a few whole rows and scrolls (style.css .list-scroll).
+    h('div.scroll.list-scroll', { id: 'profiles-list-scroll' },
       listRow({ id: NONE, name: NO_PROFILE, count: '', active: !view.active, selected: open === NONE }),
       view.profiles.map(profile => listRow({ id: profile.id, name: profile.name, count: plural(presentItems(profile, all).length, 'item'), active: view.active === profile.id, selected: open === profile.id }))));
 }
@@ -243,11 +243,9 @@ function renameField(profile: Profile) {
 
 /** The pane header: the title (or `nameField` in its place), what the open view's action would do, and the actions. */
 function header(pane: { title: string; subtitle: (Node | string | null)[]; actions: (Node | null)[]; nameField?: Node; glyph?: 'sliders-horizontal' | 'circle-dashed' }) {
-  const back = button({ variant: 'ghost', size: 'small', icon: 'arrow-left', label: 'Profiles', id: 'profile-back', onclick: () => { const was = profileState.open; profileState.open = undefined; rerender(); document.getElementById(`profile-row-${was}`)?.focus(); } });
-  back.classList.add('profile-back');
   const line = h('p', {}, ...pane.subtitle);
   line.title = line.textContent ?? '';
-  return h('div.pane-header.profile-header', {}, back, icon(pane.glyph ?? 'sliders-horizontal', 16, 'tone-muted'),
+  return h('div.pane-header.profile-header', {}, icon(pane.glyph ?? 'sliders-horizontal', 16, 'tone-muted'),
     h('div.pane-title', {}, pane.nameField ?? h('h2', { title: pane.title }, pane.title), line), h('div.detail-actions.profile-actions', {}, ...pane.actions));
 }
 
@@ -345,7 +343,7 @@ function noProfileDetail() {
         h('li', {}, icon('circle-off', 14, 'tone-muted'), h('span', {}, 'Something you disable by hand in one tool stays disabled. Profiles only turn back on what a profile turned off.')),
         h('li', {}, icon('refresh-cw', 14, 'tone-muted'), h('span', {}, 'Managed items keep syncing while they are off, so they are up to date when they come back.')),
         h('li', {}, icon('history', 14, 'tone-muted'), h('span', {}, 'Each switch is one step in History, with Undo. Switch here, from the status bar, or from Central Knot’s menu bar menu.'))),
-      offItems.length ? [h('h3.eyebrow.pf-eyebrow', {}, 'Turned off by profiles', h('span.eyebrow-count', {}, String(offItems.length))), ...table(offItems, { plan, action: active ? 'apply' : 'stop using profiles' })] : null));
+      offItems.length ? [withClass(eyebrow('Turned off by profiles', offItems.length), 'pf-eyebrow'), ...table(offItems, { plan, action: active ? 'apply' : 'stop using profiles' })] : null));
 }
 
 // ---------- Page ----------
@@ -370,7 +368,6 @@ export function profilesPage(): HTMLElement {
       button({ variant: 'primary', icon: 'plus', label: 'New profile', id: 'profile-new', disabled: !canEditProfiles(), onclick: newProfile })));
   }
   const open = openId();
-  if (open) document.body.classList.add('has-item');
   const profile = view.profiles.find(entry => entry.id === open);
   return h('div.page.profiles-page', {}, bands.length ? h('div.bands', {}, bands) : null,
     h('div.page.split.profiles-split', {}, listColumn(open), open === NONE ? noProfileDetail() : profile ? profileDetail(profile) : h('div.detail-column')));

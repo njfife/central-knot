@@ -10,7 +10,7 @@ import { mcpDisabled, mcpSwitchPath, withMcpSwitch } from '../src/mcpswitch.ts';
 import { choseProfileInUse, holdsOnWhatIsHere, itemKeyOf, offAfterFailures, planSwitch, switchItems, type SwitchItem } from '../src/profileplan.ts';
 import { deleteProfile, readProfiles, releaseProfileHolds, saveProfile, switchedByHand, switchProfile, undoProfileSwitch } from '../src/profiles.ts';
 import type { ShareContext } from '../src/share.ts';
-import { switchState, targetOf } from '../src/skillswitch.ts';
+import { switchState } from '../src/skillswitch.ts';
 import type { HarnessId, HistoryEvent, SkillFacts } from '../src/types.ts';
 
 test('Each tool’s MCP switch: off writes its own form, on takes it out, and every other byte stays', () => {
@@ -127,18 +127,18 @@ test('Switching to a profile turns the rest off in each tool’s settings, in on
     assert.deepEqual(view.offByProfile, { 'skill:pager': ['claude-cli'], 'mcp:sentry': ['claude-cli', 'codex-cli'] });
     assert.equal((await deleteProfile(box.context, saved.id!)).problem, 'That profile is in use. Switch to another profile, or to No profile, first.');
 
-    const events = (await readHistory(box.home)).filter(event => event.kind === 'profile');
+    const events = (await readHistory(box.context)).filter(event => event.kind === 'profile');
     assert.equal(events.length, 1);
     const undone = await undoProfileSwitch(box.context, events[0].id);
     assert.equal(undone.stopped, undefined);
-    // Each settings file holds its earlier switches again (Claude Code's skill switches keep their emptied object).
-    assert.deepEqual(JSON.parse(await readFile(files[0], 'utf8')), { theme: 'dark', skillOverrides: {} });
+    // Each settings file is back as it was, byte for byte.
+    assert.equal(await readFile(files[0], 'utf8'), original[0]);
     assert.equal(await readFile(files[1], 'utf8'), original[1]);
     const after = await readProfiles(box.home);
     assert.equal(after.active, undefined);
     assert.deepEqual(after.offByProfile, {});
     // The undo is itself a switch: its Undo goes to Development again.
-    const redo = (await readHistory(box.home)).at(-1)!;
+    const redo = (await readHistory(box.context)).at(-1)!;
     assert.equal(redo.kind, 'profile');
     assert.equal((await undoProfileSwitch(box.context, redo.id)).flips.length, 3);
     assert.equal((await readProfiles(box.home)).active, saved.id);
@@ -153,11 +153,11 @@ test('Undo of an older switch keeps what later switches hold, and the profile th
     await switchProfile(box.context, dev);
     await switchProfile(box.context, pager);
     // Codex's copy of dev is off by Codex's own skill switch, by its path.
-    const devInCodex = targetOf({ folder: 'dev', directory: join(box.home, '.codex/skills/dev') });
+    const devInCodex = { folder: 'dev', name: 'dev', skillFile: join(box.home, '.codex/skills/dev/SKILL.md') };
     assert.equal(switchState(box.context, 'codex-cli', await readFile(join(box.home, '.codex/config.toml'), 'utf8'), devInCodex), true);
     // Then Development again: the profile in use was chosen by this last switch, not the first.
     await switchProfile(box.context, dev);
-    const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    const first = (await readHistory(box.context)).find(event => event.kind === 'profile')!;
     await undoProfileSwitch(box.context, first.id);
     // The first switch's pager flip was made again by later switches, so it is theirs; only sentry goes back on.
     const after = await readProfiles(box.home);
@@ -174,7 +174,7 @@ test('A switch and its own Undo cancel out: undoing the switch before them goes 
     await switchProfile(box.context, dev);
     const second = (await switchProfile(box.context, pager)).event!;
     await undoProfileSwitch(box.context, second);
-    const first = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    const first = (await readHistory(box.context)).find(event => event.kind === 'profile')!;
     await undoProfileSwitch(box.context, first.id);
     assert.deepEqual(await readProfiles(box.home), { profiles: [{ id: dev, name: 'Development', items: ['skill:dev'] }, { id: pager, name: 'Pager', items: ['skill:pager'] }], offByProfile: {} });
     // A switch whose earlier profile was deleted since isn't undone: the tools would match a profile that no longer exists.
@@ -209,13 +209,13 @@ test('A switch set by hand afterwards is the person’s: profiles let go of it',
     const all = (await saveProfile(box.context, { name: 'Everything', items: ['skill:dev', 'skill:pager', 'mcp:sentry'] })).id!;
     await switchProfile(box.context, dev);
     // On the Skills page: pager enabled in Claude Code by hand, then that Enable undone in History (as main.ts does after each).
-    const enable = [{ key: 'pager', managed: false, off: [], disabled: [] }];
+    const enable = [{ key: 'pager', managed: false, off: [], enable: ['claude-cli' as HarnessId] }];
     await releaseProfileHolds(box.context, switchedByHand(enable, (await applyChanges(box.context, enable)).results));
-    const enabled = (await readHistory(box.home)).filter(event => event.kind === 'switched').at(-1)!;
+    const enabled = (await readHistory(box.context)).filter(event => event.kind === 'switched').at(-1)!;
     await releaseProfileHolds(box.context, switchedByHand([{ key: 'pager' }], (await restoreFromHistory(box.context, enabled.id)).results));
     assert.equal((await readProfiles(box.home)).offByProfile['skill:pager'], undefined);
     // Undo of the switch leaves pager as set by hand, too: an Enable and its Undo are both choices made by hand.
-    const switched = (await readHistory(box.home)).find(event => event.kind === 'profile')!;
+    const switched = (await readHistory(box.context)).find(event => event.kind === 'profile')!;
     assert.ok(!(await undoProfileSwitch(box.context, switched.id)).flips.some(flip => flip.item === 'skill:pager'));
     await switchProfile(box.context, dev);
     const result = await switchProfile(box.context, all);
@@ -261,6 +261,6 @@ test('A settings file that can’t be written fails only its own flips, and an U
     await switchProfile(box.context, (await saveProfile(box.context, { name: 'Pager', items: ['skill:pager'] })).id!);
     for (const folder of folders) await chmod(folder, 0o555);
     assert.match((await undoProfileSwitch(box.context, result.event!)).stopped ?? '', /^Nothing was undone: /);
-    assert.equal((await readHistory(box.home)).find(event => event.id === result.event)?.undoneBy, undefined);
+    assert.equal((await readHistory(box.context)).find(event => event.id === result.event)?.undoneBy, undefined);
   } finally { for (const folder of folders) await chmod(folder, 0o755); await box.cleanup(); }
 });

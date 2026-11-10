@@ -5,13 +5,13 @@
 //   Codex        config.toml    [mcp_servers.<name>] enabled = false                (0.142.3: `codex mcp list` shows it disabled)
 //   Pi           mcp.json       "mcpServers": { "<name>": { "enabled": false } }    (1.5.0: `pi mcp list` shows it disabled)
 // Claude Code's ~/.claude.json is never touched: its switch lives in settings.json, which Claude Code does not rewrite while it runs.
-import { harnesses } from './harnesses.ts';
+import { readFile } from 'node:fs/promises';
 import { mcpFile } from './mcp.ts';
-import type { ShareContext } from './share.ts';
-import { list, parseJson, readSettingsFile, switchPath, type SwitchFile } from './skillswitch.ts';
+import { errorCode, type ShareContext } from './share.ts';
+import { switchPath, type SwitchFile } from './skillswitch.ts';
 import { readTomlTables, setJsonMember } from './textedit.ts';
-import { record } from './values.ts';
-import type { HarnessId } from './types.ts';
+import { record, withoutBom } from './values.ts';
+import type { HarnessId, SkillFacts } from './types.ts';
 
 /**
  * The file that holds a tool's MCP switches: Claude Code's and Copilot's settings.json (beside their skill switches), Codex's
@@ -21,16 +21,48 @@ export function mcpSwitchPath(context: ShareContext, tool: HarnessId): string {
   return tool === 'pi-cli' ? mcpFile(context, tool) : switchPath(context, tool);
 }
 
-/** Each tool's MCP switch file as read ('' when there is none yet), or why it can't be used. */
+/** A settings file's JSON object ({} for an empty file). Throws when it is not one. */
+const jsonOf = (text: string): Record<string, unknown> => {
+  if (!text.trim()) return {};
+  const json = record(JSON.parse(withoutBom(text)));
+  if (!json) throw new Error('Not a JSON object.');
+  return json;
+};
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** One tool's MCP switch file as read ('' when there is none yet), or why it can't be used: never written then. */
+async function readMcpSwitchFile(context: ShareContext, tool: HarnessId): Promise<SwitchFile> {
+  const path = mcpSwitchPath(context, tool);
+  let text: string;
+  try { text = await readFile(path, 'utf8'); } catch (error) {
+    return errorCode(error) === 'ENOENT' ? { tool, path, text: '', exists: false } : { tool, path, text: '', exists: true, problem: { file: path, reason: 'can’t be read.' } };
+  }
+  // A server named '' is asked about only to see whether the file parses as the tool's form.
+  try { mcpDisabled(tool, text, ''); return { tool, path, text, exists: true }; }
+  catch { return { tool, path, text, exists: true, problem: { file: path, reason: `isn’t valid ${tool === 'codex-cli' ? 'TOML' : 'JSON'}.` } }; }
+}
+
+/** Each tool's MCP switch file as read, or why it can't be used. */
 export async function readMcpSwitches(context: ShareContext, tools: HarnessId[]): Promise<Map<HarnessId, SwitchFile>> {
-  // The check asks about a server named '' only to see whether the file parses as the tool's form.
-  return new Map(await Promise.all(tools.map(async tool => [tool, await readSettingsFile(mcpSwitchPath(context, tool), text => mcpDisabled(tool, text, ''), `servers can’t be turned off in ${harnesses[tool].name}`)] as const)));
+  return new Map(await Promise.all(tools.map(async tool => [tool, await readMcpSwitchFile(context, tool)] as const)));
+}
+
+/** What a server's facts say about its tools' switches: the tools that have it off, and the tools whose file can't be used. */
+export function mcpSwitchFacts(name: string, tools: HarnessId[], switches: Map<HarnessId, SwitchFile>): Pick<SkillFacts, 'disabled' | 'switchProblem'> {
+  const facts: Pick<SkillFacts, 'disabled' | 'switchProblem'> = {};
+  for (const tool of tools) {
+    const file = switches.get(tool);
+    if (!file) continue;
+    if (file.problem) (facts.switchProblem ??= {})[tool] = file.problem;
+    else if (mcpDisabled(tool, file.text, name)) (facts.disabled ??= []).push(tool);
+  }
+  return facts;
 }
 
 const deniesByName = (entry: unknown, name: string) => record(entry)?.serverName === name;
 
 /** Pi: the server's own entry in mcp.json's `mcpServers`, if it is there as an object. */
-const piEntry = (text: string, name: string) => record(record(parseJson(text).mcpServers)?.[name]);
+const piEntry = (text: string, name: string) => record(record(jsonOf(text).mcpServers)?.[name]);
 
 /** Codex: the server's own `[mcp_servers.<name>]` table, if it has one. */
 const codexTable = (text: string, name: string) => readTomlTables(text).find(table => !table.array && table.path.length === 2 && table.path[0] === 'mcp_servers' && table.path[1] === name);
@@ -38,8 +70,8 @@ const codexTable = (text: string, name: string) => readTomlTables(text).find(tab
 /** Whether the text turns this server off in the tool. Throws when the text isn't the tool's format. */
 export function mcpDisabled(tool: HarnessId, text: string, name: string): boolean {
   switch (tool) {
-    case 'claude-cli': return list(parseJson(text).deniedMcpServers).some(entry => deniesByName(entry, name));
-    case 'copilot-cli': return list(parseJson(text).disabledMcpServers).includes(name);
+    case 'claude-cli': return list(jsonOf(text).deniedMcpServers).some(entry => deniesByName(entry, name));
+    case 'copilot-cli': return list(jsonOf(text).disabledMcpServers).includes(name);
     case 'codex-cli': return codexTable(text, name)?.entries.find(entry => entry.key === 'enabled')?.value === false;
     case 'pi-cli': return piEntry(text, name)?.enabled === false;
   }
@@ -53,11 +85,11 @@ export function withMcpSwitch(tool: HarnessId, text: string, name: string, disab
   if (mcpDisabled(tool, text, name) === disabled) return text;
   switch (tool) {
     case 'claude-cli': {
-      const others = list(parseJson(text).deniedMcpServers).filter(entry => !deniesByName(entry, name));
+      const others = list(jsonOf(text).deniedMcpServers).filter(entry => !deniesByName(entry, name));
       return setJsonMember(text, ['deniedMcpServers'], disabled ? [...others, { serverName: name }] : others.length ? others : undefined);
     }
     case 'copilot-cli': {
-      const others = list(parseJson(text).disabledMcpServers).filter(entry => entry !== name);
+      const others = list(jsonOf(text).disabledMcpServers).filter(entry => entry !== name);
       return setJsonMember(text, ['disabledMcpServers'], disabled ? [...others, name] : others.length ? others : undefined);
     }
     case 'codex-cli': {

@@ -7,7 +7,7 @@
 // - An item in the profile is turned back on only where a profile turned it off. A switch turned off by hand stays off.
 // - No profile turns back on everything profiles turned off, and holds nothing.
 import { plural } from './model.ts';
-import { andList, toolName } from './words.ts';
+import { andList, problemText, toolName } from './words.ts';
 import type { HarnessId, HistoryEvent, ManageView, McpView, Profile, ProfileFlip, ProfilesView, SkillFacts } from './types.ts';
 
 /** What every screen calls having no profile in use. */
@@ -92,12 +92,13 @@ export interface SwitchItem {
 function toItem(kind: ItemKind, facts: SkillFacts): SwitchItem {
   const tools: SwitchItem['tools'] = {};
   const blocked: SwitchItem['blocked'] = {};
+  const blockedFile: SwitchItem['blockedFile'] = {};
   for (const tool of Object.keys(facts.copies) as HarnessId[]) {
     const problem = facts.switchProblem?.[tool];
-    if (problem) blocked[tool] = problem;
+    if (problem) { blocked[tool] = problemText(problem); blockedFile[tool] = problem.file; }
     tools[tool] = !problem && facts.disabled?.includes(tool) ? 'off' : 'on';
   }
-  return { id: itemId(kind, facts.key), kind, key: facts.key, name: facts.name, description: facts.description, tools, blocked, blockedFile: facts.switchFile ?? {} };
+  return { id: itemId(kind, facts.key), kind, key: facts.key, name: facts.name, description: facts.description, tools, blocked, blockedFile };
 }
 
 /** Every standalone skill and MCP server the home has. A server that belongs to an app (ChatGPT desktop's own) is left out. */

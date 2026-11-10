@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createMarketplaces, type MarketplaceEngine, type MarketplaceHost } from '../src/marketplaces.ts';
@@ -19,8 +19,8 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
   await mkdir(home, { recursive: true });
   const calls: string[] = [];
   const host: MarketplaceHost = {
-    home: () => ({ home, snapshots: [] }),
-    tools: async () => ['claude-cli', 'copilot-cli', 'codex-cli'],
+    home: () => ({ home }),
+    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
@@ -28,6 +28,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId } = {}) 
   };
   const use: MarketplaceEngine = {
     findClis: async () => ({ 'claude-cli': '/bin/true' }),
+    checkAccess: async (context, source) => { calls.push(`check ${source}`); return engine.checkAccess(context, source); },
     readCatalog: async (context, source) => { calls.push(`read ${source}`); return engine.readCatalog(context, source); },
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (_context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
@@ -48,6 +49,17 @@ test('Adding a marketplace reads it once, stores how it was given, and the view 
     assert.deepEqual(added.view!.marketplaces.map(entry => [entry.name, entry.plugins.map(plugin => plugin.name), entry.origins]), [['team', ['pdf', 'xlsx'], ['central-knot']]]);
     // The same folder typed another way is the same marketplace: listed once.
     assert.equal((await box.markets.add(root)).view!.marketplaces.length, 1);
+  } finally { await box.cleanup(); }
+});
+
+test('A Git marketplace that can’t be reached at Add is stopped by its access check: nothing is cloned or listed', async () => {
+  const box = await setup();
+  try {
+    const added = await box.markets.add('http://127.0.0.1:1/team.git');
+    assert.match(added.problem ?? '', /Can’t reach the marketplace/);
+    assert.deepEqual(box.calls, ['check http://127.0.0.1:1/team.git'], 'no fetch after a failed check');
+    assert.equal(await stat(join(box.base, 'data/marketplaces.json')).then(() => true, () => false), false, 'not added to the list');
+    assert.equal(await stat(join(box.base, 'data/plugins/catalogs')).then(() => true, () => false), false, 'no copy made');
   } finally { await box.cleanup(); }
 });
 
@@ -87,7 +99,7 @@ test('One tool’s error fails that tool only: the others’ reports stay, and l
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'] as HarnessId[], box.home);
+    const result = await box.markets.install(root, 'team', 'pdf', ['claude-cli', 'copilot-cli', 'codex-cli'], box.home);
     assert.deepEqual(result.reports.map(report => [report.tool, report.outcome, !!report.changed]), [['claude-cli', 'installed', true], ['copilot-cli', 'failed', false], ['codex-cli', 'installed', true]]);
     assert.match(result.reports[1]!.message, /disk full/);
   } finally { await box.cleanup(); }
@@ -101,7 +113,7 @@ test('A Git marketplace that can’t be reached is not fetched again on every vi
     assert.match(first.marketplaces[0]!.problem ?? '', /reach|access|Git/);
     await box.markets.view();
     assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 1, box.calls.join('\n'));
-    await box.markets.view('https://127.0.0.1:1/gone.git');
+    await box.markets.view(true);
     assert.equal(box.calls.filter(call => call.startsWith('read ')).length, 2, 'Refresh tries again');
   } finally { await box.cleanup(); }
 });
@@ -146,7 +158,7 @@ test('A plugin gone from the marketplace fails for its tools; uninstall names th
     const root = join(box.base, 'market');
     await marketplace(root, 'team', ['pdf']);
     await box.markets.add(root);
-    const gone = await box.markets.install(root, 'team', 'removed', ['claude-cli', 'codex-cli'] as HarnessId[], box.home);
+    const gone = await box.markets.install(root, 'team', 'removed', ['claude-cli', 'codex-cli'], box.home);
     assert.equal(gone.stopped, undefined);
     assert.deepEqual(gone.reports.map(report => [report.tool, report.outcome]), [['claude-cli', 'failed'], ['codex-cli', 'failed']]);
     await box.markets.uninstall(root, 'team', 'pdf', 'claude-cli', box.home);
@@ -167,7 +179,7 @@ test('A tool holding a different marketplace under the same name is left alone',
   } finally { await box.cleanup(); }
 });
 
-test('Refreshing a marketplace lets go of its plugins’ copies from other repositories, so they are read again', async () => {
+test('Refresh lets go of the copies a marketplace’s plugins keep from other repositories, so they are read again', async () => {
   const box = await setup();
   try {
     const root = join(box.base, 'market');
@@ -177,7 +189,7 @@ test('Refreshing a marketplace lets go of its plugins’ copies from other repos
     await put(join(copy, 'plugin/README.md'), 'old');
     await box.markets.view();
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), true, 'a plain view keeps the copy');
-    await box.markets.refresh(root);
+    await box.markets.view(true);
     assert.equal(await import('node:fs/promises').then(fs => fs.stat(copy).then(() => true, () => false)), false);
   } finally { await box.cleanup(); }
 });

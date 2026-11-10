@@ -1,5 +1,6 @@
 // Design preview: sample skills for iterating on the Overview's layout. Started only with --design-preview.
 import { comparedTools, copiesDiffer } from './syncrules.ts';
+import type { SwitchProblem } from './types.ts';
 export { comparedTools, copiesDiffer };
 // Nothing here reads or writes disk; the controls act on this sample alone.
 
@@ -39,6 +40,7 @@ export interface SampleSkill {
   versions?: Partial<Record<Tool, { lines: string; changed: string; text: string }>>;
   /** Agents: the With limits label for each tool that lacks some of the origin's fields. */
   limits?: Partial<Record<Tool, string>>;
+  oneWay?: { from: Tool; lost: string[] };
   kept?: string[];
   /** Agents: one-way tools edited or deleted there, no longer updated. */
   stopped?: Tool[];
@@ -46,8 +48,10 @@ export interface SampleSkill {
   waits?: Tool[];
   /** Skills: tools whose copy is disabled with the tool's own switch (it stays there; the tool doesn't load it). */
   disabled?: Tool[];
-  /** Skills: why Disable can't be used in a tool. */
-  switchProblem?: Partial<Record<Tool, string>>;
+  /** Skills: why a tool's switch can't be used at all (its settings file, named in `file`). */
+  switchProblem?: Partial<Record<Tool, SwitchProblem>>;
+  /** Skills: why a new Disable isn't offered in a tool (an older build); Enable stays available. */
+  disableUnverified?: Partial<Record<Tool, string>>;
   /** Skills: whether Central Knot may change each tool's copy (not a link or a shared folder), so Remove can be offered. */
   writable?: Partial<Record<Tool, boolean>>;
   /** Skills, before Apply all: tools whose copy is removed then. */
