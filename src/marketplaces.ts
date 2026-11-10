@@ -6,14 +6,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { installedContents, marketplacePage, pluginDetail, pluginFiles, readmeIn, sourceLabel, type PluginFiles } from './catalogdetail.ts';
 import { searchPath } from './platform.ts';
-import { failedFor } from './pluginplan.ts';
+import { failedFor, type PluginOp } from './pluginplan.ts';
 import { findBinary, probeVersion } from './discovery.ts';
 import * as engine from './plugins.ts';
 import { installParts, partsCurrent, planParts, readParts, removeParts, undoParts } from './parts.ts';
 import { pluginTools, takesPlugins, type PluginTool } from './presence.ts';
 import type { ActionReport, Catalog, DesktopApp, CatalogPlugin, HarnessId, InstallState, InstalledCopy, MarketplaceView, PartPlan, PartsInstall, PartsPick, PartsState, PluginActionResult, PluginDetail, PluginView, PluginsView, Snapshot } from './types.ts';
 import { writeDurably, type ShareContext } from './share.ts';
-import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, partsTools } from './pluginstatus.ts';
+import { SKILL_SWITCH_TESTED_FROM, copyDiffers, heldReason, marketTitle, partsTools, stateOf, updateTools, versionToCompare } from './pluginstatus.ts';
 import { isFolder, isHttps, onlyAllowed, shortBuild } from './values.ts';
 
 /** What runs a tool's plugin commands when it is a desktop app's own copy: "Claude desktop’s Code tab 2.1.321". */
@@ -78,6 +78,8 @@ const toolIds = (value: unknown): PluginTool[] => onlyAllowed(value, pluginTools
 const withoutFileBytes = (reports: ActionReport[]): ActionReport[] => reports.map(report => ({ ...report, runs: report.runs.map(run => ({ ...run, changed: run.changed.map(change => ({ path: change.path, before: null, after: null })) })) }));
 /** How long a Git source that couldn't be fetched (with no copy to show) waits before it is tried again on its own. */
 const RETRY_MS = 60_000;
+/** Said of a plugin a tool still has that its marketplace's catalog dropped. */
+export const NO_LONGER_OFFERED = 'No longer offered in this marketplace. It stays installed as it is until you uninstall it.';
 /** A plugin's contents with nothing in them, for a plugin whose files couldn't be read (its `problem` says why). */
 const empty: PluginDetail = { skills: [], commands: [], agents: [], hooks: [], mcpServers: [], mcpUsesPluginRoot: false, lspServers: [], bin: false, offered: false };
 
@@ -232,6 +234,21 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
   }
 
   /**
+   * The plugins some tool still has installed from this marketplace that its catalog no longer lists, by name. A tool
+   * counts only when the marketplace it has under this name is this one (the same source), and only its own record of an
+   * install does: nothing is inferred from a catalog that couldn't be read (the caller has one that was).
+   */
+  async function droppedPlugins(ctx: engine.PluginContext, tools: PluginTool[], catalog: Catalog, source: string): Promise<string[]> {
+    const names = new Set<string>();
+    for (const tool of tools) {
+      const registered = (await engine.registeredMarketplaces(ctx, tool)).find(entry => entry.name === catalog.name);
+      if (!registered || !engine.sameSource(registered.source, source)) continue;
+      for (const found of await engine.installedOnce(ctx, tool)) if (found.marketplace === catalog.name && found.state.state !== 'not-installed' && !catalog.plugins.some(plugin => plugin.name === found.plugin)) names.add(found.plugin);
+    }
+    return [...names].sort();
+  }
+
+  /**
    * One marketplace on the page. A catalog that can't be read becomes a problem on its entry, never a broken page.
    * `records`: the parts record as read once for the whole view.
    */
@@ -245,9 +262,18 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
       const shown: PluginView[] = (catalog?.plugins ?? []).map(({ entry: _entry, remote: _remote, ...plugin }) => plugin);
       const { parts, recordedName } = await partsStates(ctx, catalog, source, records);
       // A plugin the catalog dropped stays listed while its parts are in a tool, so they can still be removed together.
-      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'No longer in this marketplace. Its parts can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
+      for (const name of Object.keys(parts ?? {})) if (!shown.some(plugin => plugin.name === name)) shown.push({ name, description: catalog ? 'No longer offered in this marketplace. Its parts stay as they are, and can still be removed together.' : 'Its marketplace can’t be read now. Its parts can still be removed together.', gone: true });
       if (!catalog) return { ...base, name: recordedName ?? '', problem: problem ?? read?.problem, plugins: shown, parts };
-      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states: await statesFor(ctx, tools.filter(takesPlugins), catalog, source), parts };
+      // A plugin the catalog dropped stays listed while a tool still has it installed: kept as it is, marked, until it is uninstalled (PLG-08).
+      const dropped = await droppedPlugins(ctx, tools.filter(takesPlugins), catalog, source);
+      for (const name of dropped) {
+        const listed = shown.find(plugin => plugin.name === name);
+        if (listed) listed.description = NO_LONGER_OFFERED;
+        else shown.push({ name, description: NO_LONGER_OFFERED, gone: true });
+      }
+      const pluginTools = tools.filter(takesPlugins);
+      const states = { ...await statesFor(ctx, pluginTools, catalog, source), ...await statesFor(ctx, pluginTools, catalog, source, dropped.map(name => ({ name, description: '' }))) };
+      return { ...base, name: catalog.name, fetchedAt: catalog.fetchedAt, problem, stale, owner: catalog.owner, description: catalog.description, copilotRefuses: catalog.copilotRefuses, codexOnly: catalog.codexOnly, plugins: shown, states, parts };
     } catch { return { ...base, problem: 'It could not be read.' }; }
   }
 
@@ -291,6 +317,11 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     const ctx = await context();
     const { catalog } = await catalogFor(ctx, source, { counts: false, local });
     const item = catalog?.plugins.find(entry => entry.name === plugin);
+    // A plugin the catalog dropped has only what the tools still hold of it.
+    if (catalog?.root && !item) {
+      const installed = await installedCopies(ctx, catalog, source, { name: plugin, description: '' });
+      return Object.keys(installed).length ? { ...empty, installed } : null;
+    }
     if (!catalog?.root || !item) return null;
     if (local && item.remote && !(await access(engine.remoteCopyFolder(ctx, item.remote)).then(() => true, () => false))) return null;
     const [offered, installed] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item)]);
@@ -379,15 +410,48 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
    * Each tool's own update of an installed plugin, checked as install is. Whether the tool's copy differs from the
    * marketplace's is asked as the plugin page asks it (copyDiffers), from both copies read again each time.
    */
-  const update = (source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown) => install(source, marketName, plugin, tools, home, (ctx, catalog, name, tool) => {
+  const update = (source: string, marketName: string, plugin: string, tools: PluginTool[], home: unknown, options?: { reinstall?: boolean }) => install(source, marketName, plugin, tools, home, (ctx, catalog, name, tool) => {
     const item = catalog.plugins.find(entry => entry.name === name);
     const differs = async () => {
       if (!catalog.root || !item) return false;
       const [offered, copies] = await Promise.all([offeredDetail(ctx, catalog.root, item), installedCopies(ctx, catalog, source, item, tool)]);
       return !!offered && !offered.problem && copyDiffers(offered, copies[tool]);
     };
-    return use.update(ctx, catalog, name, tool, differs);
+    return use.update(ctx, catalog, name, tool, differs, options);
   });
+
+  /**
+   * What Update all would choose now, in every marketplace, with each Git marketplace fetched again first (as Refresh
+   * does): for each plugin some tool has, installed or as parts, an update in each tool whose copy is behind and its parts
+   * brought up to date in each tool holding them out of date (pluginstatus.updateTools, as the page asks it). A plugin's
+   * files are read first, as its page reads them (from the repository it is kept in, too), so a copy that differs at the
+   * same version counts. Each op carries the version offered. Nothing here writes to a tool.
+   *
+   * A marketplace that couldn't be read now gives nothing and is named in `unread`: its last copy says nothing about what
+   * it offers today. A plugin its catalog dropped is left as it is. One turned off in a tool is still updated there, and
+   * update() keeps it off.
+   */
+  async function pendingUpdates(home: unknown): Promise<{ stopped?: string; ops: (PluginOp & { offered?: string })[]; unread: string[]; view?: PluginsView }> {
+    const stopped = await guard(home);
+    if (stopped) return { stopped, ops: [], unread: [] };
+    const shown = await view(true);
+    const ops: (PluginOp & { offered?: string })[] = [];
+    const unread: string[] = [];
+    for (const entry of shown.marketplaces) {
+      if (entry.problem || !entry.name) { unread.push(marketTitle(entry)); continue; }
+      for (const plugin of entry.plugins) {
+        if (plugin.gone) continue;
+        const copied = shown.tools.some(tool => { const state = stateOf(entry, plugin.name, tool); return state.state === 'installed' && !state.live; });
+        if (!copied && !entry.parts?.[plugin.name]) continue;
+        const read = copied ? await detail(entry.source, plugin.name).catch(() => null) : undefined;
+        const offered = versionToCompare(plugin, read);
+        const behind = updateTools(shown, entry, plugin.name, offered, plugin.components, read);
+        const op = (tool: HarnessId, action: PluginOp['action']) => ({ source: entry.source, marketName: entry.name, plugin: plugin.name, tool, action, ...(offered || plugin.version ? { offered: offered ?? plugin.version } : {}) });
+        ops.push(...behind.plugin.map(tool => op(tool, 'update')), ...behind.parts.map(tool => op(tool, 'install-parts')));
+      }
+    }
+    return { ops, unread, view: shown };
+  }
 
   /** One tool's own uninstall of one plugin. `marketName` is the catalog's name for it; `source` is checked against what the tool has. */
   async function uninstall(source: string, marketName: string, plugin: string, tool: PluginTool, home: unknown): Promise<PluginActionResult> {
@@ -441,7 +505,7 @@ export function createMarketplaces(host: MarketplaceHost, use: MarketplaceEngine
     return { reports: withoutFileBytes([await use.setSkill(ctx, marketName, plugin, skill, tool, on, source, catalog?.plugins.find(item => item.name === plugin)?.entry)]) };
   }
 
-  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts };
+  return { view, detail, readme, add, forget, install, update, uninstall, setSkill, partsPlan, parts, pendingUpdates };
 }
 
 type Handle = (channel: string, work: (...args: unknown[]) => Promise<unknown>) => void;
@@ -458,7 +522,7 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
  * The Plugins page's requests. Each checks its arguments; anything malformed is refused, never guessed at. `handle`
  * queues a request behind the app's other work; `handleNow` answers at once, for requests that change nothing a tool uses.
  */
-export function registerMarketplaces({ handle, handleNow }: { handle: Handle; handleNow: Handle }, host: MarketplaceHost): void {
+export function registerMarketplaces({ handle, handleNow }: { handle: Handle; handleNow: Handle }, host: MarketplaceHost): ReturnType<typeof createMarketplaces> {
   const markets = createMarketplaces(host);
   const open = () => !!host.home();
   handle('plugins:view', async (fresh, readId) => (open() ? markets.view(fresh === true, typeof readId === 'number' ? readId : undefined) : null));
@@ -490,4 +554,5 @@ export function registerMarketplaces({ handle, handleNow }: { handle: Handle; ha
     const ids = toolIds([tool]);
     return open() && isText(source) && isName(marketplace) && isName(plugin) && isText(skill, 200) && typeof on === 'boolean' && ids.length ? markets.setSkill(source, marketplace, plugin, skill, ids[0]!, on, home) : refused(tool);
   });
+  return markets;
 }

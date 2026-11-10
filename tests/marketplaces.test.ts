@@ -13,7 +13,7 @@ const marketplace = (root: string, name: string, plugins: string[]) => Promise.a
   ...plugins.map(plugin => put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n`)),
 ]);
 
-async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp } = {}) {
+async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?: boolean; app?: DesktopApp; pi?: boolean } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), 'ck-markets-')));
   const home = join(base, 'home');
   await mkdir(home, { recursive: true });
@@ -21,11 +21,13 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
   const ran: (string | undefined)[] = [];
   const host: MarketplaceHost = {
     home: () => ({ home }),
-    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli'], snapshots: [] }),
+    read: async () => ({ tools: ['claude-cli', 'copilot-cli', 'codex-cli', ...(options.pi ? ['pi-cli' as const] : [])], snapshots: [] }),
     writeAccess: async () => (options.allowed === false ? { allowed: false, reason: 'Preview only.' } : { allowed: true }),
     dataDir: join(base, 'data'),
     pickFolder: async () => undefined,
     openExternal: async () => {},
+    // With Pi in the home, the parts engine's context too, so a plugin's parts can go into it.
+    ...(options.pi ? { share: () => ({ home, mode: 'custom' as const, read: async () => [], build: 'test', settingsPath: join(base, 'settings.json'), realHome: join(base, 'real') }) } : {}),
   };
   const use: MarketplaceEngine = {
     findClis: async () => ({ binaries: { 'claude-cli': '/bin/true', ...(options.codex ? { 'codex-cli': join(base, 'bin/codex') } : {}), ...(options.app ? { 'copilot-cli': options.app.binary } : {}) }, apps: options.app ? { 'copilot-cli': options.app } : {} }),
@@ -34,7 +36,7 @@ async function setup(options: { allowed?: boolean; throwFor?: HarnessId; codex?:
     readRemotePlugin: async () => ({ problem: 'not in tests' }),
     install: async (context, _catalog, plugin, tool) => { calls.push(`install ${plugin} ${tool}`); ran.push(context.binaries[tool]); if (tool === options.throwFor) throw new Error('disk full'); return { tool, outcome: 'installed', message: 'Installed.', runs: [{ tool, command: 'x', ok: true, output: '', changed: [{ path: '/p', before: 'old', after: 'new' }] }], changed: true } satisfies ActionReport; },
     uninstall: async (_context, marketplace, plugin, tool, source) => { calls.push(`uninstall ${plugin}@${marketplace} ${tool} ${source}`); return { tool, outcome: 'uninstalled', message: 'Uninstalled.', runs: [], changed: true }; },
-    update: async (_context, _catalog, plugin, tool) => { calls.push(`update ${plugin} ${tool}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
+    update: async (_context, _catalog, plugin, tool, _differs, options) => { calls.push(`update ${plugin} ${tool}${options?.reinstall === false ? ' (no reinstall)' : ''}`); return { tool, outcome: 'updated', message: 'Updated.', runs: [], changed: true }; },
     setSkill: async (_context, marketplace, plugin, skill, tool, on, _source, entry) => { calls.push(`skill ${plugin}:${skill}@${marketplace} ${tool} ${on} entry=${entry?.name}`); return { tool, outcome: on ? 'skill-on' : 'skill-off', message: '', runs: [], changed: true }; },
   };
   return { base, home, calls, ran, markets: createMarketplaces(host, use), cleanup: () => rm(base, { recursive: true, force: true }) };
@@ -286,5 +288,90 @@ test('Turning a plugin skill off is offered on a build older than the one tested
     // Codex updated while the app is open: Refresh all reads its build again.
     await writeFile(join(box.base, 'bin/codex'), '#!/bin/sh\necho "codex-cli 0.167.0"\n', { mode: 0o755 });
     assert.equal((await box.markets.view(true)).versions?.['codex-cli'], '0.167.0');
+  } finally { await box.cleanup(); }
+});
+
+/** A marketplace whose plugins each say their version, with one skill each holding `text`. */
+const versioned = (root: string, name: string, plugins: Record<string, { version: string; text?: string }>) => Promise.all([
+  put(join(root, '.claude-plugin/marketplace.json'), JSON.stringify({ name, plugins: Object.keys(plugins).map(plugin => ({ name: plugin, source: `./plugins/${plugin}` })) })),
+  ...Object.entries(plugins).flatMap(([plugin, { version, text = plugin }]) => [
+    put(join(root, `plugins/${plugin}/.claude-plugin/plugin.json`), JSON.stringify({ name: plugin, version })),
+    put(join(root, `plugins/${plugin}/skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n${text}\n`)]),
+]);
+/** Claude Code's record of plugins installed from `market`, each a cache copy at its version holding one skill with `text`. */
+async function claudeHas(home: string, market: string, plugins: Record<string, { version: string; text?: string }>) {
+  const listed: Record<string, unknown> = {};
+  for (const [plugin, { version, text = plugin }] of Object.entries(plugins)) {
+    const copy = join(home, '.claude/plugins/cache', market, plugin, version);
+    await put(join(copy, '.claude-plugin/plugin.json'), JSON.stringify({ name: plugin, version }));
+    await put(join(copy, `skills/${plugin}/SKILL.md`), `---\nname: ${plugin}\ndescription: ${plugin}\n---\n${text}\n`);
+    listed[`${plugin}@${market}`] = [{ scope: 'user', installPath: copy, version }];
+  }
+  await put(join(home, '.claude/plugins/installed_plugins.json'), JSON.stringify({ version: 2, plugins: listed }));
+}
+
+test('What is due by itself is what Update all would choose: an older copy and one that differs at the same version, and nothing for a tool without the plugin', async () => {
+  const box = await setup({ pi: true });
+  try {
+    const root = join(box.base, 'market');
+    await versioned(root, 'team', { notes: { version: '2.0.0', text: 'new words' }, pdf: { version: '2.0.0' }, xlsx: { version: '2.0.0' }, extra: { version: '1.0.0' } });
+    await box.markets.add(root);
+    // Claude Code: pdf is older, notes has other words at the same version, xlsx is the marketplace's copy. It never had extra,
+    // and Codex has none of them: nothing is installed anywhere by an update.
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' }, notes: { version: '2.0.0', text: 'old words' }, xlsx: { version: '2.0.0' } });
+    // Pi has pdf's parts as they were before the marketplace moved on.
+    await versioned(root, 'team', { notes: { version: '2.0.0', text: 'new words' }, pdf: { version: '1.0.0' }, xlsx: { version: '2.0.0' }, extra: { version: '1.0.0' } });
+    assert.equal((await box.markets.parts(root, 'team', 'pdf', 'pi-cli', 'install', undefined, box.home)).reports[0]?.outcome, 'installed');
+    await versioned(root, 'team', { notes: { version: '2.0.0', text: 'new words' }, pdf: { version: '2.0.0', text: 'pdf, second edition' }, xlsx: { version: '2.0.0' }, extra: { version: '1.0.0' } });
+    // A second marketplace that can't be read now is named, and gives nothing.
+    const broken = join(box.base, 'broken');
+    await versioned(broken, 'other', { thing: { version: '1.0.0' } });
+    await box.markets.add(broken);
+    await put(join(broken, '.claude-plugin/marketplace.json'), '{ not json');
+    const due = await box.markets.pendingUpdates(box.home);
+    assert.deepEqual(due.ops.map(op => [op.plugin, op.tool, op.action, op.offered, op.marketName, op.source]), [
+      ['notes', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'claude-cli', 'update', '2.0.0', 'team', root], ['pdf', 'pi-cli', 'install-parts', '2.0.0', 'team', root]]);
+    assert.deepEqual([due.stopped, due.unread], [undefined, ['Folder: broken']], 'named as the Plugins page names it');
+    // The update itself is the button's, told not to uninstall in order to reinstall.
+    box.calls.length = 0;
+    await box.markets.update(root, 'team', 'pdf', ['claude-cli'], box.home, { reinstall: false });
+    assert.deepEqual(box.calls, ['update pdf claude-cli (no reinstall)']);
+    assert.deepEqual((await box.markets.pendingUpdates('/another/home')).ops, [], 'only the home that is open');
+  } finally { await box.cleanup(); }
+});
+
+test('Where nothing may be changed, nothing is due and the reason is given', async () => {
+  const box = await setup({ allowed: false });
+  try {
+    const root = join(box.base, 'market');
+    await versioned(root, 'team', { pdf: { version: '2.0.0' } });
+    await box.markets.add(root);
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' } });
+    assert.deepEqual(await box.markets.pendingUpdates(box.home), { stopped: 'Preview only.', ops: [], unread: [] });
+  } finally { await box.cleanup(); }
+});
+
+test('A plugin its marketplace dropped stays listed where a tool still has it, marked as no longer offered, with its installed copy; it is never due', async () => {
+  const box = await setup();
+  try {
+    const root = join(box.base, 'market');
+    await versioned(root, 'team', { pdf: { version: '1.0.0' }, xlsx: { version: '1.0.0' } });
+    await box.markets.add(root);
+    await claudeHas(box.home, 'team', { pdf: { version: '1.0.0' }, xlsx: { version: '1.0.0' } });
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: root } } }));
+    // The marketplace drops pdf and moves xlsx on.
+    await rm(join(root, 'plugins/pdf'), { recursive: true });
+    await versioned(root, 'team', { xlsx: { version: '2.0.0' } });
+    const entry = (await box.markets.view()).marketplaces[0]!;
+    assert.deepEqual(entry.plugins.map(plugin => [plugin.name, plugin.gone, plugin.description]), [
+      ['xlsx', undefined, ''], ['pdf', true, 'No longer offered in this marketplace. It stays installed as it is until you uninstall it.']]);
+    assert.deepEqual([entry.states.pdf?.['claude-cli']?.state, entry.states.pdf?.['codex-cli']?.state], ['installed', 'not-installed']);
+    assert.deepEqual((await box.markets.detail(root, 'pdf'))?.installed?.['claude-cli']?.skills.map(skill => skill.name), ['pdf'], 'its page shows what the tool still holds');
+    assert.deepEqual((await box.markets.pendingUpdates(box.home)).ops.map(op => op.plugin), ['xlsx']);
+    // Installing it again is refused (it isn't offered); uninstalling it is the tool's own uninstall.
+    assert.match((await box.markets.install(root, 'team', 'pdf', ['claude-cli'], box.home)).reports[0]!.message, /no longer in the marketplace/);
+    // A tool that has another marketplace under this name says nothing about this one's plugins.
+    await put(join(box.home, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ team: { source: { source: 'git', url: 'https://example.test/other/team.git' } } }));
+    assert.deepEqual((await box.markets.view()).marketplaces.find(market => market.source === root)!.plugins.map(plugin => plugin.name), ['xlsx']);
   } finally { await box.cleanup(); }
 });

@@ -10,7 +10,7 @@ import { configRoot, harnesses, harnessIds, writeRoot } from './harnesses.ts';
 import { CLAUDE_PROCESS, appCandidates, executableCandidates, searchPath } from './platform.ts';
 import { syncsHere, writeAccess, type ShareContext } from './share.ts';
 import { applyChanges, deleteEverywhere, eventChange, manageView, pruneHistory, readHistory, restoreFromHistory } from './manage.ts';
-import { agentTools, mcpTools, noteTools, presentTools } from './presence.ts';
+import { agentTools, mcpTools, noteTools, pluginTools, presentTools } from './presence.ts';
 import { applyMcp, mcpFile, mcpView, restoreMcp, undoClaudeWrite } from './mcp.ts';
 import { agentsView, applyAgents, convertAgentToSkill, restoreAgent } from './agents.ts';
 import { applyBase, baseView, instructionsView, instructionVersion, repoBase, saveInstruction, undoBase } from './instructions.ts';
@@ -24,9 +24,10 @@ import { deleteProfile, driftNow, switchFilesStamp, readProfiles, releaseProfile
 import { activeProfile, driftOf, NO_PROFILE, presentItems, profilesInUse, switchItems, type SwitchItem } from './profileplan.ts';
 import { defaultHistoryDays, historyDayChoices, plural } from './model.ts';
 import { signInArgs, signInLabel, signInState, whyNoSignIn } from './signin.ts';
-import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
+import type { ActionReport, Appearance, ApplyResult, PartsPick, AppPreferences, PluginActionResult, PluginUpdatesView, UpdateView, BaseApply, BaseDraft, BaseUndo, Change, ClaudeWrite, DestinationResult, HarnessId, HistoryDays, HistoryList, HistoryPrune, HistoryWindowSaved, HomeMode, HomeView, ProfilesView, ShownLog, Snapshot, SyncNotice } from './types.ts';
 import { machineNames } from './machine.ts';
 import { startUpdater, type PendingUpdate } from './updater.ts';
+import { autoUpdates, CHECK_EVERY_MS, PLUGIN_UPDATES_DEFAULT, type UpdatesRecord } from './pluginupdates.ts';
 
 const smoke = process.argv.includes('--smoke-test');
 const logPath = () => join(app.getPath('userData'), 'central-knot.log');
@@ -133,14 +134,14 @@ async function saveSyncSetting(on: boolean) {
 }
 
 /** Sends the page a message, when there is a window to send it to. */
-function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed', ...args: unknown[]) {
+function send(channel: 'sync:changed' | 'settings:changed' | 'navigate' | 'updates:changed' | 'plugin-updates:changed', ...args: unknown[]) {
   if (window && !window.isDestroyed()) window.webContents.send(channel, ...args);
 }
 
 // ---------- Running in the background (PLT-03, PLT-04, D-36) ----------
 
 /** The home last opened, so a start at sign-in syncs it again; and whether to start at sign-in (on by default). */
-interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
+interface AppSettings { home?: { mode: HomeMode; path?: string }; startAtSignIn?: boolean; /** The first close said once that Central Knot keeps running. */ closeExplained?: boolean; /** Light, dark, or as the system is set (the default). */ appearance?: Appearance; /** How long History keeps things. */ historyDays?: HistoryDays; /** Plugins are updated automatically (pluginupdates.ts). */ pluginUpdates?: boolean; /** An update prepared for the next launch to report on (updater.ts). */ update?: PendingUpdate }
 const appSettingsPath = () => join(app.getPath('userData'), 'app-settings.json');
 let appSettings: AppSettings = {};
 /** A file that isn't a JSON object (damaged, or hand-edited) counts as no settings yet: each one falls back to its default. */
@@ -200,7 +201,9 @@ async function changeHistoryWindow(days: HistoryDays): Promise<HistoryWindowSave
   });
   return { settings: preferences(), pruned };
 }
-const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays() });
+/** Whether plugins are updated automatically: as chosen in Settings, else the default. */
+const pluginUpdatesOn = () => (typeof appSettings.pluginUpdates === 'boolean' ? appSettings.pluginUpdates : PLUGIN_UPDATES_DEFAULT);
+const preferences = (): AppPreferences => ({ appearance: appearance(), signIn: signIn(), historyDays: historyDays(), pluginUpdates: pluginUpdatesOn() });
 /**
  * Shows Central Knot's own log in Finder or Explorer, selected; before anything was logged, the folder it goes in. Linux
  * always opens the folder: selecting a file there depends on the file manager and, like every selection, reports nothing
@@ -266,6 +269,9 @@ let quitting = false;
 let updater: ReturnType<typeof startUpdater> | undefined;
 /** Sync changed something while the window was closed or in the background: the menu bar icon shows it until seen. */
 let unseen = false;
+/** The same for plugins updated automatically; its menu line opens the Plugins page, where the note is. */
+let unseenPlugins = false;
+let pluginUpdates: ReturnType<typeof autoUpdates> | undefined;
 function showWindow() {
   // Startup makes the first window. macOS sends `activate` during startup too: that must never make a second one.
   if (!app.isReady() || !window) return;
@@ -311,8 +317,10 @@ function joinDock() {
 /** One status line for both menus: where, and any news. */
 function statusLine() {
   const where = current?.label ?? 'No home open yet';
-  return unseen ? `Sync made changes · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
+  return unseen ? `Sync made changes · Show (${where})` : unseenPlugins ? `Plugins were updated · Show (${where})` : `Home: ${where}${current && lastManagedCount === 0 ? ' · nothing managed yet' : ''}`;
 }
+/** The status line's click: the window, on Plugins when what is unseen is an automatic update. */
+const showNews = () => (unseenPlugins && !unseen ? showPage('plugins') : showWindow());
 /** The active profile's name, or undefined for No profile. */
 const activeProfileName = () => activeProfile(lastProfiles)?.name;
 /**
@@ -367,7 +375,7 @@ function trayMenu() {
     profileMenu(),
     { type: 'separator' },
     // The status line says where, and any news; the checkbox below already says whether sync is on.
-    { label: statusLine(), enabled: unseen, click: showWindow },
+    { label: statusLine(), enabled: unseen || unseenPlugins, click: showNews },
     { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
     { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
     { type: 'separator' },
@@ -382,11 +390,11 @@ function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(trayMenu());
   const profile = activeProfileName();
-  tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : ''}`);
+  tray.setToolTip(`Central Knot${profile ? ` · Profile: ${profile}` : ''}${unseen ? ': sync made changes' : unseenPlugins ? ': plugins were updated' : ''}`);
   // The active profile is always in sight: its name sits beside the menu bar icon.
   // Shortened past 20 characters, so a long name can't crowd the menu bar (the full name is in the tooltip and the menu).
   const short = profile && profile.length > 20 ? `${profile.slice(0, 19)}…` : profile;
-  if (process.platform === 'darwin') tray.setTitle(`${unseen ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
+  if (process.platform === 'darwin') tray.setTitle(`${unseen || unseenPlugins ? '•' : ''}${short ? ` ${short}` : ''}`.trim());
 }
 /** Sync once, from either menu: one pass that writes, with Automatic sync left off. */
 const syncOnce = () => fromTray(async () => { keepMcpAndAgents((await pass(await read(), true)).mcpAndAgents); });
@@ -410,7 +418,7 @@ function appMenu() {
       { label: 'Settings…', accelerator: 'Command+,', click: () => showPage('settings') },
       profileMenu(),
       // The same status line as the menu bar menu: where, and any news.
-      { label: statusLine(), enabled: unseen, click: showWindow },
+      { label: statusLine(), enabled: unseen || unseenPlugins, click: showNews },
       { type: 'separator' },
       { label: homeWritable ? 'Automatic sync' : 'Automatic sync (paused: preview only)', type: 'checkbox', checked: syncOn && homeWritable, enabled: homeWritable, click: item => void fromTray(async () => { await saveSyncSetting(item.checked); }) },
       { label: 'Sync once (automatic sync stays off)', toolTip: 'Apply waiting changes once', visible: !syncOn && homeWritable, enabled: !!current, click: () => void syncOnce() },
@@ -842,7 +850,7 @@ function createWindow(show: boolean) {
   window.webContents.on('did-finish-load', () => log('page loaded'));
   // Coming back to the window is when a change made in the system's own settings (Login Items, Startup apps) shows: the menus
   // are rebuilt and the page re-reads, both from this one event.
-  window.on('focus', () => { unseen = false; refreshTray(); send('settings:changed'); });
+  window.on('focus', () => { unseen = false; unseenPlugins = false; refreshTray(); send('settings:changed'); });
   const design = process.argv.find(arg => arg.startsWith('--design-preview'));
   loading = window.loadFile(join(__dirname, 'index.html'), design ? { query: { design: design.split('=')[1] ?? 'b3' } } : undefined);
 }
@@ -893,6 +901,14 @@ app.whenReady().then(async () => {
     return changeHistoryWindow(days);
   });
   handleNow('settings:show-log', showLog);
+  handleNow('settings:plugin-updates', async on => {
+    if (typeof on !== 'boolean') throw new Error('Invalid plugin updates setting.');
+    await saveAppSettings({ pluginUpdates: on });
+    log(`plugin updates: turned ${on ? 'on' : 'off'}`);
+    // Turned on: the page hears of it, and a check runs now if the last one is long enough ago.
+    if (pluginUpdates) { send('plugin-updates:changed', await pluginUpdates.view()); if (on) void pluginUpdates.tick().catch(error => logFailure('plugin updates', error)); }
+    return preferences();
+  });
   // Updates (PLT-02): checks run outside the queue; the restart waits in it, so it never lands in the middle of a write.
   updater = smoke ? undefined : startUpdater({
     log, send: view => send('updates:changed', view), hasPage: () => !!window && !window.isDestroyed(),
@@ -920,7 +936,7 @@ app.whenReady().then(async () => {
   ).map(change => ({ key: change.key, managed: change.managed, off: ids(change.off), use: change.use, useHash: change.useHash, seenManaged: change.seenManaged,
     ...(change.disable ? { disable: ids(change.disable) } : {}), ...(change.enable ? { enable: ids(change.enable) } : {}), ...(change.remove ? { remove: ids(change.remove) } : {}) }));
   // Marketplaces and plugins: their own module, given only what it needs from here.
-  registerMarketplaces({ handle, handleNow }, {
+  const markets = registerMarketplaces({ handle, handleNow }, {
     home: () => (current ? { home: current.home, overrides: context().overrides } : undefined),
     read: async readId => { const snapshots = await readFor(readId); return { tools: presentTools(snapshots), snapshots }; },
     writeAccess: () => writeAccess(context()),
@@ -929,6 +945,42 @@ app.whenReady().then(async () => {
     openExternal: url => shell.openExternal(url),
     share: () => context(),
   });
+  // Plugin updates that arrive by themselves (pluginupdates.ts): each step takes its turn in the queue, like the page's own
+  // Apply all, and is logged as one; none starts once the app is quitting (a tool's command already running finishes).
+  const noPluginUpdates: PluginUpdatesView = { on: false, checking: false, every: CHECK_EVERY_MS, updated: [], failed: [] };
+  if (!smoke) {
+    const recordPath = join(app.getPath('userData'), 'plugin-updates.json');
+    const step = (channel: string, args: unknown[], work: () => Promise<PluginActionResult>): Promise<PluginActionResult> =>
+      quitting ? Promise.resolve({ stopped: 'Central Knot is quitting.', reports: [] }) : queued(work).then(result => { logOutcome(`${channel} (by itself)`, args, result); return result; });
+    pluginUpdates = autoUpdates({
+      home: () => current?.home, on: pluginUpdatesOn, log, now: Date.now,
+      // Test-only, read only when set: a shorter time between checks.
+      every: Number(process.env.CK_PLUGIN_UPDATES_EVERY_MS) || CHECK_EVERY_MS,
+      pending: home => queued(() => markets.pendingUpdates(home)),
+      api: {
+        update: (source, marketName, plugin, tools, home) => step('plugins:update', [source, marketName, plugin, tools, home], () => markets.update(source, marketName, plugin, onlyAllowed(tools, pluginTools), home, { reinstall: false })),
+        parts: (source, marketName, plugin, tool, mode, run, home, pick) => step('plugins:parts', [source, marketName, plugin, tool, mode, run, home, pick], () => markets.parts(source, marketName, plugin, tool, mode, run, home, pick)),
+      },
+      load: async () => record(JSON.parse(await readFile(recordPath, 'utf8'))) as UpdatesRecord | undefined,
+      save: async saved => { await mkdir(app.getPath('userData'), { recursive: true }); await writeFile(recordPath, `${JSON.stringify(saved, null, 2)}\n`); },
+      changed: (view, news) => {
+        send('plugin-updates:changed', view, news);
+        if (!news) return;
+        // What the tools have changed: every page reads again. Nobody saw it: the menu bar icon says so until the window is back.
+        send('sync:changed');
+        if (window.isDestroyed() || !window.isVisible() || !window.isFocused()) { unseenPlugins = true; refreshTray(); }
+      },
+    });
+    const updates = pluginUpdates;
+    const turn = () => void updates.tick().catch(error => logFailure('plugin updates', error));
+    const pace = Math.min(5 * 60_000, Math.max(1_000, (Number(process.env.CK_PLUGIN_UPDATES_EVERY_MS) || CHECK_EVERY_MS) / 4));
+    // The first look comes a minute after start, so opening the app is never slowed by it; then every few minutes it asks whether a check is due.
+    setTimeout(turn, Math.min(60_000, pace)).unref();
+    setInterval(turn, pace).unref();
+  }
+  handleNow('plugin-updates:view', async () => pluginUpdates?.view() ?? noPluginUpdates);
+  handleNow('plugin-updates:check', async () => pluginUpdates?.check(true) ?? noPluginUpdates);
+  handleNow('plugin-updates:close', async () => pluginUpdates?.close() ?? noPluginUpdates);
   // One plugin item's file in each tool's copy, read when its row is opened (the home's read leaves file text out).
   handleNow('plugin-items:texts', async (plugin, marketName, kind, name) => (current && [plugin, marketName, name].every(value => typeof value === 'string') && (kind === 'skill' || kind === 'agent')
     ? readItemTexts(pluginItemsContext(context().overrides), harnessIds, { plugin: plugin as string, marketName: marketName as string, kind, name: name as string }) : []));

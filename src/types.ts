@@ -101,6 +101,16 @@ export interface DesktopApi {
   onSettingsChanged(callback: () => void): void;
   /** Shows Central Knot's own log in the file manager, selected where the system can (else its folder). */
   showLog(): Promise<ShownLog>;
+  /** Turns automatic plugin updates on or off (pluginupdates.ts). */
+  setPluginUpdates(on: boolean): Promise<AppPreferences>;
+  /** Automatic plugin updates: the last check, and the note of what was updated and what couldn't be. */
+  pluginUpdates(): Promise<PluginUpdatesView>;
+  /** Checks the marketplaces now and updates what is behind, failed updates included; answers once it is done. */
+  checkPluginUpdates(): Promise<PluginUpdatesView>;
+  /** Closes the note of what automatic updates did. */
+  closePluginUpdates(): Promise<PluginUpdatesView>;
+  /** Automatic plugin updates changed (a check began or ended). `news`: it updated something, or an update failed. */
+  onPluginUpdatesChanged(callback: (view: PluginUpdatesView, news: boolean) => void): void;
   /** The main process asks for a page (the Settings… menu item). */
   onNavigate(callback: (page: string) => void): void;
   /** Updates (updates.ts): what this build is, whether it can update itself, and the last check or update. */
@@ -645,8 +655,21 @@ export interface SignInPlace { open: string; unopened: string; unchanged: string
  * where it can, why the system has it off. `place`: where the system keeps it, wherever it can be changed here.
  */
 export interface SignIn { on: boolean; available: boolean; reason?: { key: SignInReason; text: string }; place?: SignInPlace }
-/** Central Knot's own settings, shown on its Settings page. */
-export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays }
+/** Central Knot's own settings, shown on its Settings page. `pluginUpdates`: plugins are updated automatically (pluginupdates.ts). */
+export interface AppPreferences { appearance: Appearance; signIn: SignIn; historyDays: HistoryDays; pluginUpdates: boolean }
+/** One line of what automatic plugin updates did: when, which plugin of which marketplace, and the words. `warn`: it needs reading (a part was left alone). */
+export interface PluginUpdateLine { at: number; source: string; plugin: string; text: string; warn?: true }
+/**
+ * Automatic plugin updates as the main process has them, for the open home. `checking`: a check is under way; `every`: the
+ * time between checks. `checked`: the last check: when, how many updates it made, how many are failing now, the marketplaces
+ * it couldn't read, and why it did nothing (`stopped`). The note: `updated`, what was updated since the note was last
+ * closed, oldest first, and `failed`, the updates that couldn't be made (each is tried again).
+ */
+export interface PluginUpdatesView {
+  on: boolean; checking: boolean; every: number;
+  checked?: { at: number; updated: number; failed: number; unread: string[]; stopped?: string };
+  updated: PluginUpdateLine[]; failed: PluginUpdateLine[];
+}
 /** Why this copy can't update itself (see updates.ts for each one's words). */
 export type UpdateReason = 'dev' | 'untagged' | 'unsigned' | 'applications' | 'readonly';
 /** A newer release: its tag, its Mac zip (where and how many bytes) and its page, which has the release notes. */
