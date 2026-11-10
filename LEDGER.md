@@ -634,3 +634,82 @@ Both new tests fail on b7b2ea9.
   - 234/234 pass;
   - no new findings.
 - **Mac:** unit tests, smoke and e2e 271/271 on ee5e9e8.
+
+## Clean-up, fixes and Settings into next (PRs #34 to #52), November 9 and 10, 2026
+
+- **Test audit** (PRs #1 to #33, merged November 9): duplicate and dead tests removed, 302 to 225 tests.
+- **De-slop and clarity** (#34 to #36, #38, #42, #46): decisions from typed fields, not English messages; exhaustive per-tool branches.
+- **Fixes:** the write guard covers every tool folder (#37); released builds open this computer's home and the Practice copy is dev-only (#39, #48); Resume works on MCP and Agents (#43); a damaged or newer MCP or agents record stops writes (#44); `git ls-remote` before a marketplace is added (#45); a person's save is never deleted, and deletions finish at folders that were away (#49, #50).
+- **Settings** (#51, 4bcf711): Start at sign-in, Appearance, Keep history for 7, 30 or 90 days, Show log file.
+- **UI fit** (#52, cc30f24): only present tools are shown; nothing is cut off from 860×560 to full screen.
+
+## Feedback batch landed (PRs #53 to #61), November 10, 2026
+
+Nathan's nine feedback threads, each on its own branch, merged into next between 02:47 and 04:02 UTC:
+- #53 the Plugins column header pins under the toolbar;
+- #54 turn off one skill of an installed plugin, per tool (Codex, Copilot CLI);
+- #55 read a plugin's skill text and see each tool's version;
+- #56 Disable or Remove a skill in one tool, managed or not;
+- #57 a plugin's parts for tools that can't take the plugin;
+- #58 base instructions;
+- #59 profiles;
+- #60 e2e skips the few-tools flow where a CLI is installed system-wide (fixed the red Mac pipeline);
+- #61 the Tools page becomes Harnesses, with a page per harness.
+
+## Release 0.4.0 preview 1 (59cd11b), November 10, 2026
+
+`Central-Knot-0.4.0-mac-arm64.zip`, SHA-256 `7233bc0b846ec5dc221ff6f39ffb8ca5fc05a9c435e5b13fac7f4163978d2d5b`, tag `v0.4.0-preview.1`. Developer ID signed and notarized; `codesign`, `stapler validate` and `spctl` verified. First release that opens on This Mac's home.
+
+**Validation.** 312 unit tests. Linux e2e 349/349 in Docker. Mac UI tour: all 18 sections pass, each run on its own (a full run failed on shared plugin data). The Mac CI pipeline was red on this commit (fixed in the wrap-up).
+
+## Wrap-up, round 1: Git repo and loose ends, November 10, 2026
+
+One agent per item, each on a `wrapup/<slug>` branch off next, integrated by the orchestrator. Reports in `~/work/ck-wrapup/reports/`.
+- **Git repo** page: keeps the Managed set in a git repo, moved only by Pull or Push.
+- **Engine bugs** (5e2a8ba, 9f529d0, 9d57547): the store prune keeps a parts skill's copy, so Undo of Remove parts works; a Claude Code skill override other than "off" survives a profile switch and an Enable after History's window (`skill-overrides.json`); a part MCP server's on/off key is left out of its fingerprint.
+- **Plugins:** Codex folder marketplaces (`.agents/plugins/marketplace.json`) read; versions and nested parts as the tools read them; a left-out part can be added later.
+- **Follow-ups and UI bugs:** a typed base-instructions draft survives a home switch; results newer than pending changes show; a profile's queued Disable is dropped; layout fixes at 860 and 2560.
+- **Mac CI:** e2e passes on a packaged Mac build.
+- **Tour:** a full ui-tour run passes.
+
+## Release 0.5.0 preview 1 (9a3ed0b), November 10, 2026
+
+`Central-Knot-0.5.0-mac-arm64.zip`, SHA-256 `ec678e12011329f03667424d0089ec49dd8cce3e406f993ab2c89d357509b737`, tag `v0.5.0-preview.1`. Signed and notarized, verified as before.
+
+**Validation.** 338 unit tests (one run in seven had one failure that did not repeat). Linux e2e 364/364; Mac packaged e2e 473/473. Mac UI tour in one full run: 19 sections, 609 screenshots. A Computer Use pass on the Mac.
+
+**Known.** An override 0.4.0 preview 1 kept only in History is not carried over; a repo that deletes `instructions/base.md` empties the base on Pull; profiles can turn off a Copilot CLI skill where the Skills page said Disable was unavailable.
+
+## Wrap-up, round 2: plugin Update, Disable best effort, desktop apps, November 10, 2026
+
+Nathan's decisions: no version gates on Disable or plugin Update, and a tool's desktop app counts without its CLI.
+- **Plugin Update** (a36808a): each tool refreshes its marketplace and updates through its own command (`claude plugin update P@M --scope user`, `copilot plugin update P@M`, Codex `marketplace upgrade` then `plugin add`); counts only when the tool's record shows the new version; no Undo. Real-CLI runs, 1.0.0 to 2.0.0 in all three.
+- **Disable best effort** (5269a71): offered on any build or with no CLI; a note on builds older than the one checked.
+- **Desktop app without its CLI** (4724d25): Claude desktop, ChatGPT desktop and the GitHub Copilot app make their tool present; app and CLI versions shown apart; plugin parts offered where there is no CLI.
+
+## Release 0.5.0 preview 2 (2b3ab02), November 10, 2026
+
+SHA-256 `fc890d2e4084e7605a82000aab1ee91cbc76c55d0cd8650595022e8f24809458`, tag `v0.5.0-preview.2`. Signed and notarized, verified as before.
+
+**Validation.** 347 unit tests on Linux and macOS. Linux e2e 369/369; Mac packaged e2e 478/478; GitHub's Mac pipeline green. Mac UI tour full run: 19 sections, 615 screenshots. A Computer Use pass on the Mac (not covering plugin Update or the app-only case).
+
+## Wrap-up, round 3: whole plugins through the desktop app, November 10, 2026
+
+- **12e626d:** with no CLI, the copy of the tool each desktop app carries (Claude desktop's Code tab binary, the Copilot app's runtime, ChatGPT desktop's Codex) runs the plugin commands: marketplace add, install, update, uninstall and Copilot's per-skill switch. The plugin box names the route. Parts only when the app's copy isn't on disk yet. Run with the real apps' copies on the Mac in throwaway homes.
+- **28ebaa2:** a plugin change's next step names both routes; Copilot's plugin-skill switch is counted as checked from 1.0.102.
+
+## Release 0.5.0 preview 3 (28ebaa2), November 10, 2026
+
+SHA-256 `6f45b38130bee0ca66901f67d7f23aa4cacd7a420669271adc1bb9a0c823aa40`, tag `v0.5.0-preview.3`. Signed and notarized, verified as before.
+
+**Validation.** 349 unit tests on Linux and macOS. Linux e2e 374/374 (including a home with only Claude desktop installing through a stand-in Code tab binary); Mac packaged e2e 478/478. Mac UI tour full run: 19 sections, 615 screenshots. No Computer Use pass on this build.
+
+**Not proven.** A plugin installed this way loading in a signed-in desktop session; Windows and Linux app locations.
+
+## After preview 3: test scripts and the default logo, November 10, 2026
+
+- **2c591e8:** e2e and ui-tour close every app they started when the run ends, however it ends.
+- **c28268e:** the default logo, the "happy atom", as the app icon, sidebar mark and window icon. The files in `assets/` are the one place a branded build replaces; the menu bar icon stays the two linked rings.
+- **7409a6a:** e2e checks that an Undo from History leaving a hand-changed switch says so where it can be seen.
+
+**Validation on 7409a6a.** 349 unit tests. Linux e2e 374/374; Mac packaged e2e 478/478.

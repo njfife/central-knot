@@ -1,85 +1,129 @@
 # Central Knot
 
-A desktop app that shows the configuration each AI coding tool has and moves it between them. This early package covers user-wide **standalone skills** in **Claude Code CLI**, **GitHub Copilot CLI**, **Codex** (the CLI, and the ChatGPT desktop app, which reads the same `~/.codex`) and **Pi** (`~/.pi/agent`). It holds plan slices 1a, 1b's first checkpoint and 8a, with the managed table Nathan chose on November 8, 2026. The interface follows `docs/ui-reference.md`. An **MCP** page shows each tool's user-wide MCP servers (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`) with the same managed table; writes edit only that server's entry, and Claude Code's waits for **Write to Claude Code** with Claude closed (MCP-02). An **Agents** page does the same for Claude Code, Copilot and Codex agents. Pi has no agents or plugins here: it gets skills and MCP servers, and **Convert to skill** copies an agent into Pi's skills folder once. An **Instructions** page opens each tool's own instruction file to read and edit in place. A **Plugins** page adds marketplaces (Git URL, `owner/repo` or folder), shows each plugin's components and what each tool gets from them, and installs or uninstalls through each CLI's own plugin commands, confirmed by reading that tool's own record. `npm run test:harness` runs those installs with the real CLIs in disposable homes.
+Central Knot is a desktop app that shows the skills, MCP servers, agents, instructions and plugins each AI coding tool on your computer has, and keeps the ones you choose the same across those tools. It works with Claude Code, GitHub Copilot CLI, Codex and Pi, through their CLIs or their desktop apps (Claude desktop, the GitHub Copilot app, ChatGPT desktop), and it only reads and writes each tool's own user-wide files.
 
-## Run
+## Getting it
 
-Node 24.9 or newer:
+Download the signed Mac build (Apple silicon) from the [GitHub releases](https://github.com/njfife/central-knot/releases). It is signed with a Developer ID and notarized. Unzip it, move **Central Knot.app** to Applications and open it.
 
-```sh
-npm ci
-npm start
-npm test
-npm run package:mac
-```
+A released build opens on **This Mac's home**: your real tools. Nothing is changed until you choose it. The sidebar's **Home** list also has **Another folder…**, for a backup or another account's home; Central Knot writes only inside that folder, and one that is or links into your real tool folders is read-only. The **Practice copy** (sample data in a throwaway folder, removed at Quit) is only in development builds: run `npm start` from the source to try things on sample files first.
 
-Mac packaging runs on the selected Apple Silicon Mac and produces `release/Central-Knot-0.3.0-mac-arm64.zip`. `npm run package:mac` signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there. Otherwise, or with `CK_SIGN=0`, it applies and verifies an ad-hoc signature, and macOS still refuses an ad-hoc copy that arrives with a download's quarantine flag (V-10). `npm run package:mac:release` never falls back to ad hoc.
+Real-home writes happen only on macOS. If something looks wrong, Settings → **Show log file** opens Central Knot's own log.
 
-`npm run smoke:mac` opens a hidden, fixture-only window with disposable app data and checks the rendered rows and sharing plan. It never selects an actual home.
+## The pages
 
-`npm run e2e` drives the packaged app end to end in a throwaway HOME, including force-kills during copies. Run it after `npm run package:mac`.
+### Overview
 
-## Homes
+One card each for skills, MCP servers and agents, with counts and anything that needs a choice. A card opens its page.
 
-- **This Mac’s home** (listed first; a released build opens it first): your real skills and a bounded `--version` probe of each CLI. Only choosing this writes real folders, and only on macOS. The app reopens on the home you last used, so a start at sign-in keeps syncing it.
-- **Another folder…**: a simulated home. Apply all writes only inside it. A folder that is, contains or links into your real home's harness folders is read-only.
-- **Practice copy** (dev builds and tests only): a throwaway copy of `fixtures/home` made for this launch and removed at Quit. Apply all really writes here. A dev build opens it first, so a development run never syncs your real tools. A released build does not offer it, and a remembered Practice copy opens this Mac's home instead.
+### Harnesses
 
-## The Overview and the managed table
+One card per tool found on this computer, with its skills, MCP servers, agents, instruction file, plugins and config folder. A tool counts as found when its CLI or its desktop app is there; when both are, their versions are shown separately. Each harness has its own page with tabs for Skills, MCP servers, Agents, Instructions, Plugins and About, and you can manage that tool's items there directly. Only the tools you have are shown anywhere in the app.
 
-The **Overview** shows one card each for skills, MCP servers and agents, with counts and anything that needs a choice. A card opens its page.
+### Skills, MCP servers and Agents
 
-The **Skills**, **MCP** and **Agents** pages each hold the managed table: one row per item, one column per installed tool. Nothing is managed until you choose it. The bullets below use skills; MCP servers and agents work the same way.
+Each of these pages holds the managed table: one row per item, one column per tool. Nothing is managed until you choose it.
 
-- **Managed** switch: a managed skill keeps one copy in every tool it syncs to. Unmanaged skills are left alone.
-- **Tool cells** are toggles. Filled means syncing to that tool is on. Green check: synced. Blue: waits for Apply all. Amber: copies differ. Ring: has a copy that is not synced. Empty: no copy. Hatched: that tool cannot load it, with the reason.
-- **Tool menus**, from a column header: add all of that tool's skills to another tool, or **Stop syncing here** (copies stay).
-- **Manage all** queues every unmanaged skill without differing copies. Changes wait for **Apply all**, or **Discard**.
-- **Copies differ**: open the row and choose which tool's copy every tool uses (the replaced copy is kept in `.central-knot/items`), or keep both as they are.
-- **Catch-up**: opening a home or **Refresh** copies a managed skill back into a tool it syncs to that lacks it, and says which. Turn a tool off for a skill to stop that.
-- Copies are written only into each tool's own skills folder, byte-exact with file modes, without nested `.git` or Finder's `.DS_Store`. Central Knot never writes through a link or into a folder other tools share, such as `~/.agents/skills`; a differing copy there is reported for you to change.
+- **Managed** switch: a managed item keeps one copy in every tool it syncs to. Unmanaged items are left alone.
+- **Tool cells** are toggles. Green check: synced. Blue: waits for Apply all. Amber: copies differ. Ring: has a copy that is not synced. Empty: no copy. Hatched: that tool cannot load it, with the reason.
+- **Column menus**: add all of one tool's items to another tool, or **Stop syncing here** (copies stay).
+- **Manage all** queues every unmanaged item without differing copies. Changes wait for **Apply all**, or **Discard**.
+- **Copies differ**: open the row and choose which tool's copy every tool uses, or keep both as they are.
+- **Catch-up**: opening a home or **Refresh** copies a managed item back into a tool it syncs to that lacks it.
 
-State lives in one folder with no second copy, `.central-knot/` inside the selected home: `sync.json` and imported revisions under `items/`. Nathan accepted that limit on November 7, 2026, so owner-restore and overwritten-record rollback (AT-62(f), (g)) stay Unmet. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing.
+Skills also have, per tool and for any skill, managed or not:
 
-`--design-preview` (or `=b`, `=b3`) opens the managed table on sample data, without touching any files.
+- **Disable / Enable**, with the tool's own switch: Claude Code `skillOverrides`, Copilot `disabledSkills`, Codex `[[skills.config]]` by path, Pi's `settings.json` filter. Disable is best effort: it is offered whatever the tool's version, written and then read back. On a build older than the one it was checked on, a short note says it may not take effect.
+- **Remove** takes that tool's copy out. History keeps it for Restore.
+- **Delete everywhere** (unmanaged skills) removes every copy Central Knot may change, kept in History.
 
-## Two-way sync, History and the background
+MCP servers: each tool's user-wide file (Claude Code `~/.claude.json`, Copilot `mcp-config.json`, Codex `config.toml`, Pi `mcp.json`). Writes edit only that server's entry. Claude Code's file is written only by **Write to Claude Code**, which waits while Claude Code, Claude desktop or its Code tab is open. Codex servers written inline or with dotted keys are left alone.
 
-- **Automatic sync (status bar switch, on by default).** A managed skill, MCP server or agent edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing skill edits are decided by the newest action, or the fixed tool order (Copilot, Claude Code, Codex, Pi) when the order can't be proved. Competing MCP server and agent edits always use the fixed order (Copilot, Claude Code, Codex, then Pi for MCP). Each outcome shows a notice with Undo or Restore.
-- **With Automatic sync off,** edits and deletions are noted as waiting, and **Sync once** spreads them once. **Apply all** writes only what it shows.
-- **History** lists what sync did on its own, with Undo or Restore. Every replaced or removed version is kept first in `.central-knot/` (skills, agent files, and each tool's own MCP settings).
-- **Safety.** A folder or file that can't be read, is half-written, or was reset is held, never read as a deletion. Every write checks the file first and never overwrites a save made meanwhile.
-- **Agents** (Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`) sync name, description and prompt. A tool that lacks the origin's other fields gets the agent **With limits**, one-way: changes there stay there. Pi has no agents; **Convert to skill** writes one as a Pi skill, once, and never writes back to the agent.
-- **MCP:** Claude Code's `~/.claude.json` is written only by **Write to Claude Code**, with Claude Code quit (it refuses while Claude Code runs). Codex servers written inline or with dotted keys are left alone.
-- **Background:** closing the window keeps Central Knot syncing. The app menu (and the menu bar icon, when the menu bar has room) has Automatic sync, Sync once (shown while Automatic sync is off), Start at sign-in and Quit. Start at sign-in is on by default once the app is in `/Applications`.
+Agents: Claude Code `~/.claude/agents`, Copilot `~/.copilot/agents`, Codex `~/.codex/agents`. Name, description and prompt sync. A tool that lacks the origin's other fields gets the agent **With limits**, one way: changes there stay there. Pi has no agents; **Convert to skill** writes one as a Pi skill, once.
 
-## Profiles
+Copies are written only into each tool's own folder, byte-exact with file modes, without nested `.git` or `.DS_Store`. Central Knot never writes through a link or into a folder other tools share, such as `~/.agents/skills`.
 
-A **profile** is a named set of skills and MCP servers to have on, such as *Incident* or *Development*, chosen from what the home already has (**Profiles** in the sidebar). Switching to one, from that page, the status bar or the menu bar icon's **Profile** menu, turns everything it leaves out **off with each tool's own switch** and turns back on what an earlier switch turned off. Nothing is moved or deleted, and the MCP entries themselves are never edited:
+### Two-way sync
+
+- **Automatic sync** (status bar switch, on by default): a managed item edited in one tool spreads to the others within seconds. A deletion spreads after a 2 s settle. Competing skill edits are decided by the newest action, or the fixed order Copilot, Claude Code, Codex, Pi when the order can't be proved. Competing MCP server and agent edits always use that fixed order. Each outcome shows a notice with Undo or Restore.
+- With Automatic sync off, edits and deletions are noted as waiting, and **Sync once** spreads them once.
+- A folder or file that can't be read, is half-written or was reset is held, never read as a deletion. Every write checks the file first and never overwrites a save made meanwhile.
+- Closing the window keeps Central Knot syncing. The menu bar icon has Open, Settings, the profile, Automatic sync, Sync once (while Automatic sync is off), Start at sign-in and Quit.
+
+### Instructions
+
+Opens each tool's own instruction file to read and edit in place, with **Undo save**.
+
+**Base instructions**: you write a base once and choose which tools get it. It is added after each tool's own instructions as one marked block; the tool's own text is never rewritten. Every write is reviewed first (**Review changes**), a copy edited outside the app is found, and each save can be undone. A typed draft is not lost when you switch homes: the app asks first.
+
+### Plugins
+
+- **Marketplaces**: add one by Git URL, `owner/repo` or folder. A Git address is checked (`git ls-remote`) before it is added. Claude-format and Codex marketplaces (including `.agents/plugins/marketplace.json`) are read.
+- Each plugin shows its parts (skills, MCP servers, agents and more), what each tool gets from them, its skill text, and each tool's installed version next to the marketplace's.
+- **Install and uninstall** run through each tool's own plugin commands, and count only when that tool's own record shows the result. Nothing runs until **Apply all**.
+- **Parts** for a tool that can't take the whole plugin (Pi always): the plugin's skills, MCP servers and agents go in as ordinary items. They are removed together, can be undone, and show **Update parts** when the plugin changes.
+- **Per-skill switch**: turn off one skill of an installed plugin in Codex or Copilot CLI.
+- **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so.
+- **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
+
+### Profiles
+
+A profile is a named set of skills and MCP servers to have on, such as *Incident* or *Development*. Switching to one, from the Profiles page, the status bar or the menu bar icon's **Profile** menu, turns off what it leaves out with each tool's own switch and turns back on what an earlier switch turned off. Nothing is moved or deleted.
 
 | Tool | Skill switch | MCP server switch |
 |---|---|---|
-| Claude Code | `skillOverrides` in `~/.claude/settings.json` | `deniedMcpServers` in `~/.claude/settings.json` (never `~/.claude.json`, so no Write now) |
+| Claude Code | `skillOverrides` in `~/.claude/settings.json` | `deniedMcpServers` in `~/.claude/settings.json` (never `~/.claude.json`) |
 | Copilot CLI | `disabledSkills` in `~/.copilot/settings.json` | `disabledMcpServers` in the same file |
 | Codex | `[[skills.config]]` by path in `config.toml` | `enabled = false` in the server's table |
 | Pi | a `-skills/…` filter in `settings.json` | `"enabled": false` in `mcp.json` |
 
-- **One step in History.** A switch is one History row; **Undo switch** puts back every switch it changed (where it is still as the switch left it) and the profile before.
-- **Hand-made choices stay.** A skill you turned off in one tool yourself (Disable on the Skills page) stays off; profiles only turn back on what a profile turned off. **No profile** turns all of that back on.
-- **Managed keeps syncing.** A managed item that a profile turned off still receives edits, so it is current when it comes back. Profiles never change Managed.
-- Agents have no off-switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json` in the home. A switch takes effect from each tool's next session.
+- A switch is one History row, and **Undo switch** puts back what it changed.
+- A skill you disabled by hand stays off; profiles only turn back on what a profile turned off.
+- A managed item a profile turned off still receives edits. Profiles never change Managed.
+- Agents have no off switch in any tool, so they are not in profiles. Profiles are kept in `.central-knot/profiles.json`. A switch takes effect from each tool's next session.
 
-## Trying v1 on your Mac
+### History
 
-1. Optional first: back up `~/.claude ~/.copilot ~/.codex ~/.pi ~/.agents ~/.claude.json` with `tar`. Central Knot keeps its own History, but a backup costs nothing.
-2. Open the build (the newest under `~/agent-builds/central-knot/`, or `release/` after `npm run package:mac`). It opens on **This Mac’s home**, your real setup. To try things on sample files first, run `npm start` from the source: a dev build opens the **Practice copy**.
-3. Nothing is managed until you choose it: **Manage all** or single switches, then **Apply all**.
-4. For MCP into Claude Code, quit Claude Code, then **Write to Claude Code**.
-5. To make it start at sign-in, copy it to `/Applications`. An ad-hoc build may need right-click → **Open** the first time.
-6. If something looks wrong, `~/Library/Application Support/central-knot/central-knot.log` records window events and failed requests.
+Lists what Central Knot and sync did, with **Undo** or **Restore**. Every replaced or removed version is kept first in `.central-knot/` (skills, agent files and each tool's own MCP settings). Undo says what it could not put back. History keeps things for 30 days by default; Settings offers 7, 30 or 90.
+
+### Git repo
+
+Keeps the Managed set (skills, MCP servers, agents and base instructions) in a git repo on GitHub, GitLab or any git remote. Connect with a repo address and an optional branch; Central Knot uses this computer's own git sign-in. Nothing moves until you click **Pull** or **Push**. Pull brings the repo's changes into your tools through the normal sync, so each one is in History with Undo. Push makes one commit of the Managed set. The page lists what would come in and what would go out, and the sidebar shows the counts. The repo layout is `skills/<folder>/`, `mcp/<name>.json`, `agents/<name>.md` and `instructions/base.md`; other files in the repo are left alone.
+
+### Settings
+
+Start at sign-in, Appearance (System, Light or Dark), Keep history for (7, 30 or 90 days) and Show log file.
+
+## State
+
+Central Knot's state lives in one folder, `.central-knot/` inside the selected home: `sync.json`, kept revisions under `items/`, profiles and base instructions. There is no second copy. A damaged, missing, newer, replaced or differently owned record stops writes and deletes nothing. App settings (home, appearance, history length) and the log are in the normal Electron app data folder (`~/Library/Application Support/central-knot/` on a Mac).
 
 ## Not here yet
 
-Disable, plugin updates, plugins for Pi, Cowork, the bundled build, Windows and Linux. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows and Linux real-home writes and desktop app locations, Cowork, OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
-The product boundary is in `AGENTS.md`. Planning inputs are under `docs/`. `LEDGER.md` records what was run and every check round.
+## For developers
+
+Node 24.9 or newer.
+
+```sh
+npm ci
+npm start            # dev build, opens the Practice copy
+npm test             # TypeScript check and unit tests (tests/*.test.ts)
+```
+
+- **End to end:** `npm run e2e` (`scripts/e2e.mjs`) drives the app over its debug port in a throwaway HOME. `--electron` runs the dev build instead of the packaged app; on Linux add `--no-sandbox` and run it under `xvfb-run`.
+- **UI tour:** `node scripts/ui-tour.mjs <outDir> [--electron] [--only shell,skills,…]` takes screenshots of each feature on the Practice copy, at 860×560 up to 2560×1440, dark and light.
+- **Harness tests:** `npm run test:harness` installs, updates and uninstalls a marker plugin with the real `claude`, `copilot` and `codex` CLIs in disposable homes (a missing one is skipped). `CK_HARNESS_APPS=1` runs the same tests through the copy each desktop app carries.
+- **Smoke:** `npm run smoke:mac` opens a hidden window on fixture data only.
+- **CI:** `.github/workflows/mac.yml`.
+
+### Packaging and release
+
+`npm run package:mac` (`scripts/package-mac.mjs`) builds `release/Central-Knot-<version>-mac-arm64.zip` on an Apple silicon Mac. It signs with the Mac's Developer ID Application certificate and notarizes through the `central-knot-notary` keychain profile when both are there; otherwise, or with `CK_SIGN=0`, it signs ad hoc. `npm run package:mac:release` never falls back to ad hoc. The version comes from `package.json`. Releases are published on GitHub with their checks in the release notes.
+
+### Logo
+
+The logo files are in `assets/`: `logo.svg` (the sidebar mark, copied into `dist/` by `scripts/build.mjs`), `icon.icns` (the Mac app icon, used by `scripts/package-mac.mjs`), `icon.png` (the window icon on Windows and Linux) and `icon.svg` (the app icon drawing). A branded build replaces these files with its own under the same names; nothing else needs to change. The menu bar icon is drawn in code (`src/trayicon.ts`) and is not part of the logo.
+
+The product boundary is in `AGENTS.md`. The requirements are in `docs/SPEC.md` and the per-tool evidence in `docs/capability-data.md`. `LEDGER.md` records what was run and every check round.
