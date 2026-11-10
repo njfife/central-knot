@@ -70,6 +70,7 @@ Opens each tool's own instruction file to read and edit in place, with **Undo sa
 - **Update**: where a tool has an older version than the marketplace, the plugin box, list row and plugin page offer Update (**Update all** for a marketplace with two or more behind). Each tool refreshes its copy of the marketplace and updates through its own command. An update can't be undone, and the result says so. A plugin turned off in a tool is still off after its update.
 - **Updates that arrive by themselves**: every four hours, with the window closed too, Central Knot reads your marketplaces again and makes the updates that Update all would offer, through each tool's own command. It only updates what a tool already has: a plugin turned off stays off, one you uninstalled from a tool is not put back, and parts in a tool that can't take the whole plugin are updated with the parts you turned off left out. A note on the Plugins page says which plugins were updated in which tools and what couldn't be; a failed update is tried again, less often each time, and the log has each step. It is on unless you turn off **Update plugins automatically** in Settings, and it pauses while Automatic sync is off. **Check now** in Settings runs a check at once.
 - **No longer offered**: a plugin its marketplace has dropped stays installed as it is, marked "No longer offered", until you uninstall it.
+- **Cowork**: where Claude desktop is installed, Claude Code's card and each plugin's page say that Cowork uses the plugins in your Claude account, so Central Knot doesn't install there; plugins for Cowork are added in Claude desktop, under Customize › Plugins (as Claude documents; not tried here). (When this was tried on Claude desktop 5.1231.0, a plugin put into Cowork's folder on the computer was listed by Claude desktop, but the new Cowork session, which ran in the cloud, didn't load it: `docs/capability-data.md`, section 7.)
 - **Desktop apps without a CLI**: Claude desktop (its Code tab), the GitHub Copilot app and ChatGPT desktop each carry their own copy of the tool. With no CLI installed, Central Knot runs the plugin commands through that copy, and the plugin box says which route it uses. A CLI is used when one is installed. If the app's copy isn't on disk yet (for example, the Code tab has never been opened), the plugin's parts are offered instead. macOS app locations only.
 
 ### Profiles
@@ -112,7 +113,7 @@ Central Knot's state lives in one folder, `.central-knot/` inside the selected h
 
 ## Not here yet
 
-Windows and Linux real-home writes and desktop app locations, Cowork, OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
+Windows and Linux real-home writes and desktop app locations, installing a plugin into Cowork (the one Cowork session tried had only the Claude account's plugins, see Plugins), OpenCode, and a plugin installed through a desktop app shown loading in a signed-in session. Nothing here claims an item has loaded in a session: Written means the bytes are on disk.
 
 ## For developers
 
