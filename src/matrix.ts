@@ -631,6 +631,8 @@ function row(skill: SampleSkill) {
         h('button.row-open', { type: 'button', id: `open-${skill.key}`, 'aria-label': `${view.comparing === skill.key ? 'Hide' : 'Show'} details for ${skill.key}`, onclick: (event: Event) => { event.stopPropagation(); openRow(skill.key); } },
           icon(view.comparing === skill.key ? 'chevron-down' : 'chevron-right', 14, 'tone-faint')),
         h('span.ov-name-text', { title: skill.name ?? skill.key }, skill.name ?? skill.key),
+        // A harness's page: the description under the name while its own column is hidden for lack of room (see style.css).
+        focus && skill.description ? h('span.ov-name-sub', {}, skill.description) : null,
         kind === 'agents' && Object.keys(skill.limits ?? {}).length && oneWaySource(skill) && !decided ? h('span.row-tag', { title: `${skill.managed ? 'Syncs' : 'Would sync'} one-way: it uses ${names[oneWaySource(skill)!]}’s ${limitedFields(skill).replace(' or ', ' and ')} settings, which the other tools can’t hold, so they get only its name, description and prompt` }, `one-way from ${names[oneWaySource(skill)!]}`) : null,
         skill.held ? h('span.held-pill', { title: skill.held }, 'Can’t manage') : null,
         attention && !decided ? smallAction('Copies differ', `decide-${skill.key}`, () => { view.comparing = view.comparing === skill.key ? undefined : skill.key; rerender(); }, '.decide') : null,
@@ -806,7 +808,7 @@ function toolMenu(tool: Tool, list: SampleSkill[]) {
   const noun = (n: number) => kindNoun[kind][n === 1 ? 0 : 1];
   return h('div.tool-menu', { role: 'dialog', 'aria-label': `${names[tool]} actions`, onclick: (event: Event) => event.stopPropagation() },
     // On a harness's own page the page already names it and counts what it has: the menu starts at its first action.
-    tool === focus ? null : h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`)),
+    tool === focus ? null : h('div.tool-menu-head', {}, brandMark(tool, 16), h('strong', {}, names[tool]), menuHasRows(tool, list) ? h('span.tool-menu-count', {}, `has ${mine} ${noun(mine)}`) : null),
     ...menuRows(tool, list),
     // Only when there is something to queue: a menu that says there is nothing to add needs no note about Apply all.
     menuHasRows(tool, list) ? h('p.tool-menu-foot', {}, 'Adding only queues the change; nothing is written until Apply all.') : null,
