@@ -68,7 +68,8 @@ export async function loadRepo(check = false): Promise<void> {
   // What the check found, in the status bar, so it never disagrees with the page.
   if (view?.connected && state.page === 'repo') {
     const { pull: toPull, push: toPush } = waitingCounts(view);
-    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.` : 'Checked the repo: up to date.');
+    announce(view.problem ? 'Couldn’t reach the repo.' : toPull || toPush ? `Checked the repo: ${[toPull ? `${toPull} to pull` : '', toPush ? `${toPush} to push` : ''].filter(Boolean).join(', ')}.`
+      : view.branchGone ? 'Checked the repo: its branch is gone.' : view.pushBlocked ? 'Checked the repo: a newer commit to pull.' : 'Checked the repo: up to date.');
   }
   rerender();
 }
@@ -162,7 +163,7 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
   // Held from the repo: Push never touches it there (unless it was only waiting on the last Pull, which Pull retries).
   const note = change.held ? (side === 'in' ? `Can’t come in. ${change.held}${change.retry ? '' : ' Push leaves it in the repo as it is.'}` : `Stays out of the repo. ${change.held}`)
     : change.alsoHere === 'removed' ? 'Removed here, or no longer Managed, but changed in the repo, so Pull brings it back.'
-    : change.alsoHere === 'unmanaged' ? 'One of this name is in your tools but not Managed. Pull replaces it; yours stays in History.'
+    : change.alsoHere === 'unmanaged' ? `${/^[aeiou]|^MCP/i.test(kind.label) ? 'An' : 'A'} ${kind.label.replace(/^[A-Z][a-z]/, word => word.toLowerCase())} named ${change.name} is already in your tools, not Managed. Pull replaces it; yours stays in History.`
     : change.alsoHere ? `Changed here too. Pull uses the repo’s version; yours stays in History.`
     : change.keptHere ? 'Removed in the repo but changed here, so it stays, and Push puts it back.'
     : side === 'in' && change.change === 'removed' ? 'Pull deletes it from your tools. History can restore it.'
@@ -180,14 +181,19 @@ function changeRow(change: RepoChange, side: 'in' | 'out') {
 }
 
 /** One direction: its items, the button that moves them, and (when that button can't run) why, right under it. */
+/** An item its button won't move: held, and not just waiting to be tried again. */
+const stuckRow = (change: RepoChange) => !!change.held && !change.retry;
+
 function changeList(id: string, title: string, changes: RepoChange[], side: 'in' | 'out', action: HTMLElement | null, empty: string, blocked?: string) {
   // The button carries the count of what moves; items that can't move are counted beside the title.
-  const stuck = changes.filter(change => change.held && !change.retry).length;
+  const stuck = changes.filter(stuckRow).length;
   return h('section.repo-side', { 'aria-labelledby': id },
     // Title, its button, then what can't move: the button stays put whatever is held.
     h('div.repo-side-head', {}, h('h2.eyebrow', { id }, title), action, stuck ? h('span.repo-stuck-count', {}, `${stuck} can’t ${side === 'in' ? 'come in' : 'go'}`) : null),
     blocked ? h('p.repo-side-note', { id: `${id}-blocked` }, icon('triangle-alert', 12, 'tone-warning'), blocked) : null,
-    changes.length ? h('ul.repo-list', {}, changes.map(change => changeRow(change, side))) : h('p.repo-empty-side', {}, empty));
+    // What can't move comes last, so the list reads top-down as what the button does, then what stays.
+    changes.length ? h('ul.repo-list', {}, [...changes].sort((first, second) => Number(stuckRow(first)) - Number(stuckRow(second))).map(change => changeRow(change, side)))
+      : h('p.repo-empty-side', {}, empty));
 }
 
 /** Changes waiting each way, leaving out items that can't move. */
@@ -195,8 +201,8 @@ export const waitingCounts = (view: ConnectedRepoView) => ({ pull: view.incoming
 
 /** "The same commit", and what of it hasn't come in, so the facts stay true when an item is held. */
 function sameCommitText(view: ConnectedRepoView): string {
-  const held = view.incoming.filter(change => change.held && !change.retry).length;
-  return held ? `The same commit, except ${plural(held, 'item')} that can’t come in` : 'The same commit';
+  const held = view.incoming.filter(stuckRow).length;
+  return held ? `The same commit. ${plural(held, 'item')} in it can’t come in.` : 'The same commit';
 }
 
 /** Push's count as the toolbar and status bar say it: waiting on Pull when Push can't run yet. */
@@ -204,8 +210,8 @@ const pushCountText = (view: ConnectedRepoView, count: number) => (view.pushBloc
 
 /** Items that can't move, in the same words as their list: "can't come in" from the repo, "can't go" from here. */
 function stuckText(view: ConnectedRepoView): string {
-  const cantCome = view.incoming.filter(change => change.held && !change.retry).length;
-  const cantGo = view.outgoing.filter(change => change.held).length;
+  const cantCome = view.incoming.filter(stuckRow).length;
+  const cantGo = view.outgoing.filter(stuckRow).length;
   return [cantCome ? `${cantCome} can’t come in` : '', cantGo ? `${cantGo} can’t go` : ''].filter(Boolean).join(', ');
 }
 
@@ -216,11 +222,15 @@ function summary(view: ConnectedRepoView): HTMLElement {
   const stuckNote = stuckText(view);
   const counts = [incoming ? part('arrow-down-to-line', 'tone-accent', `${incoming} to pull`) : null,
     outgoing ? part('arrow-up-from-line', view.pushBlocked ? 'tone-muted' : 'tone-accent', pushCountText(view, outgoing), !!view.pushBlocked) : null,
-    stuckNote ? h('span.repo-state-part.tone-muted', {}, stuckNote) : null];
+    stuckNote ? part('triangle-alert', 'tone-warning', stuckNote, true) : null];
+  // Up to date only when nothing waits: a newer commit that changes nothing here still has to be pulled before a push.
+  const settled = view.branchGone ? part('triangle-alert', 'tone-warning', 'The repo’s branch is gone')
+    : view.pushBlocked ? part('arrow-down-to-line', 'tone-accent', 'A newer commit to pull')
+    : part('circle-check', 'tone-success', 'Up to date with the repo');
   const parts = repo.checking ? [part('refresh-cw', 'tone-muted spin', 'Checking the repo…')]
-    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts]
-    : !incoming && !outgoing && stuckNote ? [part('triangle-alert', 'tone-warning', `Up to date, except: ${stuckNote}`)]
-    : !incoming && !outgoing ? [part('circle-check', 'tone-success', 'Up to date with the repo')]
+    // Unreachable: what can't move is said beside each list; the line keeps to the problem and the counts.
+    : view.problem ? [part('circle-alert', 'tone-danger', 'Couldn’t reach the repo'), ...counts.slice(0, 2)]
+    : !incoming && !outgoing ? [settled, counts[2]]
     : counts;
   // Focusable, so focus has somewhere to land when the button just used goes away (nothing left to pull or push).
   return h('span.repo-state', { id: 'repo-state', role: 'status', tabindex: '-1' }, parts);
@@ -275,7 +285,8 @@ function connectedPage(view: ConnectedRepoView) {
     h('div.toolbar.repo-toolbar', {},
       summary(view),
       h('span.toolbar-spacer'),
-      button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled: locked || repo.confirmDisconnect, onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-confirm')?.focus(); } })),
+      // While the question is open it stands in for this button, so the button steps aside rather than sit there dimmed.
+      repo.confirmDisconnect ? null : button({ variant: 'ghost', size: 'small', icon: 'unplug', label: 'Disconnect…', id: 'repo-disconnect', disabled: locked, onclick: () => { repo.confirmDisconnect = true; rerender(); document.getElementById('repo-disconnect-confirm')?.focus(); } })),
     h('div.bands', {},
       view.access.allowed ? null : h('div.band', { role: 'status' }, icon('eye', 14), h('span.band-text', {}, view.access.reason)),
       repo.confirmDisconnect ? h('div.band.repo-confirm', { role: 'alert' }, icon('unplug', 14, 'tone-muted'),
@@ -286,7 +297,7 @@ function connectedPage(view: ConnectedRepoView) {
       outcomeBand()),
     h('div.scroll.repo-scroll', { id: 'repo-scroll' },
       h('section.repo-where', { 'aria-label': 'Repo' },
-        h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), h('span.mono.repo-url', {}, view.url), h('span.repo-branch', { title: 'Branch' }, view.branch)),
+        h('div.repo-address', {}, icon('git-branch', 16, 'tone-muted'), h('span.repo-address-text', {}, h('span.mono.repo-url', {}, view.url), h('span.repo-branch', { title: 'Branch' }, view.branch))),
         h('dl.facts.repo-facts', {},
           h('dt', {}, 'This computer is at'), h('dd', {}, view.base ? commitText(view.base) : h('span.tone-muted', {}, 'Nothing pulled or pushed yet')),
           h('dt', {}, view.problem ? 'Repo, last seen' : 'Repo’s latest'), h('dd', {}, view.branchGone ? h('span.tone-warning', {}, `The repo no longer has the branch ${view.branch}. Push puts it back.`) : !view.latest ? h('span.tone-muted', {}, 'The repo is empty') : latestDiffers ? h('span.repo-latest', {}, commitText(view.latest), h('span.repo-new', {}, 'not pulled yet')) : h('span.tone-muted', {}, sameCommitText(view))),

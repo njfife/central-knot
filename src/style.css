@@ -1353,7 +1353,6 @@ button.apply-state.apply-waiting.text-action { color: var(--warning); text-decor
 .repo-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-width: 0; font-weight: 500; }
 .toolbar.repo-toolbar { height: auto; min-height: 37px; padding-top: 4px; padding-bottom: 4px; }
 .repo-state-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
-.repo-state-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* This page spans the window: its header, bands and empty state are not held to the older 900px content edge. */
 body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; }
 .repo-page > .scroll > .empty { max-width: none; }
@@ -1364,14 +1363,14 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-where { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .repo-address { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .repo-address > svg { margin-top: 2px; }
-.repo-address .repo-branch { margin-top: 1px; }
 .repo-address > svg { flex: none; }
 /* The address wraps rather than shortening: it is how a user knows which repo is in use. */
-.repo-url { min-width: 0; flex: 0 1 auto; font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
+.repo-address-text { min-width: 0; flex: 1 1 auto; line-height: 20px; }
+.repo-url { font-size: 13px; line-height: 20px; font-weight: 500; overflow-wrap: anywhere; }
+/* The branch follows the address's last line, as part of it. */
+.repo-address-text > .repo-branch { display: inline-block; margin-left: 8px; vertical-align: 1px; white-space: nowrap; }
 .repo-page .market-add-input[aria-invalid='true'], .repo-page .market-add-input[aria-invalid='true']:focus { border-color: var(--danger); outline-color: var(--danger); }
 /* Bands on this page pin their icon to the first line, as its notes do. */
-.repo-page > .bands > .band { align-items: flex-start; }
-.repo-page > .bands > .band > svg { margin-top: 1px; }
 .repo-branch { flex: none; font-family: var(--mono); font-size: 12px; line-height: 18px; padding: 0 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-soft); }
 .repo-facts { grid-template-columns: minmax(96px, 144px) minmax(0, 1fr); }
 .repo-facts dd { min-width: 0; }
@@ -1391,7 +1390,7 @@ body.page-repo #header, .page.repo-page > .bands > .band { padding-right: 16px; 
 .repo-row-icon { display: flex; padding-top: 3px; }
 .repo-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .repo-row-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.repo-row-name { min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-row-name { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
 .repo-row-kind { flex: none; font-size: 12px; line-height: 16px; color: var(--ink-faint); }
 .repo-row-note { display: flex; align-items: baseline; gap: 4px; max-width: 76ch; font-size: 12px; line-height: 16px; }
 .repo-row-note > svg { flex: none; align-self: flex-start; margin-top: 2px; }
