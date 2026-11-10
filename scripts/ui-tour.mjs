@@ -1339,5 +1339,6 @@ if (wanted('repo')) {
 }
 
 a.quit();
-rmSync(scratch, { recursive: true, force: true });
+// The app was stopped just now and its helper processes may still be writing: the folder goes once they are done.
+rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`tour in ${out}`);

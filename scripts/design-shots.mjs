@@ -43,5 +43,5 @@ for (const step of steps) {
   await shot(step.name);
   for (const action of step.reset ?? []) await click(action);
 }
-ws.close(); child.kill('SIGKILL'); rmSync(scratch, { recursive: true, force: true });
+ws.close(); child.kill('SIGKILL'); rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 console.log(`shots in ${out}`);
