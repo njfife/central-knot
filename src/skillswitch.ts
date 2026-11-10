@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { toolConfigRoot } from './harnesses.ts';
-import { errorCode, plainError, writeFileChecked, type ShareContext } from './share.ts';
+import { errorCode, plainError, storeDirectory, writeDurably, writeFileChecked, type ShareContext } from './share.ts';
 import { editTomlArray, readTomlTables, setJsonMember, tomlValue, type TomlTable, type TomlValue } from './textedit.ts';
 import { SKILL_SWITCH_TESTED_FROM } from './pluginstatus.ts';
 import type { HarnessId, SwitchProblem, SwitchTarget } from './types.ts';
@@ -65,27 +65,46 @@ export function isDisabled(context: ShareContext, file: SwitchFile, target: Swit
  * Turns one tool's copy of a skill off or on, then reads the file back to confirm. A caller offering a new Disable checks
  * unverifiedBuild first (this only edits the file; it doesn't know the tool's build). Writes only over the text it read (a save
  * made meanwhile is never overwritten) and only when something changes. `restore`: what Claude Code's override held before a
- * Disable (say "name-only"), put back by Enable instead of no override. Returns whether it changed, and that earlier value.
- * Throws an error whose message says why (see switchFailure).
+ * Disable (say "name-only"), put back by Enable instead of no override; without it, Enable puts back the value kept for that
+ * folder. Returns whether it changed, and that earlier value. Throws an error whose message says why (see switchFailure).
  */
 export async function setDisabled(context: ShareContext, tool: HarnessId, target: SwitchTarget, disabled: boolean, restore?: string): Promise<{ changed: boolean; previous?: string }> {
   const file = await readSwitchFile(context, tool);
   if (!file.parsed) throw failure(problemText(file.problem!));
   const now = stateIn(context, tool, file.parsed, target);
   if (now.disabled === disabled) return { changed: false };
+  if (tool === 'claude-cli' && !disabled) restore ??= (await readKeptOverrides(context))[target.folder];
   await writeFileChecked(file.path, withSwitch(context, file, target, disabled, restore), file.exists ? file.text : undefined);
   const after = await readSwitchFile(context, tool);
   if (!after.parsed || stateIn(context, tool, after.parsed, target).disabled !== disabled) throw failure(`${toolName(tool)}’s settings did not take the change.`);
+  if (tool === 'claude-cli') await keepOverrides(context, { [target.folder]: disabled ? now.previous : undefined });
   return { changed: true, previous: now.previous };
+}
+
+// Claude Code overrides a Disable replaced (say "name-only"), by skill folder. Kept in the store, not only in History (which
+// expires), so any later Enable puts the value back: the Skills page's and a profile's alike.
+const keptOverridesPath = (context: ShareContext) => join(storeDirectory(context.home), 'skill-overrides.json');
+export async function readKeptOverrides(context: ShareContext): Promise<Record<string, string>> {
+  try { return (record(JSON.parse(await readFile(keptOverridesPath(context), 'utf8'))) ?? {}) as Record<string, string>; } catch { return {}; }
+}
+/** Sets (a value) or drops (undefined) the kept override of each folder named. */
+export async function keepOverrides(context: ShareContext, changes: Record<string, string | undefined>) {
+  const kept = await readKeptOverrides(context);
+  const next = { ...kept };
+  for (const [folder, value] of Object.entries(changes)) { if (value === undefined) delete next[folder]; else next[folder] = value; }
+  if (JSON.stringify(next) !== JSON.stringify(kept)) await writeDurably(keptOverridesPath(context), `${JSON.stringify(next, null, 2)}\n`);
 }
 
 /**
  * For a caller that edits several switches in one file with one checked write (profiles.ts): whether `text` turns this copy off,
- * and `text` with it turned off or on. Both throw when the text isn't the tool's format.
+ * and `text` with it turned off or on (`restore` as for setDisabled), with what Claude Code's override held before. Both throw
+ * when the text isn't the tool's format.
  */
 export const switchState = (context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget) => stateIn(context, tool, parse(tool, text), target).disabled;
-export const switchedText = (context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean) =>
-  withSwitch(context, { tool, path: '', text, exists: true, parsed: parse(tool, text) }, target, disabled);
+export function switchedText(context: ShareContext, tool: HarnessId, text: string, target: SwitchTarget, disabled: boolean, restore?: string): { text: string; previous?: string } {
+  const parsed = parse(tool, text);
+  return { text: withSwitch(context, { tool, path: '', text, exists: true, parsed }, target, disabled, restore), previous: stateIn(context, tool, parsed, target).previous };
+}
 
 /** A switch change's failure in words: its own reason, or the plain one for a file system error. */
 export const switchFailure = (error: unknown) => (['CK_SWITCH', 'CK_CHANGED'].includes(errorCode(error)) && error instanceof Error ? error.message : plainError(error));

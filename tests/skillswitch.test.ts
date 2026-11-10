@@ -220,3 +220,19 @@ test('Remove from one tool: unmanaged or managed, only that copy goes, nothing b
     assert.equal(await readFile(join(box.home, '.claude/skills/kept/SKILL.md'), 'utf8'), text('kept', 'Edited just now.'));
   } finally { await box.cleanup(); }
 });
+
+test('Enable puts back the Claude Code override a Disable replaced, after History’s window has passed', async () => {
+  const box = await sandbox(['claude-cli']);
+  let now = Date.parse('2026-11-01T00:00:00Z');
+  const context: ShareContext = { ...box.context, historyDays: 7, now: () => now };
+  try {
+    await skill(box.home, 'claude-cli', 'pager');
+    const original = '{\n  "skillOverrides": { "pager": "name-only" }\n}\n';
+    await writeFile(switchPath(context, 'claude-cli'), original);
+    await applyChanges(context, [{ key: 'pager', managed: false, off: [], disable: ['claude-cli'] }]);
+    now += 8 * 24 * 60 * 60 * 1000;
+    assert.equal((await readHistory(context)).length, 0);
+    await applyChanges(context, [{ key: 'pager', managed: false, off: [], enable: ['claude-cli'] }]);
+    assert.equal(await readFile(switchPath(context, 'claude-cli'), 'utf8'), original);
+  } finally { await box.cleanup(); }
+});
